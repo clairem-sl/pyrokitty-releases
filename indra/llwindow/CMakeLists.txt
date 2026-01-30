@@ -145,6 +145,7 @@ if (WINDOWS)
        ole32
        dxgi
        d3d9
+       wbemuuid     # WMI UUIDs for lldxhardware.cpp
        )
 endif (WINDOWS)
 

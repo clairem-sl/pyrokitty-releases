@@ -3496,7 +3496,9 @@ void LLVOAvatar::idleUpdateMisc(bool detailed_update)
             F32 old_angle = mImpostorAngle.mV[i];
             F32 angle_diff = fabsf(cur_angle-old_angle);
 
-            if (angle_diff > F_PI/512.f*distance*mUpdatePeriod)
+            // <FS:Pyrokitty> Reduced angle sensitivity (256 vs 512) for fewer updates
+            if (angle_diff > F_PI/256.f*distance*mUpdatePeriod)
+            // </FS:Pyrokitty>
             {
                 mNeedsImpostorUpdate = true;
                 mLastImpostorUpdateReason = 2;
@@ -3508,7 +3510,9 @@ void LLVOAvatar::idleUpdateMisc(bool detailed_update)
             //significantly
 
             F32 dist_diff = fabsf(distance-mImpostorDistance);
-            if (dist_diff/mImpostorDistance > 0.1f)
+            // <FS:Pyrokitty> Reduced distance sensitivity (20% vs 10%) for fewer updates
+            if (dist_diff/mImpostorDistance > 0.2f)
+            // </FS:Pyrokitty>
             {
                 mNeedsImpostorUpdate = true;
                 mLastImpostorUpdateReason = 3;
@@ -5184,9 +5188,11 @@ void LLVOAvatar::computeUpdatePeriod()
         size.setSub(ext[1], ext[0]);
         F32 mag = size.getLength3().getF32() * 0.5f;
 
-        const S32 UPDATE_RATE_SLOW = 64;
-        const S32 UPDATE_RATE_MED = 48;
-        const S32 UPDATE_RATE_FAST = 32;
+        // <FS:Pyrokitty> Doubled update intervals for performance
+        const S32 UPDATE_RATE_SLOW = 128;
+        const S32 UPDATE_RATE_MED = 96;
+        const S32 UPDATE_RATE_FAST = 64;
+        // </FS:Pyrokitty>
         if(slow)
         {
             mUpdatePeriod = UPDATE_RATE_FAST;
@@ -12794,14 +12800,23 @@ void LLVOAvatar::calculateUpdateRenderComplexity()
             LLPerfStats::tunables.userFPSTuningStrategy != LLPerfStats::TUNE_SCENE_ONLY &&
             !isVisuallyMuted())
         {
-            LLUUID id = getID(); // <== use id to make sure this avatar didn't get deleted between frames
-            LL::WorkQueue::getInstance("mainloop")->post([this, id]()
-                {
-                    if (gObjectList.findObject(id) != nullptr)
+            // <FS:Pyrokitty> Rate limit profileAvatar calls for non-self avatars
+            // Self updates every call, others only once per 200 frames (staggered by ID)
+            bool should_profile = isSelf() ||
+                ((LLFrameTimer::getFrameCount() + mID.mData[0]) % 200 == 0);
+
+            if (should_profile)
+            {
+                LLUUID id = getID(); // <== use id to make sure this avatar didn't get deleted between frames
+                LL::WorkQueue::getInstance("mainloop")->post([this, id]()
                     {
-                        gPipeline.profileAvatar(this);
-                    }
-                });
+                        if (gObjectList.findObject(id) != nullptr)
+                        {
+                            gPipeline.profileAvatar(this);
+                        }
+                    });
+            }
+            // </FS:Pyrokitty>
         }
     }
 }

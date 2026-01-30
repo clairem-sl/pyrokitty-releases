@@ -106,7 +106,7 @@ if (WINDOWS)
           /Oi
           /Ot
           /fp:precise
-          /MP
+          /MP8
           /permissive-
       )
 

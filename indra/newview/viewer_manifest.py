@@ -1062,23 +1062,38 @@ class Windows_x86_64_Manifest(ViewerManifest):
                 "%%DELETE_FILES%%":self.nsi_file_commands(False)})
 
         # <FS:Ansariel> Undo Github-Build stuff
-        # Check two paths, one for Program Files, and one for Program Files (x86).
-        # Yay 64bit windows.
-        nsis_path = "makensis.exe"
-        for program_files in '${programfiles}', '${programfiles(x86)}':
-            for nesis_path in 'NSIS', 'NSIS\\Unicode':
-                possible_path = os.path.expandvars(f"{program_files}\\{nesis_path}\\makensis.exe")
-                if os.path.exists(possible_path):
-                    nsis_path = possible_path
+        # <FS:Pyrokitty> Add SKIP_NSIS and SKIP_SYMBOLS support
+        if os.environ.get('SKIP_SYMBOLS'):
+            print("Skipping symbols packaging (SKIP_SYMBOLS is set)")
+        else:
+            self.fs_save_windows_symbols()
+
+        if os.environ.get('SKIP_NSIS'):
+            print("Skipping NSIS installer creation (SKIP_NSIS is set)")
+            self.package_file = None
+        else:
+            # Check two paths, one for Program Files, and one for Program Files (x86).
+            # Yay 64bit windows.
+            nsis_path = None
+            for program_files in ['${programfiles}', '${programfiles(x86)}']:
+                if nsis_path:
                     break
+                for nsis_subpath in ['NSIS', 'NSIS\\Unicode']:
+                    possible_path = os.path.expandvars(f"{program_files}\\{nsis_subpath}\\makensis.exe")
+                    print(f"Checking for NSIS at: {possible_path}")
+                    if os.path.exists(possible_path):
+                        nsis_path = possible_path
+                        print(f"Found NSIS at: {nsis_path}")
+                        break
 
-        self.run_command([possible_path, '/V2', self.dst_path_of(tempfile)])
+            if not nsis_path:
+                raise ManifestError("NSIS not found! Please install NSIS or set SKIP_NSIS=1")
 
-        self.fs_sign_win_installer(substitution_strings) # <FS:ND/> Sign files, step two. Sign installer.
-        self.fs_save_windows_symbols()
-
-        self.created_path(self.dst_path_of(installer_file))
-        self.package_file = installer_file
+            self.run_command([nsis_path, '/V2', self.dst_path_of(tempfile)])
+            self.fs_sign_win_installer(substitution_strings) # <FS:ND/> Sign files, step two. Sign installer.
+            self.created_path(self.dst_path_of(installer_file))
+            self.package_file = installer_file
+        # </FS:Pyrokitty>
         # </FS:Ansariel>
 
     def sign(self, exe):

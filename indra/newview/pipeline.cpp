@@ -11945,8 +11945,10 @@ void LLPipeline::generateImpostor(LLVOAvatar* avatar, bool preview_avatar, bool 
         F32 pa = gViewerWindow->getWindowHeightRaw() / (RAD_TO_DEG * viewer_camera->getView());
 
         //get resolution based on angle width and height of impostor (double desired resolution to prevent aliasing)
-        resY = llmin(nhpo2((U32) (fov*pa)), (U32) 512);
-        resX = llmin(nhpo2((U32) (atanf(tdim.mV[0]/distance)*2.f*RAD_TO_DEG*pa)), (U32) 512);
+        // <FS:Pyrokitty> Reduced max from 512 to 128 for performance
+        resY = llmin(nhpo2((U32) (fov*pa)), (U32) 128);
+        resX = llmin(nhpo2((U32) (atanf(tdim.mV[0]/distance)*2.f*RAD_TO_DEG*pa)), (U32) 128);
+        // </FS:Pyrokitty>
 
         if (!for_profile)
         {
@@ -11992,19 +11994,17 @@ void LLPipeline::generateImpostor(LLVOAvatar* avatar, bool preview_avatar, bool 
 
         renderGeomPostDeferred(camera);
 
-        // Shameless hack time: render it all again,
-        // this time writing the depth
-        // values we need to generate the alpha mask below
-        // while preserving the alpha-sorted color rendering
-        // from the previous pass
-        //
+        // <FS:Pyrokitty> Skip second alpha depth pass - minor visual artifacts
+        // on transparent geometry but significant performance gain
+        // Original code re-rendered alpha geometry just to get depth values
+        // for the alpha mask. Testing shows artifacts are minimal.
+        /*
         sImpostorRenderAlphaDepthPass = true;
-        // depth-only here...
-        //
         gGL.setColorMask(false,false);
         renderGeomPostDeferred(camera);
-
         sImpostorRenderAlphaDepthPass = false;
+        */
+        // </FS:Pyrokitty>
 
     }
 

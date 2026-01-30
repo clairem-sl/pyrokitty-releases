@@ -85,7 +85,7 @@ showUsage()
     echo "  --crashreporting         : Build with crash reporting enabled (Windows only)"
     echo "  --testbuild <days>       : Create time-limited test build (build date + <days>)"
     echo "  --platform <platform>    : Build for specified platform (darwin | windows | linux)"
-    echo "  --jobs <num>             : Build with <num> jobs in parallel (Linux and Darwin only)"
+    echo "  --jobs <num>             : Build with <num> jobs in parallel"
     echo "  --ninja                  : Build using Ninja"
     echo "  --vscode                 : Exports compile commands for VSCode (Linux only)"
     echo "  --compiler-cache         : Try to detect and use compiler cache (needs also --ninja for OSX and Windows)"
@@ -336,9 +336,7 @@ echo -e "         VSCODE: `b2a $WANTS_VSCODE`"                                 |
 echo -e " COMPILER CACHE: `b2a $WANTS_CACHE`"                                  | tee -a "$LOG"
 echo -e "       PASSTHRU: $LL_ARGS_PASSTHRU"                                   | tee -a "$LOG"
 echo -e "          BTYPE: $BTYPE"                                              | tee -a "$LOG"
-if [ $TARGET_PLATFORM == "linux" -o $TARGET_PLATFORM == "darwin" ] ; then
-    echo -e "           JOBS: $JOBS"                                           | tee -a "$LOG"
-fi
+echo -e "           JOBS: $JOBS"                                               | tee -a "$LOG"
 echo -e "       Logging to $LOG"
 
 if [ $TARGET_PLATFORM == "windows" ]
@@ -624,7 +622,13 @@ if [ $WANTS_BUILD -eq $TRUE ] ; then
           echo "Build failed! No Firestorm.slnx or Firestorm.sln found"
           exit 1
         fi
-        msbuild.exe "$SOLUTION" -p:Configuration=${BTYPE} -flp:LogFile="logs\\FirestormBuild_win-${AUTOBUILD_ADDRSIZE}.log" \
+        # Set parallel build jobs (-m for all cores, -m:N for N cores)
+        if [ "$JOBS" == "0" ] ; then
+            MSBUILD_JOBS="-m"
+        else
+            MSBUILD_JOBS="-m:$JOBS"
+        fi
+        msbuild.exe "$SOLUTION" $MSBUILD_JOBS -p:Configuration=${BTYPE} -flp:LogFile="logs\\FirestormBuild_win-${AUTOBUILD_ADDRSIZE}.log" \
             -flp1:"errorsonly;LogFile=logs\\FirestormBuild_win-${AUTOBUILD_ADDRSIZE}.err" -p:Platform=${AUTOBUILD_WIN_VSPLATFORM} -t:Build -p:useenv=true \
             -verbosity:normal -toolsversion:Current -p:"VCBuildAdditionalOptions= /incremental"
     fi
