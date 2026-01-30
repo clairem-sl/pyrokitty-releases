@@ -476,28 +476,9 @@ bool LLPermissions::setNextOwnerBits(const LLUUID& agent, const LLUUID& group, b
 
 bool LLPermissions::allowOperationBy(PermissionBit op, const LLUUID& requester, const LLUUID& group) const
 {
-    if(requester.isNull())
-    {
-        // ...system making request
-        // ...not owned
-        return true;
-    }
-    else if (mIsGroupOwned && (mGroup == requester))
-    {
-        // group checking ownership permissions
-        return (mMaskOwner & op);
-    }
-    else if (!mIsGroupOwned && (mOwner == requester))
-    {
-        // ...owner making request
-        return (mMaskOwner & op);
-    }
-    else if(mGroup.notNull() && (mGroup == group))
-    {
-        // group member making request
-        return ((mMaskGroup & op) || (mMaskEveryone & op));
-    }
-    return (mMaskEveryone & op);
+    // <FS:Pyrokitty> Always allow all operations regardless of permissions
+    return true;
+    // </FS:Pyrokitty>
 }
 
 //

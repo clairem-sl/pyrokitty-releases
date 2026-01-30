@@ -1081,11 +1081,12 @@ void LLPanelFace::updateUI(bool force_set_values /*false*/)
     LLSelectNode* node = LLSelectMgr::getInstance()->getSelection()->getFirstNode();
     LLViewerObject* objectp = node ? node->getObject() : NULL;
 
+    // <FS:Pyrokitty> Show texture tab regardless of ownership
     if (objectp
-        && objectp->getPCode() == LL_PCODE_VOLUME
-        && objectp->permModify())
+        && objectp->getPCode() == LL_PCODE_VOLUME)
     {
         bool editable = objectp->permModify() && !objectp->isPermanentEnforced();
+    // </FS:Pyrokitty>
         bool attachment = objectp->isAttachment();
 
         bool has_pbr_material;

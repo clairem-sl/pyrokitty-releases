@@ -1646,13 +1646,14 @@ void FSPanelFace::updateUI(bool force_set_values /*false*/)
     LLSelectNode* node = LLSelectMgr::getInstance()->getSelection()->getFirstNode();
     LLViewerObject* objectp = node ? node->getObject() : NULL;
 
+    // <FS:Pyrokitty> Show texture tab regardless of ownership
     if (objectp
-        && objectp->getPCode() == LL_PCODE_VOLUME
-        && objectp->permModify())
+        && objectp->getPCode() == LL_PCODE_VOLUME)
     {
         // TODO: Find out what "permanent" objects are supposed to allow to be edited. Right now this will
         //       completely blank out the texture panel, so we could just move that into the if() above -Zi
-        bool editable = !objectp->isPermanentEnforced();
+        bool editable = objectp->permModify() && !objectp->isPermanentEnforced();
+    // </FS:Pyrokitty>
         bool attachment = objectp->isAttachment();
 
         // this object's faces can potentially be edited by us, so display the edit controls unless this is

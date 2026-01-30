@@ -30,12 +30,17 @@
 #include <map>
 #include "llcontrol.h"
 
+// <FS:Pyrokitty> Always-on hacked godlike viewer - grants all permissions locally
+#define HACKED_GODLIKE_VIEWER
+
 // Enabled this definition to compile a 'hacked' viewer that
 // allows a hacked godmode to be toggled on and off.
-#define TOGGLE_HACKED_GODLIKE_VIEWER
+// Note: HACKED_GODLIKE_VIEWER above takes precedence if defined
+//#define TOGGLE_HACKED_GODLIKE_VIEWER
 #ifdef TOGGLE_HACKED_GODLIKE_VIEWER
 extern bool gHackGodmode;
 #endif
+// </FS:Pyrokitty>
 
 bool toggle_show_navigation_panel(const LLSD& newvalue);
 bool toggle_show_favorites_panel(const LLSD& newvalue);

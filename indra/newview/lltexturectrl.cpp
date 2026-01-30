@@ -261,7 +261,7 @@ void LLFloaterTexturePicker::setImageID(const LLUUID& image_id, bool set_selecti
             {
                 mInventoryPanel->getRootFolder()->clearSelection();
                 //<FS:Chaser> Clear out the UUID instead of keeping the last value
-                getChild<LLLineEditor>("TextureKey")->setText(LLUUID::null.asString());
+                getChild<LLLineEditor>("TextureKey")->setText(image_id.asString());
                 //</FS:Chaser>
             }
             else
@@ -282,20 +282,13 @@ void LLFloaterTexturePicker::setImageID(const LLUUID& image_id, bool set_selecti
                         mNoCopyTextureSelected = true;
                     }
 
-                    //Verify permissions before revealing UUID.
-                    //Replicates behaviour of "Copy UUID" on inventory. If you can't copy it there, you can't copy it here.
-                    if(copy&&mod&&xfer)
-                    {
-                        getChild<LLLineEditor>("TextureKey")->setText(image_id.asString());
-                    }
-                    else
-                    {
-                        getChild<LLLineEditor>("TextureKey")->setText(LLUUID::null.asString());
-                    }
+                    // <FS:Pyrokitty> Always show UUID regardless of permissions
+                    getChild<LLLineEditor>("TextureKey")->setText(image_id.asString());
+                    // </FS:Pyrokitty>
                 }
                 else
                 {
-                    getChild<LLLineEditor>("TextureKey")->setText(LLUUID::null.asString());
+                    getChild<LLLineEditor>("TextureKey")->setText(image_id.asString());
                 }
                 // </FS:Chaser>
             }
@@ -1202,19 +1195,9 @@ void LLFloaterTexturePicker::onSelectionChange(const std::deque<LLFolderViewItem
             // </FS:Ansariel>
             setImageIDFromItem(itemp, false);
 
-            // <FS:Chaser> UUID texture picker permissions continued
-            //We also have to set this here because above passes the asset ID, not the inventory ID.
-            //Verify permissions before revealing UUID.
-            //Replicates behaviour of "Copy UUID" on inventory. If you can't copy it there, you can't copy it here.
-            if(copy&&mod&&xfer)
-            {
-                getChild<LLLineEditor>("TextureKey")->setText(itemp->getAssetUUID().asString());
-            }
-            else
-            {
-                getChild<LLLineEditor>("TextureKey")->setText(LLUUID::null.asString());
-            }
-            // </FS:Chaser>
+            // <FS:Pyrokitty> Always show UUID regardless of permissions
+            getChild<LLLineEditor>("TextureKey")->setText(itemp->getAssetUUID().asString());
+            // </FS:Pyrokitty>
 
             mViewModel->setDirty(); // *TODO: shouldn't we be using setValue() here?
 

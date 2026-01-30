@@ -395,7 +395,7 @@ bool LLAgent::isMicrophoneOn(const LLSD& sdname)
 // ************************************************************
 // Enabled this definition to compile a 'hacked' viewer that
 // locally believes the end user has godlike powers.
-// #define HACKED_GODLIKE_VIEWER
+#define HACKED_GODLIKE_VIEWER
 // For a toggled version, see viewer.h for the
 // TOGGLE_HACKED_GODLIKE_VIEWER define, instead.
 // ************************************************************
