@@ -331,6 +331,7 @@ private:
 protected:
     U32         mOcclusionState[LLViewerCamera::NUM_CAMERAS];
     U32         mOcclusionIssued[LLViewerCamera::NUM_CAMERAS];
+    U32         mOcclusionQueried[LLViewerCamera::NUM_CAMERAS]; // <FS:Pyrokitty> Temporal coherence - frame when last query completed
 
     S32         mLODHash;
 
