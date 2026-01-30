@@ -2842,7 +2842,7 @@
       <key>Type</key>
       <string>U32</string>
       <key>Value</key>
-      <integer>2048</integer>
+      <integer>16384</integer>
     </map>
     <key>FSDiskCacheHighWaterPercent</key>
     <map>
@@ -2897,7 +2897,7 @@
       <key>Type</key>
       <string>U32</string>
       <key>Value</key>
-      <integer>2048</integer>
+      <integer>16384</integer>
     </map>
     <key>CacheValidateCounter</key>
     <map>

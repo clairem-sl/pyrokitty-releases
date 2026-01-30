@@ -35,9 +35,8 @@ bool llHashedUniqueID(unsigned char id[MD5HEX_STR_SIZE])
     bool idIsUnique = true;
     LLMD5 hashed_unique_id;
     unsigned char unique_id[MAC_ADDRESS_BYTES];
-    if ( LLMachineID::getUniqueID(unique_id, sizeof(unique_id))
-         || LLUUID::getNodeID(unique_id)
-        )
+    // <FS:Pyrokitty> LLMachineID now always succeeds with static IDs for privacy
+    if (LLMachineID::getUniqueID(unique_id, sizeof(unique_id)))
     {
         hashed_unique_id.update(unique_id, MAC_ADDRESS_BYTES);
         hashed_unique_id.finalize();
@@ -50,6 +49,7 @@ bool llHashedUniqueID(unsigned char id[MD5HEX_STR_SIZE])
         memcpy(id,"00000000000000000000000000000000", MD5HEX_STR_SIZE);
         LL_WARNS_ONCE("AppInit") << "Failed to get an id; cannot uniquely identify this machine." << LL_ENDL;
     }
+    // </FS:Pyrokitty>
     return idIsUnique;
 }
 

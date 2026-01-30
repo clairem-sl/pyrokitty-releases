@@ -1197,32 +1197,9 @@ bool LLAppViewerWin32::sendURLToOtherInstance(const std::string& url)
 
 std::string LLAppViewerWin32::generateSerialNumber()
 {
-    char serial_md5[MD5HEX_STR_SIZE];       // Flawfinder: ignore
-    serial_md5[0] = 0;
-
-    DWORD serial = 0;
-    DWORD flags = 0;
-    BOOL success = GetVolumeInformation(
-            L"C:\\",
-            NULL,       // volume name buffer
-            0,          // volume name buffer size
-            &serial,    // volume serial
-            NULL,       // max component length
-            &flags,     // file system flags
-            NULL,       // file system name buffer
-            0);         // file system name buffer size
-    if (success)
-    {
-        LLMD5 md5;
-        md5.update( (unsigned char*)&serial, sizeof(DWORD));
-        md5.finalize();
-        md5.hex_digest(serial_md5);
-    }
-    else
-    {
-        LL_WARNS() << "GetVolumeInformation failed" << LL_ENDL;
-    }
-    return serial_md5;
+    // <FS:Pyrokitty> Return static serial for privacy - don't leak volume serial
+    return "00000000000000000000000000000000";
+    // </FS:Pyrokitty>
 }
 
 // <FS:ND> Thread to purge old texture cache in the background.

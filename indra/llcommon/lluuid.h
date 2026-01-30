@@ -181,7 +181,8 @@ public:
     static LLMutex * mMutex;
 
     static U32 getRandomSeed();
-    static S32 getNodeID(unsigned char * node_id);
+    // <FS:Pyrokitty> Removed - no longer used, privacy
+    // static S32 getNodeID(unsigned char * node_id);
 
     static bool parseUUID(const std::string& buf, LLUUID* value);
 

@@ -37,6 +37,8 @@
 #include <wbemidl.h>
 #include <comdef.h>
 
+#pragma comment(lib, "wbemuuid.lib") // <FS:Pyrokitty> Link WMI library for DirectX hardware detection
+
 #include <boost/tokenizer.hpp>
 
 #include "lldxhardware.h"

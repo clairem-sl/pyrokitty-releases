@@ -444,230 +444,11 @@ static void get_random_bytes(void* buf, int nbytes)
     return;
 }
 
-#if LL_WINDOWS
+// <FS:Pyrokitty> Removed getNodeID() implementations - was leaking MAC address for privacy
+// All platform-specific MAC address retrieval code has been removed.
+// UUID generation now uses random bytes instead.
 
-typedef struct _ASTAT_
-{
-    ADAPTER_STATUS adapt;
-    NAME_BUFFER    NameBuff[30];
-}ASTAT, * PASTAT;
-
-// static
-S32 LLUUID::getNodeID(unsigned char* node_id)
-{
-    ASTAT Adapter;
-    NCB Ncb;
-    UCHAR uRetCode;
-    LANA_ENUM   lenum;
-    int      i;
-    int retval = 0;
-
-    memset(&Ncb, 0, sizeof(Ncb));
-    Ncb.ncb_command = NCBENUM;
-    Ncb.ncb_buffer = (UCHAR*)&lenum;
-    Ncb.ncb_length = sizeof(lenum);
-    uRetCode = Netbios(&Ncb);
-
-    for (i = 0; i < lenum.length; i++)
-    {
-        memset(&Ncb, 0, sizeof(Ncb));
-        Ncb.ncb_command = NCBRESET;
-        Ncb.ncb_lana_num = lenum.lana[i];
-
-        uRetCode = Netbios(&Ncb);
-
-        memset(&Ncb, 0, sizeof(Ncb));
-        Ncb.ncb_command = NCBASTAT;
-        Ncb.ncb_lana_num = lenum.lana[i];
-
-        strcpy((char*)Ncb.ncb_callname, "*              ");     /* Flawfinder: ignore */
-        Ncb.ncb_buffer = (unsigned char*)&Adapter;
-        Ncb.ncb_length = sizeof(Adapter);
-
-        uRetCode = Netbios(&Ncb);
-        if (uRetCode == 0)
-        {
-            memcpy(node_id, Adapter.adapt.adapter_address, 6);      /* Flawfinder: ignore */
-            retval = 1;
-        }
-    }
-    return retval;
-}
-
-#elif LL_DARWIN
-// macOS version of the UUID generation code...
-/*
- * Get an ethernet hardware address, if we can find it...
- */
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/time.h>
-#include <sys/socket.h>
-#include <sys/ioctl.h>
-#include <net/if.h>
-#include <net/if_types.h>
-#include <net/if_dl.h>
-#include <net/route.h>
-#include <ifaddrs.h>
-
- // static
-S32 LLUUID::getNodeID(unsigned char* node_id)
-{
-    int i;
-    unsigned char* a = NULL;
-    struct ifaddrs* ifap, * ifa;
-    int rv;
-    S32 result = 0;
-
-    if ((rv = getifaddrs(&ifap)) == -1)
-    {
-        return -1;
-    }
-    if (ifap == NULL)
-    {
-        return -1;
-    }
-
-    for (ifa = ifap; ifa != NULL; ifa = ifa->ifa_next)
-    {
-        //      printf("Interface %s, address family %d, ", ifa->ifa_name, ifa->ifa_addr->sa_family);
-        for (i = 0; i < ifa->ifa_addr->sa_len; i++)
-        {
-            //          printf("%02X ", (unsigned char)ifa->ifa_addr->sa_data[i]);
-        }
-        //      printf("\n");
-
-        if (ifa->ifa_addr->sa_family == AF_LINK)
-        {
-            // This is a link-level address
-            struct sockaddr_dl* lla = (struct sockaddr_dl*)ifa->ifa_addr;
-
-            //          printf("\tLink level address, type %02X\n", lla->sdl_type);
-
-            if (lla->sdl_type == IFT_ETHER)
-            {
-                // Use the first ethernet MAC in the list.
-                // For some reason, the macro LLADDR() defined in net/if_dl.h doesn't expand correctly.  This is what it would do.
-                a = (unsigned char*)&((lla)->sdl_data);
-                a += (lla)->sdl_nlen;
-
-                if (!a[0] && !a[1] && !a[2] && !a[3] && !a[4] && !a[5])
-                {
-                    continue;
-                }
-
-                if (node_id)
-                {
-                    memcpy(node_id, a, 6);
-                    result = 1;
-                }
-
-                // We found one.
-                break;
-            }
-        }
-    }
-    freeifaddrs(ifap);
-
-    return result;
-}
-
-#else
-
-// Linux version of the UUID generation code...
-/*
- * Get the ethernet hardware address, if we can find it...
- */
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <sys/types.h>
-#include <sys/time.h>
-#include <sys/stat.h>
-#include <sys/file.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <net/if.h>
-#define HAVE_NETINET_IN_H
-#ifdef HAVE_NETINET_IN_H
-#include <netinet/in.h>
-#if !LL_DARWIN
-#include <linux/sockios.h>
-#endif
-#endif
-
- // static
-S32 LLUUID::getNodeID(unsigned char* node_id)
-{
-    int         sd;
-    struct ifreq    ifr, * ifrp;
-    struct ifconf   ifc;
-    char buf[1024];
-    int     n, i;
-    unsigned char* a;
-
-    /*
-     * BSD 4.4 defines the size of an ifreq to be
-     * max(sizeof(ifreq), sizeof(ifreq.ifr_name)+ifreq.ifr_addr.sa_len
-     * However, under earlier systems, sa_len isn't present, so the size is
-     * just sizeof(struct ifreq)
-     */
-#ifdef HAVE_SA_LEN
-#ifndef max
-#define max(a,b) ((a) > (b) ? (a) : (b))
-#endif
-#define ifreq_size(i) max(sizeof(struct ifreq),\
-     sizeof((i).ifr_name)+(i).ifr_addr.sa_len)
-#else
-#define ifreq_size(i) sizeof(struct ifreq)
-#endif /* HAVE_SA_LEN*/
-
-    sd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sd < 0) {
-        return -1;
-    }
-    memset(buf, 0, sizeof(buf));
-    ifc.ifc_len = sizeof(buf);
-    ifc.ifc_buf = buf;
-    if (ioctl(sd, SIOCGIFCONF, (char*)&ifc) < 0) {
-        close(sd);
-        return -1;
-    }
-    n = ifc.ifc_len;
-    for (i = 0; i < n; i += ifreq_size(*ifr)) {
-        ifrp = (struct ifreq*)((char*)ifc.ifc_buf + i);
-        strncpy(ifr.ifr_name, ifrp->ifr_name, IFNAMSIZ);        /* Flawfinder: ignore */
-#ifdef SIOCGIFHWADDR
-        if (ioctl(sd, SIOCGIFHWADDR, &ifr) < 0)
-            continue;
-        a = (unsigned char*)&ifr.ifr_hwaddr.sa_data;
-#else
-#ifdef SIOCGENADDR
-        if (ioctl(sd, SIOCGENADDR, &ifr) < 0)
-            continue;
-        a = (unsigned char*)ifr.ifr_enaddr;
-#else
-        /*
-         * XXX we don't have a way of getting the hardware
-         * address
-         */
-        close(sd);
-        return 0;
-#endif /* SIOCGENADDR */
-#endif /* SIOCGIFHWADDR */
-        if (!a[0] && !a[1] && !a[2] && !a[3] && !a[4] && !a[5])
-            continue;
-        if (node_id) {
-            memcpy(node_id, a, 6);      /* Flawfinder: ignore */
-            close(sd);
-            return 1;
-        }
-    }
-    close(sd);
-    return 0;
-}
-
-#endif
+// </FS:Pyrokitty>
 
 S32 LLUUID::cmpTime(uuid_time_t* t1, uuid_time_t* t2)
 {
@@ -781,16 +562,16 @@ void LLUUID::generate()
     if (!has_init)
     {
         has_init = 1;
-        if (getNodeID(node_id) <= 0)
-        {
-            get_random_bytes(node_id, 6);
-            /*
-             * Set multicast bit, to prevent conflicts
-             * with IEEE 802 addresses obtained from
-             * network cards
-             */
-            node_id[0] |= 0x80;
-        }
+        // <FS:Pyrokitty> Use random node ID for privacy - no MAC address in UUIDs
+        // Always use random bytes instead of real MAC address
+        get_random_bytes(node_id, 6);
+        /*
+         * Set multicast bit, to prevent conflicts
+         * with IEEE 802 addresses obtained from
+         * network cards
+         */
+        node_id[0] |= 0x80;
+        // </FS:Pyrokitty>
 
         getCurrentTime(&time_last);
 #if LL_USE_JANKY_RANDOM_NUMBER_GENERATOR
@@ -859,7 +640,10 @@ U32 LLUUID::getRandomSeed()
 {
     static unsigned char seed[16];      /* Flawfinder: ignore */
 
-    getNodeID(&seed[0]);
+    // <FS:Pyrokitty> Use static bytes for privacy - no MAC address in seed
+    static unsigned char static_node[6] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+    memcpy(&seed[0], static_node, 6);
+    // </FS:Pyrokitty>
 
     // Incorporate the pid into the seed to prevent
     // processes that start on the same host at the same

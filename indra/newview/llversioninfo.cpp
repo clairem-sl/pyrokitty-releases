@@ -131,13 +131,6 @@ std::string LLVersionInfo::getShortVersion() const
     return short_version;
 }
 
-// <FS:PP>
-std::string LLVersionInfo::getLLViewerVersion() const
-{
-    return LL_VIEWER_VERSION_LL;
-}
-// </FS:PP>
-
 std::string LLVersionInfo::getChannelAndVersion()
 {
     if (mVersionChannel.empty())

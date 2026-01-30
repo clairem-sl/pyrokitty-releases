@@ -229,8 +229,10 @@ void LLLoginInstance::constructAuthParams(LLPointer<LLCredential> user_credentia
     request_params["last_exec_duration"] = mLastExecDuration;
     request_params["last_exec_session_id"] = mLastAgentSessionId.asString();
     request_params["mac"] = (char*)hashed_unique_id_string;
-    request_params["version"] = LLVersionInfo::instance().getVersion();
-    request_params["channel"] = LLVersionInfo::instance().getChannel();
+    // <FS:Pyrokitty> Don't send version/channel for privacy
+    // request_params["version"] = LLVersionInfo::instance().getVersion();
+    // request_params["channel"] = LLVersionInfo::instance().getChannel();
+    // </FS:Pyrokitty>
     request_params["platform"] = mPlatform;
     request_params["address_size"] = ADDRESS_SIZE;
     request_params["platform_version"] = mPlatformVersion;

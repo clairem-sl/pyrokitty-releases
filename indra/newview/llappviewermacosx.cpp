@@ -404,33 +404,9 @@ bool LLAppViewerMacOSX::restoreErrorTrap()
 
 std::string LLAppViewerMacOSX::generateSerialNumber()
 {
-    char serial_md5[MD5HEX_STR_SIZE];       // Flawfinder: ignore
-    serial_md5[0] = 0;
-
-    // JC: Sample code from http://developer.apple.com/technotes/tn/tn1103.html
-    CFStringRef serialNumber = NULL;
-    io_service_t    platformExpert = IOServiceGetMatchingService(kIOMasterPortDefault,
-                                                                 IOServiceMatching("IOPlatformExpertDevice"));
-    if (platformExpert)
-    {
-        serialNumber = (CFStringRef) IORegistryEntryCreateCFProperty(platformExpert,
-                                                                     CFSTR(kIOPlatformSerialNumberKey),
-                                                                     kCFAllocatorDefault, 0);
-        IOObjectRelease(platformExpert);
-    }
-
-    if (serialNumber)
-    {
-        char buffer[MAX_STRING];        // Flawfinder: ignore
-        if (CFStringGetCString(serialNumber, buffer, MAX_STRING, kCFStringEncodingASCII))
-        {
-            LLMD5 md5( (unsigned char*)buffer );
-            md5.hex_digest(serial_md5);
-        }
-        CFRelease(serialNumber);
-    }
-
-    return serial_md5;
+    // <FS:Pyrokitty> Return static serial for privacy - don't leak hardware serial
+    return "00000000000000000000000000000000";
+    // </FS:Pyrokitty>
 }
 
 void handleUrl(const char* url_utf8)
