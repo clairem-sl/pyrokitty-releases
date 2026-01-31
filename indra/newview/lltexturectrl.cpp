@@ -628,6 +628,13 @@ bool LLFloaterTexturePicker::postBuild()
     mUUIDBtn = getChild<LLButton>("TextureKeyApply");
     mUUIDEditor = getChild<LLLineEditor>("TextureKey");
 
+    // <FS:Pyrokitty> Initialize TextureKey with the current image UUID
+    if (mImageAssetID.notNull())
+    {
+        mUUIDEditor->setText(mImageAssetID.asString());
+    }
+    // </FS:Pyrokitty>
+
     mDefaultBtn->setClickedCallback(boost::bind(LLFloaterTexturePicker::onBtnSetToDefault,this));
     mNoneBtn->setClickedCallback(boost::bind(LLFloaterTexturePicker::onBtnNone, this));
     mBlankBtn->setClickedCallback(boost::bind(LLFloaterTexturePicker::onBtnBlank, this));

@@ -297,6 +297,12 @@ static void downloadError(LLSD const &aData, std::string const &aURL)
 // call this just before the login screen and after the LLProxy has been setup.
 void FSData::startDownload()
 {
+    // <FS:Pyrokitty> Disable Phoenix server callbacks for privacy
+    mFSDataDone = true;
+    LL_INFOS("fsdata") << "FSData downloads disabled for privacy" << LL_ENDL;
+    return;
+    // </FS:Pyrokitty>
+
     mFSdataFilename = gDirUtilp->getExpandedFilename(LL_PATH_USER_SETTINGS, "fsdata.xml");
     mFSdataDefaultsFilename = gDirUtilp->getExpandedFilename(LL_PATH_USER_SETTINGS, llformat("fsdata_defaults.%s.xml", LLVersionInfo::getInstance()->getShortVersion().c_str()));
     mClientTagsFilename = gDirUtilp->getExpandedFilename(LL_PATH_USER_SETTINGS, "client_list_v2.xml");
@@ -356,6 +362,11 @@ void FSData::startDownload()
 // call this _after_ the login screen to pick up grid data.
 void FSData::downloadAgents()
 {
+    // <FS:Pyrokitty> Disable Phoenix server callbacks for privacy
+    mAgentsDone = true;
+    return;
+    // </FS:Pyrokitty>
+
 #ifdef OPENSIM
     std::string filename_prefix = LLGridManager::getInstance()->getGridId();
 #else

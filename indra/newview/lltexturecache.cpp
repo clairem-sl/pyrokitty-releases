@@ -868,7 +868,9 @@ std::string LLTextureCache::getTextureFileName(const LLUUID& id)
 {
     std::string idstr = id.asString();
     std::string delem = gDirUtilp->getDirDelimiter();
-    std::string filename = mTexturesDirName + delem + idstr[0] + delem + idstr + ".texture";
+    // <FS:Pyrokitty> Use 256 subdirs (2 hex chars) instead of 16 for better NTFS performance
+    std::string filename = mTexturesDirName + delem + idstr.substr(0, 2) + delem + idstr + ".texture";
+    // </FS:Pyrokitty>
     return filename;
 }
 
@@ -1030,12 +1032,20 @@ S64 LLTextureCache::initCache(ELLPath location, S64 max_size, bool texture_cache
                 }
         LLFile::mkdir(mTexturesDirName);
 
-        const char* subdirs = "0123456789abcdef";
-        for (S32 i=0; i<16; i++)
+        // <FS:Pyrokitty> Create 256 subdirs (00-ff) instead of 16 for better NTFS performance
+        const char* hexchars = "0123456789abcdef";
+        for (S32 i = 0; i < 16; i++)
         {
-            std::string dirname = mTexturesDirName + gDirUtilp->getDirDelimiter() + subdirs[i];
-            LLFile::mkdir(dirname);
+            for (S32 j = 0; j < 16; j++)
+            {
+                std::string subdir;
+                subdir += hexchars[i];
+                subdir += hexchars[j];
+                std::string dirname = mTexturesDirName + gDirUtilp->getDirDelimiter() + subdir;
+                LLFile::mkdir(dirname);
+            }
         }
+        // </FS:Pyrokitty>
     }
     readHeaderCache();
     purgeTextures(true); // calc mTexturesSize and make some room in the texture cache if we need it
@@ -1580,12 +1590,20 @@ void LLTextureCache::clearCorruptedCache()
     {
         LLFile::mkdir(mTexturesDirName);
 
-        const char* subdirs = "0123456789abcdef";
-        for (S32 i=0; i<16; i++)
+        // <FS:Pyrokitty> Create 256 subdirs (00-ff) instead of 16 for better NTFS performance
+        const char* hexchars = "0123456789abcdef";
+        for (S32 i = 0; i < 16; i++)
         {
-            std::string dirname = mTexturesDirName + gDirUtilp->getDirDelimiter() + subdirs[i];
-            LLFile::mkdir(dirname);
+            for (S32 j = 0; j < 16; j++)
+            {
+                std::string subdir;
+                subdir += hexchars[i];
+                subdir += hexchars[j];
+                std::string dirname = mTexturesDirName + gDirUtilp->getDirDelimiter() + subdir;
+                LLFile::mkdir(dirname);
+            }
         }
+        // </FS:Pyrokitty>
     }
 
     return ;
@@ -1614,12 +1632,19 @@ void LLTextureCache::purgeAllTextures(bool purge_directories)
 #endif
 // </FS:ND>
         {
-        const char* subdirs = "0123456789abcdef";
+        // <FS:Pyrokitty> Iterate 256 subdirs (00-ff) instead of 16
+        const char* hexchars = "0123456789abcdef";
         std::string delem = gDirUtilp->getDirDelimiter();
         std::string mask = "*";
-        for (S32 i=0; i<16; i++)
+        for (S32 i = 0; i < 16; i++)
         {
-            std::string dirname = mTexturesDirName + delem + subdirs[i];
+            for (S32 j = 0; j < 16; j++)
+            {
+                std::string subdir;
+                subdir += hexchars[i];
+                subdir += hexchars[j];
+                std::string dirname = mTexturesDirName + delem + subdir;
+                // </FS:Pyrokitty>
             LL_INFOS() << "Deleting files in directory: " << dirname << LL_ENDL;
             if (purge_directories)
             {
@@ -1635,7 +1660,8 @@ void LLTextureCache::purgeAllTextures(bool purge_directories)
             MSG msg;
             PeekMessage(&msg, 0, 0, 0, PM_NOREMOVE | PM_NOYIELD);
 #endif
-        }
+            } // <FS:Pyrokitty> Close inner loop (j)
+        } // <FS:Pyrokitty> Close outer loop (i)
         // <FS:Ansariel> Only delete folder if it actually exist
         if (LLFile::isdir(mTexturesDirName))
         {

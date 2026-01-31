@@ -151,7 +151,7 @@
     <key>Type</key>
     <string>String</string>
     <key>Value</key>
-    <string>http://phoenixviewer.com/app/fsdata/grids.xml</string>
+    <string></string>
   </map>
   <key>FSPrimfeedViewerApiKey</key>
   <map>
@@ -173,7 +173,7 @@
     <key>Type</key>
     <string>String</string>
     <key>Value</key>
-    <string>https://phoenixviewer.com/app/fsdata/fs_grid_builder.html</string>
+    <string></string>
   </map>
   <key>LastConnectedGrid</key>
   <map>
@@ -6009,7 +6009,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://viewer-sidebar.secondlife.com/sidebar.html</string>
+      <string>about:blank</string>
       <key>Backup</key>
       <integer>0</integer>
     </map>
@@ -11408,6 +11408,17 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>Value</key>
     <integer>2048</integer>
   </map>
+  <key>RenderMaxAuxTextureResolution</key>
+  <map>
+    <key>Comment</key>
+    <string>Maximum texture resolution for auxiliary textures (normal, specular, emissive, ORM). Set to 0 to use same as diffuse.</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>U32</string>
+    <key>Value</key>
+    <integer>512</integer>
+  </map>
     <key>RenderDownScaleMethod</key>
     <map>
         <key>Comment</key>
@@ -13756,7 +13767,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Type</key>
 			<string>String</string>
 			<key>Value</key>
-			<string>https://phoenixviewer.com/app/file-a-jira/?environment=[ENVIRONMENT]</string>
+			<string></string>
 		</map>
 	<key>RevokePermsOnStopAnimation</key>
     <map>
@@ -24777,7 +24788,7 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://phoenixviewer.com/app/loginV3/secondlifegrid.xml</string>
+      <string></string>
     </map>
     <key>FSIgnoreAdHocSessions</key>
     <map>

@@ -38,6 +38,11 @@
 //static
 std::string LLViewerHome::getHomeURL()
 {
+    // <FS:Pyrokitty> Disable home page loading for privacy
+    return "about:blank";
+    // </FS:Pyrokitty>
+
+#if 0 // Original code disabled
     // Return the URL to display in the Home side tray. We read
     // this value from settings.xml and support various substitutions
 
@@ -57,6 +62,7 @@ std::string LLViewerHome::getHomeURL()
     // expand all substitution strings in the URL and return it
     // (also adds things like [LANGUAGE], [VERSION], [OS], etc.)
     return LLWeb::expandURLSubstitutions(homeURL, substitution);
+#endif
 }
 
 //static

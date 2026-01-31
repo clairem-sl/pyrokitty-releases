@@ -5127,7 +5127,9 @@ U32 LLAppViewer::getTextureCacheVersion()
     // 2021-03-10 Bumping up by one to help obviate texture cache issues with
     //            Simple Cache Viewer - see SL-14985 for more information
     //const U32 TEXTURE_CACHE_VERSION = 8;
-    const U32 TEXTURE_CACHE_VERSION = 9;
+    // <FS:Pyrokitty> Bump to 10 - changed to 256 subdirs (00-ff) for better NTFS performance
+    const U32 TEXTURE_CACHE_VERSION = 10;
+    // </FS:Pyrokitty>
 
     return TEXTURE_CACHE_VERSION ;
 }

@@ -874,6 +874,10 @@ void LLPanelLogin::loadLoginPage()
 {
     if (!sInstance) return;
 
+    // <FS:Pyrokitty> Disable login page web content for privacy
+    return;
+    // </FS:Pyrokitty>
+
     LLURI login_page = LLURI(LLGridManager::getInstance()->getLoginPage());
     LLSD params(login_page.queryMap());
 

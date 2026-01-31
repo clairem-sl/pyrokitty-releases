@@ -4870,6 +4870,11 @@ bool process_login_success_response(U32 &first_sim_size_x, U32 &first_sim_size_y
         gAgent.setHomePosRegion(region_handle, position);
     }
 
+    // <FS:Pyrokitty> Override MOTD for privacy - don't use server MOTD
+    gAgent.mMOTD.assign("Welcome to the jungle!");
+    // </FS:Pyrokitty>
+
+#if 0 // Original MOTD handling disabled
     // If MOTD has not been set by fsdata, fallback to LL MOTD
 // <FS:CR> FIRE-8571, FIRE-9274
     if (gAgent.mMOTD.empty() || !LLGridManager::getInstance()->isInSLMain())
@@ -4886,6 +4891,7 @@ bool process_login_success_response(U32 &first_sim_size_x, U32 &first_sim_size_y
     }
 #endif
     // </FS:Techwolf Lupindo>
+#endif
 
     // Options...
     // Each 'option' is an array of submaps.

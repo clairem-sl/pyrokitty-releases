@@ -1244,13 +1244,21 @@ void deleteCacheDirectory( std::wstring aDir )
     if( aDir[ aDir.size() -1 ] != '\\' || aDir[ aDir.size() -1 ] != '/' )
         aDir += L"\\";
 
-    wchar_t aCacheDirs[] = L"0123456789abcdef";
+    // <FS:Pyrokitty> Handle 256 subdirs (00-ff) instead of 16
+    wchar_t aHexChars[] = L"0123456789abcdef";
 
-    for( int i = 0; i < _countof( aCacheDirs ); ++i )
+    for( int i = 0; i < 16; ++i )
     {
-        deleteFilesInDirectory( aDir + aCacheDirs[i] );
-        ::RemoveDirectory( (aDir + aCacheDirs[i]).c_str() );
+        for( int j = 0; j < 16; ++j )
+        {
+            std::wstring subdir;
+            subdir += aHexChars[i];
+            subdir += aHexChars[j];
+            deleteFilesInDirectory( aDir + subdir );
+            ::RemoveDirectory( (aDir + subdir).c_str() );
+        }
     }
+    // </FS:Pyrokitty>
 
     deleteFilesInDirectory( aDir );
     ::RemoveDirectory( aDir.c_str() );

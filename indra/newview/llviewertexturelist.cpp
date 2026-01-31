@@ -975,6 +975,17 @@ void LLViewerTextureList::updateImageDecodePriority(LLViewerFetchedTexture* imag
 
                     F32 vsize = face->getPixelArea();
 
+                    // <FS:Pyrokitty> Limit non-diffuse textures for performance
+                    // Channel 0 = DIFFUSE_MAP, Channel 3 = BASECOLOR_MAP (PBR)
+                    // All other channels (normal, specular, emissive, ORM) get limited
+                    static LLCachedControl<U32> max_aux_texture_resolution(gSavedSettings, "RenderMaxAuxTextureResolution", 512);
+                    if (max_aux_texture_resolution > 0 && i != LLRender::DIFFUSE_MAP && i != LLRender::BASECOLOR_MAP)
+                    {
+                        F32 max_aux_area = (F32)max_aux_texture_resolution * (F32)max_aux_texture_resolution;
+                        vsize = llmin(vsize, max_aux_area);
+                    }
+                    // </FS:Pyrokitty>
+
                     on_screen |= face->mInFrustum;
 
                     // Scale desired texture resolution higher or lower depending on texture scale

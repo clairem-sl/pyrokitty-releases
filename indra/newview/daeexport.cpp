@@ -527,10 +527,35 @@ void DAESaver::updateTextureInfo()
             if (std::find(mTextures.begin(), mTextures.end(), id) != mTextures.end()) continue;
 
             mTextures.push_back(id);
-            bool exportable = false;
-            LLViewerFetchedTexture* imagep = LLViewerTextureManager::getFetchedTexture(id);
+
+            // <FS:Pyrokitty> Always allow texture export
             std::string name;
             std::string description;
+
+            // Try to get name from inventory
+            FSExportPermsCheck::canExportAsset(id, &name, &description);
+
+            // If name is empty (not in inventory), use UUID as name
+            if (name.empty())
+            {
+                name = id.asString();
+            }
+
+            if (id != DAEExportUtil::LL_TEXTURE_BLANK)
+            {
+                std::string safe_name = gDirUtilp->getScrubbedFileName(name);
+                std::replace(safe_name.begin(), safe_name.end(), ' ', '_');
+                mTextureNames.push_back(safe_name);
+            }
+            else
+            {
+                mTextureNames.push_back(std::string());
+            }
+            // </FS:Pyrokitty>
+
+#if 0 // Original permission-checking code disabled
+            bool exportable = false;
+            LLViewerFetchedTexture* imagep = LLViewerTextureManager::getFetchedTexture(id);
             if (LLGridManager::getInstance()->isInSecondLife())
             {
                 if (imagep->mComment.find("a") != imagep->mComment.end())
@@ -557,6 +582,7 @@ void DAESaver::updateTextureInfo()
             {
                 mTextureNames.push_back(std::string());
             }
+#endif
         }
     }
 }
