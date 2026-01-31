@@ -5790,6 +5790,16 @@ void LLVolumeGeometryManager::registerFace(LLSpatialGroup* group, LLFace* facep,
         draw_info->mAvatar = facep->mAvatar;
         draw_info->mSkinInfo = facep->mSkinInfo;
 
+        // <FS:Pyrokitty> Skip small objects in shadow pass
+        static LLCachedControl<F32> RenderShadowMinSize(gSavedSettings, "RenderShadowMinSize", 0.f);
+        if (RenderShadowMinSize > 0.f && drawable)
+        {
+            const LLVector3& scale = drawable->getScale();
+            F32 maxScale = llmax(scale.mV[VX], scale.mV[VY], scale.mV[VZ]);
+            draw_info->mSkipShadow = (maxScale < RenderShadowMinSize);
+        }
+        // </FS:Pyrokitty>
+
         if (gltf_mat)
         {
             // just remember the material ID, render pools will reference the GLTF material

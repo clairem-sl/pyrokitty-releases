@@ -286,6 +286,74 @@ An attempt was made to optimize shadow culling by traversing the octree once for
 
 **Lesson learned:** The octree traversal is not the bottleneck for shadow rendering. The camera setup and actual shadow map rendering dominate the cost. Reducing `RenderShadowSplits` is a more effective optimization.
 
+### RenderShadowMinSize Setting
+
+Skips small objects during shadow rendering based on object scale (meters).
+
+| Value | Effect |
+|-------|--------|
+| 0 | Disabled - all objects cast shadows |
+| 0.25 | Skip objects smaller than 0.25m (default) |
+| 0.5 | Skip objects smaller than 0.5m (aggressive) |
+
+**Implementation:**
+- In `llvovolume.cpp`: Sets `mSkipShadow` flag on `LLDrawInfo` based on drawable scale
+- In `lldrawpool.cpp` and `pipeline.cpp`: Checks `mSkipShadow` and skips rendering
+
+```cpp
+// llvovolume.cpp - When creating DrawInfo
+static LLCachedControl<F32> RenderShadowMinSize(gSavedSettings, "RenderShadowMinSize", 0.25f);
+if (RenderShadowMinSize > 0.f && drawable)
+{
+    const LLVector3& scale = drawable->getScale();
+    F32 maxScale = llmax(scale.mV[VX], scale.mV[VY], scale.mV[VZ]);
+    draw_info->mSkipShadow = (maxScale < RenderShadowMinSize);
+}
+```
+
+### Fixed Alpha Cutoff Optimization
+
+Shadow passes now use a fixed 0.5 alpha cutoff instead of per-object `mAlphaMaskCutoff` values.
+
+**Problem:** `setMinimumAlpha()` calls `gGL.flush()` internally, causing a CPU-intensive draw call submission per object. This breaks batching.
+
+**Solution:** Comment out per-object `setMinimumAlpha()` calls in shadow loops and use fixed 0.5 cutoff set once per shader bind.
+
+**Files modified:**
+- `lldrawpool.cpp`: `pushMaskBatches()` and `pushRiggedMaskBatches()` - removed per-object setMinimumAlpha
+- `pipeline.cpp`: `renderAlphaObjects()` - setMinimumAlpha only called on shader change
+
+**Visual impact:** Minimal - 0.5 is the default cutoff for most objects. Some alpha-masked textures with non-default cutoffs may have slightly different shadow edges.
+
+### Shader Bind Optimization in renderAlphaObjects
+
+The `renderAlphaObjects()` function now tracks which shader was last bound and only calls `bind()` when switching between GLTF and non-GLTF shaders.
+
+**Problem:** `LLGLSLShader::bind()` always calls `gGL.flush()` even when the shader is already bound (line 1055 in `llglslshader.cpp`). The original code called `bind()` for every draw call.
+
+**Solution:** Track last shader type and only bind when switching:
+```cpp
+enum ShaderType { SHADER_NONE, SHADER_GLTF, SHADER_MASK };
+ShaderType lastShader = SHADER_NONE;
+
+// In loop:
+if (pparams->mGLTFMaterial)
+{
+    if (lastShader != SHADER_GLTF)
+    {
+        gDeferredShadowGLTFAlphaBlendProgram.bind(rigged);
+        // Set uniforms only once per shader switch
+        LLGLSLShader::sCurBoundShaderPtr->uniform1i(LLShaderMgr::SUN_UP_FACTOR, sun_up);
+        LLGLSLShader::sCurBoundShaderPtr->uniform1f(LLShaderMgr::DEFERRED_SHADOW_TARGET_WIDTH, (float)target_width);
+        LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(ALPHA_BLEND_CUTOFF);
+        lastShader = SHADER_GLTF;
+    }
+    LLRenderPass::pushGLTFBatch(*pparams);
+}
+```
+
+This significantly reduces the number of `flush()` calls when draw calls are grouped by shader type.
+
 ### Potential Future Optimizations
 
 1. **Per-cascade LOD** - Use progressively lower LOD for distant cascades

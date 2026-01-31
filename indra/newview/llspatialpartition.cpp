@@ -1133,6 +1133,30 @@ public:
     LLOctreeCullShadow(LLCamera* camera)
         : LLOctreeCull(camera) { }
 
+    // <FS:Pyrokitty> Skip small spatial groups early in shadow culling
+    virtual bool earlyFail(LLViewerOctreeGroup* base_group)
+    {
+        // Check size first (cheap) - use getBounds which includes all children
+        // After rebound(), mBounds[1] is HALF-size, so multiply by 2
+        // Static so we only read setting once per frame at most
+        static LLCachedControl<F32> shadowMinSize(gSavedSettings, "RenderShadowMinSize", 0.f);
+        if (shadowMinSize > 0.f)
+        {
+            const LLVector4a* bounds = base_group->getBounds();
+            // Get max dimension of the bounding box (bounds[1] is half-size)
+            const LLVector4a& halfSize = bounds[1];
+            F32 maxSize = llmax(halfSize[0], halfSize[1], halfSize[2]) * 2.f;
+            if (maxSize < shadowMinSize)
+            {
+                return true; // Skip this group and all children
+            }
+        }
+
+        // Then check parent class (occlusion culling)
+        return LLOctreeCull::earlyFail(base_group);
+    }
+    // </FS:Pyrokitty>
+
     virtual S32 frustumCheck(const LLViewerOctreeGroup* group)
     {
         return AABBInFrustumGroupBounds(group);

@@ -10964,6 +10964,17 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>Value</key>
     <integer>3</integer>
   </map>
+  <key>RenderShadowMinSize</key>
+  <map>
+    <key>Comment</key>
+    <string>Skip objects smaller than this size (meters) in shadow passes. 0 = disabled. Requires relog for existing objects.</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>F32</string>
+    <key>Value</key>
+    <real>4</real>
+  </map>
   <key>RenderSSAOScale</key>
   <map>
     <key>Comment</key>

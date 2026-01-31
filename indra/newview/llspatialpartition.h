@@ -149,6 +149,7 @@ public:
     U8   mShiny = 0;
     bool mFullbright = false;
     bool mHasGlow = false;
+    bool mSkipShadow = false; // <FS:Pyrokitty> Skip small objects in shadow pass (set at DrawInfo creation)
 
     struct CompareTexture
     {

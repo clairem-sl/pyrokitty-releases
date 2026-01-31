@@ -1134,6 +1134,12 @@ F32 LLViewerTextureList::updateImagesCreateTextures(F32 max_time)
 
     LLTimer create_timer;
 
+    // <FS:Pyrokitty> Ensure minimum throughput when queue is large
+    // Process at least queue_size/100 + 5 textures per frame to prevent queue backup
+    // For 17,000 textures: 175/frame = ~3 seconds to clear at 60 FPS
+    S32 min_count = (S32)mCreateTextureList.size() / 100 + 5;
+    // </FS:Pyrokitty>
+
     while (!mCreateTextureList.empty())
     {
         LLViewerFetchedTexture* imagep = mCreateTextureList.front();
@@ -1164,10 +1170,12 @@ F32 LLViewerTextureList::updateImagesCreateTextures(F32 max_time)
 
         mCreateTextureList.pop();
 
-        if (create_timer.getElapsedTimeF32() > max_time)
+        // <FS:Pyrokitty> Allow time limit to be exceeded to hit minimum count
+        if (create_timer.getElapsedTimeF32() > max_time && --min_count <= 0)
         {
             break;
         }
+        // </FS:Pyrokitty>
     }
 
     if (!mDownScaleQueue.empty() && gPipeline.mDownResMap.isComplete())

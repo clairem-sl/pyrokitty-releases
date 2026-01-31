@@ -564,6 +564,7 @@ void LLDrawPoolBump::renderDeferred(S32 pass)
         const LLVOAvatar* lastAvatar = nullptr;
         U64 lastMeshId = 0;
         bool skipLastSkin = false;
+        F32 lastAlphaCutoff = -1.f; // <FS:Pyrokitty> Track last cutoff to avoid redundant flush
 
         for (LLCullResult::drawinfo_iterator i = begin; i != end; )
         {
@@ -571,7 +572,13 @@ void LLDrawPoolBump::renderDeferred(S32 pass)
 
             LLCullResult::increment_iterator(i, end);
 
-            LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(params.mAlphaMaskCutoff);
+            // <FS:Pyrokitty> Only set alpha cutoff when it changes to avoid flush per object
+            if (params.mAlphaMaskCutoff != lastAlphaCutoff)
+            {
+                LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(params.mAlphaMaskCutoff);
+                lastAlphaCutoff = params.mAlphaMaskCutoff;
+            }
+            // </FS:Pyrokitty>
             LLDrawPoolBump::bindBumpMap(params, bump_channel);
 
             if (rigged)

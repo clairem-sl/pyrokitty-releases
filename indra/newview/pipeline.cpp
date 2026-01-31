@@ -7487,10 +7487,23 @@ void LLPipeline::renderAlphaObjects(bool rigged)
     auto* begin = gPipeline.beginRenderMap(type);
     auto* end = gPipeline.endRenderMap(type);
 
+    // <FS:Pyrokitty> Track last shader to avoid redundant bind() and flush() calls
+    // bind() always calls gGL.flush() even when shader is already bound
+    enum ShaderType { SHADER_NONE, SHADER_GLTF, SHADER_MASK };
+    ShaderType lastShader = SHADER_NONE;
+    // </FS:Pyrokitty>
+
     for (LLCullResult::drawinfo_iterator i = begin; i != end; )
     {
         LLDrawInfo* pparams = *i;
         LLCullResult::increment_iterator(i, end);
+
+        // <FS:Pyrokitty> Skip small objects in shadow pass
+        if (pparams->mSkipShadow)
+        {
+            continue;
+        }
+        // </FS:Pyrokitty>
 
         if (rigged != (pparams->mAvatar != nullptr))
         {
@@ -7503,18 +7516,30 @@ void LLPipeline::renderAlphaObjects(bool rigged)
         {
             if (pparams->mGLTFMaterial)
             {
-                gDeferredShadowGLTFAlphaBlendProgram.bind(rigged);
-                LLGLSLShader::sCurBoundShaderPtr->uniform1i(LLShaderMgr::SUN_UP_FACTOR, sun_up);
-                LLGLSLShader::sCurBoundShaderPtr->uniform1f(LLShaderMgr::DEFERRED_SHADOW_TARGET_WIDTH, (float)target_width);
-                LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(ALPHA_BLEND_CUTOFF);
+                // <FS:Pyrokitty> Only bind shader when type changes to avoid redundant flush()
+                if (lastShader != SHADER_GLTF)
+                {
+                    gDeferredShadowGLTFAlphaBlendProgram.bind(rigged);
+                    LLGLSLShader::sCurBoundShaderPtr->uniform1i(LLShaderMgr::SUN_UP_FACTOR, sun_up);
+                    LLGLSLShader::sCurBoundShaderPtr->uniform1f(LLShaderMgr::DEFERRED_SHADOW_TARGET_WIDTH, (float)target_width);
+                    LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(ALPHA_BLEND_CUTOFF);
+                    lastShader = SHADER_GLTF;
+                }
+                // </FS:Pyrokitty>
                 LLRenderPass::pushRiggedGLTFBatch(*pparams, lastAvatarGLTF, lastMeshIdGLTF, skipLastSkinGLTF);
             }
             else
             {
-                gDeferredShadowAlphaMaskProgram.bind(rigged);
-                LLGLSLShader::sCurBoundShaderPtr->uniform1i(LLShaderMgr::SUN_UP_FACTOR, sun_up);
-                LLGLSLShader::sCurBoundShaderPtr->uniform1f(LLShaderMgr::DEFERRED_SHADOW_TARGET_WIDTH, (float)target_width);
-                LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(ALPHA_BLEND_CUTOFF);
+                // <FS:Pyrokitty> Only bind shader when type changes to avoid redundant flush()
+                if (lastShader != SHADER_MASK)
+                {
+                    gDeferredShadowAlphaMaskProgram.bind(rigged);
+                    LLGLSLShader::sCurBoundShaderPtr->uniform1i(LLShaderMgr::SUN_UP_FACTOR, sun_up);
+                    LLGLSLShader::sCurBoundShaderPtr->uniform1f(LLShaderMgr::DEFERRED_SHADOW_TARGET_WIDTH, (float)target_width);
+                    LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(ALPHA_BLEND_CUTOFF);
+                    lastShader = SHADER_MASK;
+                }
+                // </FS:Pyrokitty>
                 if (mSimplePool->uploadMatrixPalette(pparams->mAvatar, pparams->mSkinInfo, lastAvatar, lastMeshId, skipLastSkin))
                 {
                     mSimplePool->pushBatch(*pparams, true, true);
@@ -7525,18 +7550,30 @@ void LLPipeline::renderAlphaObjects(bool rigged)
         {
             if (pparams->mGLTFMaterial)
             {
-                gDeferredShadowGLTFAlphaBlendProgram.bind(rigged);
-                LLGLSLShader::sCurBoundShaderPtr->uniform1i(LLShaderMgr::SUN_UP_FACTOR, sun_up);
-                LLGLSLShader::sCurBoundShaderPtr->uniform1f(LLShaderMgr::DEFERRED_SHADOW_TARGET_WIDTH, (float)target_width);
-                LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(ALPHA_BLEND_CUTOFF);
+                // <FS:Pyrokitty> Only bind shader when type changes to avoid redundant flush()
+                if (lastShader != SHADER_GLTF)
+                {
+                    gDeferredShadowGLTFAlphaBlendProgram.bind(rigged);
+                    LLGLSLShader::sCurBoundShaderPtr->uniform1i(LLShaderMgr::SUN_UP_FACTOR, sun_up);
+                    LLGLSLShader::sCurBoundShaderPtr->uniform1f(LLShaderMgr::DEFERRED_SHADOW_TARGET_WIDTH, (float)target_width);
+                    LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(ALPHA_BLEND_CUTOFF);
+                    lastShader = SHADER_GLTF;
+                }
+                // </FS:Pyrokitty>
                 LLRenderPass::pushGLTFBatch(*pparams);
             }
             else
             {
-                gDeferredShadowAlphaMaskProgram.bind(rigged);
-                LLGLSLShader::sCurBoundShaderPtr->uniform1i(LLShaderMgr::SUN_UP_FACTOR, sun_up);
-                LLGLSLShader::sCurBoundShaderPtr->uniform1f(LLShaderMgr::DEFERRED_SHADOW_TARGET_WIDTH, (float)target_width);
-                LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(ALPHA_BLEND_CUTOFF);
+                // <FS:Pyrokitty> Only bind shader when type changes to avoid redundant flush()
+                if (lastShader != SHADER_MASK)
+                {
+                    gDeferredShadowAlphaMaskProgram.bind(rigged);
+                    LLGLSLShader::sCurBoundShaderPtr->uniform1i(LLShaderMgr::SUN_UP_FACTOR, sun_up);
+                    LLGLSLShader::sCurBoundShaderPtr->uniform1f(LLShaderMgr::DEFERRED_SHADOW_TARGET_WIDTH, (float)target_width);
+                    LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(ALPHA_BLEND_CUTOFF);
+                    lastShader = SHADER_MASK;
+                }
+                // </FS:Pyrokitty>
                 mSimplePool->pushBatch(*pparams, true, true);
             }
         }

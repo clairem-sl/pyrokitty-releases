@@ -459,6 +459,13 @@ void LLRenderPass::pushUntexturedBatches(U32 type)
         LLDrawInfo* pparams = *i;
         LLCullResult::increment_iterator(i, end);
 
+        // <FS:Pyrokitty> Skip small objects in shadow pass
+        if (LLPipeline::sShadowRender && pparams->mSkipShadow)
+        {
+            continue;
+        }
+        // </FS:Pyrokitty>
+
         pushUntexturedBatch(*pparams);
     }
 }
@@ -504,6 +511,13 @@ void LLRenderPass::pushUntexturedRiggedBatches(U32 type)
         LLDrawInfo* pparams = *i;
         LLCullResult::increment_iterator(i, end);
 
+        // <FS:Pyrokitty> Skip small objects in shadow pass
+        if (LLPipeline::sShadowRender && pparams->mSkipShadow)
+        {
+            continue;
+        }
+        // </FS:Pyrokitty>
+
         if (uploadMatrixPalette(pparams->mAvatar, pparams->mSkinInfo, lastAvatar, lastMeshId, skipLastSkin))
         {
             pushUntexturedBatch(*pparams);
@@ -520,7 +534,18 @@ void LLRenderPass::pushMaskBatches(U32 type, bool texture, bool batch_textures)
     {
         LLDrawInfo* pparams = *i;
         LLCullResult::increment_iterator(i, end);
-        LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(pparams->mAlphaMaskCutoff);
+        // <FS:Pyrokitty> Skip small objects in shadow pass
+        if (LLPipeline::sShadowRender && pparams->mSkipShadow)
+        {
+            continue;
+        }
+        // </FS:Pyrokitty>
+        // <FS:Pyrokitty> Use fixed alpha cutoff for shadows - removes expensive per-object flush()
+        if (!LLPipeline::sShadowRender)
+        {
+            LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(pparams->mAlphaMaskCutoff);
+        }
+        // </FS:Pyrokitty>
         pushBatch(*pparams, texture, batch_textures);
     }
 }
@@ -541,7 +566,19 @@ void LLRenderPass::pushRiggedMaskBatches(U32 type, bool texture, bool batch_text
 
         llassert(pparams);
 
-        LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(pparams->mAlphaMaskCutoff);
+        // <FS:Pyrokitty> Skip small objects in shadow pass
+        if (LLPipeline::sShadowRender && pparams->mSkipShadow)
+        {
+            continue;
+        }
+        // </FS:Pyrokitty>
+
+        // <FS:Pyrokitty> Use fixed alpha cutoff for shadows - removes expensive per-object flush()
+        if (!LLPipeline::sShadowRender)
+        {
+            LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(pparams->mAlphaMaskCutoff);
+        }
+        // </FS:Pyrokitty>
 
         if (uploadMatrixPalette(pparams->mAvatar, pparams->mSkinInfo, lastAvatar, lastMeshId, skipLastSkin))
         {
@@ -814,6 +851,13 @@ void LLRenderPass::pushUntexturedGLTFBatches(U32 type)
         LLDrawInfo& params = **i;
         LLCullResult::increment_iterator(i, end);
 
+        // <FS:Pyrokitty> Skip small objects in shadow pass
+        if (LLPipeline::sShadowRender && params.mSkipShadow)
+        {
+            continue;
+        }
+        // </FS:Pyrokitty>
+
         pushUntexturedGLTFBatch(params);
     }
 }
@@ -898,6 +942,13 @@ void LLRenderPass::pushUntexturedRiggedGLTFBatches(U32 type)
         LL_PROFILE_ZONE_NAMED_CATEGORY_DRAWPOOL("pushRiggedGLTFBatch");
         LLDrawInfo& params = **i;
         LLCullResult::increment_iterator(i, end);
+
+        // <FS:Pyrokitty> Skip small objects in shadow pass
+        if (LLPipeline::sShadowRender && params.mSkipShadow)
+        {
+            continue;
+        }
+        // </FS:Pyrokitty>
 
         pushUntexturedRiggedGLTFBatch(params, lastAvatar, lastMeshId, skipLastSkin);
     }
