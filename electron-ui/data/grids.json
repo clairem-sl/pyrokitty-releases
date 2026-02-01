@@ -1,0 +1,17 @@
+[
+  {
+    "id": "util.agni.lindenlab.com",
+    "name": "Second Life",
+    "nick": "agni",
+    "loginUri": "https://login.agni.lindenlab.com/cgi-bin/login.cgi",
+    "helperUri": "https://secondlife.com/helpers/",
+    "slurlBase": "http://maps.secondlife.com/secondlife/"
+  },
+  {
+    "id": "util.aditi.lindenlab.com",
+    "name": "Second Life Beta",
+    "nick": "aditi",
+    "loginUri": "https://login.aditi.lindenlab.com/cgi-bin/login.cgi",
+    "helperUri": "https://secondlife.aditi.lindenlab.com/helpers/"
+  }
+]
