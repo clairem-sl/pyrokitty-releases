@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Account, Grid, ViewerInstance } from '../../shared/types';
 
 const formatUptime = (startTime: number): string => {
@@ -16,107 +16,40 @@ const formatUptime = (startTime: number): string => {
 };
 
 interface ViewerStatusProps {
-  account: Account | null;
-  grid: Grid | null;
-  instance: ViewerInstance | null;
-  onLaunch: (password?: string) => void;
+  account: Account;
+  grid: Grid;
+  instance: ViewerInstance;
   onStop: () => void;
-  onRemoveAccount: () => void;
 }
 
 export const ViewerStatus: React.FC<ViewerStatusProps> = ({
   account,
   grid,
   instance,
-  onLaunch,
   onStop,
-  onRemoveAccount,
-}) => {
-  const [password, setPassword] = useState('');
-
-  if (!account || !grid) {
-    return (
-      <div className="form-section">
-        <div className="empty-state">
-          <h3>Select an Account</h3>
-          <p>Choose an account from the sidebar to launch the viewer</p>
-        </div>
-      </div>
-    );
-  }
-
-  const isRunning = instance && ['starting', 'running', 'connected'].includes(instance.status);
-  const hasPassword = !!account.password;
-
-  const handleLaunch = () => {
-    if (hasPassword) {
-      onLaunch();
-    } else if (password) {
-      onLaunch(password);
-      setPassword('');
-    }
-  };
-
-  const canLaunch = hasPassword || password.length > 0;
-
-  return (
+}) => (
     <div className="form-section">
       <h3>{account.firstName} {account.lastName}</h3>
       <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
         Grid: {grid.name}
-        {hasPassword && <span style={{ marginLeft: '8px', color: 'var(--success)' }}>(password saved)</span>}
       </p>
 
-      {instance && (
-        <div style={{ marginBottom: '16px' }}>
-          <div className="account-status" style={{ marginBottom: '8px' }}>
-            <span className={`status-dot ${instance.status}`} />
-            <span style={{ textTransform: 'capitalize' }}>{instance.status}</span>
-          </div>
-          {isRunning && (
-            <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
-              <div>PID: {instance.pid}</div>
-              <div>Uptime: {formatUptime(instance.startTime)}</div>
-              <div>WebSocket Port: {instance.wsPort}</div>
-            </div>
-          )}
+      <div style={{ marginBottom: '16px' }}>
+        <div className="account-status" style={{ marginBottom: '8px' }}>
+          <span className={`status-dot ${instance.status}`} />
+          <span style={{ textTransform: 'capitalize' }}>{instance.status}</span>
         </div>
-      )}
-
-      {!isRunning && !hasPassword && (
-        <div className="form-group" style={{ marginBottom: '16px' }}>
-          <label htmlFor="launchPassword">Password</label>
-          <input
-            id="launchPassword"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter password to launch"
-          />
+        <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+          <div>PID: {instance.pid}</div>
+          <div>Uptime: {formatUptime(instance.startTime)}</div>
+          <div>WebSocket Port: {instance.wsPort}</div>
         </div>
-      )}
-
-      <div className="btn-group">
-        {isRunning ? (
-          <button className="btn btn-danger" onClick={onStop}>
-            Stop Viewer
-          </button>
-        ) : (
-          <button
-            className="btn btn-primary"
-            onClick={handleLaunch}
-            disabled={!canLaunch}
-          >
-            Launch Viewer
-          </button>
-        )}
       </div>
 
-      <div style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid var(--border)' }}>
-        <button className="btn btn-danger" onClick={onRemoveAccount}>
-          Remove Account
+      <div className="btn-group">
+        <button className="btn btn-danger" onClick={onStop}>
+          Stop Viewer
         </button>
       </div>
     </div>
   );
-};

@@ -1,78 +1,29 @@
-import React, { useState, useEffect } from 'react';
-import { ipcRenderer } from 'electron';
-import { Grid, Account, ViewerInstance, IPC_CHANNELS } from '../shared/types';
+import React, { useState } from 'react';
+import { MantineProvider } from '@mantine/core';
+import { theme } from './theme';
+import { useGrids, useAccounts, useViewers } from './hooks';
 import { AccountList } from './components/AccountList';
 import { LoginForm } from './components/LoginForm';
 import { ViewerStatus } from './components/ViewerStatus';
 import { InstancesPanel } from './components/InstancesPanel';
+import { Welcome } from './components/Welcome';
+import { ConfirmDialog } from './components/ConfirmDialog';
 
 type View = 'account' | 'add-account';
 
 export const App: React.FC = () => {
-  const [grids, setGrids] = useState<Grid[]>([]);
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [instances, setInstances] = useState<ViewerInstance[]>([]);
+  const { grids, getGrid } = useGrids();
+  const { accounts, addAccount, updateAccount, removeAccount, getAccount } = useAccounts();
+  const { instances, launchViewer, stopViewer, getInstanceForAccount, isRunning } = useViewers();
 
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<View>('account');
   const [error, setError] = useState<string | null>(null);
+  const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
 
-  // Load initial data
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [gridsData, accountsData, instancesData] = await Promise.all([
-          ipcRenderer.invoke(IPC_CHANNELS.GET_GRIDS),
-          ipcRenderer.invoke(IPC_CHANNELS.GET_ACCOUNTS),
-          ipcRenderer.invoke(IPC_CHANNELS.GET_INSTANCES),
-        ]);
-
-        setGrids(gridsData);
-        setAccounts(accountsData);
-        setInstances(instancesData);
-      } catch (err) {
-        console.error('Error loading data:', err);
-        setError('Failed to load data');
-      }
-    };
-
-    loadData();
-  }, []);
-
-  // Listen for viewer status updates
-  useEffect(() => {
-    const handleStatusUpdate = (_: any, instance: ViewerInstance) => {
-      setInstances((prev) => {
-        const index = prev.findIndex((i) => i.id === instance.id);
-        if (index >= 0) {
-          const updated = [...prev];
-          updated[index] = instance;
-          return updated;
-        }
-        return [...prev, instance];
-      });
-    };
-
-    ipcRenderer.on(IPC_CHANNELS.VIEWER_STATUS_UPDATE, handleStatusUpdate);
-
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.VIEWER_STATUS_UPDATE, handleStatusUpdate);
-    };
-  }, []);
-
-  // Refresh instances periodically
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      const instancesData = await ipcRenderer.invoke(IPC_CHANNELS.GET_INSTANCES);
-      setInstances(instancesData);
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  const selectedAccount = accounts.find((a) => a.id === selectedAccountId) || null;
-  const selectedGrid = selectedAccount ? grids.find((g) => g.id === selectedAccount.gridId) || null : null;
-  const selectedInstance = instances.find((i) => i.accountId === selectedAccountId) || null;
+  const selectedAccount = getAccount(selectedAccountId || '') || null;
+  const selectedGrid = selectedAccount ? getGrid(selectedAccount.gridId) || null : null;
+  const selectedInstance = getInstanceForAccount(selectedAccountId || '') || null;
 
   const handleSelectAccount = (accountId: string) => {
     setSelectedAccountId(accountId);
@@ -88,15 +39,7 @@ export const App: React.FC = () => {
 
   const handleSaveAccount = async (gridId: string, firstName: string, lastName: string, password: string, savePassword: boolean) => {
     try {
-      const newAccount = await ipcRenderer.invoke(IPC_CHANNELS.ADD_ACCOUNT, {
-        gridId,
-        firstName,
-        lastName,
-        password,
-        savePassword,
-      });
-
-      setAccounts((prev) => [...prev, newAccount]);
+      const newAccount = await addAccount(gridId, firstName, lastName, password, savePassword);
       setSelectedAccountId(newAccount.id);
       setCurrentView('account');
       setError(null);
@@ -105,16 +48,15 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleRemoveAccount = async () => {
+  const handleRemoveAccount = () => {
     if (!selectedAccountId) return;
+    setConfirmRemoveOpen(true);
+  };
 
-    if (!confirm('Are you sure you want to remove this account?')) {
-      return;
-    }
-
+  const confirmRemoveAccount = async () => {
+    if (!selectedAccountId) return;
     try {
-      await ipcRenderer.invoke(IPC_CHANNELS.REMOVE_ACCOUNT, selectedAccountId);
-      setAccounts((prev) => prev.filter((a) => a.id !== selectedAccountId));
+      await removeAccount(selectedAccountId);
       setSelectedAccountId(null);
     } catch (err: any) {
       setError(err.message || 'Failed to remove account');
@@ -125,11 +67,12 @@ export const App: React.FC = () => {
     if (!selectedAccountId) return;
 
     try {
-      const instance = await ipcRenderer.invoke(IPC_CHANNELS.LAUNCH_VIEWER, {
-        accountId: selectedAccountId,
-        password,
-      });
-      setInstances((prev) => [...prev, instance]);
+      // If user provided a new password, save it
+      if (password) {
+        await updateAccount(selectedAccountId, { password });
+      }
+
+      await launchViewer(selectedAccountId, password);
       setError(null);
     } catch (err: any) {
       setError(err.message || 'Failed to launch viewer');
@@ -141,18 +84,19 @@ export const App: React.FC = () => {
     if (!id) return;
 
     try {
-      await ipcRenderer.invoke(IPC_CHANNELS.STOP_VIEWER, id);
+      await stopViewer(id);
     } catch (err: any) {
       setError(err.message || 'Failed to stop viewer');
     }
   };
 
   return (
+    <MantineProvider theme={theme} defaultColorScheme="dark">
     <div className="app">
       <header className="header">
         <h1>PyroKitty</h1>
         <span className="header-info">
-          {instances.filter((i) => ['starting', 'running', 'connected'].includes(i.status)).length} viewer(s) running
+          {instances.filter(isRunning).length} viewer(s) running
         </span>
       </header>
 
@@ -178,15 +122,24 @@ export const App: React.FC = () => {
               onCancel={() => setCurrentView('account')}
               error={null}
             />
-          ) : (
+          ) : selectedAccount && selectedGrid && isRunning(selectedInstance) ? (
             <ViewerStatus
               account={selectedAccount}
               grid={selectedGrid}
               instance={selectedInstance}
-              onLaunch={handleLaunchViewer}
               onStop={() => handleStopViewer()}
-              onRemoveAccount={handleRemoveAccount}
             />
+          ) : selectedAccount ? (
+            <LoginForm
+              grids={grids}
+              account={selectedAccount}
+              onLaunch={handleLaunchViewer}
+              onCancel={() => setSelectedAccountId(null)}
+              onRemove={handleRemoveAccount}
+              error={null}
+            />
+          ) : (
+            <Welcome />
           )}
 
           <InstancesPanel
@@ -198,5 +151,15 @@ export const App: React.FC = () => {
         </main>
       </div>
     </div>
+
+    <ConfirmDialog
+      opened={confirmRemoveOpen}
+      onClose={() => setConfirmRemoveOpen(false)}
+      onConfirm={confirmRemoveAccount}
+      title="Remove Account"
+      message="Are you sure you want to remove this account?"
+      confirmLabel="Remove"
+    />
+    </MantineProvider>
   );
 };

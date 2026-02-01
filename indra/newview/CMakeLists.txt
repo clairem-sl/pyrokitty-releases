@@ -877,6 +877,7 @@ set(viewer_SOURCE_FILES
     pieseparator.cpp
     pieslice.cpp
     pkchateventapi.cpp
+    pkwebsocketserver.cpp
     pipeline.cpp
     qtoolalign.cpp
     quickprefs.cpp
@@ -1720,6 +1721,7 @@ set(viewer_HEADER_FILES
     pieseparator.h
     pieslice.h
     pkchateventapi.h
+    pkwebsocketserver.h
     pipeline.h
     rlvactions.h
     rlvcommon.h

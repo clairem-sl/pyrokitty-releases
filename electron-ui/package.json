@@ -5,13 +5,13 @@
   "main": "dist/main/index.js",
   "scripts": {
     "start": "npm run build && electron .",
-    "dev": "concurrently \"npm run watch:main\" \"npm run watch:renderer\" \"wait-on dist/main/index.js && electron .\"",
+    "dev": "npm run build && concurrently --kill-others \"npm run watch:main\" \"npm run watch:renderer\" \"electron .\"",
     "build": "npm run build:main && npm run build:renderer",
     "build:main": "tsc -p tsconfig.main.json",
-    "build:renderer": "esbuild src/renderer/index.tsx --bundle --outfile=dist/renderer/index.js --platform=browser --target=chrome114 --external:electron && npm run copy:assets",
-    "copy:assets": "node -e \"const fs=require('fs');fs.mkdirSync('dist/renderer/styles',{recursive:true});fs.copyFileSync('src/renderer/index.html','dist/renderer/index.html');fs.copyFileSync('src/renderer/styles/main.css','dist/renderer/styles/main.css');\"",
+    "build:renderer": "esbuild src/renderer/index.tsx --bundle --outfile=dist/renderer/index.js --platform=browser --target=chrome114 --external:electron && esbuild src/renderer/styles/index.css --bundle --outfile=dist/renderer/styles/index.css && npm run copy:assets",
+    "copy:assets": "node -e \"const fs=require('fs');fs.copyFileSync('src/renderer/index.html','dist/renderer/index.html');\"",
     "watch:main": "tsc -p tsconfig.main.json --watch",
-    "watch:renderer": "esbuild src/renderer/index.tsx --bundle --outfile=dist/renderer/index.js --platform=browser --target=chrome114 --external:electron --watch",
+    "watch:renderer": "concurrently \"esbuild src/renderer/index.tsx --bundle --outfile=dist/renderer/index.js --platform=browser --target=chrome114 --external:electron --watch\" \"esbuild src/renderer/styles/index.css --bundle --outfile=dist/renderer/styles/index.css --watch\"",
     "pack": "electron-builder --dir",
     "dist": "electron-builder"
   },
@@ -21,6 +21,7 @@
     "@types/node": "^20.10.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
+    "@types/ws": "^8.5.0",
     "concurrently": "^8.2.0",
     "electron": "^28.0.0",
     "electron-builder": "^24.9.0",
@@ -29,8 +30,11 @@
     "wait-on": "^7.2.0"
   },
   "dependencies": {
+    "@mantine/core": "^8.3.14",
+    "@mantine/hooks": "^8.3.14",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "ws": "^8.16.0"
   },
   "build": {
     "appId": "com.pyrokitty.viewer-manager",

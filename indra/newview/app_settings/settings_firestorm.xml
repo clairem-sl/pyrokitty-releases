@@ -291,5 +291,18 @@
 	<integer>0</integer>
   </map>
 
+  <!-- FS:Pyrokitty WebSocket server for Electron UI -->
+  <key>PKWebSocketPort</key>
+  <map>
+    <key>Comment</key>
+    <string>Port for WebSocket server to communicate with external UI (Electron). Set to 0 to disable.</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>U32</string>
+    <key>Value</key>
+    <integer>0</integer>
+  </map>
+
 </map>
 </llsd>

@@ -47,6 +47,15 @@ export const IPC_CHANNELS = {
   STOP_VIEWER: 'viewer:stop',
   GET_INSTANCES: 'viewer:instances',
   VIEWER_STATUS_UPDATE: 'viewer:status-update',
+
+  // Chat operations (renderer -> main)
+  SEND_NEARBY_CHAT: 'chat:send-nearby',
+  SEND_IM: 'chat:send-im',
+  SEND_GROUP_IM: 'chat:send-group-im',
+
+  // Chat events (main -> renderer)
+  CHAT_MESSAGE: 'chat:message',
+  VIEWER_WS_CONNECTED: 'viewer:ws-connected',
 } as const;
 
 // IPC Request/Response types
@@ -61,4 +70,35 @@ export interface AddAccountRequest {
   lastName: string;
   password?: string; // Only included if savePassword is true
   savePassword: boolean;
+}
+
+// WebSocket protocol types
+export interface WSMessage {
+  pump: string;
+  data: Record<string, unknown>;
+}
+
+export interface WSConnectedMessage {
+  type: 'connected';
+  reply_pump: string;
+  apis: Array<{ name: string; desc: string }>;
+}
+
+export interface ChatEvent {
+  type: 'nearby' | 'im';
+  message: string;
+  from_name: string;
+  from_id: string;
+  time?: string;
+  // Nearby-specific
+  source_type?: number;
+  chat_type?: number;
+  // IM-specific
+  session_id?: string;
+  session_type?: string;
+}
+
+export interface ViewerAPI {
+  name: string;
+  desc: string;
 }

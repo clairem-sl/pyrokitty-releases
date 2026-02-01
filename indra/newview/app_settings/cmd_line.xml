@@ -474,5 +474,17 @@
     </map>
     <!-- FS:Ansariel -->
 
+    <!-- FS:Pyrokitty WebSocket server port for Electron UI -->
+    <key>wsport</key>
+    <map>
+      <key>desc</key>
+      <string>Port for WebSocket server to communicate with external UI (Electron). Default 9001. Set to 0 to disable.</string>
+      <key>count</key>
+      <integer>1</integer>
+      <key>map-to</key>
+      <string>PKWebSocketPort</string>
+    </map>
+    <!-- FS:Pyrokitty -->
+
   </map>
 </llsd>

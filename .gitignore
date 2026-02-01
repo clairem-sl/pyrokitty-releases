@@ -134,6 +134,4 @@ checks.json
 .claude
 release.sh
 build_portable.sh
-
-node_modules/
-.DS_Store
+accounts.json

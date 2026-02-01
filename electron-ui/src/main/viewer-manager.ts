@@ -5,6 +5,7 @@ import { EventEmitter } from 'events';
 import { ViewerInstance, ViewerStatus } from '../shared/types';
 import { accountManager } from './account-manager';
 import { gridManager } from './grid-manager';
+import { connectionManager, ViewerConnection } from './viewer-connection';
 
 function getViewerPath(): string {
   const appRoot = app.getAppPath();
@@ -71,6 +72,7 @@ export class ViewerManager extends EventEmitter {
     const args: string[] = [
       '--login', account.firstName, account.lastName, loginPassword,
       '--grid', grid.nick,
+      '--wsport', wsPort.toString(),
     ];
 
     const viewerPath = getViewerPath();
@@ -99,6 +101,8 @@ export class ViewerManager extends EventEmitter {
     // Handle process events
     process.on('spawn', () => {
       this.updateStatus(instanceId, 'running');
+      // Try to connect via WebSocket after viewer has time to start
+      this.scheduleWebSocketConnect(instanceId, wsPort);
     });
 
     process.stdout?.on('data', (data) => {
@@ -153,11 +157,50 @@ export class ViewerManager extends EventEmitter {
   }
 
   private cleanup(instanceId: string): void {
+    connectionManager.disconnect(instanceId);
     this.instances.delete(instanceId);
     this.processes.delete(instanceId);
   }
 
+  private scheduleWebSocketConnect(instanceId: string, port: number, attempt = 1): void {
+    const maxAttempts = 10;
+    const delayMs = 3000; // 3 seconds between attempts
+
+    setTimeout(() => {
+      const instance = this.instances.get(instanceId);
+      if (!instance || instance.status === 'disconnected' || instance.status === 'crashed') {
+        return; // Viewer is gone, don't try to connect
+      }
+
+      console.log(`[ViewerManager] WebSocket connect attempt ${attempt}/${maxAttempts} for ${instanceId}`);
+
+      const connection = connectionManager.connect(instanceId, port);
+
+      connection.once('connected', () => {
+        this.updateStatus(instanceId, 'connected');
+        // Auto-subscribe to chat events
+        connection.subscribeToChat('all');
+      });
+
+      connection.once('error', () => {
+        if (attempt < maxAttempts) {
+          // Retry
+          this.scheduleWebSocketConnect(instanceId, port, attempt + 1);
+        } else {
+          console.warn(`[ViewerManager] Failed to connect to viewer ${instanceId} after ${maxAttempts} attempts`);
+        }
+      });
+
+      connection.connect();
+    }, delayMs);
+  }
+
+  getConnection(instanceId: string): ViewerConnection | undefined {
+    return connectionManager.getConnection(instanceId);
+  }
+
   stopAll(): void {
+    connectionManager.disconnectAll();
     for (const [instanceId] of this.instances) {
       this.stopViewer(instanceId);
     }

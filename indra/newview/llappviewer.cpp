@@ -64,6 +64,7 @@
 #include "llviewerjoystick.h"
 #include "llcalc.h"
 #include "pkchateventapi.h"
+#include "pkwebsocketserver.h"
 #include "llconversationlog.h"
 #if LL_WINDOWS
 #include "lldxhardware.h"
@@ -2039,6 +2040,13 @@ bool LLAppViewer::cleanup()
 
     LLNotifications::instance().clear();
 
+    // <FS:Pyrokitty> Stop WebSocket server
+    if (PKWebSocketServer::instanceExists())
+    {
+        PKWebSocketServer::getInstance()->stop();
+    }
+    // </FS:Pyrokitty>
+
     // workaround for DEV-35406 crash on shutdown
     LLEventPumps::instance().reset(true);
 
@@ -3790,6 +3798,13 @@ bool LLAppViewer::initWindow()
 
     // <FS:Pyrokitty> Initialize chat event API for LEAP plugins
     new PKChatEventAPI();
+
+    // Start WebSocket server for Electron UI communication
+    U32 wsPort = gSavedSettings.getU32("PKWebSocketPort");
+    if (wsPort > 0)
+    {
+        PKWebSocketServer::getInstance()->start(static_cast<uint16_t>(wsPort));
+    }
     // </FS:Pyrokitty>
 
     if (gSavedSettings.getBOOL("WindowMaximized"))
