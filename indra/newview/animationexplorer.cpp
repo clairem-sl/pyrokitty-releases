@@ -47,6 +47,14 @@
 #include "llviewerobjectlist.h"
 #include "llviewerregion.h"
 #include "llviewerwindow.h"         // for gViewerWindow
+#include "llwindow.h"               // for LLWindow::copyTextToClipboard
+// <FS:Pyrokitty> Save animation
+#include "llapr.h"
+#include "llfilepicker.h"
+#include "llfilesystem.h"
+#include "llviewerassetstorage.h"
+#include "llviewermenufile.h"
+// </FS:Pyrokitty>
 #include "llvoavatar.h"
 #include "llvoavatarself.h"         // for gAgentAvatarp
 #include "llavatarnamecache.h"
@@ -155,12 +163,16 @@ bool AnimationExplorer::postBuild()
     mAnimationScrollList = getChild<LLScrollListCtrl>("animation_list");
     mStopButton = getChild<LLButton>("stop_btn");
     mBlacklistButton = getChild<LLButton>("blacklist_btn");
+    mCopyUuidButton = getChild<LLButton>("copy_uuid_btn");
     mStopAndRevokeButton = getChild<LLButton>("stop_and_revoke_btn");
     mNoOwnedAnimationsCheckBox = getChild<LLCheckBoxCtrl>("no_owned_animations_check");
 
     mAnimationScrollList->setCommitCallback(boost::bind(&AnimationExplorer::onSelectAnimation, this));
     mStopButton->setCommitCallback(boost::bind(&AnimationExplorer::onStopPressed, this));
     mBlacklistButton->setCommitCallback(boost::bind(&AnimationExplorer::onBlacklistPressed, this));
+    mCopyUuidButton->setCommitCallback(boost::bind(&AnimationExplorer::onCopyUuidPressed, this));
+    mSaveButton = getChild<LLButton>("save_btn");
+    mSaveButton->setCommitCallback(boost::bind(&AnimationExplorer::onSavePressed, this));
     mStopAndRevokeButton->setCommitCallback(boost::bind(&AnimationExplorer::onStopAndRevokePressed, this));
     mNoOwnedAnimationsCheckBox->setCommitCallback(boost::bind(&AnimationExplorer::onOwnedCheckToggled, this));
 
@@ -229,6 +241,94 @@ void AnimationExplorer::onBlacklistPressed()
     }
     FSAssetBlacklist::getInstance()->addNewItemToBlacklist(mCurrentAnimationID, item->getColumn(column)->getValue(), region_name, LLAssetType::AT_ANIMATION);
 }
+
+// <FS:Pyrokitty> Copy animation UUID to clipboard
+void AnimationExplorer::onCopyUuidPressed()
+{
+    if (mCurrentAnimationID.notNull())
+    {
+        std::string buffer;
+        mCurrentAnimationID.toString(buffer);
+        gViewerWindow->getWindow()->copyTextToClipboard(utf8str_to_wstring(buffer));
+    }
+}
+// </FS:Pyrokitty>
+
+// <FS:Pyrokitty> Save animation to disk
+static void onAnimationExplorerSaveComplete(const LLUUID& asset_uuid,
+                                            LLAssetType::EType type,
+                                            void* user_data,
+                                            S32 status,
+                                            LLExtStat ext_status)
+{
+    std::string* filename = static_cast<std::string*>(user_data);
+    if (!filename)
+    {
+        return;
+    }
+
+    if (status != 0)
+    {
+        LL_WARNS() << "Failed to fetch animation asset: " << asset_uuid << " status: " << status << LL_ENDL;
+        delete filename;
+        return;
+    }
+
+    LLFileSystem file(asset_uuid, type, LLFileSystem::READ);
+    S32 file_size = file.getSize();
+    if (file_size <= 0)
+    {
+        LL_WARNS() << "Animation file is empty: " << asset_uuid << LL_ENDL;
+        delete filename;
+        return;
+    }
+
+    std::vector<U8> buffer(file_size);
+    file.read(&buffer[0], file_size);
+
+    llofstream outfile(*filename, std::ios::binary);
+    if (!outfile.good())
+    {
+        LL_WARNS() << "Failed to open file for writing: " << *filename << LL_ENDL;
+        delete filename;
+        return;
+    }
+
+    outfile.write(reinterpret_cast<char*>(&buffer[0]), file_size);
+    LL_INFOS() << "Saved animation to: " << *filename << LL_ENDL;
+
+    delete filename;
+}
+
+static void onAnimationExplorerSaveFilePicked(const std::vector<std::string>& filenames, const LLUUID& asset_id)
+{
+    if (filenames.empty())
+    {
+        return;
+    }
+
+    std::string* filename = new std::string(filenames[0]);
+
+    gAssetStorage->getAssetData(asset_id,
+                                LLAssetType::AT_ANIMATION,
+                                onAnimationExplorerSaveComplete,
+                                filename,
+                                true);
+}
+
+void AnimationExplorer::onSavePressed()
+{
+    if (mCurrentAnimationID.notNull())
+    {
+        std::string default_filename = mCurrentAnimationID.asString() + ".anim";
+
+        LLFilePickerReplyThread::startPicker(
+            boost::bind(&onAnimationExplorerSaveFilePicked, _1, mCurrentAnimationID),
+            LLFilePicker::FFSAVE_ALL,
+            default_filename);
+    }
+}
+// </FS:Pyrokitty>
 
 void AnimationExplorer::onStopAndRevokePressed()
 {

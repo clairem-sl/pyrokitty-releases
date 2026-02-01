@@ -73,6 +73,7 @@
 #include "rlvlocks.h"
 // [/RLVa:KB]
 #include "llfloaterproperties.h" // <FS:Ansariel> Keep legacy properties floater
+#include "llviewerwindow.h" // <FS:Pyrokitty> Copy Asset UUID
 
 const LLColor4U DEFAULT_WHITE(255, 255, 255);
 #include "tea.h" // <FS:AW opensim currency support>
@@ -583,6 +584,22 @@ void LLTaskInvFVBridge::performAction(LLInventoryModel* model, std::string actio
     {
         showProperties();
     }
+    // <FS:Pyrokitty> Copy Asset UUID from object contents
+    else if (action == "copy_uuid")
+    {
+        LLInventoryItem* item = findItem();
+        if (item)
+        {
+            LLUUID asset_id = item->getAssetUUID();
+            if (asset_id.notNull())
+            {
+                std::string buffer;
+                asset_id.toString(buffer);
+                gViewerWindow->getWindow()->copyTextToClipboard(utf8str_to_wstring(buffer));
+            }
+        }
+    }
+    // </FS:Pyrokitty>
 }
 
 void LLTaskInvFVBridge::buildContextMenu(LLMenuGL& menu, U32 flags)
@@ -621,6 +638,18 @@ void LLTaskInvFVBridge::buildContextMenu(LLMenuGL& menu, U32 flags)
     //    disabled_items.push_back(std::string("Task Properties"));
     //}
     // </FS:Ansariel>
+    // <FS:Pyrokitty> Copy Asset UUID from object contents
+    // Works directly with task inventory - doesn't require item to be in agent's inventory
+    // Note: Server doesn't send asset UUIDs for items in non-owned objects (security measure)
+    {
+        items.push_back(std::string("Copy Asset UUID"));
+        // Disable if asset UUID not available (server doesn't provide it for non-owned objects)
+        if (!item || item->getAssetUUID().isNull())
+        {
+            disabled_items.push_back(std::string("Copy Asset UUID"));
+        }
+    }
+    // </FS:Pyrokitty>
 // [RLVa:KB] - Checked: 2010-09-28 (RLVa-1.2.1f) | Added: RLVa-1.2.1f
     items.push_back(std::string("Task Rename"));
     if ( (!isItemRenameable()) || ((flags & FIRST_SELECTED_ITEM) == 0) )

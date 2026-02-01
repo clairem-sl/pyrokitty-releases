@@ -3297,9 +3297,12 @@ void LLPipeline::stateSort(LLCamera& camera, LLCullResult &result)
                 markVisible(drawablep, camera);
             }
 
-            { //rebuild mesh as soon as we know it's visible
+            // <FS:Pyrokitty> Skip mesh rebuilding during shadow passes - main view handles this
+            if (!sShadowRender)
+            {
                 group->rebuildMesh();
             }
+            // </FS:Pyrokitty>
         }
     }
     }
@@ -3724,7 +3727,8 @@ void LLPipeline::postSort(LLCamera &camera)
 
     LL_PUSH_CALLSTACKS();
 
-    if (!gCubeSnapshot)
+    // <FS:Pyrokitty> Skip geometry rebuilding during shadow passes - main view handles this
+    if (!gCubeSnapshot && !sShadowRender)
     {
         // rebuild drawable geometry
         for (LLCullResult::sg_iterator i = sCull->beginDrawableGroups(); i != sCull->endDrawableGroups(); ++i)
@@ -3745,6 +3749,7 @@ void LLPipeline::postSort(LLCamera &camera)
 
         rebuildPriorityGroups();
     }
+    // </FS:Pyrokitty>
 
     LL_PUSH_CALLSTACKS();
 
@@ -3767,10 +3772,12 @@ void LLPipeline::postSort(LLCamera &camera)
             continue;
         }
 
-        if (group->hasState(LLSpatialGroup::NEW_DRAWINFO) && group->hasState(LLSpatialGroup::GEOM_DIRTY) && !gCubeSnapshot)
+        // <FS:Pyrokitty> Skip geometry rebuilding during shadow passes
+        if (group->hasState(LLSpatialGroup::NEW_DRAWINFO) && group->hasState(LLSpatialGroup::GEOM_DIRTY) && !gCubeSnapshot && !sShadowRender)
         {  // no way this group is going to be drawable without a rebuild
             group->rebuildGeom();
         }
+        // </FS:Pyrokitty>
 
         for (LLSpatialGroup::draw_map_t::iterator j = group->mDrawMap.begin(); j != group->mDrawMap.end(); ++j)
         {
@@ -3792,7 +3799,8 @@ void LLPipeline::postSort(LLCamera &camera)
             }
         }
 
-        if (hasRenderType(LLPipeline::RENDER_TYPE_PASS_ALPHA))
+        // <FS:Pyrokitty> Skip alpha group collection during shadow passes - shadows don't need alpha sorting
+        if (hasRenderType(LLPipeline::RENDER_TYPE_PASS_ALPHA) && !sShadowRender)
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("Collect Alpha groups");
             LLSpatialGroup::draw_map_t::iterator alpha = group->mDrawMap.find(LLRenderPass::PASS_ALPHA);
@@ -3829,6 +3837,7 @@ void LLPipeline::postSort(LLCamera &camera)
                 }
             }
         }
+        // </FS:Pyrokitty>
     }
     }
 
@@ -3846,24 +3855,22 @@ void LLPipeline::postSort(LLCamera &camera)
         glBeginQuery(GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN, mMeshDirtyQueryObject);
     }*/
 
+    // <FS:Pyrokitty> Skip mesh rebuilding during shadow passes
+    if (!sShadowRender)
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("rebuild delayed upd groups");
-    // pack vertex buffers for groups that chose to delay their updates
-    {
-        LL_PROFILE_GPU_ZONE("rebuildMesh");
-        for (LLSpatialGroup::sg_vector_t::iterator iter = mMeshDirtyGroup.begin(); iter != mMeshDirtyGroup.end(); ++iter)
+        // pack vertex buffers for groups that chose to delay their updates
         {
-            (*iter)->rebuildMesh();
+            LL_PROFILE_GPU_ZONE("rebuildMesh");
+            for (LLSpatialGroup::sg_vector_t::iterator iter = mMeshDirtyGroup.begin(); iter != mMeshDirtyGroup.end(); ++iter)
+            {
+                (*iter)->rebuildMesh();
+            }
         }
-    }
-    }
 
-    /*if (use_transform_feedback)
-    {
-        glEndQuery(GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN);
-    }*/
-
-    mMeshDirtyGroup.clear();
+        mMeshDirtyGroup.clear();
+    }
+    // </FS:Pyrokitty>
 
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("sort alpha groups");

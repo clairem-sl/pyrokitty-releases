@@ -99,6 +99,8 @@ protected:
     LLScrollListCtrl* mAnimationScrollList;
     LLButton*         mStopButton;
     LLButton*         mBlacklistButton;
+    LLButton*         mCopyUuidButton;
+    LLButton*         mSaveButton;
     LLButton*         mStopAndRevokeButton;
     LLCheckBoxCtrl*   mNoOwnedAnimationsCheckBox;
 
@@ -125,6 +127,8 @@ protected:
     void onSelectAnimation();
     void onStopPressed();
     void onBlacklistPressed();
+    void onCopyUuidPressed();
+    void onSavePressed();
     void onStopAndRevokePressed();
     void onOwnedCheckToggled();
 };

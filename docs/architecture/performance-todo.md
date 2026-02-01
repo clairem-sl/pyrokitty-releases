@@ -156,6 +156,17 @@ During shadow passes, we don't need textures. Could batch all untextured geometr
 
 ## Already Implemented (FS:Pyrokitty)
 
+### Shadow postSort Optimization
+Skip unnecessary work during shadow passes in `stateSort()` and `postSort()`:
+- Geometry rebuilding (`rebuildGeom()`, `rebuildMesh()`)
+- Alpha group collection and distance updates
+- Priority group rebuilding
+- Delayed mesh updates (`mMeshDirtyGroup`)
+
+**Location:** `pipeline.cpp` - Added `!sShadowRender` checks at multiple points
+**Impact:** Reduces CPU time in postSort during shadow passes (~2-4% of frame with 4 cascades)
+
+
 ### FSR 1.0 Two-Pass Resolution Scaling (EASU + RCAS)
 - `RenderResolutionMultiplier` - Render at reduced resolution (0.0-1.0, default 0.7)
 - `RenderFSREnabled` - Enable FSR two-pass upscaling (default true)

@@ -354,7 +354,37 @@ if (pparams->mGLTFMaterial)
 
 This significantly reduces the number of `flush()` calls when draw calls are grouped by shader type.
 
+### Skip postSort Work During Shadow Passes
+
+Shadow passes call `stateSort()` which internally calls `postSort()`. Many operations in these functions are only needed for the main view, not shadows:
+
+**Skipped during shadow passes (`sShadowRender == true`):**
+1. Geometry rebuilding (`rebuildGeom()`, `rebuildMesh()`) - Main view handles this
+2. Alpha group collection and distance updates - Shadows don't need alpha sorting
+3. Priority group rebuilding - Not needed for depth-only shadow maps
+4. Delayed mesh updates (`mMeshDirtyGroup`) - Main view handles this
+
+**Implementation:**
+Added `!sShadowRender` checks in `pipeline.cpp`:
+- `postSort()` line 3727: Skip drawable geometry rebuild
+- `postSort()` line 3770: Skip inline rebuildGeom for dirty groups
+- `postSort()` line 3795: Skip alpha group collection
+- `postSort()` line 3849: Skip delayed mesh rebuilding
+- `stateSort()` line 3300: Skip rebuildMesh in visibility loop
+
+**Impact:** Reduces CPU time spent in `postSort` during shadow passes (previously ~6% of frame time with 4 cascades).
+
+### Per-Cascade LOD Culling (ATTEMPTED - REVERTED)
+
+Attempted to skip high-LOD objects in distant shadow cascades. Theory: objects far from camera (high LOD value) don't contribute visible shadows in distant cascades.
+
+**Why it was reverted:**
+- Too aggressive at hiding shadows, causing noticeable visual artifacts
+- The overhead of checking LOD per-object still traverses all draw calls
+- Not as effective as `RenderShadowSplits` which eliminates entire cascades
+
+**Better alternative:** Use `RenderShadowSplits` (0-3) to skip distant cascades entirely. Each cascade skipped saves ~25% of shadow work without visual artifacts from selective culling.
+
 ### Potential Future Optimizations
 
-1. **Per-cascade LOD** - Use progressively lower LOD for distant cascades
-2. **Reduced avatar passes** - Simplify from 3 passes to 1-2
+1. **Reduced avatar passes** - Simplify from 3 passes to 1-2

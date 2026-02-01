@@ -3376,24 +3376,26 @@ bool idle_startup()
 
         LLPerfStats::StatsRecorder::setAutotuneInit();
 
+        // <FS:Pyrokitty> Disable Avatar Welcome Pack floater
         // Display Avatar Welcome Pack the first time a user logs in
         // (or clears their settings....)
-        if (gSavedSettings.getBOOL("FirstLoginThisInstall"))
-        {
-            LLFloater* avatar_welcome_pack_floater = LLFloaterReg::findInstance("avatar_welcome_pack");
-            if (avatar_welcome_pack_floater != nullptr)
-            {
-                // There is a (very - 1 in ~50 times) hard to repro bug where the login
-                // page is not hidden when the AWP floater is presented. This (agressive)
-                // approach to always close it seems like the best fix for now.
-                // <FS:Ansariel> [FS Login Panel]
-                //LLPanelLogin::closePanel();
-                FSPanelLogin::closePanel();
-                // </FS:Ansariel> [FS Login Panel]
-
-                avatar_welcome_pack_floater->setVisible(true);
-            }
-        }
+        // if (gSavedSettings.getBOOL("FirstLoginThisInstall"))
+        // {
+        //     LLFloater* avatar_welcome_pack_floater = LLFloaterReg::findInstance("avatar_welcome_pack");
+        //     if (avatar_welcome_pack_floater != nullptr)
+        //     {
+        //         // There is a (very - 1 in ~50 times) hard to repro bug where the login
+        //         // page is not hidden when the AWP floater is presented. This (agressive)
+        //         // approach to always close it seems like the best fix for now.
+        //         // <FS:Ansariel> [FS Login Panel]
+        //         //LLPanelLogin::closePanel();
+        //         FSPanelLogin::closePanel();
+        //         // </FS:Ansariel> [FS Login Panel]
+        //
+        //         avatar_welcome_pack_floater->setVisible(true);
+        //     }
+        // }
+        // </FS:Pyrokitty>
 
         //// We're successfully logged in.
         // 2025-06 Moved lower down in the state machine so the Avatar Welcome Pack

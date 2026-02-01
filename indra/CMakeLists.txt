@@ -100,6 +100,9 @@ endif (FS_PF_USER_AGENT)
 # <FS:Ansariel> [AVX Optimization]
 option(USE_AVX_OPTIMIZATION "AVX optimization support" OFF)
 option(USE_AVX2_OPTIMIZATION "AVX2 optimization support" OFF)
+
+# <FS:Pyrokitty> Skip debug symbols for smaller release builds
+option(SKIP_DEBUG_SYMBOLS "Skip generating .pdb and .map debug files" OFF)
 if (USE_AVX_OPTIMIZATION)
   if (USE_AVX2_OPTIMIZATION)
     message(FATAL_ERROR "You cannot use AVX and AVX2 at the same time!")

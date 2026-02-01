@@ -461,9 +461,7 @@ void LLRenderPass::pushUntexturedBatches(U32 type)
 
         // <FS:Pyrokitty> Skip small objects in shadow pass
         if (LLPipeline::sShadowRender && pparams->mSkipShadow)
-        {
             continue;
-        }
         // </FS:Pyrokitty>
 
         pushUntexturedBatch(*pparams);
@@ -513,9 +511,7 @@ void LLRenderPass::pushUntexturedRiggedBatches(U32 type)
 
         // <FS:Pyrokitty> Skip small objects in shadow pass
         if (LLPipeline::sShadowRender && pparams->mSkipShadow)
-        {
             continue;
-        }
         // </FS:Pyrokitty>
 
         if (uploadMatrixPalette(pparams->mAvatar, pparams->mSkinInfo, lastAvatar, lastMeshId, skipLastSkin))
@@ -536,9 +532,7 @@ void LLRenderPass::pushMaskBatches(U32 type, bool texture, bool batch_textures)
         LLCullResult::increment_iterator(i, end);
         // <FS:Pyrokitty> Skip small objects in shadow pass
         if (LLPipeline::sShadowRender && pparams->mSkipShadow)
-        {
             continue;
-        }
         // </FS:Pyrokitty>
         // <FS:Pyrokitty> Use fixed alpha cutoff for shadows - removes expensive per-object flush()
         if (!LLPipeline::sShadowRender)
@@ -568,9 +562,7 @@ void LLRenderPass::pushRiggedMaskBatches(U32 type, bool texture, bool batch_text
 
         // <FS:Pyrokitty> Skip small objects in shadow pass
         if (LLPipeline::sShadowRender && pparams->mSkipShadow)
-        {
             continue;
-        }
         // </FS:Pyrokitty>
 
         // <FS:Pyrokitty> Use fixed alpha cutoff for shadows - removes expensive per-object flush()
@@ -853,9 +845,7 @@ void LLRenderPass::pushUntexturedGLTFBatches(U32 type)
 
         // <FS:Pyrokitty> Skip small objects in shadow pass
         if (LLPipeline::sShadowRender && params.mSkipShadow)
-        {
             continue;
-        }
         // </FS:Pyrokitty>
 
         pushUntexturedGLTFBatch(params);
@@ -945,9 +935,7 @@ void LLRenderPass::pushUntexturedRiggedGLTFBatches(U32 type)
 
         // <FS:Pyrokitty> Skip small objects in shadow pass
         if (LLPipeline::sShadowRender && params.mSkipShadow)
-        {
             continue;
-        }
         // </FS:Pyrokitty>
 
         pushUntexturedRiggedGLTFBatch(params, lastAvatar, lastMeshId, skipLastSkin);

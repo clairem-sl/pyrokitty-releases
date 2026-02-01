@@ -2274,12 +2274,22 @@ else (OPENSIM)
 endif (OPENSIM)
 
 if (WINDOWS)
+    # <FS:Pyrokitty> Conditionally include debug symbols
+    if (SKIP_DEBUG_SYMBOLS)
+        message(STATUS "Skipping debug symbols (.pdb/.map) generation")
+        set(_LINK_FLAGS "/NODEFAULTLIB:LIBCMT /SUBSYSTEM:WINDOWS /LARGEADDRESSAWARE /NOEXP /NOIMPLIB")
+        set(_LINK_FLAGS_RELEASE "/FORCE:MULTIPLE /OPT:REF /LARGEADDRESSAWARE /NOEXP /NOIMPLIB")
+    else()
+        set(_LINK_FLAGS "/debug /NODEFAULTLIB:LIBCMT /SUBSYSTEM:WINDOWS /LARGEADDRESSAWARE /NOEXP /NOIMPLIB")
+        set(_LINK_FLAGS_RELEASE "/FORCE:MULTIPLE /MAP\"secondlife-bin.MAP\" /OPT:REF /LARGEADDRESSAWARE /NOEXP /NOIMPLIB")
+    endif()
+    # </FS:Pyrokitty>
     set_target_properties(${VIEWER_BINARY_NAME}
         PROPERTIES
         # *TODO -reenable this once we get server usage sorted out
-        LINK_FLAGS "/debug /NODEFAULTLIB:LIBCMT /SUBSYSTEM:WINDOWS /LARGEADDRESSAWARE /NOEXP /NOIMPLIB"
+        LINK_FLAGS "${_LINK_FLAGS}"
         LINK_FLAGS_DEBUG "/NODEFAULTLIB:\"LIBCMT;LIBCMTD;MSVCRT\" /INCREMENTAL:NO /LARGEADDRESSAWARE /NOEXP /NOIMPLIB"
-        LINK_FLAGS_RELEASE "/FORCE:MULTIPLE /MAP\"secondlife-bin.MAP\" /OPT:REF /LARGEADDRESSAWARE /NOEXP /NOIMPLIB"
+        LINK_FLAGS_RELEASE "${_LINK_FLAGS_RELEASE}"
         )
     target_compile_options(${VIEWER_BINARY_NAME} PRIVATE /bigobj)
 
@@ -2356,10 +2366,9 @@ if (WINDOWS)
           )
     endif ()
 
-    add_custom_command(
-      OUTPUT  ${CMAKE_CFG_INTDIR}/copy_touched.bat
+    # <FS:Pyrokitty> Removed touch file mechanism - manifest runs every build but only copies changed files
+    add_custom_target(copy_w_viewer_manifest ALL
       COMMAND ${PYTHON_EXECUTABLE}
-      ARGS
         ${CMAKE_CURRENT_SOURCE_DIR}/viewer_manifest.py
         --actions=copy
         --arch=${ARCH}
@@ -2377,18 +2386,14 @@ if (WINDOWS)
         --dest=${CMAKE_CURRENT_BINARY_DIR}/$<IF:$<BOOL:${LL_GENERATOR_IS_MULTI_CONFIG}>,$<CONFIG>,>
         --grid=${GRID}
         --source=${CMAKE_CURRENT_SOURCE_DIR}
-        --touch=${CMAKE_CURRENT_BINARY_DIR}/$<IF:$<BOOL:${LL_GENERATOR_IS_MULTI_CONFIG}>,$<CONFIG>,>/copy_touched.bat
         --versionfile=${CMAKE_CURRENT_BINARY_DIR}/viewer_version.txt
         --viewer_flavor=${ND_VIEWER_FLAVOR}
       DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/viewer_manifest.py
         stage_third_party_libs
         llwebrtc
-        ${COPY_INPUT_DEPENDENCIES}
       COMMENT "Performing viewer_manifest copy"
       )
-
-    add_custom_target(copy_w_viewer_manifest ALL DEPENDS ${CMAKE_CFG_INTDIR}/copy_touched.bat)
+    # </FS:Pyrokitty>
 
     add_dependencies(${VIEWER_BINARY_NAME} stage_third_party_libs llcommon llwebrtc copy_w_viewer_manifest)
 

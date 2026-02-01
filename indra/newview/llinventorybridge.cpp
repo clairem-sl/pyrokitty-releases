@@ -104,6 +104,14 @@
 #include "llviewerattachmenu.h"
 #include "llresmgr.h"
 
+// <FS:Pyrokitty> Save animation to disk
+#include "llapr.h"
+#include "llfilepicker.h"
+#include "llfilesystem.h"
+#include "llviewerassetstorage.h"
+#include "llviewermenufile.h"
+// </FS:Pyrokitty>
+
 void copy_slurl_to_clipboard_callback_inv(const std::string& slurl);
 
 const F32 SOUND_GAIN = 1.0f;
@@ -7773,6 +7781,10 @@ void LLAnimationBridge::buildContextMenu(LLMenuGL& menu, U32 flags)
             items.push_back(std::string("Properties"));
 
             getClipboardEntries(true, items, disabled_items, flags);
+
+            // <FS:Pyrokitty> Save animation to disk
+            items.push_back(std::string("Save Animation As"));
+            // </FS:Pyrokitty>
         }
 
         items.push_back(std::string("Animation Separator"));
@@ -7787,6 +7799,82 @@ void LLAnimationBridge::buildContextMenu(LLMenuGL& menu, U32 flags)
 
     hide_context_entries(menu, items, disabled_items);
 }
+
+// <FS:Pyrokitty> Save animation to disk - callback and helper
+static void onAnimationSaveComplete(const LLUUID& asset_uuid,
+                                     LLAssetType::EType type,
+                                     void* user_data,
+                                     S32 status,
+                                     LLExtStat ext_status)
+{
+    std::string* filename = static_cast<std::string*>(user_data);
+
+    if (status != LL_ERR_NOERR)
+    {
+        LL_WARNS() << "Failed to fetch animation " << asset_uuid << " for saving. Status: " << status << LL_ENDL;
+        LLSD args;
+        args["MESSAGE"] = "Failed to download animation data.";
+        LLNotificationsUtil::add("GenericAlert", args);
+        delete filename;
+        return;
+    }
+
+    LLFileSystem file(asset_uuid, type, LLFileSystem::READ);
+    S32 file_size = file.getSize();
+
+    if (file_size <= 0)
+    {
+        LL_WARNS() << "Animation file is empty or could not be read: " << asset_uuid << LL_ENDL;
+        LLSD args;
+        args["MESSAGE"] = "Animation data is empty.";
+        LLNotificationsUtil::add("GenericAlert", args);
+        delete filename;
+        return;
+    }
+
+    std::vector<U8> buffer(file_size);
+    if (!file.read(&buffer[0], file_size))
+    {
+        LL_WARNS() << "Failed to read animation data: " << asset_uuid << LL_ENDL;
+        delete filename;
+        return;
+    }
+
+    // Write to file
+    LLAPRFile outfile(*filename, LL_APR_WB);
+    if (!outfile.getFileHandle())
+    {
+        LL_WARNS() << "Failed to open file for writing: " << *filename << LL_ENDL;
+        LLSD args;
+        args["MESSAGE"] = "Failed to open file for writing.";
+        LLNotificationsUtil::add("GenericAlert", args);
+        delete filename;
+        return;
+    }
+
+    outfile.write(&buffer[0], file_size);
+    LL_INFOS() << "Saved animation to: " << *filename << LL_ENDL;
+
+    delete filename;
+}
+
+static void onAnimationSaveFilePicked(const std::vector<std::string>& filenames, const LLUUID& asset_id)
+{
+    if (filenames.empty())
+    {
+        return;
+    }
+
+    std::string* filename = new std::string(filenames[0]);
+
+    // Request the animation asset
+    gAssetStorage->getAssetData(asset_id,
+                                 LLAssetType::AT_ANIMATION,
+                                 onAnimationSaveComplete,
+                                 filename,
+                                 true);
+}
+// </FS:Pyrokitty>
 
 // virtual
 void LLAnimationBridge::performAction(LLInventoryModel* model, std::string action)
@@ -7806,6 +7894,22 @@ void LLAnimationBridge::performAction(LLInventoryModel* model, std::string actio
             }
         }
     }
+    // <FS:Pyrokitty> Save animation to disk
+    else if (action == "save_anim_as")
+    {
+        LLViewerInventoryItem* item = getItem();
+        if (item)
+        {
+            LLUUID asset_id = item->getAssetUUID();
+            std::string default_filename = LLDir::getScrubbedFileName(item->getName()) + ".anim";
+
+            LLFilePickerReplyThread::startPicker(
+                boost::bind(&onAnimationSaveFilePicked, _1, asset_id),
+                LLFilePicker::FFSAVE_ALL,
+                default_filename);
+        }
+    }
+    // </FS:Pyrokitty>
     else
     {
         LLItemBridge::performAction(model, action);
