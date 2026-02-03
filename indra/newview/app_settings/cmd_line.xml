@@ -81,7 +81,15 @@
       <key>map-to</key>
       <string>PacketDropPercentage</string>
     </map>
-    
+
+    <key>external-login</key>
+    <map>
+      <key>desc</key>
+      <string>Start in external login mode - wait for session handoff from PyroKitty</string>
+      <key>map-to</key>
+      <string>ExternalLoginMode</string>
+    </map>
+
     <key>god</key>
     <map>
       <key>desc</key>

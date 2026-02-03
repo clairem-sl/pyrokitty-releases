@@ -5202,6 +5202,17 @@
       <key>Value</key>
       <integer>1</integer>
     </map>
+    <key>ExternalLoginMode</key>
+    <map>
+      <key>Comment</key>
+      <string>Start in external login mode - wait for session handoff from PyroKitty</string>
+      <key>Persist</key>
+      <integer>0</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>0</integer>
+    </map>
     <key>EventURL</key>
     <map>
       <key>Comment</key>

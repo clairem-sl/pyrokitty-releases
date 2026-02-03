@@ -137,6 +137,7 @@
 #include "llpreviewscript.h"
 #include "llproxy.h"
 #include "llproductinforequest.h"
+#include "pkloginhandoff.h"
 #include "llqueryflags.h"
 #include "llsecapi.h"
 #include "llselectmgr.h"
@@ -1268,6 +1269,23 @@ bool idle_startup()
             LLAppViewer::instance()->earlyExitNoNotify();
         }
 
+        // <FS:Pyrokitty> Check for external login mode - skip login UI and wait for session handoff
+        if (PKLoginHandoff::isExternalLoginMode())
+        {
+            LL_INFOS("AppInit") << "External login mode - skipping login UI, waiting for session handoff" << LL_ENDL;
+
+            // Initialize menus (needed by STATE_WORLD_INIT)
+            if (gLoginMenuBarView == NULL)
+            {
+                init_menus();
+            }
+
+            gViewerWindow->setShowProgress(true, false);
+            LLStartUp::setStartupState(STATE_EXTERNAL_LOGIN_WAIT);
+            return false;
+        }
+        // </FS:Pyrokitty>
+
         gViewerWindow->getWindow()->setCursor(UI_CURSOR_ARROW);
 
         // Login screen needs menus for preferences, but we can enter
@@ -1386,6 +1404,210 @@ bool idle_startup()
         ms_sleep(1);
         return false;
     }
+
+    // <FS:Pyrokitty> External login mode - wait for session handoff from PyroKitty
+    if (STATE_EXTERNAL_LOGIN_WAIT == LLStartUp::getStartupState())
+    {
+        // Check if session data has been received via PKLoginHandoff API
+        if (PKLoginHandoff::hasSessionData())
+        {
+            LL_INFOS("AppInit") << "External session data received, initializing world" << LL_ENDL;
+
+            // Get the session data that was stored by PKLoginHandoff
+            extern LLSD PKLoginHandoff_GetSessionData();
+            LLSD sessionData = PKLoginHandoff_GetSessionData();
+
+            // Set up the first sim connection data
+            std::string sim_ip = sessionData["sim_ip"].asString();
+            U32 sim_port = static_cast<U32>(sessionData["sim_port"].asInteger());
+            gFirstSim.set(sim_ip, static_cast<U16>(sim_port));
+
+            // Note: Don't enable circuit here - let the normal startup flow do it
+            // in STATE_SEED_CAP_GRANTED after the region is registered in LLWorld.
+            // This prevents "Object update from unknown region" errors.
+
+            // Set region handle from session data
+            if (sessionData.has("region_handle"))
+            {
+                std::string handleStr = sessionData["region_handle"].asString();
+                LL_INFOS("AppInit") << "External login: region_handle string = '" << handleStr << "'" << LL_ENDL;
+                gFirstSimHandle = std::stoull(handleStr);
+                LL_INFOS("AppInit") << "External login: parsed gFirstSimHandle = " << gFirstSimHandle << LL_ENDL;
+            }
+            else
+            {
+                // If no region handle provided, compute a default (this is a fallback)
+                // The proper region handle should come from TeleportFinish
+                gFirstSimHandle = to_region_handle(256 * 1000, 256 * 1000);
+                LL_WARNS("AppInit") << "External login: No region_handle provided, using default" << LL_ENDL;
+            }
+
+            // Set seed capability
+            gFirstSimSeedCap = sessionData["seed_capability"].asString();
+
+            // Debug: log all keys in sessionData
+            LL_INFOS("AppInit") << "External login: sessionData keys:" << LL_ENDL;
+            for (LLSD::map_const_iterator it = sessionData.beginMap(); it != sessionData.endMap(); ++it)
+            {
+                LL_INFOS("AppInit") << "  - " << it->first << " (type: " << it->second.type() << ")" << LL_ENDL;
+            }
+
+            // Set inventory root folders from session data and load skeleton
+            LL_INFOS("AppInit") << "External login: has inventory_skeleton = " << sessionData.has("inventory_skeleton") << LL_ENDL;
+            if (sessionData.has("inventory_skeleton"))
+            {
+                LL_INFOS("AppInit") << "External login: inventory_skeleton.isArray() = " << sessionData["inventory_skeleton"].isArray() << LL_ENDL;
+            }
+            if (sessionData.has("inventory_skeleton") && sessionData["inventory_skeleton"].isArray())
+            {
+                const LLSD& skeleton = sessionData["inventory_skeleton"];
+                LL_INFOS("AppInit") << "External login: loading inventory skeleton with "
+                                    << skeleton.size() << " folders" << LL_ENDL;
+
+                // Find and set the root folder FIRST (parent_id is null for root)
+                for (LLSD::array_const_iterator it = skeleton.beginArray(); it != skeleton.endArray(); ++it)
+                {
+                    LLUUID parent_id((*it)["parent_id"].asString());
+                    if (parent_id.isNull())
+                    {
+                        LLUUID root_id((*it)["folder_id"].asString());
+                        gInventory.setRootFolderID(root_id);
+                        LL_INFOS("AppInit") << "External login: set root folder = " << root_id << LL_ENDL;
+                        break;
+                    }
+                }
+
+                // Delete old inventory cache to avoid stale data conflicts
+                std::string cache_path = gDirUtilp->getExpandedFilename(LL_PATH_CACHE, gAgentID.asString());
+                std::string inv_cache = cache_path + ".inv";
+                std::string inv_cache_gz = cache_path + ".inv.gz";
+                if (LLFile::isfile(inv_cache))
+                {
+                    LLFile::remove(inv_cache);
+                    LL_INFOS("AppInit") << "External login: removed old inventory cache" << LL_ENDL;
+                }
+                if (LLFile::isfile(inv_cache_gz))
+                {
+                    LLFile::remove(inv_cache_gz);
+                    LL_INFOS("AppInit") << "External login: removed old inventory cache (gz)" << LL_ENDL;
+                }
+
+                // Now load skeleton - it will use our data without cache interference
+                if (!gInventory.loadSkeleton(skeleton, gAgentID))
+                {
+                    LL_WARNS("AppInit") << "External login: problem loading inventory skeleton" << LL_ENDL;
+                }
+                else
+                {
+                    LL_INFOS("AppInit") << "External login: inventory skeleton loaded successfully" << LL_ENDL;
+                }
+            }
+            else if (sessionData.has("inventory_root"))
+            {
+                // Fallback: create minimal root if no skeleton provided
+                LLUUID inv_root_id(sessionData["inventory_root"].asString());
+                gInventory.setRootFolderID(inv_root_id);
+                LL_INFOS("AppInit") << "External login: set inventory root = " << inv_root_id << " (no skeleton)" << LL_ENDL;
+
+                // Create a minimal root category so inventory can be marked usable
+                LLPointer<LLViewerInventoryCategory> root_cat = new LLViewerInventoryCategory(
+                    inv_root_id,
+                    LLUUID::null,  // Root has no parent
+                    LLFolderType::FT_ROOT_INVENTORY,
+                    "My Inventory",
+                    gAgentID);
+                root_cat->setVersion(LLViewerInventoryCategory::VERSION_INITIAL);
+                root_cat->setDescendentCount(0);
+                gInventory.updateCategory(root_cat);
+                LL_INFOS("AppInit") << "External login: created minimal root inventory category" << LL_ENDL;
+            }
+            if (sessionData.has("inventory_lib_root"))
+            {
+                LLUUID lib_root_id(sessionData["inventory_lib_root"].asString());
+                gInventory.setLibraryRootFolderID(lib_root_id);
+                LL_INFOS("AppInit") << "External login: set library root = " << lib_root_id << LL_ENDL;
+            }
+            if (sessionData.has("inventory_lib_owner"))
+            {
+                LLUUID lib_owner_id(sessionData["inventory_lib_owner"].asString());
+                gInventory.setLibraryOwnerID(lib_owner_id);
+                LL_INFOS("AppInit") << "External login: set library owner = " << lib_owner_id << LL_ENDL;
+            }
+
+            // Set agent appearance service URL
+            if (sessionData.has("agent_appearance_service"))
+            {
+                std::string appearance_url = sessionData["agent_appearance_service"].asString();
+                gSavedSettings.setString("AgentAppearanceServiceURL", appearance_url);
+                LL_INFOS("AppInit") << "External login: set agent_appearance_service = " << appearance_url << LL_ENDL;
+            }
+
+            // Build inventory parent-child map
+            // This must be done after creating the root category
+            gInventory.buildParentChildMap();
+
+            // Force inventory to be usable even without full skeleton
+            // The inventory will be fetched from the server via background fetch
+            if (!gInventory.isInventoryUsable())
+            {
+                gInventory.setAgentInventoryUsable(true);
+                LL_INFOS("AppInit") << "External login: forced inventory usable flag" << LL_ENDL;
+            }
+            LL_INFOS("AppInit") << "External login: inventory usable = "
+                                << gInventory.isInventoryUsable() << LL_ENDL;
+
+            // Initialize notification storages (normally done in STATE_LOGIN_CLEANUP)
+            // Set up user directories first
+            std::string firstname = sessionData.has("first_name") ? sessionData["first_name"].asString() : "User";
+            std::string lastname = sessionData.has("last_name") ? sessionData["last_name"].asString() : "Resident";
+            std::string userid = firstname + "_" + lastname;
+            std::string gridlabel = LLGridManager::getInstance()->getGridLabel();
+            gDirUtilp->setLindenUserDir(userid, gridlabel);
+            LLFile::mkdir(gDirUtilp->getLindenUserDir());
+
+            // Initialize notification storage singletons
+            if (!LLPersistentNotificationStorage::instanceExists())
+            {
+                LLPersistentNotificationStorage::initParamSingleton();
+                LLDoNotDisturbNotificationStorage::initParamSingleton();
+                LL_INFOS("AppInit") << "External login: initialized notification storage" << LL_ENDL;
+            }
+
+            // NOTE: Do NOT start inventory background fetch here - capabilities aren't available yet.
+            // Do NOT call createCommonSystemCategories() here - it would create duplicate folders
+            // on the server since we haven't loaded the inventory skeleton yet.
+            // The inventory fetch will be started in STATE_INVENTORY_SEND2 after the region is
+            // connected and capabilities are available.
+            LL_INFOS("AppInit") << "External login: inventory fetch will start after region connect" << LL_ENDL;
+
+            LL_INFOS("AppInit") << "External login: connecting to " << gFirstSim
+                                << " with circuit code " << gMessageSystem->mOurCircuitCode
+                                << LL_ENDL;
+
+            // <FS:Pyrokitty> Skip benefits initialization for external login
+            // Benefits data would need to be passed from PyroKitty - for now just skip
+            mBenefitsSuccessfullyInit = true;
+            LL_INFOS("AppInit") << "External login: skipping benefits init" << LL_ENDL;
+            // </FS:Pyrokitty>
+
+            // Hide splash screen but keep progress view for startup status
+            LLSplashScreen::hide();
+            gViewerWindow->getWindow()->show();
+            set_startup_status(0.3f, "Connecting to region...", "");
+            LL_INFOS("AppInit") << "External login: hidden splash, showing main window" << LL_ENDL;
+
+            // Skip to world init state
+            LLStartUp::setStartupState(STATE_WORLD_INIT);
+            return false;
+        }
+
+        // Still waiting for session data
+        set_startup_status(0.10f, "Waiting for session from PyroKitty...", "");
+        do_startup_frame();
+        ms_sleep(100);  // Don't spin CPU while waiting
+        return false;
+    }
+    // </FS:Pyrokitty>
 
     if (STATE_LOGIN_CLEANUP == LLStartUp::getStartupState())
     {
@@ -2770,20 +2992,49 @@ bool idle_startup()
 
         // This method MUST be called before gInventory.findCategoryUUIDForType because of
         // gInventory.mIsAgentInvUsable is set to true in the gInventory.buildParentChildMap.
-        gInventory.buildParentChildMap();
+        // <FS:Pyrokitty> Skip for external login - we already called this in STATE_EXTERNAL_LOGIN_WAIT
+        if (!PKLoginHandoff::isExternalLoginMode())
+        {
+            gInventory.buildParentChildMap();
+        }
+        else
+        {
+            // For external login, validation may fail due to duplicate system folders in
+            // user inventory (common with old/merged accounts). Force usable since the
+            // skeleton was already loaded successfully.
+            if (!gInventory.isInventoryUsable())
+            {
+                gInventory.setAgentInventoryUsable(true);
+                LL_INFOS("AppInit") << "External login: re-forced inventory usable flag in STATE_INVENTORY_SEND2" << LL_ENDL;
+            }
+        }
+        // </FS:Pyrokitty>
 
         // If buildParentChildMap succeeded, inventory will now be in
         // a usable state and gInventory.isInventoryUsable() will be
         // true.
 
         // if inventory is unusable, show warning.
-        if (!gInventory.isInventoryUsable())
+        // <FS:Pyrokitty> Don't show warning for external login - we're forcing usable
+        if (!gInventory.isInventoryUsable() && !PKLoginHandoff::isExternalLoginMode())
         {
             LLNotificationsUtil::add("InventoryUnusable");
         }
+        // </FS:Pyrokitty>
 
         LLInventoryModelBackgroundFetch::instance().start();
-        gInventory.createCommonSystemCategories();
+        // <FS:Pyrokitty> For external login, skip creating system categories - they already exist
+        // on the server and will be fetched by background fetch. Creating them here would
+        // create duplicate folders since we don't have the inventory skeleton loaded.
+        if (!PKLoginHandoff::isExternalLoginMode())
+        {
+            gInventory.createCommonSystemCategories();
+        }
+        else
+        {
+            LL_INFOS("AppInit") << "External login: skipping createCommonSystemCategories, will be fetched from server" << LL_ENDL;
+        }
+        // </FS:Pyrokitty>
         LLStartUp::setStartupState(STATE_INVENTORY_CALLBACKS );
         do_startup_frame();
 
@@ -3032,7 +3283,8 @@ bool idle_startup()
         // location is not your expected location. So, if this is
         // your first login, then you do not have an expectation,
         // thus, do not show this alert.
-        if (!gAgent.isFirstLogin())
+        // <FS:Pyrokitty> Also skip for external login - we handle location via teleport handoff
+        if (!gAgent.isFirstLogin() && !PKLoginHandoff::isExternalLoginMode())
         {
             LL_INFOS() << "gAgentStartLocation : " << gAgentStartLocation << LL_ENDL;
             LLSLURL start_slurl = LLStartUp::getStartSLURL();

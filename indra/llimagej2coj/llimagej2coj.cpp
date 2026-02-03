@@ -315,6 +315,9 @@ public:
         opj_set_warning_handler(decoder, warning_callback, nullptr);
         opj_set_info_handler(decoder, info_callback, nullptr);
 
+        /* Enable internal multi-threading for parallel tile/component decoding */
+        opj_codec_set_threads(decoder, 2);
+
         if (!opj_setup_decoder(decoder, &parameters))
         {
             return false;
@@ -388,6 +391,9 @@ public:
         opj_set_info_handler(decoder, info_callback, this);
         opj_set_warning_handler(decoder, warning_callback, this);
         opj_set_error_handler(decoder, error_callback, this);
+
+        /* Enable internal multi-threading for parallel tile/component decoding */
+        opj_codec_set_threads(decoder, 2);
 
         if (stream)
         {
@@ -538,6 +544,9 @@ public:
         opj_set_error_handler(encoder, error_callback, nullptr);
         opj_set_warning_handler(encoder, warning_callback, nullptr);
         opj_set_info_handler(encoder, info_callback, nullptr);
+
+        /* Enable internal multi-threading for parallel tile/component encoding */
+        opj_codec_set_threads(encoder, 2);
 
         parameters.tcp_mct = (image->numcomps >= 3) ? 1 : 0; // no color transform for RGBA images
 

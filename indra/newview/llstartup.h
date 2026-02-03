@@ -63,6 +63,9 @@ typedef enum {
     STATE_BROWSER_INIT,             // Initialize web browser for login screen
     STATE_LOGIN_SHOW,               // Show login screen
     STATE_LOGIN_WAIT,               // Wait for user input at login screen
+// <FS:Pyrokitty> External login mode
+    STATE_EXTERNAL_LOGIN_WAIT,      // Wait for session handoff from PyroKitty
+// </FS:Pyrokitty>
     STATE_LOGIN_CLEANUP,            // Get rid of login screen and start login
 // <FS:Techwolf Lupindo> fsdata support
     STATE_AGENTS_WAIT,          // Wait for agents.xml to load.

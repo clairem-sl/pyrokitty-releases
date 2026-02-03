@@ -64,6 +64,7 @@
 #include "llviewerjoystick.h"
 #include "llcalc.h"
 #include "pkchateventapi.h"
+#include "pkloginhandoff.h"
 #include "pkwebsocketserver.h"
 #include "llconversationlog.h"
 #if LL_WINDOWS
@@ -3798,6 +3799,14 @@ bool LLAppViewer::initWindow()
 
     // <FS:Pyrokitty> Initialize chat event API for LEAP plugins
     new PKChatEventAPI();
+
+    // Initialize login handoff API for external login via PyroKitty
+    new PKLoginHandoff();
+    if (gSavedSettings.getBOOL("ExternalLoginMode"))
+    {
+        PKLoginHandoff::setExternalLoginMode(true);
+        LL_INFOS("AppInit") << "External login mode enabled - waiting for session handoff" << LL_ENDL;
+    }
 
     // Start WebSocket server for Electron UI communication
     U32 wsPort = gSavedSettings.getU32("PKWebSocketPort");

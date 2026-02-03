@@ -164,6 +164,8 @@ protected:
 public:
     // The inventory model usage is sensitive to the initial construction of the model
     bool isInventoryUsable() const;
+    // Force inventory to be usable for external login mode (PyroKitty)
+    void setAgentInventoryUsable(bool usable) { mIsAgentInvUsable = usable; }
 private:
     bool mIsAgentInvUsable; // used to handle an invalid inventory state
 
