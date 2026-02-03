@@ -1,0 +1,21 @@
+import { UUID } from '../UUID';
+import { MessageFlags } from '../../enums/MessageFlags';
+import { MessageBase } from '../MessageBase';
+import { Message } from '../../enums/Message';
+export declare class SimWideDeletesMessage implements MessageBase {
+    name: string;
+    messageFlags: MessageFlags;
+    id: Message;
+    AgentData: {
+        AgentID: UUID;
+        SessionID: UUID;
+    };
+    DataBlock: {
+        TargetID: UUID;
+        Flags: number;
+    };
+    getSize(): number;
+    writeToBuffer(buf: Buffer, pos: number): number;
+    readFromBuffer(buf: Buffer, pos: number): number;
+}
+//# sourceMappingURL=SimWideDeletes.d.ts.map

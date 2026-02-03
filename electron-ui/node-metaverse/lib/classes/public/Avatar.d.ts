@@ -1,0 +1,40 @@
+import { AvatarQueryResult } from './AvatarQueryResult';
+import { GameObject } from './GameObject';
+import { Vector3 } from '../Vector3';
+import { Quaternion } from '../Quaternion';
+import { Subject } from 'rxjs';
+import { UUID } from '../UUID';
+export declare class Avatar extends AvatarQueryResult {
+    onMoved: Subject<Avatar>;
+    onTitleChanged: Subject<Avatar>;
+    onLeftRegion: Subject<Avatar>;
+    onAttachmentAdded: Subject<GameObject>;
+    onAttachmentRemoved: Subject<GameObject>;
+    onVisibleChanged: Subject<Avatar>;
+    private rotation;
+    private title;
+    private _isVisible;
+    private _gameObject?;
+    private _position;
+    private _coarsePosition;
+    private readonly attachments;
+    constructor(gameObjectOrID: GameObject | UUID, firstName: string, lastName: string);
+    static fromGameObject(obj: GameObject): Avatar;
+    set gameObject(obj: GameObject);
+    get isVisible(): boolean;
+    set isVisible(value: boolean);
+    setTitle(newTitle: string): void;
+    getTitle(): string;
+    get position(): Vector3;
+    set coarsePosition(pos: Vector3);
+    getRotation(): Quaternion;
+    processObjectUpdate(obj: GameObject): void;
+    setGeometry(position: Vector3, rotation: Quaternion): void;
+    getAttachment(itemID: UUID): GameObject;
+    getAttachments(): Map<string, GameObject>;
+    waitForAttachment(itemID: UUID | string, timeout?: number): Promise<GameObject>;
+    addAttachment(obj: GameObject): void;
+    removeAttachment(obj: GameObject): void;
+    coarseLeftRegion(): void;
+}
+//# sourceMappingURL=Avatar.d.ts.map

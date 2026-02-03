@@ -1,0 +1,1 @@
+{"version":3,"file":"GroupNoticeEvent.d.ts","sourceRoot":"","sources":["GroupNoticeEvent.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,IAAI,EAAE,MAAM,iBAAiB,CAAC;AAE5C,qBAAa,gBAAgB;IAElB,OAAO,EAAE,IAAI,CAAC;IACd,IAAI,EAAE,IAAI,CAAC;IACX,QAAQ,EAAE,MAAM,CAAC;IACjB,OAAO,EAAE,MAAM,CAAC;IAChB,OAAO,EAAE,MAAM,CAAC;CAC1B"}

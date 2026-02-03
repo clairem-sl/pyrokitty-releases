@@ -1,0 +1,1 @@
+{"version":3,"file":"FriendRightsEvent.d.ts","sourceRoot":"","sources":["FriendRightsEvent.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,MAAM,EAAE,MAAM,0BAA0B,CAAC;AACvD,OAAO,KAAK,EAAE,WAAW,EAAE,MAAM,sBAAsB,CAAC;AAExD,qBAAa,iBAAiB;IAEnB,MAAM,EAAE,MAAM,CAAC;IACf,QAAQ,EAAE,WAAW,CAAC;IACtB,WAAW,EAAE,WAAW,CAAC;CACnC"}

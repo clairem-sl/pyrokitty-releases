@@ -1,0 +1,40 @@
+import { Quaternion } from "./Quaternion";
+import type { XMLNode } from 'xmlbuilder';
+export declare class Vector4 {
+    x: number;
+    y: number;
+    z: number;
+    w: number;
+    constructor(buf?: Buffer | number[] | Vector4 | number, pos?: number, double?: boolean | number, w?: number);
+    static getXML(doc: XMLNode, v?: Vector4): void;
+    static getZero(): Vector4;
+    writeToBuffer(buf: Buffer, pos: number, double?: boolean): void;
+    toString(): string;
+    getBuffer(double?: boolean): Buffer;
+    compareApprox(vec: Vector4): boolean;
+    toArray(): number[];
+    equals(vec: Vector4, epsilon?: number): boolean;
+    dot(vec: Vector4): number;
+    distance(vec: Vector4): number;
+    squaredDistance(vec: Vector4): number;
+    direction(vec: Vector4): Vector4;
+    mix(vec: Vector4, t: number): Vector4;
+    sum(vec: Vector4): Vector4;
+    difference(vec: Vector4): Vector4;
+    product(vec: Vector4): Vector4;
+    quotient(vec: Vector4): Vector4;
+    reset(): void;
+    copy(): Vector4;
+    toJSON(): object;
+    negate(): Vector4;
+    length(): number;
+    squaredLength(): number;
+    add(vec: Vector4): this;
+    subtract(vec: Vector4): this;
+    multiply(value: number | Vector4): this;
+    divide(value: number | Vector4): this;
+    scale(scalar: number): this;
+    normalize(): this;
+    toQuaternion(): Quaternion;
+}
+//# sourceMappingURL=Vector4.d.ts.map

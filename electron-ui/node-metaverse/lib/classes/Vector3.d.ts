@@ -1,0 +1,46 @@
+import { Quaternion } from "./Quaternion";
+import type { XMLNode } from 'xmlbuilder';
+export declare class Vector3 {
+    static zero: Vector3;
+    static up: Vector3;
+    static right: Vector3;
+    static forward: Vector3;
+    x: number;
+    y: number;
+    z: number;
+    constructor(buf?: Buffer | number[] | Vector3 | number, pos?: number, doubleOrX?: boolean | number);
+    static getXML(doc: XMLNode, v?: Vector3): void;
+    static fromXMLJS(obj: any, param: string): Vector3 | false;
+    static getZero(): Vector3;
+    writeToBuffer(buf: Buffer, pos: number, double?: boolean): void;
+    toString(): string;
+    getBuffer(double?: boolean): Buffer;
+    compareApprox(vec: Vector3): boolean;
+    toArray(): number[];
+    equals(vec: Vector3, epsilon?: number): boolean;
+    cross(vec: Vector3): Vector3;
+    dot(vec: Vector3): number;
+    distance(vec: Vector3): number;
+    squaredDistance(vec: Vector3): number;
+    direction(vec: Vector3): Vector3;
+    toJSON(): object;
+    mix(vec: Vector3, t: number): Vector3;
+    sum(vec: Vector3): Vector3;
+    difference(vec: Vector3): Vector3;
+    product(vec: Vector3): Vector3;
+    quotient(vec: Vector3): Vector3;
+    reset(): void;
+    copy(): Vector3;
+    negate(): Vector3;
+    length(): number;
+    squaredLength(): number;
+    add(vec: Vector3): Vector3;
+    subtract(vec: Vector3): Vector3;
+    multiply(value: number | Vector3): Vector3;
+    divide(value: number | Vector3): Vector3;
+    scale(scalar: number): Vector3;
+    normalize(): Vector3;
+    multiplyQuaternion(quat: Quaternion): Vector3;
+    toQuaternion(): Quaternion;
+}
+//# sourceMappingURL=Vector3.d.ts.map

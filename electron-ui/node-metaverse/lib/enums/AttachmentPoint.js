@@ -1,0 +1,65 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AttachmentPoint = void 0;
+var AttachmentPoint;
+(function (AttachmentPoint) {
+    AttachmentPoint[AttachmentPoint["Default"] = 0] = "Default";
+    AttachmentPoint[AttachmentPoint["Chest"] = 1] = "Chest";
+    AttachmentPoint[AttachmentPoint["Skull"] = 2] = "Skull";
+    AttachmentPoint[AttachmentPoint["LeftShoulder"] = 3] = "LeftShoulder";
+    AttachmentPoint[AttachmentPoint["RightShoulder"] = 4] = "RightShoulder";
+    AttachmentPoint[AttachmentPoint["LeftHand"] = 5] = "LeftHand";
+    AttachmentPoint[AttachmentPoint["RightHand"] = 6] = "RightHand";
+    AttachmentPoint[AttachmentPoint["LeftFoot"] = 7] = "LeftFoot";
+    AttachmentPoint[AttachmentPoint["RightFoot"] = 8] = "RightFoot";
+    AttachmentPoint[AttachmentPoint["Spine"] = 9] = "Spine";
+    AttachmentPoint[AttachmentPoint["Pelvis"] = 10] = "Pelvis";
+    AttachmentPoint[AttachmentPoint["Mouth"] = 11] = "Mouth";
+    AttachmentPoint[AttachmentPoint["Chin"] = 12] = "Chin";
+    AttachmentPoint[AttachmentPoint["LeftEar"] = 13] = "LeftEar";
+    AttachmentPoint[AttachmentPoint["RightEar"] = 14] = "RightEar";
+    AttachmentPoint[AttachmentPoint["LeftEyeball"] = 15] = "LeftEyeball";
+    AttachmentPoint[AttachmentPoint["RightEyeball"] = 16] = "RightEyeball";
+    AttachmentPoint[AttachmentPoint["Nose"] = 17] = "Nose";
+    AttachmentPoint[AttachmentPoint["RightUpperArm"] = 18] = "RightUpperArm";
+    AttachmentPoint[AttachmentPoint["RightForearm"] = 19] = "RightForearm";
+    AttachmentPoint[AttachmentPoint["LeftUpperArm"] = 20] = "LeftUpperArm";
+    AttachmentPoint[AttachmentPoint["LeftForearm"] = 21] = "LeftForearm";
+    AttachmentPoint[AttachmentPoint["RightHip"] = 22] = "RightHip";
+    AttachmentPoint[AttachmentPoint["RightUpperLeg"] = 23] = "RightUpperLeg";
+    AttachmentPoint[AttachmentPoint["RightLowerLeg"] = 24] = "RightLowerLeg";
+    AttachmentPoint[AttachmentPoint["LeftHip"] = 25] = "LeftHip";
+    AttachmentPoint[AttachmentPoint["LeftUpperLeg"] = 26] = "LeftUpperLeg";
+    AttachmentPoint[AttachmentPoint["LeftLowerLeg"] = 27] = "LeftLowerLeg";
+    AttachmentPoint[AttachmentPoint["Stomach"] = 28] = "Stomach";
+    AttachmentPoint[AttachmentPoint["LeftPec"] = 29] = "LeftPec";
+    AttachmentPoint[AttachmentPoint["RightPec"] = 30] = "RightPec";
+    // Private/HUD attachments
+    AttachmentPoint[AttachmentPoint["HUDCenter2"] = 31] = "HUDCenter2";
+    AttachmentPoint[AttachmentPoint["HUDTopRight"] = 32] = "HUDTopRight";
+    AttachmentPoint[AttachmentPoint["HUDTop"] = 33] = "HUDTop";
+    AttachmentPoint[AttachmentPoint["HUDTopLeft"] = 34] = "HUDTopLeft";
+    AttachmentPoint[AttachmentPoint["HUDCenter"] = 35] = "HUDCenter";
+    AttachmentPoint[AttachmentPoint["HUDBottomLeft"] = 36] = "HUDBottomLeft";
+    AttachmentPoint[AttachmentPoint["HUDBottom"] = 37] = "HUDBottom";
+    AttachmentPoint[AttachmentPoint["HUDBottomRight"] = 38] = "HUDBottomRight";
+    // Extras
+    AttachmentPoint[AttachmentPoint["Neck"] = 39] = "Neck";
+    AttachmentPoint[AttachmentPoint["Root"] = 40] = "Root";
+    AttachmentPoint[AttachmentPoint["LefHandRing1"] = 41] = "LefHandRing1";
+    AttachmentPoint[AttachmentPoint["RightHandRing1"] = 42] = "RightHandRing1";
+    AttachmentPoint[AttachmentPoint["TailBase"] = 43] = "TailBase";
+    AttachmentPoint[AttachmentPoint["TailTip"] = 44] = "TailTip";
+    AttachmentPoint[AttachmentPoint["LeftWing"] = 45] = "LeftWing";
+    AttachmentPoint[AttachmentPoint["RightWing"] = 46] = "RightWing";
+    AttachmentPoint[AttachmentPoint["FaceJaw"] = 47] = "FaceJaw";
+    AttachmentPoint[AttachmentPoint["FaceLeftEar"] = 48] = "FaceLeftEar";
+    AttachmentPoint[AttachmentPoint["FaceRightEar"] = 49] = "FaceRightEar";
+    AttachmentPoint[AttachmentPoint["FaceLeftEye"] = 50] = "FaceLeftEye";
+    AttachmentPoint[AttachmentPoint["FaceRightEye"] = 51] = "FaceRightEye";
+    AttachmentPoint[AttachmentPoint["FaceTongue"] = 52] = "FaceTongue";
+    AttachmentPoint[AttachmentPoint["Groin"] = 53] = "Groin";
+    AttachmentPoint[AttachmentPoint["HindLeftFoot"] = 54] = "HindLeftFoot";
+    AttachmentPoint[AttachmentPoint["HindRightFoot"] = 55] = "HindRightFoot"; // FS: Right Hind Foot
+})(AttachmentPoint || (exports.AttachmentPoint = AttachmentPoint = {}));
+//# sourceMappingURL=AttachmentPoint.js.map

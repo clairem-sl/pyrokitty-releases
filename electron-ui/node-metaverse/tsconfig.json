@@ -1,0 +1,33 @@
+{
+    "compilerOptions": {
+        "target": "es2020",
+        "module": "commonjs",
+        "declaration": true,
+        "outDir": "dist",
+        "sourceMap": true,
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "noImplicitReturns": true,
+        "noImplicitAny": true,
+        "resolveJsonModule": true,
+        "noImplicitThis": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "strictBindCallApply": true,
+        "strictPropertyInitialization": false,
+        "strictNullChecks": true,
+        "noFallthroughCasesInSwitch": false,
+        "types": [
+            "node"
+        ]
+    },
+    "include": [
+        "lib/**/*.ts",
+        "examples/**/*.ts"
+    ],
+    "exclude": [
+        "node_modules",
+        "lib/**/*.spec.ts"
+    ]
+}

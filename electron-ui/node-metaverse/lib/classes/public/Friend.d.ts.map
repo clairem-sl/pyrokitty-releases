@@ -1,0 +1,1 @@
+{"version":3,"file":"Friend.d.ts","sourceRoot":"","sources":["Friend.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,MAAM,EAAE,MAAM,UAAU,CAAC;AAClC,OAAO,EAAE,WAAW,EAAE,MAAM,yBAAyB,CAAC;AAEtD,qBAAa,MAAO,SAAQ,MAAM;IAEvB,MAAM,EAAE,OAAO,CAAC;IAChB,WAAW,EAAE,WAAW,CAAoB;IAC5C,QAAQ,EAAE,WAAW,CAAoB;CACnD"}

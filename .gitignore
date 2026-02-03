@@ -137,4 +137,3 @@ build_portable.sh
 accounts.json
 /node-metaverse
 /electron-ui/scripts/config.ts
-/electron-ui/node-metaverse

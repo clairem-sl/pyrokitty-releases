@@ -1,0 +1,15 @@
+import Long from 'long';
+import { MessageBase } from '../MessageBase';
+import { Message } from '../../enums/Message';
+export declare class TeleportLandingStatusChangedMessage implements MessageBase {
+    name: string;
+    messageFlags: number;
+    id: Message;
+    RegionData: {
+        RegionHandle: Long;
+    };
+    getSize(): number;
+    writeToBuffer(buf: Buffer, pos: number): number;
+    readFromBuffer(buf: Buffer, pos: number): number;
+}
+//# sourceMappingURL=TeleportLandingStatusChanged.d.ts.map

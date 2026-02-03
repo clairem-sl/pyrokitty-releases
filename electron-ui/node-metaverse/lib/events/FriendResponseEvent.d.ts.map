@@ -1,0 +1,1 @@
+{"version":3,"file":"FriendResponseEvent.d.ts","sourceRoot":"","sources":["FriendResponseEvent.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,IAAI,EAAE,MAAM,iBAAiB,CAAC;AAE5C,qBAAa,mBAAmB;IAErB,IAAI,EAAE,IAAI,CAAC;IACX,QAAQ,EAAE,MAAM,CAAC;IACjB,OAAO,EAAE,MAAM,CAAC;IAChB,QAAQ,EAAE,OAAO,CAAC;IAClB,SAAS,EAAE,IAAI,CAAC;CAC1B"}

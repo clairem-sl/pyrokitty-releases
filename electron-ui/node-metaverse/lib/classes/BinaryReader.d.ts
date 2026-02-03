@@ -1,0 +1,67 @@
+import { UUID } from "./UUID";
+export declare class BinaryReader {
+    private readonly buf;
+    pos: number;
+    constructor(buf: Buffer);
+    seek(pos: number): void;
+    getPos(): number;
+    peekUInt8(): number;
+    peekInt8(): number;
+    peekUInt16LE(): number;
+    peekInt16LE(): number;
+    peekUInt16BE(): number;
+    peekInt16BE(): number;
+    peekUInt32LE(): number;
+    peekInt32LE(): number;
+    peekUInt32BE(): number;
+    peekInt32BE(): number;
+    peekUInt64LE(): bigint;
+    peekInt64LE(): bigint;
+    peekUInt64BE(): bigint;
+    peekInt64BE(): bigint;
+    peekFloatLE(): number;
+    peekFloatBE(): number;
+    peekDoubleLE(): number;
+    peekDoubleBE(): number;
+    peekUUID(): UUID;
+    peekDate(): Date;
+    peekBuffer(length: number): Buffer;
+    peekVarInt(): {
+        value: number | bigint;
+        bytesRead: number;
+    };
+    peekString(metadata?: {
+        length: number | bigint;
+        bytesRead: number;
+    }): string;
+    peekCString(): string;
+    peekFixedString(length: number): string;
+    readUInt8(): number;
+    readInt8(): number;
+    readUInt16LE(): number;
+    readInt16LE(): number;
+    readUInt16BE(): number;
+    readInt16BE(): number;
+    readUInt32LE(): number;
+    readInt32LE(): number;
+    readUInt32BE(): number;
+    readInt32BE(): number;
+    readUInt64LE(): bigint;
+    readInt64LE(): bigint;
+    readUInt64BE(): bigint;
+    readInt64BE(): bigint;
+    readFloatLE(): number;
+    readFloatBE(): number;
+    readDoubleLE(): number;
+    readDoubleBE(): number;
+    readUUID(): UUID;
+    readDate(): Date;
+    readBuffer(length: number): Buffer;
+    readCString(): string;
+    readString(): string;
+    readFixedString(length: number): string;
+    length(): number;
+    readVarInt(): number | bigint;
+    private checkBounds;
+}
+//# sourceMappingURL=BinaryReader.d.ts.map

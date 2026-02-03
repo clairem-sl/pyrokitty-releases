@@ -1,0 +1,1 @@
+{"version":3,"file":"FriendRequestEvent.d.ts","sourceRoot":"","sources":["FriendRequestEvent.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,IAAI,EAAE,MAAM,iBAAiB,CAAC;AAE5C,qBAAa,kBAAkB;IAEpB,IAAI,EAAE,IAAI,CAAC;IACX,QAAQ,EAAE,MAAM,CAAC;IACjB,SAAS,EAAE,IAAI,CAAC;IAChB,OAAO,EAAE,MAAM,CAAC;CAC1B"}

@@ -1,0 +1,1 @@
+{"version":3,"file":"BulkUpdateInventoryEvent.d.ts","sourceRoot":"","sources":["BulkUpdateInventoryEvent.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,eAAe,EAAE,MAAM,4BAA4B,CAAC;AAClE,OAAO,KAAK,EAAE,aAAa,EAAE,MAAM,0BAA0B,CAAC;AAE9D,qBAAa,wBAAwB;IAE1B,UAAU,EAAE,eAAe,EAAE,CAAM;IACnC,QAAQ,EAAE,aAAa,EAAE,CAAM;CACzC"}
