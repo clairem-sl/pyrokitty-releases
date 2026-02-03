@@ -1,5 +1,6 @@
 import React from 'react';
-import { Account, Grid, ViewerInstance } from '../../shared/types';
+import { Account, Grid } from '../../shared/types';
+import { isInstanceRunning, isDisconnecting, getStatusDotClass } from './StatusIndicator';
 
 interface InstancesPanelProps {
   instances: ViewerInstance[];
@@ -22,9 +23,7 @@ export const InstancesPanel: React.FC<InstancesPanelProps> = ({
     return grids.find((g) => g.id === gridId);
   };
 
-  const runningInstances = instances.filter((i) =>
-    ['starting', 'running', 'connected'].includes(i.status)
-  );
+  const runningInstances = instances.filter(isInstanceRunning);
 
   if (runningInstances.length === 0) {
     return null;
@@ -38,24 +37,27 @@ export const InstancesPanel: React.FC<InstancesPanelProps> = ({
         const account = getAccount(instance.accountId);
         const grid = getGrid(instance.gridId);
 
+        const stopping = isDisconnecting(instance);
         return (
           <div key={instance.id} className="instance-item">
             <div className="instance-info">
-              <span className={`status-dot ${instance.status}`} />
+              <span className={`status-dot ${getStatusDotClass(instance)}`} />
               <div>
                 <div className="instance-name">
                   {account ? `${account.firstName} ${account.lastName}` : 'Unknown'}
                 </div>
                 <div className="instance-details">
                   {grid?.name || 'Unknown Grid'} | Port {instance.wsPort}
+                  {stopping && ' | Logging out...'}
                 </div>
               </div>
             </div>
             <button
               className="btn btn-secondary"
               onClick={() => onStopInstance(instance.id)}
+              disabled={stopping}
             >
-              Stop
+              {stopping ? 'Stopping...' : 'Stop'}
             </button>
           </div>
         );

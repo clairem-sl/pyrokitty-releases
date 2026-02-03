@@ -5,17 +5,17 @@ import { Grid, Account } from '../../shared/types';
 interface LoginFormProps {
   grids: Grid[];
   onSubmit?: (gridId: string, firstName: string, lastName: string, password: string, savePassword: boolean) => void;
-  onLaunch?: (password?: string) => void;
+  onLogin?: (password?: string) => void;  // Login to metaverse
   onCancel: () => void;
   onRemove?: () => void;
   error: string | null;
-  account?: Account | null;  // Pre-populated account for launch mode
+  account?: Account | null;  // Pre-populated account for login mode
 }
 
 export const LoginForm: React.FC<LoginFormProps> = ({
   grids,
   onSubmit,
-  onLaunch,
+  onLogin,
   onCancel,
   onRemove,
   error,
@@ -32,9 +32,9 @@ export const LoginForm: React.FC<LoginFormProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isLaunchMode && onLaunch) {
-      // Use typed password if provided, otherwise use saved (undefined = use saved)
-      onLaunch(password || undefined);
+    // Default action is login only (not launch viewer)
+    if (isLaunchMode && onLogin) {
+      onLogin(password || undefined);
     } else if (onSubmit && selectedGridId && firstName.trim() && lastName.trim() && password) {
       onSubmit(selectedGridId, firstName.trim(), lastName.trim(), password, savePassword);
     }
@@ -123,11 +123,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({
 
         <div className="btn-group">
           <button type="submit" className="btn btn-primary" disabled={!canSubmit}>
-            {isLaunchMode ? 'Launch Viewer' : 'Save Account'}
+            {isLaunchMode ? 'Login' : 'Save Account'}
           </button>
           {isLaunchMode && onRemove && (
             <button type="button" className="btn btn-danger" onClick={onRemove}>
-              Remove Account
+              Remove
             </button>
           )}
           {!isLaunchMode && (

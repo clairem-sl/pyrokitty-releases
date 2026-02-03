@@ -1,3 +1,6 @@
 export { useGrids } from './useGrids';
 export { useAccounts } from './useAccounts';
 export { useViewers } from './useViewers';
+export { useChat } from './useChat';
+export { useFriends } from './useFriends';
+export { useGroups } from './useGroups';

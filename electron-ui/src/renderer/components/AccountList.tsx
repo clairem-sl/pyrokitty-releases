@@ -1,23 +1,6 @@
 import React from 'react';
-import { Account, Grid, ViewerInstance } from '../../shared/types';
-
-const getStatusText = (instance: ViewerInstance | undefined): string => {
-  if (!instance) return 'Offline';
-  switch (instance.status) {
-    case 'starting':
-      return 'Starting...';
-    case 'running':
-      return 'Running';
-    case 'connected':
-      return 'Connected';
-    case 'disconnected':
-      return 'Disconnected';
-    case 'crashed':
-      return 'Crashed';
-    default:
-      return 'Unknown';
-  }
-};
+import { Account, Grid } from '../../shared/types';
+import { StatusIndicator, isInstanceRunning } from './StatusIndicator';
 
 interface AccountListProps {
   accounts: Account[];
@@ -55,7 +38,7 @@ export const AccountList: React.FC<AccountListProps> = ({
         ) : (
           accounts.map((account) => {
             const instance = getInstanceForAccount(account.id);
-            const isRunning = instance && ['starting', 'running', 'connected'].includes(instance.status);
+            const isRunning = isInstanceRunning(instance);
 
             return (
               <div
@@ -69,10 +52,7 @@ export const AccountList: React.FC<AccountListProps> = ({
                 <div className="account-grid">
                   {getGridName(account.gridId)}
                 </div>
-                <div className="account-status">
-                  <span className={`status-dot ${instance?.status || ''}`} />
-                  <span>{getStatusText(instance)}</span>
-                </div>
+                <StatusIndicator instance={instance} />
               </div>
             );
           })

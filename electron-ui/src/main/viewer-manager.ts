@@ -2,10 +2,11 @@ import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { app } from 'electron';
 import { EventEmitter } from 'events';
-import { ViewerInstance, ViewerStatus } from '../shared/types';
+import { ViewerInstance, ViewerStatus, ConnectionState } from '../shared/types';
 import { accountManager } from './account-manager';
 import { gridManager } from './grid-manager';
 import { connectionManager, ViewerConnection } from './viewer-connection';
+import { metaverseConnectionManager, MetaverseConnection } from './metaverse-connection';
 
 function getViewerPath(): string {
   const appRoot = app.getAppPath();
@@ -40,7 +41,260 @@ export class ViewerManager extends EventEmitter {
     return this.nextWsPort++;
   }
 
-  async launchViewer(accountId: string, password?: string): Promise<ViewerInstance> {
+  /**
+   * Launch a session - logs in via node-metaverse first, then optionally hands off to viewer
+   */
+  async launchViewer(accountId: string, password?: string, options?: { startLocation?: string; launchViewer?: boolean }): Promise<ViewerInstance> {
+    // Check if already running
+    const existing = this.getInstanceForAccount(accountId);
+    if (existing) {
+      throw new Error('Viewer already running for this account');
+    }
+
+    // Get account details
+    const account = accountManager.getAccount(accountId);
+    if (!account) {
+      throw new Error('Account not found');
+    }
+
+    // Use provided password or saved password
+    const loginPassword = password || account.password;
+    if (!loginPassword) {
+      throw new Error('Password required');
+    }
+
+    // Get grid details
+    const grid = gridManager.getGrid(account.gridId);
+    if (!grid) {
+      throw new Error('Grid not found');
+    }
+
+    const wsPort = this.getNextWsPort();
+    const instanceId = `viewer_${Date.now()}`;
+    const shouldLaunchViewer = options?.launchViewer !== false;
+
+    // Create instance record
+    const instance: ViewerInstance = {
+      id: instanceId,
+      accountId,
+      gridId: account.gridId,
+      pid: 0,
+      wsPort,
+      startTime: Date.now(),
+      status: 'starting',
+      connectionState: 'disconnected',
+    };
+
+    this.instances.set(instanceId, instance);
+
+    try {
+      // Step 1: Create MetaverseConnection and login via node-metaverse
+      console.log(`[ViewerManager] Creating metaverse connection for ${account.firstName} ${account.lastName}`);
+      const metaverse = metaverseConnectionManager.create(instanceId);
+
+      // Forward state changes to instance
+      metaverse.on('state-change', (state: ConnectionState) => {
+        this.updateConnectionState(instanceId, state);
+      });
+
+      this.updateConnectionState(instanceId, 'logging_in');
+
+      await metaverse.login({
+        firstName: account.firstName,
+        lastName: account.lastName,
+        password: loginPassword,
+        gridLoginUri: grid.loginUri,
+        startLocation: options?.startLocation,
+      });
+
+      console.log(`[ViewerManager] Login successful, connected to metaverse`);
+      this.updateStatus(instanceId, 'running');
+
+      // Step 2: If viewer launch is requested, prepare handoff and launch viewer
+      if (shouldLaunchViewer) {
+        await this.launchViewerWithHandoff(instanceId, instance, metaverse, grid.nick, wsPort, loginPassword);
+      }
+
+      return instance;
+
+    } catch (error) {
+      console.error(`[ViewerManager] Launch failed:`, error);
+      this.cleanup(instanceId);
+      throw error;
+    }
+  }
+
+  /**
+   * Launch the viewer for an existing metaverse session.
+   * Used when user is already logged in via node-metaverse and wants to launch the viewer.
+   */
+  async launchViewerForInstance(instanceId: string): Promise<void> {
+    const instance = this.instances.get(instanceId);
+    if (!instance) {
+      throw new Error('Instance not found');
+    }
+
+    if (instance.connectionState !== 'metaverse_connected') {
+      throw new Error(`Cannot launch viewer: instance is ${instance.connectionState}, expected metaverse_connected`);
+    }
+
+    const metaverse = metaverseConnectionManager.get(instanceId);
+    if (!metaverse) {
+      throw new Error('Metaverse connection not found');
+    }
+
+    const account = accountManager.getAccount(instance.accountId);
+    if (!account) {
+      throw new Error('Account not found');
+    }
+
+    const grid = gridManager.getGrid(instance.gridId);
+    if (!grid) {
+      throw new Error('Grid not found');
+    }
+
+    console.log(`[ViewerManager] Launching viewer for existing session ${instanceId}`);
+
+    await this.launchViewerWithHandoff(
+      instanceId,
+      instance,
+      metaverse,
+      grid.nick,
+      instance.wsPort,
+      account.password || ''
+    );
+  }
+
+  /**
+   * Launch the viewer process and perform session handoff
+   */
+  private async launchViewerWithHandoff(
+    instanceId: string,
+    instance: ViewerInstance,
+    metaverse: MetaverseConnection,
+    gridNick: string,
+    wsPort: number,
+    password: string
+  ): Promise<void> {
+    // Prepare handoff data (includes teleport if needed)
+    console.log(`[ViewerManager] Preparing handoff data...`);
+    const handoffData = await metaverse.prepareHandoff();
+
+    // Launch viewer in external login mode
+    const viewerPath = getViewerPath();
+    const args: string[] = [
+      '--external-login',
+      '--set', 'PKWebSocketPort', wsPort.toString(),
+    ];
+
+    console.log(`[ViewerManager] Launching viewer in external login mode`);
+    console.log(`[ViewerManager] Command: ${viewerPath} ${args.join(' ')}`);
+
+    const process = spawn(viewerPath, args, {
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    instance.pid = process.pid || 0;
+    this.processes.set(instanceId, process);
+
+    // Handle process events
+    process.on('spawn', () => {
+      console.log(`[ViewerManager] Viewer process spawned`);
+    });
+
+    process.stdout?.on('data', (data) => {
+      console.log(`[Viewer ${instanceId}] ${data}`);
+    });
+
+    process.stderr?.on('data', (data) => {
+      console.error(`[Viewer ${instanceId}] ${data}`);
+    });
+
+    process.on('error', (error) => {
+      console.error(`[Viewer ${instanceId}] Error:`, error);
+      this.updateStatus(instanceId, 'crashed');
+    });
+
+    process.on('exit', (code, signal) => {
+      console.log(`[Viewer ${instanceId}] Exited with code ${code}, signal ${signal}`);
+      this.updateStatus(instanceId, 'disconnected');
+      this.cleanup(instanceId);
+    });
+
+    // Wait for viewer WebSocket and send handoff
+    await this.connectAndHandoff(instanceId, wsPort, handoffData, metaverse);
+  }
+
+  /**
+   * Connect to viewer WebSocket and send handoff data
+   */
+  private async connectAndHandoff(
+    instanceId: string,
+    wsPort: number,
+    handoffData: any,
+    metaverse: MetaverseConnection
+  ): Promise<void> {
+    const maxAttempts = 30;
+    const delayMs = 1000;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        console.log(`[ViewerManager] WebSocket connect attempt ${attempt}/${maxAttempts}`);
+
+        const connection = connectionManager.connect(instanceId, wsPort);
+
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error('Connection timeout'));
+          }, 5000);
+
+          connection.once('connected', () => {
+            clearTimeout(timeout);
+            resolve();
+          });
+
+          connection.once('error', (err) => {
+            clearTimeout(timeout);
+            reject(err);
+          });
+
+          connection.connect();
+        });
+
+        // Connection successful, send handoff
+        console.log(`[ViewerManager] Connected to viewer WebSocket, sending handoff...`);
+
+        connection.send('PKLoginHandoff', {
+          op: 'session_handoff',
+          ...handoffData,
+        });
+
+        console.log(`[ViewerManager] Handoff sent successfully`);
+
+        // Complete handoff - viewer takes over
+        metaverse.completeHandoff();
+        this.updateStatus(instanceId, 'connected');
+
+        // Subscribe to chat events
+        connection.subscribeToChat('all');
+
+        return;
+
+      } catch (error) {
+        if (attempt === maxAttempts) {
+          throw new Error(`Failed to connect to viewer after ${maxAttempts} attempts`);
+        }
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  /**
+   * Legacy launch method - directly launches viewer without metaverse pre-login
+   * Kept for backward compatibility
+   */
+  async launchViewerDirect(accountId: string, password?: string): Promise<ViewerInstance> {
     // Check if already running
     const existing = this.getInstanceForAccount(accountId);
     if (existing) {
@@ -93,6 +347,7 @@ export class ViewerManager extends EventEmitter {
       wsPort,
       startTime: Date.now(),
       status: 'starting',
+      connectionState: 'disconnected',
     };
 
     this.instances.set(instanceId, instance);
@@ -127,23 +382,31 @@ export class ViewerManager extends EventEmitter {
     return instance;
   }
 
-  stopViewer(instanceId: string): boolean {
-    const process = this.processes.get(instanceId);
-    if (!process) {
+  async stopViewer(instanceId: string): Promise<boolean> {
+    const instance = this.instances.get(instanceId);
+    if (!instance) {
       return false;
     }
 
-    console.log(`Stopping viewer ${instanceId}`);
+    console.log(`[ViewerManager] Stopping viewer ${instanceId}`);
 
-    // Try graceful shutdown first
-    process.kill('SIGTERM');
+    // Show disconnecting state in UI
+    this.updateConnectionState(instanceId, 'disconnecting');
 
-    // Force kill after timeout
-    setTimeout(() => {
-      if (this.processes.has(instanceId)) {
-        process.kill('SIGKILL');
-      }
-    }, 5000);
+    const process = this.processes.get(instanceId);
+    if (process) {
+      // Try graceful shutdown first
+      process.kill('SIGTERM');
+
+      // Force kill after timeout
+      setTimeout(() => {
+        if (this.processes.has(instanceId)) {
+          process.kill('SIGKILL');
+        }
+      }, 5000);
+    } else {
+      await this.cleanup(instanceId);
+    }
 
     return true;
   }
@@ -156,8 +419,26 @@ export class ViewerManager extends EventEmitter {
     }
   }
 
-  private cleanup(instanceId: string): void {
+  private updateConnectionState(instanceId: string, state: ConnectionState): void {
+    const instance = this.instances.get(instanceId);
+    if (instance) {
+      instance.connectionState = state;
+      this.emit('status-update', instance);
+    }
+  }
+
+  private async cleanup(instanceId: string): Promise<void> {
     connectionManager.disconnect(instanceId);
+    await metaverseConnectionManager.remove(instanceId);
+
+    // Emit final disconnected state before removing
+    const instance = this.instances.get(instanceId);
+    if (instance) {
+      instance.connectionState = 'disconnected';
+      instance.status = 'disconnected';
+      this.emit('status-update', instance);
+    }
+
     this.instances.delete(instanceId);
     this.processes.delete(instanceId);
   }
@@ -199,11 +480,19 @@ export class ViewerManager extends EventEmitter {
     return connectionManager.getConnection(instanceId);
   }
 
-  stopAll(): void {
+  async stopAll(): Promise<void> {
     connectionManager.disconnectAll();
+    await metaverseConnectionManager.removeAll();
     for (const [instanceId] of this.instances) {
       this.stopViewer(instanceId);
     }
+  }
+
+  /**
+   * Get the MetaverseConnection for an instance
+   */
+  getMetaverseConnection(instanceId: string): MetaverseConnection | undefined {
+    return metaverseConnectionManager.get(instanceId);
   }
 }
 
