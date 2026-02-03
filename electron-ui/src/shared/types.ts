@@ -85,6 +85,7 @@ export interface ViewerInstance {
   startTime: number;
   status: ViewerStatus;
   connectionState: ConnectionState;
+  regionName?: string; // Set when fully arrived in a region
 }
 
 export type ViewerStatus = 'starting' | 'running' | 'connected' | 'disconnected' | 'crashed';

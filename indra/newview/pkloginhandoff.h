@@ -84,6 +84,19 @@ public:
     static bool hasSessionData();
 
     /**
+     * Check if this is a session continuation (same-region handoff).
+     * In session continuation mode, we skip UseCircuitCode and continue
+     * from the bot's sequence number.
+     */
+    static bool isSessionContinuation();
+
+    /**
+     * Get the initial sequence number for session continuation.
+     * Returns 0 if not in session continuation mode.
+     */
+    static U32 getInitialSequenceNumber();
+
+    /**
      * Get the startup state to jump to after session injection.
      * Call this after hasSessionData() returns true.
      */
@@ -102,6 +115,8 @@ private:
 
     static bool sExternalLoginMode;
     static std::atomic<bool> sHasSessionData;  // Thread-safe for WebSocket callback
+    static std::atomic<bool> sSessionContinuation;  // Same-region handoff mode
+    static std::atomic<U32> sInitialSequenceNumber;  // Starting sequence for session continuation
 };
 
 #endif // PK_LOGINHANDOFF_H

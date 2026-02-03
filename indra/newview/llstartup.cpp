@@ -1580,8 +1580,15 @@ bool idle_startup()
             // connected and capabilities are available.
             LL_INFOS("AppInit") << "External login: inventory fetch will start after region connect" << LL_ENDL;
 
+            // Set the circuit code from session data (gMessageSystem should be initialized now)
+            if (sessionData.has("circuit_code") && gMessageSystem)
+            {
+                gMessageSystem->mOurCircuitCode = static_cast<U32>(sessionData["circuit_code"].asInteger());
+                LL_INFOS("AppInit") << "External login: set circuit code = " << gMessageSystem->mOurCircuitCode << LL_ENDL;
+            }
+
             LL_INFOS("AppInit") << "External login: connecting to " << gFirstSim
-                                << " with circuit code " << gMessageSystem->mOurCircuitCode
+                                << " with circuit code " << (gMessageSystem ? gMessageSystem->mOurCircuitCode : 0)
                                 << LL_ENDL;
 
             // <FS:Pyrokitty> Skip benefits initialization for external login
@@ -2656,6 +2663,43 @@ bool idle_startup()
         gUseCircuitCallbackCalled = false;
 
         msg->enableCircuit(gFirstSim, true);
+
+        // <FS:Pyrokitty> Session continuation mode - skip UseCircuitCode
+        if (PKLoginHandoff::isSessionContinuation())
+        {
+            LL_INFOS("AppInit") << "Session continuation mode - skipping UseCircuitCode" << LL_ENDL;
+
+            // Set the initial sequence number on the circuit to continue from bot's session
+            // Note: node-metaverse uses post-increment (packet gets N, then seq becomes N+1)
+            // while the viewer uses pre-increment (seq becomes N+1, packet gets N+1)
+            // So we need to set mPacketsOutID to (sequenceNumber - 1) so the viewer's
+            // first packet matches what the bot would have sent next
+            U32 initialSeq = PKLoginHandoff::getInitialSequenceNumber();
+            U32 adjustedSeq = (initialSeq > 0) ? (initialSeq - 1) : 0;
+            LLCircuitData* cdp = msg->mCircuitInfo.findCircuit(gFirstSim);
+            if (cdp)
+            {
+                cdp->setPacketOutID(adjustedSeq);
+                LL_INFOS("AppInit") << "Bot sequence was " << initialSeq
+                    << ", set viewer mPacketsOutID to " << adjustedSeq
+                    << " (first packet will be " << (adjustedSeq + 1) << ")" << LL_ENDL;
+            }
+            else
+            {
+                LL_WARNS("AppInit") << "Could not find circuit to set sequence number!" << LL_ENDL;
+            }
+
+            // Skip UseCircuitCode - mark as already received ack
+            gGotUseCircuitCodeAck = true;
+            gUseCircuitCallbackCalled = true;
+
+            timeout.reset();
+            do_startup_frame();
+
+            return false;
+        }
+        // </FS:Pyrokitty>
+
         // now, use the circuit info to tell simulator about us!
         LL_INFOS("AppInit") << "viewer: UserLoginLocationReply() Enabling " << gFirstSim << " with code " << msg->mOurCircuitCode << LL_ENDL;
         msg->newMessageFast(_PREHASH_UseCircuitCode);
@@ -2709,7 +2753,24 @@ bool idle_startup()
         LLViewerRegion* regionp = gAgent.getRegion();
         if(regionp)
         {
-            send_complete_agent_movement(regionp->getHost());
+            // <FS:Pyrokitty> Session continuation - skip CompleteAgentMovement
+            // The bot already sent this, so the sim won't respond again.
+            // We skip it and mark movement as complete to proceed directly.
+            if (PKLoginHandoff::isSessionContinuation())
+            {
+                LL_INFOS("AppInit") << "Session continuation - skipping CompleteAgentMovement (bot already did this)" << LL_ENDL;
+                gAgentMovementCompleted = true;
+
+                // Reset the interest list so the sim re-sends all objects
+                // (otherwise sim thinks we already have them from the bot's session)
+                LL_INFOS("AppInit") << "Session continuation - resetting interest list for object refresh" << LL_ENDL;
+                regionp->resetInterestList();
+            }
+            else
+            {
+                send_complete_agent_movement(regionp->getHost());
+            }
+            // </FS:Pyrokitty>
             gAssetStorage->setUpstream(regionp->getHost());
             gCacheName->setUpstream(regionp->getHost());
             // <FS:Ansariel> OpenSim legacy economy support

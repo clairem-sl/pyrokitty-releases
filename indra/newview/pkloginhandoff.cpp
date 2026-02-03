@@ -35,6 +35,8 @@
 
 bool PKLoginHandoff::sExternalLoginMode = false;
 std::atomic<bool> PKLoginHandoff::sHasSessionData(false);
+std::atomic<bool> PKLoginHandoff::sSessionContinuation(false);
+std::atomic<U32> PKLoginHandoff::sInitialSequenceNumber(0);
 
 // Session data storage (populated by handoff, consumed by startup)
 namespace
@@ -88,6 +90,16 @@ bool PKLoginHandoff::hasSessionData()
     return sHasSessionData;
 }
 
+bool PKLoginHandoff::isSessionContinuation()
+{
+    return sSessionContinuation;
+}
+
+U32 PKLoginHandoff::getInitialSequenceNumber()
+{
+    return sInitialSequenceNumber;
+}
+
 int PKLoginHandoff::getTargetStartupState()
 {
     // Return STATE_WORLD_INIT since we have all the data needed to skip login
@@ -129,10 +141,11 @@ void PKLoginHandoff::sessionHandoff(const LLSD& data)
     gAgent.mSecureSessionID.set(data["secure_session_id"].asString());
     LL_INFOS("PKLoginHandoff") << "Set session IDs" << LL_ENDL;
 
-    // Set circuit code
-    U32 circuitCode = static_cast<U32>(data["circuit_code"].asInteger());
-    gMessageSystem->mOurCircuitCode = circuitCode;
-    LL_INFOS("PKLoginHandoff") << "Set circuit code: " << circuitCode << LL_ENDL;
+    // Note: Don't set gMessageSystem->mOurCircuitCode here - gMessageSystem
+    // isn't initialized yet. The circuit code is stored in sSessionData and
+    // will be applied during STATE_EXTERNAL_LOGIN_WAIT when the messaging
+    // system is ready.
+    LL_INFOS("PKLoginHandoff") << "Circuit code stored: " << data["circuit_code"].asInteger() << LL_ENDL;
 
     // Set name if provided
     if (data.has("first_name"))
@@ -147,6 +160,29 @@ void PKLoginHandoff::sessionHandoff(const LLSD& data)
         }
         // Note: gDisplayName is static in llstartup.cpp and will be set during STATE_WORLD_INIT
         LL_INFOS("PKLoginHandoff") << "Set username: " << gAgentUsername << LL_ENDL;
+    }
+
+    // Check for session continuation mode (same-region handoff)
+    if (data.has("session_continuation") && data["session_continuation"].asBoolean())
+    {
+        sSessionContinuation = true;
+        LL_INFOS("PKLoginHandoff") << "Session continuation mode enabled" << LL_ENDL;
+
+        // Get the sequence number to continue from
+        if (data.has("sequence_number"))
+        {
+            sInitialSequenceNumber = data["sequence_number"].asInteger();
+            LL_INFOS("PKLoginHandoff") << "Initial sequence number: " << sInitialSequenceNumber << LL_ENDL;
+        }
+        else
+        {
+            LL_WARNS("PKLoginHandoff") << "Session continuation without sequence_number!" << LL_ENDL;
+        }
+    }
+    else
+    {
+        sSessionContinuation = false;
+        sInitialSequenceNumber = 0;
     }
 
     // Mark that we have valid session data

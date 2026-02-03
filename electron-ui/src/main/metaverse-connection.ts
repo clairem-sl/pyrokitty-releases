@@ -537,6 +537,16 @@ export class MetaverseConnection extends EventEmitter {
       const regionHandle = destRegion.handle.toString();
 
       const circuit = this.bot.currentRegion.circuit;
+      const currentRegion = this.bot.currentRegion;
+
+      // For local teleports (same region), use current region's connection data
+      // The teleport event returns 'local' for sim_ip when staying in the same region
+      const isLocalTeleport = tpEvent.simIP === 'local';
+      const simIP = isLocalTeleport ? circuit.ipAddress : tpEvent.simIP;
+      const simPort = isLocalTeleport ? circuit.port : tpEvent.simPort;
+      const seedCapability = isLocalTeleport ? currentRegion.seedCapabilityURL : tpEvent.seedCapability;
+
+      console.log(`[MetaverseConnection] Handoff - isLocal: ${isLocalTeleport}, simIP: ${simIP}, simPort: ${simPort}`);
 
       // Build inventory skeleton
       const inventorySkeleton: HandoffData['inventory_skeleton'] = [];
@@ -557,9 +567,9 @@ export class MetaverseConnection extends EventEmitter {
         session_id: circuit.sessionID.toString(),
         secure_session_id: circuit.secureSessionID.toString(),
         circuit_code: circuit.circuitCode,
-        sim_ip: tpEvent.simIP,
-        sim_port: tpEvent.simPort,
-        seed_capability: tpEvent.seedCapability,
+        sim_ip: simIP,
+        sim_port: simPort,
+        seed_capability: seedCapability,
         region_handle: regionHandle,
         first_name: this.bot.agent.firstName,
         last_name: this.bot.agent.lastName,
@@ -582,11 +592,25 @@ export class MetaverseConnection extends EventEmitter {
   }
 
   /**
-   * Complete handoff - bot disconnects, viewer takes over
+   * Complete handoff - viewer takes over the session
+   * For local teleports (same region), we must close the UDP socket so the viewer
+   * can connect with the same circuit credentials. We use shutdownForHandoff()
+   * which closes only the UDP socket without:
+   * - Sending logout (which would invalidate session)
+   * - Closing caps (which would invalidate seed capability)
    */
   completeHandoff(): void {
-    // Don't fully close the bot - just mark state as handed off
-    // The viewer will take over UDP communication
+    console.log('[MetaverseConnection] Handoff complete - closing UDP for viewer takeover');
+
+    if (this.bot) {
+      try {
+        this.bot.shutdownForHandoff();
+        console.log('[MetaverseConnection] UDP circuit closed, viewer can now connect');
+      } catch (error) {
+        console.error('[MetaverseConnection] Error during handoff shutdown:', error);
+      }
+    }
+
     this.setState('viewer_connected');
   }
 
@@ -595,6 +619,13 @@ export class MetaverseConnection extends EventEmitter {
    */
   getBot(): Bot | null {
     return this.bot;
+  }
+
+  /**
+   * Get the current region name (if connected and in a region)
+   */
+  getRegionName(): string | undefined {
+    return this.bot?.currentRegion?.regionName;
   }
 }
 

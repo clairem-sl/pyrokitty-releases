@@ -34,12 +34,14 @@ export const ViewerStatus: React.FC<ViewerStatusProps> = ({
   const connectionState = instance.connectionState || 'disconnected';
   const isMetaverseOnly = connectionState === 'metaverse_connected';
   const stopping = isDisconnecting(instance);
+  const canLaunchViewer = isMetaverseOnly && !!instance.regionName && !stopping;
 
   return (
     <div className="form-section">
       <h3>{account.firstName} {account.lastName}</h3>
       <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
         Grid: {grid.name}
+        {instance.regionName && ` - ${instance.regionName}`}
       </p>
 
       <div style={{ marginBottom: '16px' }}>
@@ -55,8 +57,8 @@ export const ViewerStatus: React.FC<ViewerStatusProps> = ({
       </div>
 
       <div className="btn-group">
-        {isMetaverseOnly && onLaunchViewer && !stopping && (
-          <button className="btn btn-primary" onClick={onLaunchViewer}>
+        {isMetaverseOnly && onLaunchViewer && (
+          <button className="btn btn-primary" onClick={onLaunchViewer} disabled={!canLaunchViewer}>
             Launch Viewer
           </button>
         )}

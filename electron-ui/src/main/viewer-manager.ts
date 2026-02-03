@@ -110,6 +110,12 @@ export class ViewerManager extends EventEmitter {
       console.log(`[ViewerManager] Login successful, connected to metaverse`);
       this.updateStatus(instanceId, 'running');
 
+      // Set region name now that we're connected
+      const regionName = metaverse.getRegionName();
+      if (regionName) {
+        this.updateRegionName(instanceId, regionName);
+      }
+
       // Step 2: If viewer launch is requested, prepare handoff and launch viewer
       if (shouldLaunchViewer) {
         await this.launchViewerWithHandoff(instanceId, instance, metaverse, grid.nick, wsPort, loginPassword);
@@ -272,7 +278,7 @@ export class ViewerManager extends EventEmitter {
 
         console.log(`[ViewerManager] Handoff sent successfully`);
 
-        // Complete handoff - viewer takes over
+        // Complete handoff - viewer takes over (stops bot's UDP without logout)
         metaverse.completeHandoff();
         this.updateStatus(instanceId, 'connected');
 
@@ -423,6 +429,14 @@ export class ViewerManager extends EventEmitter {
     const instance = this.instances.get(instanceId);
     if (instance) {
       instance.connectionState = state;
+      this.emit('status-update', instance);
+    }
+  }
+
+  private updateRegionName(instanceId: string, regionName: string): void {
+    const instance = this.instances.get(instanceId);
+    if (instance) {
+      instance.regionName = regionName;
       this.emit('status-update', instance);
     }
   }

@@ -1360,6 +1360,13 @@ TPACKETID LLCircuitData::getPacketOutID() const
 }
 
 
+void LLCircuitData::setPacketOutID(TPACKETID id)
+{
+    mPacketsOutID = id;
+    LL_INFOS("Circuit") << "Set initial packet out ID to " << id << " for session continuation" << LL_ENDL;
+}
+
+
 U32 LLCircuitData::getPacketsLost() const
 {
     return mPacketsLost;

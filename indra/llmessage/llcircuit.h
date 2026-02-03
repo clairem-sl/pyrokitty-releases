@@ -122,6 +122,7 @@ public:
     U32         getPacketsOut() const;
     U32         getPacketsLost() const;
     TPACKETID   getPacketOutID() const;
+    void        setPacketOutID(TPACKETID id);  // For session continuation handoff
     bool        getTrusted() const;
     F32         getAgeInSeconds() const;
     S32         getUnackedPacketCount() const   { return mUnackedPacketCount; }

@@ -210,6 +210,10 @@ S32 start_net(S32& socket_out, int& nPort)
         return 2;
     }
 
+    // Enable SO_REUSEADDR to allow quick port reuse (for session handoff)
+    int reuse = 1;
+    setsockopt(hSocket, SOL_SOCKET, SO_REUSEADDR, (char*)&reuse, sizeof(reuse));
+
     // Name the socket (assign the local port number to receive on)
     stLclAddr.sin_family      = AF_INET;
     stLclAddr.sin_addr.s_addr = htonl(INADDR_ANY);
