@@ -5,6 +5,16 @@ import { accountManager } from './account-manager';
 import { viewerManager } from './viewer-manager';
 import { connectionManager } from './viewer-connection';
 import { metaverseConnectionManager } from './metaverse-connection';
+import { chatLogManager } from './chat-log-manager';
+
+function saveChatMessage(instanceId: string, message: ChatMessage): void {
+  const instance = viewerManager.getInstance(instanceId);
+  if (!instance) return;
+  const accountId = instance.accountId;
+  const sessionId = message.type === 'nearby' ? 'nearby' : (message.sessionId || message.fromId);
+  if (!sessionId) return;
+  chatLogManager.appendMessage(accountId, sessionId, message);
+}
 
 export function setupIpcHandlers(mainWindow: BrowserWindow): void {
   // Grid handlers
@@ -83,6 +93,7 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
         isOutgoing: true,
       };
       mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...outMessage });
+      saveChatMessage(instanceId, outMessage);
     } else if (instance?.connectionState === 'metaverse_connected') {
       const metaverse = metaverseConnectionManager.get(instanceId);
       if (!metaverse) {
@@ -117,6 +128,7 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
         isOutgoing: true,
       };
       mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...outMessage });
+      saveChatMessage(instanceId, outMessage);
     } else if (instance?.connectionState === 'metaverse_connected') {
       const metaverse = metaverseConnectionManager.get(instanceId);
       if (!metaverse) {
@@ -151,6 +163,7 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
         isOutgoing: true,
       };
       mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...outMessage });
+      saveChatMessage(instanceId, outMessage);
     } else if (instance?.connectionState === 'metaverse_connected') {
       const metaverse = metaverseConnectionManager.get(instanceId);
       if (!metaverse) {
@@ -252,6 +265,19 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     }
   });
 
+  // Chat log persistence handlers
+  ipcMain.handle(IPC_CHANNELS.LOAD_CHAT_LOG, async (_, instanceId: string, sessionId: string) => {
+    const instance = viewerManager.getInstance(instanceId);
+    if (!instance) return [];
+    return chatLogManager.loadMessages(instance.accountId, sessionId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LOAD_ALL_CHAT_LOGS, async (_, instanceId: string) => {
+    const instance = viewerManager.getInstance(instanceId);
+    if (!instance) return [];
+    return chatLogManager.loadAllSessions(instance.accountId);
+  });
+
   // Forward WebSocket events to renderer
   connectionManager.on('viewer-connected', (instanceId: string, apis: any[]) => {
     mainWindow.webContents.send(IPC_CHANNELS.VIEWER_WS_CONNECTED, { instanceId, apis });
@@ -278,6 +304,7 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       };
       console.log(`[IPC] Forwarding chat message to renderer:`, message);
       mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...message });
+      saveChatMessage(instanceId, message);
     }
   });
 
@@ -288,14 +315,17 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
   metaverseConnectionManager.on('nearby-chat', (instanceId: string, message: ChatMessage) => {
     mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...message });
+    saveChatMessage(instanceId, message);
   });
 
   metaverseConnectionManager.on('im', (instanceId: string, message: ChatMessage) => {
     mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...message });
+    saveChatMessage(instanceId, message);
   });
 
   metaverseConnectionManager.on('group-chat', (instanceId: string, message: ChatMessage) => {
     mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...message });
+    saveChatMessage(instanceId, message);
   });
 
   metaverseConnectionManager.on('friends-update', (instanceId: string, friends: any[]) => {

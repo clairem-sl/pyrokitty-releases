@@ -160,6 +160,10 @@ export const IPC_CHANNELS = {
   START_IM_SESSION: 'chat:start-im',
   START_GROUP_CHAT: 'chat:start-group',
   MARK_SESSION_READ: 'chat:mark-read',
+
+  // Chat log persistence
+  LOAD_CHAT_LOG: 'chat-log:load',
+  LOAD_ALL_CHAT_LOGS: 'chat-log:load-all',
 } as const;
 
 // IPC Request/Response types

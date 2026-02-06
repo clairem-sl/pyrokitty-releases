@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ipcRenderer } from 'electron';
 import { IPC_CHANNELS, ChatMessage, ChatSession, ChatType } from '../../shared/types';
 
@@ -12,7 +12,10 @@ export function useChat({ instanceId }: UseChatOptions) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
-  // Load initial chat sessions
+  // Track message IDs we've already loaded from history to avoid duplicates
+  const loadedIdsRef = useRef<Set<string>>(new Set());
+
+  // Load initial chat sessions and chat history
   useEffect(() => {
     if (!instanceId) return;
 
@@ -22,6 +25,35 @@ export function useChat({ instanceId }: UseChatOptions) {
         setSessions(data || []);
       } catch (e) {
         console.error('Failed to load chat sessions:', e);
+      }
+
+      // Load saved chat history
+      try {
+        const allLogs: { sessionId: string; messages: ChatMessage[] }[] =
+          await ipcRenderer.invoke(IPC_CHANNELS.LOAD_ALL_CHAT_LOGS, instanceId);
+
+        if (allLogs && allLogs.length > 0) {
+          const ids = new Set<string>();
+          const sessionMap = new Map<string, ChatMessage[]>();
+
+          for (const { sessionId, messages: msgs } of allLogs) {
+            for (const msg of msgs) {
+              ids.add(msg.id);
+            }
+            if (sessionId === 'nearby') {
+              setNearbyMessages(msgs);
+            } else {
+              sessionMap.set(sessionId, msgs);
+            }
+          }
+
+          if (sessionMap.size > 0) {
+            setMessages(sessionMap);
+          }
+          loadedIdsRef.current = ids;
+        }
+      } catch (e) {
+        console.error('Failed to load chat history:', e);
       }
     };
     load();
@@ -48,10 +80,15 @@ export function useChat({ instanceId }: UseChatOptions) {
       };
 
       if (message.type === 'nearby') {
-        setNearbyMessages((prev) => [...prev, message]);
+        setNearbyMessages((prev) => {
+          // Skip if already loaded from history
+          if (loadedIdsRef.current.has(message.id)) return prev;
+          return [...prev, message];
+        });
       } else {
         // IM or group message - store by session
         const sessionId = message.sessionId || message.fromId;
+        if (loadedIdsRef.current.has(message.id)) return; // Skip duplicates from history
         setMessages((prev) => {
           const updated = new Map(prev);
           const existing = updated.get(sessionId) || [];

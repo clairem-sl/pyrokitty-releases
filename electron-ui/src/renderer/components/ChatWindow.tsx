@@ -245,7 +245,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
 
             {/* Chat area */}
-            <div className="split-main">
+            <div className="split-main" onClick={() => activeSessionId && onSelectSession(activeSessionId)}>
               {activeSession && activeSession.type === 'im' ? (
                 <ChatPanel
                   messages={activeSessionMessages}
@@ -298,7 +298,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
 
             {/* Chat area */}
-            <div className="split-main">
+            <div className="split-main" onClick={() => activeSessionId && onSelectSession(activeSessionId)}>
               {activeSession && activeSession.type === 'group' ? (
                 <ChatPanel
                   messages={activeSessionMessages}

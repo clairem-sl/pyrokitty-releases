@@ -4,6 +4,7 @@ import { setupIpcHandlers } from './ipc-handlers';
 import { gridManager } from './grid-manager';
 import { accountManager } from './account-manager';
 import { viewerManager } from './viewer-manager';
+import { chatLogManager } from './chat-log-manager';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -46,6 +47,9 @@ async function createWindow(): Promise<void> {
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
+  // Flush any pending chat logs before exit
+  chatLogManager.flushAll();
+
   // Stop all viewers when app closes
   viewerManager.stopAll();
 
