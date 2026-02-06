@@ -400,14 +400,18 @@ export class CommunicationsCommands extends CommandsBase
             EstateID: 0
         };
         circuit.sendMessage(im, PacketFlags.Reliable);
-        await Utils.waitOrTimeOut(this.currentRegion.clientEvents.onGroupChatSessionJoin, 10000, (event: GroupChatSessionJoinEvent) =>
+        const event = await Utils.waitOrTimeOut(this.currentRegion.clientEvents.onGroupChatSessionJoin, 10000, (evt: GroupChatSessionJoinEvent) =>
         {
-            if (event.sessionID.toString() === groupID.toString())
+            if (evt.sessionID && evt.sessionID.toString() === groupID.toString())
             {
                 return FilterResponse.Finish;
             }
             return FilterResponse.NoMatch;
         });
+        if (event && !event.success)
+        {
+            throw new Error('Failed to start group chat session');
+        }
     }
 
     public async moderateGroupChat(groupID: UUID | string, memberID: UUID | string, muteText: boolean, muteVoice: boolean): Promise<any>

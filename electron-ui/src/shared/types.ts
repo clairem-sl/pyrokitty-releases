@@ -66,6 +66,23 @@ export interface Group {
   powers?: string;
 }
 
+// Nearby avatar types
+export interface NearbyAvatar {
+  id: string;
+  name: string;
+  distance?: number;
+  title?: string;
+  position?: { x: number; y: number; z: number };
+}
+
+// Region info for mini-map
+export interface RegionInfo {
+  name: string;
+  x: number; // Grid X coordinate
+  y: number; // Grid Y coordinate
+  mapImageUrl: string;
+}
+
 // Account stored in accounts.json
 export interface Account {
   id: string;
@@ -126,6 +143,14 @@ export const IPC_CHANNELS = {
   GET_GROUPS: 'groups:get',
   GROUPS_UPDATE: 'groups:update',
 
+  // Nearby avatars
+  GET_NEARBY_AVATARS: 'avatars:get-nearby',
+  NEARBY_AVATARS_UPDATE: 'avatars:nearby-update',
+
+  // Region info
+  GET_REGION_INFO: 'region:get-info',
+  REGION_INFO_UPDATE: 'region:info-update',
+
   // Connection state
   CONNECTION_STATE_UPDATE: 'connection:state-update',
 
@@ -134,6 +159,7 @@ export const IPC_CHANNELS = {
   CHAT_SESSION_UPDATE: 'chat:session-update',
   START_IM_SESSION: 'chat:start-im',
   START_GROUP_CHAT: 'chat:start-group',
+  MARK_SESSION_READ: 'chat:mark-read',
 } as const;
 
 // IPC Request/Response types

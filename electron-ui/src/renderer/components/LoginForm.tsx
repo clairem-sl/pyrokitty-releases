@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PasswordInput } from '@mantine/core';
+import { TextInput, PasswordInput, NativeSelect, Checkbox, Button, Paper, Group, Title, Alert } from '@mantine/core';
 import { Grid, Account } from '../../shared/types';
 
 interface LoginFormProps {
@@ -24,9 +24,10 @@ export const LoginForm: React.FC<LoginFormProps> = ({
   const isLaunchMode = !!account;
   const hasPassword = isLaunchMode && !!account.password;
 
-  const [selectedGridId, setSelectedGridId] = useState(account?.gridId || '');
+  const defaultGridId = grids.find(g => g.nick === 'agni')?.id || grids[0]?.id || '';
+  const [selectedGridId, setSelectedGridId] = useState(account?.gridId || defaultGridId);
   const [firstName, setFirstName] = useState(account?.firstName || '');
-  const [lastName, setLastName] = useState(account?.lastName || '');
+  const [lastName, setLastName] = useState(account?.lastName || 'Resident');
   const [password, setPassword] = useState(account?.password || '');
   const [savePassword, setSavePassword] = useState(false);
 
@@ -43,60 +44,54 @@ export const LoginForm: React.FC<LoginFormProps> = ({
   const selectedGrid = grids.find(g => g.id === selectedGridId);
   const canSubmit = isLaunchMode ? (hasPassword || password.length > 0) : (selectedGridId && firstName && lastName && password);
 
-  return (
-    <div className="form-section">
-      <h3>{isLaunchMode ? 'Login' : 'Add Account'}</h3>
+  const gridOptions = grids.map((grid) => ({
+    value: grid.id,
+    label: grid.name,
+  }));
 
-      {error && <div className="message error">{error}</div>}
+  return (
+    <Paper bg="var(--mantine-color-dark-6)" radius="md" p="lg" mb="lg">
+      <Title order={3} mb="md">{isLaunchMode ? 'Login' : 'Add Account'}</Title>
+
+      {error && <Alert color="red" mb="md">{error}</Alert>}
 
       <form onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label htmlFor="grid">Grid</label>
-          {isLaunchMode ? (
-            <input type="text" value={selectedGrid?.name || ''} disabled />
-          ) : (
-            <select
-              id="grid"
-              value={selectedGridId}
-              onChange={(e) => setSelectedGridId(e.target.value)}
-              required
-            >
-              <option value="" disabled>Select Grid...</option>
-              {grids.map((grid) => (
-                <option key={grid.id} value={grid.id}>
-                  {grid.name}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
+        {isLaunchMode ? (
+          <TextInput
+            label="Grid"
+            value={selectedGrid?.name || ''}
+            disabled
+            mb="md"
+          />
+        ) : (
+          <NativeSelect
+            label="Grid"
+            value={selectedGridId}
+            onChange={(e) => setSelectedGridId(e.currentTarget.value)}
+            data={gridOptions}
+            required
+            mb="md"
+          />
+        )}
 
-        <div className="form-row">
-          <div className="form-group">
-            <label htmlFor="firstName">First Name</label>
-            <input
-              id="firstName"
-              type="text"
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              placeholder="First"
-              required
-              disabled={isLaunchMode}
-            />
-          </div>
-          <div className="form-group">
-            <label htmlFor="lastName">Last Name</label>
-            <input
-              id="lastName"
-              type="text"
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-              placeholder="Last"
-              required
-              disabled={isLaunchMode}
-            />
-          </div>
-        </div>
+        <Group grow mb="md">
+          <TextInput
+            label="First Name"
+            value={firstName}
+            onChange={(e) => setFirstName(e.currentTarget.value)}
+            placeholder="First"
+            required
+            disabled={isLaunchMode}
+          />
+          <TextInput
+            label="Last Name"
+            value={lastName}
+            onChange={(e) => setLastName(e.currentTarget.value)}
+            placeholder="Last"
+            required
+            disabled={isLaunchMode}
+          />
+        </Group>
 
         <PasswordInput
           label="Password"
@@ -109,34 +104,30 @@ export const LoginForm: React.FC<LoginFormProps> = ({
         />
 
         {!isLaunchMode && (
-          <div className="form-group checkbox-group">
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={savePassword}
-                onChange={(e) => setSavePassword(e.target.checked)}
-              />
-              <span>Save password</span>
-            </label>
-          </div>
+          <Checkbox
+            label="Save password"
+            checked={savePassword}
+            onChange={(e) => setSavePassword(e.currentTarget.checked)}
+            mb="md"
+          />
         )}
 
-        <div className="btn-group">
-          <button type="submit" className="btn btn-primary" disabled={!canSubmit}>
+        <Group mt="md">
+          <Button type="submit" disabled={!canSubmit}>
             {isLaunchMode ? 'Login' : 'Save Account'}
-          </button>
+          </Button>
           {isLaunchMode && onRemove && (
-            <button type="button" className="btn btn-danger" onClick={onRemove}>
+            <Button color="red" onClick={onRemove}>
               Remove
-            </button>
+            </Button>
           )}
           {!isLaunchMode && (
-            <button type="button" className="btn btn-secondary" onClick={onCancel}>
+            <Button variant="default" onClick={onCancel}>
               Cancel
-            </button>
+            </Button>
           )}
-        </div>
+        </Group>
       </form>
-    </div>
+    </Paper>
   );
 };

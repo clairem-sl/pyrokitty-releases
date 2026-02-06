@@ -51,6 +51,26 @@ interface HandoffData {
   // Session continuation fields
   session_continuation?: boolean;
   sequence_number?: number;
+  // Items already attached on the bot - viewer should skip re-attaching these
+  attached_items?: string[];
+  // Attachment objects with local IDs - viewer can request these from sim
+  attached_objects?: Array<{ localID: number; itemID: string }>;
+  // Cached packets for replay
+  cached_packets?: {
+    layer_data: Array<{ type: number; data: string }>;
+    region_handshake: any;
+    parcel_overlay: Array<{ sequenceId: number; data: string }>;
+    // Structured ObjectUpdate data for ALL region objects
+    object_updates: Array<{
+      regionHandle: string;
+      timeDilation: number;
+      type: 'ObjectUpdate' | 'ObjectUpdateCompressed';
+      objects: Array<{
+        updateFlags: number;
+        data: string;  // base64 encoded
+      }>;
+    }>;
+  };
 }
 
 function launchViewer(localPort: number): ChildProcess {
@@ -185,6 +205,16 @@ async function main() {
     console.log(`    Circuit Code: ${circuit.circuitCode}`);
     console.log(`    Remote: ${circuit.ipAddress}:${circuit.port}`);
 
+    // Wait for terrain to be received so we can cache it for handoff
+    console.log('\n[2.5] Waiting for terrain data to be received...');
+    try {
+      await bot.currentRegion.waitForTerrain();
+      console.log('    Terrain received!');
+    } catch (e) {
+      console.log('    Terrain timeout - proceeding anyway');
+    }
+    console.log(`    Sequence number after terrain: ${circuit.getSequenceNumber()}`);
+
     // Step 3: Get local UDP port and sequence number
     const localPort = circuit.getLocalPort();
     const sequenceNumber = circuit.getSequenceNumber();
@@ -199,6 +229,9 @@ async function main() {
     console.log(`\n[4] Looking up region ${currentRegionName}...`);
     const regionInfo = await bot.clientCommands.grid.getRegionByName(currentRegionName);
     console.log(`    Region handle: ${regionInfo.handle.toString()}`);
+
+    // Sleep 5 seconds to make the test more similar to a real world example.
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     // Step 5: Close bot's UDP socket to free the port
     console.log('\n[5] Closing bot UDP socket to free port...');
@@ -254,6 +287,32 @@ async function main() {
 
     console.log(`    sequence_number: ${sequenceNumber} (for session continuation)`);
 
+    // Get cached packets for handoff (terrain, region handshake, parcel overlay, attachment objects)
+    const cachedPackets = bot.currentRegion.getCachedPacketsForHandoff();
+    console.log(`    Cached packets - LayerData: ${cachedPackets.layerData.length}, ParcelOverlay: ${cachedPackets.parcelOverlay.length}, ObjectUpdates: ${cachedPackets.objectUpdates.length}, RegionHandshake: ${cachedPackets.regionHandshake ? 'yes' : 'no'}`);
+
+    // Calculate total cached data size
+    let totalLayerDataSize = 0;
+    for (const ld of cachedPackets.layerData) {
+      totalLayerDataSize += Buffer.from(ld.data, 'base64').length;
+    }
+    let totalParcelOverlaySize = 0;
+    for (const po of cachedPackets.parcelOverlay) {
+      totalParcelOverlaySize += Buffer.from(po.data, 'base64').length;
+    }
+    console.log(`    Cached data sizes - LayerData: ${totalLayerDataSize} bytes, ParcelOverlay: ${totalParcelOverlaySize} bytes`);
+
+    // Get list of items already attached on the bot
+    const attachedItems = bot.agent.getAttachedItemIDs();
+    const attachedObjects = bot.agent.getAttachedObjectInfo();
+    console.log(`    Currently attached items: ${attachedItems.length}`);
+    if (attachedItems.length > 0) {
+      console.log(`    Attached item IDs: ${attachedItems.join(', ')}`);
+    }
+    if (attachedObjects.length > 0) {
+      console.log(`    Attached object local IDs: ${attachedObjects.map(o => o.localID).join(', ')}`);
+    }
+
     const handoffData: HandoffData = {
       agent_id: bot.agent.agentID.toString(),
       session_id: circuit.sessionID.toString(),
@@ -276,6 +335,17 @@ async function main() {
       // Session continuation mode - skip UseCircuitCode, continue from bot's sequence
       session_continuation: true,
       sequence_number: sequenceNumber,
+      // Items already attached - viewer should skip re-attaching these
+      attached_items: attachedItems,
+      // Attachment objects with local IDs - viewer can request these from sim
+      attached_objects: attachedObjects,
+      // Cached packets for replay to viewer
+      cached_packets: {
+        layer_data: cachedPackets.layerData,
+        region_handshake: cachedPackets.regionHandshake,
+        parcel_overlay: cachedPackets.parcelOverlay,
+        object_updates: cachedPackets.objectUpdates,
+      },
     };
 
     await sendHandoff(viewerWs, handoffData);
@@ -283,6 +353,9 @@ async function main() {
     console.log('\n[9] Handoff complete!');
     console.log('    The viewer should now connect to the sim using the same UDP endpoint.');
 
+
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    console.log('\nComplete!');
   } catch (error) {
     console.error('\nError:', error);
   } finally {

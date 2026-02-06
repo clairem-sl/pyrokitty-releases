@@ -227,7 +227,7 @@ export class FriendCommands extends CommandsBase
                 for (const agentEntry of msg.AgentBlock)
                 {
                     const uuidStr = agentEntry.AgentID.toString();
-                    if (this.friendsList.has(uuidStr) === undefined)
+                    if (!this.friendsList.has(uuidStr))
                     {
                         const friend = await this.bot.clientCommands.grid.avatarKey2Name(agentEntry.AgentID) as Friend;
                         friend.online = false;
@@ -253,7 +253,7 @@ export class FriendCommands extends CommandsBase
                 for (const agentEntry of msg.AgentBlock)
                 {
                     const uuidStr = agentEntry.AgentID.toString();
-                    if (this.friendsList.has(uuidStr) === undefined)
+                    if (!this.friendsList.has(uuidStr))
                     {
                         const friend = await this.bot.clientCommands.grid.avatarKey2Name(agentEntry.AgentID) as Friend;
                         friend.online = false;

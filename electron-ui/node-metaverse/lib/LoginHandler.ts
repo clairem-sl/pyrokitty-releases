@@ -1,13 +1,10 @@
-import validator from 'validator';
 import * as xmlrpc from 'xmlrpc';
-import * as fs from 'fs';
 import * as path from 'path';
 import { LoginError } from './classes/LoginError';
 import type { LoginParameters } from './classes/LoginParameters';
 import { LoginResponse } from './classes/LoginResponse';
 import type { ClientEvents } from './classes/ClientEvents';
 import { Utils } from './classes/Utils';
-import { UUID } from './classes/UUID';
 import type { BotOptionFlags } from './enums/BotOptionFlags';
 import { URL } from 'url';
 import * as os from 'os';
@@ -18,31 +15,26 @@ const packageJson = require(packageJsonPath);
 const version = packageJson.version;
 
 
-export class LoginHandler
-{
+export class LoginHandler {
     private readonly clientEvents: ClientEvents;
     private readonly options: BotOptionFlags;
 
-    public constructor(ce: ClientEvents, options: BotOptionFlags)
-    {
+    public constructor(ce: ClientEvents, options: BotOptionFlags) {
         this.clientEvents = ce;
         this.options = options;
     }
 
-    public async Login(params: LoginParameters): Promise<LoginResponse>
-    {
+    public async Login(params: LoginParameters): Promise<LoginResponse> {
         const loginURI = new URL(params.url);
 
         let secure = false;
 
-        if (loginURI.protocol !== null && loginURI.protocol.trim().toLowerCase() === 'https:')
-        {
+        if (loginURI.protocol !== null && loginURI.protocol.trim().toLowerCase() === 'https:') {
             secure = true;
         }
 
         let port: string | null = loginURI.port;
-        if (port === null)
-        {
+        if (port === null) {
             port = secure ? '443' : '80';
         }
 
@@ -58,45 +50,23 @@ export class LoginHandler
 
         const nameHash = Utils.SHA1String(params.firstName + params.lastName + viewerDigest);
         const macAddress: string[] = [];
-        for (let i = 0; i < 12; i = i + 2)
-        {
+        for (let i = 0; i < 12; i = i + 2) {
             macAddress.push(nameHash.substring(i, i + 2));
         }
 
-        let hardwareID: string | null = null;
-
-        const hardwareIDFile = path.resolve(__dirname, 'deviceToken.json');
-        try
-        {
-            const hwID = await fs.promises.readFile(hardwareIDFile);
-            const data = JSON.parse(hwID.toString('utf-8'));
-            hardwareID = data.id0;
-        }
-        catch (_e: unknown)
-        {
-            // Ignore any error
-        }
-
-        if (hardwareID === null || !validator.isUUID(String(hardwareID), 'loose'))
-        {
-            hardwareID = UUID.random().toString();
-            await fs.promises.writeFile(hardwareIDFile, JSON.stringify({ id0: hardwareID }));
-        }
+        const hardwareID = '00000000-0000-0000-0000-00000000eeef';
 
         const mfaToken = params.token ?? '';
         const mfaHash = params.mfa_hash ?? '';
 
-        return new Promise<LoginResponse>((resolve, reject) =>
-        {
+        return new Promise<LoginResponse>((resolve, reject) => {
             let password = params.password;
-            if (params.getHashedPassword)
-            {
+            if (params.getHashedPassword) {
                 password = params.getHashedPassword();
             }
 
             let platform = '???'
-            switch (os.platform())
-            {
+            switch (os.platform()) {
                 case 'darwin':
                     platform = 'mac';
                     break;
@@ -154,26 +124,21 @@ export class LoginHandler
                             'global-textures'
                         ]
                     }
-                ], (error: object, value: any) =>
-                {
-                    if (error)
-                    {
-                        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
-                        reject(error);
+                ], (error: object, value: any) => {
+                if (error) {
+                    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+                    reject(error);
+                }
+                else {
+                    if (!value.login || value.login === 'false') {
+                        reject(new LoginError(value));
                     }
-                    else
-                    {
-                        if (!value.login || value.login === 'false')
-                        {
-                            reject(new LoginError(value));
-                        }
-                        else
-                        {
-                            const response = new LoginResponse(value, this.clientEvents, this.options);
-                            resolve(response);
-                        }
+                    else {
+                        const response = new LoginResponse(value, this.clientEvents, this.options);
+                        resolve(response);
                     }
                 }
+            }
             );
         });
     }

@@ -1,6 +1,7 @@
 import React from 'react';
-import { Account, Grid } from '../../shared/types';
-import { StatusIndicator, isInstanceRunning } from './StatusIndicator';
+import { Text } from '@mantine/core';
+import { Account, Grid, ViewerInstance } from '../../shared/types';
+import { StatusIndicator, isInstanceRunning, isDisconnecting } from './StatusIndicator';
 
 interface AccountListProps {
   accounts: Account[];
@@ -9,6 +10,8 @@ interface AccountListProps {
   selectedAccountId: string | null;
   onSelectAccount: (accountId: string) => void;
   onAddAccount: () => void;
+  onStopInstance: (instanceId: string) => void;
+  onLaunchViewer: (instanceId: string) => void;
 }
 
 export const AccountList: React.FC<AccountListProps> = ({
@@ -18,6 +21,8 @@ export const AccountList: React.FC<AccountListProps> = ({
   selectedAccountId,
   onSelectAccount,
   onAddAccount,
+  onStopInstance,
+  onLaunchViewer,
 }) => {
   const getInstanceForAccount = (accountId: string): ViewerInstance | undefined => {
     return instances.find((i) => i.accountId === accountId);
@@ -32,18 +37,20 @@ export const AccountList: React.FC<AccountListProps> = ({
       <h2>Accounts</h2>
       <div className="account-list">
         {accounts.length === 0 ? (
-          <div className="empty-state">
-            <p>No accounts yet</p>
-          </div>
+          <Text c="dimmed" ta="center" py="xl">No accounts yet</Text>
         ) : (
           accounts.map((account) => {
             const instance = getInstanceForAccount(account.id);
-            const isRunning = isInstanceRunning(instance);
+            const running = isInstanceRunning(instance);
+            const stopping = isDisconnecting(instance);
+
+            const isMetaverseOnly = instance?.connectionState === 'metaverse_connected';
+            const canLaunchViewer = isMetaverseOnly && !!instance?.regionName && !stopping;
 
             return (
               <div
                 key={account.id}
-                className={`account-item ${selectedAccountId === account.id ? 'selected' : ''} ${isRunning ? 'running' : ''}`}
+                className={`account-item ${selectedAccountId === account.id ? 'selected' : ''} ${running ? 'running' : ''}`}
                 onClick={() => onSelectAccount(account.id)}
               >
                 <div className="account-name">
@@ -52,7 +59,39 @@ export const AccountList: React.FC<AccountListProps> = ({
                 <div className="account-grid">
                   {getGridName(account.gridId)}
                 </div>
-                <StatusIndicator instance={instance} />
+                <div className="account-status-row">
+                  <StatusIndicator instance={instance} />
+                  {running && instance && (
+                    <button
+                      className="account-stop-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onStopInstance(instance.id);
+                      }}
+                      disabled={stopping}
+                      title={stopping ? 'Stopping...' : 'Logout'}
+                    >
+                      {stopping ? '...' : 'Logout'}
+                    </button>
+                  )}
+                </div>
+                {running && instance?.regionName && (
+                  <div className="account-region">
+                    {instance.regionName}
+                  </div>
+                )}
+                {isMetaverseOnly && instance && (
+                  <button
+                    className="account-launch-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onLaunchViewer(instance.id);
+                    }}
+                    disabled={!canLaunchViewer}
+                  >
+                    Launch Viewer
+                  </button>
+                )}
               </div>
             );
           })

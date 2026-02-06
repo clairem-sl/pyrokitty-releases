@@ -151,6 +151,16 @@ export class ViewerConnection extends EventEmitter {
     });
   }
 
+  /**
+   * Show or hide native chat UI in the viewer.
+   */
+  setChatVisible(visible: boolean): void {
+    this.send('ChatAPI', {
+      op: 'setVisible',
+      visible,
+    });
+  }
+
   private handleMessage(rawData: string): void {
     try {
       const message = JSON.parse(rawData);
@@ -169,6 +179,7 @@ export class ViewerConnection extends EventEmitter {
 
       // Handle pump messages
       if (message.pump && message.data !== undefined) {
+        console.log(`[ViewerConnection ${this.instanceId}] Pump message: ${message.pump}`, message.data);
         this.emit('message', message.pump, message.data);
         return;
       }

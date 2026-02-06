@@ -25,6 +25,8 @@
 #define PK_LOGINHANDOFF_H
 
 #include "lleventapi.h"
+#include "lluuid.h"  // includes uuid_vec_t typedef
+#include "llsd.h"
 #include <atomic>
 
 /**
@@ -118,5 +120,14 @@ private:
     static std::atomic<bool> sSessionContinuation;  // Same-region handoff mode
     static std::atomic<U32> sInitialSequenceNumber;  // Starting sequence for session continuation
 };
+
+// Helper function to get session data
+LLSD PKLoginHandoff_GetSessionData();
+
+// Helper function to check if an item is pre-attached (should be skipped)
+bool PKLoginHandoff_IsItemPreAttached(const LLUUID& item_id);
+
+// Helper function to get all pre-attached item IDs
+void PKLoginHandoff_GetPreAttachedItems(uuid_vec_t& item_ids);
 
 #endif // PK_LOGINHANDOFF_H

@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
 import { ChatPanel } from './ChatPanel';
-import { FriendsList } from './FriendsList';
-import { GroupsList } from './GroupsList';
-import { ChatMessage, ChatSession, Friend, Group, ConnectionState } from '../../shared/types';
+import { MiniMap } from './MiniMap';
+import { ChatMessage, ChatSession, Friend, Group, ConnectionState, NearbyAvatar, RegionInfo } from '../../shared/types';
 
-type Tab = 'nearby' | 'ims' | 'friends' | 'groups';
+type Tab = 'nearby' | 'messages' | 'groups';
 
 interface ChatWindowProps {
   connectionState: ConnectionState;
   // Nearby chat
   nearbyMessages: ChatMessage[];
   onSendNearbyChat: (message: string, type?: 'whisper' | 'normal' | 'shout') => void;
+  // Nearby avatars
+  nearbyAvatars: NearbyAvatar[];
   // IM/Group sessions
   sessions: ChatSession[];
   activeSessionId: string | null;
@@ -22,15 +23,20 @@ interface ChatWindowProps {
   onlineFriends: Friend[];
   offlineFriends: Friend[];
   onStartIMWithFriend: (friend: Friend) => void;
+  // Nearby avatar IM
+  onStartIMWithAvatar: (avatar: NearbyAvatar) => void;
   // Groups
   groups: Group[];
   onOpenGroupChat: (group: Group) => void;
+  // Region info for mini-map
+  regionInfo: RegionInfo | null;
 }
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
   connectionState,
   nearbyMessages,
   onSendNearbyChat,
+  nearbyAvatars,
   sessions,
   activeSessionId,
   onSelectSession,
@@ -40,8 +46,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onlineFriends,
   offlineFriends,
   onStartIMWithFriend,
+  onStartIMWithAvatar,
   groups,
   onOpenGroupChat,
+  regionInfo,
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>('nearby');
 
@@ -59,6 +67,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     );
   }
 
+  const imSessions = sessions.filter((s) => s.type === 'im');
+  const groupSessions = sessions.filter((s) => s.type === 'group');
+
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const activeSessionMessages = activeSessionId ? getSessionMessages(activeSessionId) : [];
 
@@ -71,9 +82,19 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
-  const imSessions = sessions.filter((s) => s.type === 'im');
-  const groupSessions = sessions.filter((s) => s.type === 'group');
-  const totalUnread = sessions.reduce((sum, s) => sum + s.unreadCount, 0);
+  // Get IM session for a friend
+  const getIMSessionForFriend = (friendId: string): ChatSession | undefined => {
+    return imSessions.find((s) => s.participantId === friendId);
+  };
+
+  // Get group session
+  const getGroupSession = (groupId: string): ChatSession | undefined => {
+    return groupSessions.find((s) => s.groupId === groupId);
+  };
+
+  // Count unread for tabs
+  const imUnread = imSessions.reduce((sum, s) => sum + s.unreadCount, 0);
+  const groupUnread = groupSessions.reduce((sum, s) => sum + s.unreadCount, 0);
 
   return (
     <div className="chat-window">
@@ -86,125 +107,211 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           Nearby
         </button>
         <button
-          className={`chat-tab ${activeTab === 'ims' ? 'active' : ''}`}
-          onClick={() => setActiveTab('ims')}
+          className={`chat-tab ${activeTab === 'messages' ? 'active' : ''}`}
+          onClick={() => {
+            setActiveTab('messages');
+            // Mark active session as read when switching to Messages tab
+            if (activeSessionId && activeSession?.type === 'im') {
+              onSelectSession(activeSessionId);
+            }
+          }}
         >
-          IMs
-          {imSessions.some((s) => s.unreadCount > 0) && (
-            <span className="chat-tab-badge">
-              {imSessions.reduce((sum, s) => sum + s.unreadCount, 0)}
-            </span>
-          )}
-        </button>
-        <button
-          className={`chat-tab ${activeTab === 'friends' ? 'active' : ''}`}
-          onClick={() => setActiveTab('friends')}
-        >
-          Friends ({onlineFriends.length})
+          Messages
+          {imUnread > 0 && <span className="chat-tab-badge">{imUnread}</span>}
         </button>
         <button
           className={`chat-tab ${activeTab === 'groups' ? 'active' : ''}`}
-          onClick={() => setActiveTab('groups')}
+          onClick={() => {
+            setActiveTab('groups');
+            // Mark active session as read when switching to Groups tab
+            if (activeSessionId && activeSession?.type === 'group') {
+              onSelectSession(activeSessionId);
+            }
+          }}
         >
           Groups ({groups.length})
+          {groupUnread > 0 && <span className="chat-tab-badge">{groupUnread}</span>}
         </button>
       </div>
 
       {/* Tab content */}
       <div className="chat-content">
         {activeTab === 'nearby' && (
-          <ChatPanel
-            messages={nearbyMessages}
-            onSendMessage={onSendNearbyChat}
-            title="Nearby Chat"
-            placeholder="Say something..."
-            showChatTypes={true}
-          />
-        )}
-
-        {activeTab === 'ims' && (
-          <div className="im-container">
-            {/* Session list */}
-            <div className="im-sessions">
-              {imSessions.length === 0 ? (
-                <div className="im-sessions-empty">
-                  No IM conversations yet
-                </div>
-              ) : (
-                imSessions.map((session) => (
-                  <div
-                    key={session.id}
-                    className={`im-session ${session.id === activeSessionId ? 'active' : ''}`}
-                    onClick={() => onSelectSession(session.id)}
-                  >
-                    <span className="im-session-name">{session.name}</span>
-                    {session.unreadCount > 0 && (
-                      <span className="im-session-badge">{session.unreadCount}</span>
-                    )}
-                  </div>
-                ))
-              )}
+          <div className="split-panel">
+            {/* Nearby avatars sidebar */}
+            <div className="split-sidebar">
+              <div className="split-sidebar-section">
+                <div className="split-sidebar-header">Nearby ({nearbyAvatars.length})</div>
+                {nearbyAvatars.length === 0 ? (
+                  <div className="split-sidebar-empty">No avatars nearby</div>
+                ) : (
+                  nearbyAvatars.map((avatar) => (
+                    <div
+                      key={avatar.id}
+                      className="split-sidebar-item"
+                      title={avatar.title || undefined}
+                    >
+                      <span className="avatar-status-dot" />
+                      <span className="split-sidebar-name">{avatar.name}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="split-sidebar-map">
+                <MiniMap
+                  regionInfo={regionInfo}
+                  nearbyAvatars={nearbyAvatars}
+                  onAvatarClick={(avatar) => {
+                    onStartIMWithAvatar(avatar);
+                    setActiveTab('messages');
+                  }}
+                />
+              </div>
             </div>
 
-            {/* Active IM chat */}
-            {activeSession && activeSession.type === 'im' ? (
+            {/* Chat area */}
+            <div className="split-main">
               <ChatPanel
-                messages={activeSessionMessages}
-                onSendMessage={handleSendSessionMessage}
-                title={activeSession.name}
-                placeholder={`Message ${activeSession.name}...`}
+                messages={nearbyMessages}
+                onSendMessage={onSendNearbyChat}
+                title="Nearby Chat"
+                placeholder="Say something..."
+                showChatTypes={true}
               />
-            ) : (
-              <div className="im-no-selection">
-                Select a conversation or start a new IM from the Friends tab
-              </div>
-            )}
+            </div>
           </div>
         )}
 
-        {activeTab === 'friends' && (
-          <FriendsList
-            onlineFriends={onlineFriends}
-            offlineFriends={offlineFriends}
-            onStartIM={(friend) => {
-              onStartIMWithFriend(friend);
-              setActiveTab('ims');
-            }}
-          />
+        {activeTab === 'messages' && (
+          <div className="split-panel">
+            {/* Friends sidebar */}
+            <div className="split-sidebar">
+              <div className="split-sidebar-section">
+                <div className="split-sidebar-header">Online ({onlineFriends.length})</div>
+                {onlineFriends.length === 0 ? (
+                  <div className="split-sidebar-empty">No friends online</div>
+                ) : (
+                  onlineFriends.map((friend) => {
+                    const session = getIMSessionForFriend(friend.id);
+                    const isActive = session?.id === activeSessionId;
+                    return (
+                      <div
+                        key={friend.id}
+                        className={`split-sidebar-item ${isActive ? 'active' : ''} ${session ? 'has-session' : ''}`}
+                        onClick={() => {
+                          if (session) {
+                            onSelectSession(session.id);
+                          } else {
+                            onStartIMWithFriend(friend);
+                          }
+                        }}
+                      >
+                        <span className="friend-status-dot online" />
+                        <span className="split-sidebar-name">{friend.name || friend.id}</span>
+                        {session && session.unreadCount > 0 && (
+                          <span className="split-sidebar-badge">{session.unreadCount}</span>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+              <div className="split-sidebar-section">
+                <div className="split-sidebar-header">Offline ({offlineFriends.length})</div>
+                {offlineFriends.map((friend) => {
+                  const session = getIMSessionForFriend(friend.id);
+                  const isActive = session?.id === activeSessionId;
+                  return (
+                    <div
+                      key={friend.id}
+                      className={`split-sidebar-item ${isActive ? 'active' : ''} ${session ? 'has-session' : ''}`}
+                      onClick={() => {
+                        if (session) {
+                          onSelectSession(session.id);
+                        } else {
+                          onStartIMWithFriend(friend);
+                        }
+                      }}
+                    >
+                      <span className="friend-status-dot offline" />
+                      <span className="split-sidebar-name">{friend.name || friend.id}</span>
+                      {session && session.unreadCount > 0 && (
+                        <span className="split-sidebar-badge">{session.unreadCount}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Chat area */}
+            <div className="split-main">
+              {activeSession && activeSession.type === 'im' ? (
+                <ChatPanel
+                  messages={activeSessionMessages}
+                  onSendMessage={handleSendSessionMessage}
+                  title={activeSession.name}
+                  placeholder={`Message ${activeSession.name}...`}
+                />
+              ) : (
+                <div className="split-main-empty">
+                  Select a friend to start chatting
+                </div>
+              )}
+            </div>
+          </div>
         )}
 
         {activeTab === 'groups' && (
-          <div className="groups-container">
-            {/* Group sessions */}
-            {groupSessions.length > 0 && (
-              <div className="group-sessions">
-                <h4>Active Group Chats</h4>
-                {groupSessions.map((session) => (
-                  <div
-                    key={session.id}
-                    className={`group-session ${session.id === activeSessionId ? 'active' : ''}`}
-                    onClick={() => {
-                      onSelectSession(session.id);
-                      setActiveTab('ims'); // Switch to IMs to show the chat
-                    }}
-                  >
-                    <span className="group-session-name">{session.name}</span>
-                    {session.unreadCount > 0 && (
-                      <span className="group-session-badge">{session.unreadCount}</span>
-                    )}
-                  </div>
-                ))}
+          <div className="split-panel">
+            {/* Groups sidebar */}
+            <div className="split-sidebar">
+              <div className="split-sidebar-section">
+                <div className="split-sidebar-header">My Groups</div>
+                {groups.length === 0 ? (
+                  <div className="split-sidebar-empty">No groups</div>
+                ) : (
+                  groups.map((group) => {
+                    const session = getGroupSession(group.id);
+                    const isActive = session?.id === activeSessionId;
+                    return (
+                      <div
+                        key={group.id}
+                        className={`split-sidebar-item ${isActive ? 'active' : ''} ${session ? 'has-session' : ''}`}
+                        onClick={() => {
+                          if (session) {
+                            onSelectSession(session.id);
+                          } else {
+                            onOpenGroupChat(group);
+                          }
+                        }}
+                      >
+                        <span className="split-sidebar-name">{group.name}</span>
+                        {session && session.unreadCount > 0 && (
+                          <span className="split-sidebar-badge">{session.unreadCount}</span>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
-            )}
+            </div>
 
-            {/* All groups */}
-            <GroupsList
-              groups={groups}
-              onOpenGroupChat={(group) => {
-                onOpenGroupChat(group);
-                setActiveTab('ims');
-              }}
-            />
+            {/* Chat area */}
+            <div className="split-main">
+              {activeSession && activeSession.type === 'group' ? (
+                <ChatPanel
+                  messages={activeSessionMessages}
+                  onSendMessage={handleSendSessionMessage}
+                  title={activeSession.name}
+                  placeholder={`Message ${activeSession.name}...`}
+                />
+              ) : (
+                <div className="split-main-empty">
+                  Select a group to start chatting
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -4,3 +4,5 @@ export { useViewers } from './useViewers';
 export { useChat } from './useChat';
 export { useFriends } from './useFriends';
 export { useGroups } from './useGroups';
+export { useNearbyAvatars } from './useNearbyAvatars';
+export { useRegionInfo } from './useRegionInfo';

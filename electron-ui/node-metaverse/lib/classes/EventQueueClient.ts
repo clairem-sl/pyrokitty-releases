@@ -18,6 +18,7 @@ import { InventoryItem } from './InventoryItem';
 import { Utils } from './Utils';
 import { InventoryLibrary } from '../enums/InventoryLibrary';
 import { LandStatsEvent } from '../events/LandStatsEvent';
+import { AgentGroupDataUpdateEvent, GroupData } from '../events/AgentGroupDataUpdateEvent';
 
 import * as LLSD from '@caspertech/llsd';
 import type { CancelableRequest, Response as GotResponse } from 'got';
@@ -252,46 +253,39 @@ export class EventQueueClient
                                         break;
                                     }
                                     case 'AgentGroupDataUpdate':
-                                        /*
+                                    {
+                                        const body = event.body;
+                                        console.log('[EventQueue] AgentGroupDataUpdate received:', JSON.stringify(body, null, 2));
+                                        const groupEvent = new AgentGroupDataUpdateEvent();
+                                        groupEvent.agentID = new UUID(body.AgentData[0].AgentID);
+                                        groupEvent.groups = [];
+
+                                        const groupDataArray = body.GroupData || [];
+                                        const newGroupDataArray = body.NewGroupData || [];
+
+                                        console.log(`[EventQueue] Processing ${groupDataArray.length} groups`);
+
+                                        for (let i = 0; i < groupDataArray.length; i++)
                                         {
-                                            "body": {
-                                                "AgentData": [
-                                                    {
-                                                        "AgentID": "49cc9041-5c53-4c1c-8490-e6bb84cdbacd"
-                                                    }
-                                                ],
-                                                "GroupData": [
-                                                    {
-                                                        "AcceptNotices": true,
-                                                        "Contribution": 0,
-                                                        "GroupID": "06459c46-069f-4de1-c297-c966bd55ab91",
-                                                        "GroupInsigniaID": "8dacb5c9-80bc-aae4-6a12-d792b6eb7dc4",
-                                                        "GroupName": "Jez Ember Estates",
-                                                        "GroupPowers": "AAAgAAQAAAA="
-                                                    },
-                                                    {
-                                                        "AcceptNotices": true,
-                                                        "Contribution": 0,
-                                                        "GroupID": "539b5be0-bb18-d0ef-6c07-3326e0130aaf",
-                                                        "GroupInsigniaID": "7d7d0b4a-bf5b-dc51-3869-5e0eaa6ad41d",
-                                                        "GroupName": "**BOY BEARS MALL**",
-                                                        "GroupPowers": "AAAIABgBAAA="
-                                                    }
-                                                ],
-                                                "NewGroupData": [
-                                                    {
-                                                        "ListInProfile": true
-                                                    },
-                                                    {
-                                                        "ListInProfile": true
-                                                    }
-                                                ]
-                                            },
-                                            "message": "AgentGroupDataUpdate"
+                                            const gd = groupDataArray[i];
+                                            const ngd = newGroupDataArray[i] || {};
+
+                                            const group: GroupData = {
+                                                groupID: new UUID(gd.GroupID),
+                                                groupName: gd.GroupName,
+                                                groupInsigniaID: new UUID(gd.GroupInsigniaID),
+                                                contribution: gd.Contribution,
+                                                groupPowers: gd.GroupPowers,
+                                                acceptNotices: gd.AcceptNotices,
+                                                listInProfile: ngd.ListInProfile ?? true,
+                                            };
+                                            groupEvent.groups.push(group);
                                         }
 
-                                         */
+                                        console.log(`[EventQueue] Emitting onAgentGroupDataUpdate with ${groupEvent.groups.length} groups`);
+                                        this.clientEvents.onAgentGroupDataUpdate.next(groupEvent);
                                         break;
+                                    }
                                     case 'AgentStateUpdate':
                                         /*
 
@@ -336,9 +330,13 @@ export class EventQueueClient
                                         {
                                             const gcsje = new GroupChatSessionJoinEvent();
                                             gcsje.success = event.body.success;
-                                            if (gcsje.success)
+                                            // Always set sessionID if available so we can match failures too
+                                            if (event.body.session_id)
                                             {
                                                 gcsje.sessionID = new UUID(event.body.session_id.toString());
+                                            }
+                                            if (gcsje.success && gcsje.sessionID)
+                                            {
                                                 const added = this.agent.addChatSession(gcsje.sessionID, true);
                                                 if (!added)
                                                 {

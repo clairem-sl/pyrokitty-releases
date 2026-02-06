@@ -71,6 +71,18 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
         throw new Error('Viewer not connected');
       }
       connection.sendNearbyChat(message, chatType, channel || 0);
+      // Local echo for Electron UI
+      const outMessage: ChatMessage = {
+        id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        type: 'nearby',
+        message,
+        fromName: 'You',
+        fromId: '',
+        timestamp: Date.now(),
+        chatType,
+        isOutgoing: true,
+      };
+      mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...outMessage });
     } else if (instance?.connectionState === 'metaverse_connected') {
       const metaverse = metaverseConnectionManager.get(instanceId);
       if (!metaverse) {
@@ -93,6 +105,18 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
         throw new Error('Viewer not connected');
       }
       connection.sendIM(participantId, message);
+      // Local echo for Electron UI
+      const outMessage: ChatMessage = {
+        id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        type: 'im',
+        message,
+        fromName: 'You',
+        fromId: '',
+        timestamp: Date.now(),
+        sessionId: participantId,
+        isOutgoing: true,
+      };
+      mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...outMessage });
     } else if (instance?.connectionState === 'metaverse_connected') {
       const metaverse = metaverseConnectionManager.get(instanceId);
       if (!metaverse) {
@@ -115,6 +139,18 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
         throw new Error('Viewer not connected');
       }
       connection.sendGroupIM(groupId, message);
+      // Local echo for Electron UI
+      const outMessage: ChatMessage = {
+        id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        type: 'group',
+        message,
+        fromName: 'You',
+        fromId: '',
+        timestamp: Date.now(),
+        sessionId: groupId,
+        isOutgoing: true,
+      };
+      mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...outMessage });
     } else if (instance?.connectionState === 'metaverse_connected') {
       const metaverse = metaverseConnectionManager.get(instanceId);
       if (!metaverse) {
@@ -133,7 +169,11 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     if (!metaverse) {
       return [];
     }
-    return metaverse.getFriends();
+    try {
+      return metaverse.getFriends();
+    } catch {
+      return [];
+    }
   });
 
   // Groups handlers
@@ -142,7 +182,38 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     if (!metaverse) {
       return [];
     }
-    return metaverse.getGroups();
+    try {
+      return metaverse.getGroups();
+    } catch {
+      return [];
+    }
+  });
+
+  // Nearby avatars handlers
+  ipcMain.handle(IPC_CHANNELS.GET_NEARBY_AVATARS, async (_, instanceId: string) => {
+    const metaverse = metaverseConnectionManager.get(instanceId);
+    if (!metaverse) {
+      return [];
+    }
+    try {
+      return metaverse.getNearbyAvatars();
+    } catch {
+      return [];
+    }
+  });
+
+  // Region info handler
+  ipcMain.handle(IPC_CHANNELS.GET_REGION_INFO, async (_, instanceId: string) => {
+    const metaverse = metaverseConnectionManager.get(instanceId);
+    if (!metaverse) {
+      return null;
+    }
+    try {
+      return metaverse.getRegionInfo();
+    } catch {
+      // Bot may be disconnected (viewer took over)
+      return null;
+    }
   });
 
   // Chat sessions handlers
@@ -151,7 +222,11 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     if (!metaverse) {
       return [];
     }
-    return metaverse.getChatSessions();
+    try {
+      return metaverse.getChatSessions();
+    } catch {
+      return [];
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.START_IM_SESSION, async (_, instanceId: string, participantId: string, participantName: string) => {
@@ -170,15 +245,39 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     return metaverse.startGroupChatSession(groupId);
   });
 
+  ipcMain.handle(IPC_CHANNELS.MARK_SESSION_READ, async (_, instanceId: string, sessionId: string) => {
+    const metaverse = metaverseConnectionManager.get(instanceId);
+    if (metaverse) {
+      metaverse.markSessionRead(sessionId);
+    }
+  });
+
   // Forward WebSocket events to renderer
   connectionManager.on('viewer-connected', (instanceId: string, apis: any[]) => {
     mainWindow.webContents.send(IPC_CHANNELS.VIEWER_WS_CONNECTED, { instanceId, apis });
   });
 
   connectionManager.on('viewer-message', (instanceId: string, pump: string, data: any) => {
+    console.log(`[IPC] viewer-message from ${instanceId}, pump: ${pump}, type: ${data.type}`);
     // Forward chat messages to renderer
     if (data.type === 'nearby' || data.type === 'im') {
-      mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...data });
+      // Transform snake_case from viewer to camelCase for renderer
+      // For IMs, use from_id as sessionId to match node-metaverse behavior
+      const sessionId = data.type === 'im' ? data.from_id : data.session_id;
+      const message: ChatMessage = {
+        id: `ws_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        type: data.type,
+        message: data.message,
+        fromName: data.from_name,
+        fromId: data.from_id,
+        timestamp: Date.now(),
+        chatType: data.chat_type === 0 ? 'whisper' : data.chat_type === 2 ? 'shout' : 'normal',
+        sourceType: data.source_type === 0 ? 'system' : data.source_type === 1 ? 'agent' : 'object',
+        sessionId,
+        isOutgoing: false,
+      };
+      console.log(`[IPC] Forwarding chat message to renderer:`, message);
+      mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...message });
     }
   });
 
@@ -209,6 +308,10 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
   metaverseConnectionManager.on('groups-update', (instanceId: string, groups: any[]) => {
     mainWindow.webContents.send(IPC_CHANNELS.GROUPS_UPDATE, { instanceId, groups });
+  });
+
+  metaverseConnectionManager.on('nearby-avatars-update', (instanceId: string, avatars: any[]) => {
+    mainWindow.webContents.send(IPC_CHANNELS.NEARBY_AVATARS_UPDATE, { instanceId, avatars });
   });
 
   metaverseConnectionManager.on('chat-session-update', (instanceId: string, session: any) => {

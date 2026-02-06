@@ -31,6 +31,7 @@ import type { InventoryResponseEvent } from '../events/InventoryResponseEvent';
 import type { LandStatsEvent } from '../events/LandStatsEvent';
 import type { SimStatsEvent } from '../events/SimStatsEvent';
 import type { BalanceUpdatedEvent } from '../events/BalanceUpdatedEvent';
+import type { AgentGroupDataUpdateEvent } from '../events/AgentGroupDataUpdateEvent';
 import { TimeoutError } from './TimeoutError';
 import { FilterResponse } from '../enums/FilterResponse';
 import type { UUID } from './UUID';
@@ -72,6 +73,7 @@ export class ClientEvents
     public onLandStatReplyEvent: Subject<LandStatsEvent> = new Subject<LandStatsEvent>();
     public onSimStats: Subject<SimStatsEvent> = new Subject<SimStatsEvent>();
     public onBalanceUpdated: Subject<BalanceUpdatedEvent> = new Subject<BalanceUpdatedEvent>();
+    public onAgentGroupDataUpdate: Subject<AgentGroupDataUpdateEvent> = new Subject<AgentGroupDataUpdateEvent>();
     public onScriptRunningReply = new Subject<{
         ItemID: UUID,
         Mono: boolean,

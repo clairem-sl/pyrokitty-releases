@@ -184,6 +184,10 @@ public:
     // Processes the initial wearables update message (if necessary, since the outfit folder makes it redundant)
     static void     processAgentInitialWearablesUpdate(LLMessageSystem* mesgsys, void** user_data);
 
+    // <FS:Pyrokitty> Session continuation - force wearables refresh
+    static void     resetForSessionContinuation();
+    // </FS:Pyrokitty>
+
 protected:
     /*virtual*/ void    invalidateBakedTextureHash(LLMD5& hash) const;
     void            sendAgentWearablesUpdate();

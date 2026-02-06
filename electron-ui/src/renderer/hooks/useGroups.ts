@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ipcRenderer } from 'electron';
 import { IPC_CHANNELS, Group } from '../../shared/types';
 
@@ -48,8 +48,13 @@ export function useGroups({ instanceId }: UseGroupsOptions) {
     return groups.find((g) => g.id === groupId);
   }, [groups]);
 
+  // Sort groups alphabetically
+  const sortedGroups = useMemo(() => {
+    return [...groups].sort((a, b) => a.name.localeCompare(b.name));
+  }, [groups]);
+
   return {
-    groups,
+    groups: sortedGroups,
     getGroup,
   };
 }

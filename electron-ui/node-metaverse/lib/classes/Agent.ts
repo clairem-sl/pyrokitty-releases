@@ -32,8 +32,7 @@ import type { AgentDataUpdateMessage } from './messages/AgentDataUpdate';
 import { InventoryLibrary } from '../enums/InventoryLibrary';
 import { AssetType } from '../enums/AssetType';
 
-export class Agent
-{
+export class Agent {
     public firstName: string;
     public lastName: string;
     public localID = 0;
@@ -105,26 +104,21 @@ export class Agent
     }>();
 
 
-    public constructor(clientEvents: ClientEvents)
-    {
+    public constructor(clientEvents: ClientEvents) {
         this.inventory = new Inventory(this);
         this.clientEvents = clientEvents;
-        this.clientEvents.onGroupChatAgentListUpdate.subscribe((event: GroupChatSessionAgentListEvent) =>
-        {
+        this.clientEvents.onGroupChatAgentListUpdate.subscribe((event: GroupChatSessionAgentListEvent) => {
             const str = event.groupID.toString();
 
             const agent = event.agentID.toString();
 
             const session = this.chatSessions.get(str);
-            if (session === undefined)
-            {
+            if (session === undefined) {
                 return;
             }
 
-            if (event.entered)
-            {
-                if (session.agents === undefined)
-                {
+            if (event.entered) {
+                if (session.agents === undefined) {
                     session.agents = new Map<string, {
                         hasVoice: boolean;
                         isModerator: boolean
@@ -135,52 +129,42 @@ export class Agent
                     isModerator: event.isModerator
                 });
             }
-            else
-            {
+            else {
                 session.agents.delete(agent);
             }
         });
     }
 
-    public updateLastMessage(groupID: UUID): void
-    {
+    public updateLastMessage(groupID: UUID): void {
         const str = groupID.toString();
         const entry = this.chatSessions.get(str);
-        if (entry === undefined)
-        {
+        if (entry === undefined) {
             return;
         }
-        if (entry.timeout !== undefined)
-        {
+        if (entry.timeout !== undefined) {
             clearInterval(entry.timeout);
             entry.timeout = setTimeout(this.groupChatExpired.bind(this, groupID), 900000);
         }
     }
 
-    public setIsEstateManager(is: boolean): void
-    {
+    public setIsEstateManager(is: boolean): void {
         this.estateManager = is;
     }
 
-    public getSessionAgentCount(uuid: UUID): number
-    {
+    public getSessionAgentCount(uuid: UUID): number {
         const str = uuid.toString();
         const session = this.chatSessions.get(str);
-        if (session === undefined)
-        {
+        if (session === undefined) {
             return 0;
         }
-        else
-        {
+        else {
             return session.agents.size;
         }
     }
 
-    public addChatSession(uuid: UUID, timeout: boolean): boolean
-    {
+    public addChatSession(uuid: UUID, timeout: boolean): boolean {
         const str = uuid.toString();
-        if (this.chatSessions.has(str))
-        {
+        if (this.chatSessions.has(str)) {
             return false;
         }
         this.chatSessions.set(str, {
@@ -193,32 +177,26 @@ export class Agent
         return true;
     }
 
-    public groupChatExpired(groupID: UUID): void
-    {
+    public groupChatExpired(groupID: UUID): void {
         this.onGroupChatExpired.next(groupID);
     }
 
-    public hasChatSession(uuid: UUID): boolean
-    {
+    public hasChatSession(uuid: UUID): boolean {
         const str = uuid.toString();
         return this.chatSessions.has(str);
     }
 
-    public deleteChatSession(uuid: UUID): boolean
-    {
+    public deleteChatSession(uuid: UUID): boolean {
         const str = uuid.toString();
-        if (!this.chatSessions.has(str))
-        {
+        if (!this.chatSessions.has(str)) {
             return false;
         }
         this.chatSessions.delete(str);
         return true;
     }
 
-    public setCurrentRegion(region: Region): void
-    {
-        if (this.animSubscription !== undefined)
-        {
+    public setCurrentRegion(region: Region): void {
+        if (this.animSubscription !== undefined) {
             this.animSubscription.unsubscribe();
         }
         this.currentRegion = region;
@@ -229,22 +207,18 @@ export class Agent
         ], this.onMessage.bind(this));
     }
 
-    public circuitActive(): void
-    {
+    public circuitActive(): void {
         this.agentUpdateTimer = setInterval(this.sendAgentUpdate.bind(this), 1000);
     }
 
-    public shutdown(): void
-    {
-        if (this.agentUpdateTimer !== null)
-        {
+    public shutdown(): void {
+        if (this.agentUpdateTimer !== null) {
             clearInterval(this.agentUpdateTimer);
             this.agentUpdateTimer = null;
         }
     }
 
-    public async setInitialAppearance(): Promise<void>
-    {
+    public async setInitialAppearance(): Promise<void> {
         const circuit = this.currentRegion.circuit;
         const wearablesRequest: AgentWearablesRequestMessage = new AgentWearablesRequestMessage();
         wearablesRequest.AgentData = {
@@ -255,16 +229,13 @@ export class Agent
 
         const wearables: AgentWearablesUpdateMessage = await circuit.waitForMessage<AgentWearablesUpdateMessage>(Message.AgentWearablesUpdate, 30000);
 
-        if (!this.wearables || wearables.AgentData.SerialNum > this.wearables.serialNumber)
-        {
+        if (!this.wearables || wearables.AgentData.SerialNum > this.wearables.serialNumber) {
             this.wearables = {
                 serialNumber: wearables.AgentData.SerialNum,
                 attachments: []
             };
-            for (const wearable of wearables.WearableData)
-            {
-                if (this.wearables.attachments)
-                {
+            for (const wearable of wearables.WearableData) {
+                if (this.wearables.attachments) {
                     this.wearables.attachments.push({
                         itemID: wearable.ItemID,
                         assetID: wearable.AssetID,
@@ -277,24 +248,18 @@ export class Agent
 
         const currentOutfitFolder = await this.getWearables();
         const wornObjects = this.currentRegion.objects.getObjectsByParent(this.localID);
-        for (const item of currentOutfitFolder.items)
-        {
-            if (item.type === AssetType.Notecard)
-            {
+        for (const item of currentOutfitFolder.items) {
+            if (item.type === AssetType.Notecard) {
                 let found = false;
-                for (const obj of wornObjects)
-                {
-                    if (obj.hasNameValueEntry('AttachItemID'))
-                    {
-                        if (item.itemID.toString() === obj.getNameValueEntry('AttachItemID'))
-                        {
+                for (const obj of wornObjects) {
+                    if (obj.hasNameValueEntry('AttachItemID')) {
+                        if (item.itemID.toString() === obj.getNameValueEntry('AttachItemID')) {
                             found = true;
                         }
                     }
                 }
 
-                if (!found)
-                {
+                if (!found) {
                     const rsafi = new RezSingleAttachmentFromInvMessage();
                     rsafi.AgentData = {
                         AgentID: this.agentID,
@@ -319,23 +284,18 @@ export class Agent
         this.appearanceCompleteEvent.next();
     }
 
-    public setControlFlag(flag: ControlFlags): void
-    {
+    public setControlFlag(flag: ControlFlags): void {
         this.controlFlags = this.controlFlags | flag;
     }
 
-    public clearControlFlag(flag: ControlFlags): void
-    {
+    public clearControlFlag(flag: ControlFlags): void {
         this.controlFlags = this.controlFlags & ~flag;
     }
 
-    public async getWearables(): Promise<InventoryFolder>
-    {
-        for (const uuid of this.inventory.main.skeleton.keys())
-        {
+    public async getWearables(): Promise<InventoryFolder> {
+        for (const uuid of this.inventory.main.skeleton.keys()) {
             const folder = this.inventory.main.skeleton.get(uuid);
-            if (folder && folder.typeDefault === FolderType.CurrentOutfit)
-            {
+            if (folder && folder.typeDefault === FolderType.CurrentOutfit) {
                 await folder.populate(false);
                 return folder;
             }
@@ -343,10 +303,8 @@ export class Agent
         throw new Error('Unable to get wearables from inventory')
     }
 
-    public sendAgentUpdate(): void
-    {
-        if (!this.currentRegion)
-        {
+    public sendAgentUpdate(): void {
+        if (!this.currentRegion) {
             return;
         }
         const circuit = this.currentRegion.circuit;
@@ -368,20 +326,16 @@ export class Agent
         circuit.sendMessage(agentUpdate, 0 as PacketFlags);
     }
 
-    private onMessage(packet: Packet): void
-    {
-        if (packet.message.id === Message.AgentDataUpdate)
-        {
+    private onMessage(packet: Packet): void {
+        if (packet.message.id === Message.AgentDataUpdate) {
             const msg = packet.message as AgentDataUpdateMessage;
             this.activeGroupID = msg.AgentData.ActiveGroupID;
         }
-        else if (packet.message.id === Message.BulkUpdateInventory)
-        {
+        else if (packet.message.id === Message.BulkUpdateInventory) {
             const msg = packet.message as BulkUpdateInventoryMessage;
             const evt = new BulkUpdateInventoryEvent();
 
-            for (const newItem of msg.ItemData)
-            {
+            for (const newItem of msg.ItemData) {
                 const folder = this.inventory.findFolder(newItem.FolderID);
                 const item = new InventoryItem(folder ?? undefined, this);
                 item.assetID = newItem.AssetID;
@@ -407,8 +361,7 @@ export class Agent
                 item.permissions.groupOwned = newItem.GroupOwned;
                 evt.itemData.push(item);
             }
-            for (const newFolder of msg.FolderData)
-            {
+            for (const newFolder of msg.FolderData) {
                 const fld = new InventoryFolder(InventoryLibrary.Main, this.inventory.main, this);
                 fld.typeDefault = newFolder.Type;
                 fld.name = Utils.BufferToStringSimple(newFolder.Name);
@@ -418,21 +371,17 @@ export class Agent
             }
             this.clientEvents.onBulkUpdateInventoryEvent.next(evt);
         }
-        else if (packet.message.id === Message.AvatarAnimation)
-        {
+        else if (packet.message.id === Message.AvatarAnimation) {
             const animMsg = packet.message as AvatarAnimationMessage;
-            if (animMsg.Sender.ID.toString() === this.agentID.toString())
-            {
-                for (const anim of animMsg.AnimationList)
-                {
+            if (animMsg.Sender.ID.toString() === this.agentID.toString()) {
+                for (const anim of animMsg.AnimationList) {
                     const a = anim.AnimID.toString() as BuiltInAnimations;
                     if (a === BuiltInAnimations.STANDUP ||
                         a === BuiltInAnimations.PRE_JUMP ||
                         a === BuiltInAnimations.LAND ||
                         a === BuiltInAnimations.MEDIUM_LAND ||
                         a === BuiltInAnimations.WALK ||
-                        a === BuiltInAnimations.RUN)
-                    {
+                        a === BuiltInAnimations.RUN) {
                         // TODO: Pretty sure this isn't the best way to do this
                         this.controlFlags = ControlFlags.AGENT_CONTROL_FINISH_ANIM;
                         this.sendAgentUpdate();

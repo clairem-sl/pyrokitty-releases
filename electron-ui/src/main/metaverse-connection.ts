@@ -17,6 +17,8 @@ import {
   ChatSession,
   Friend,
   Group,
+  NearbyAvatar,
+  RegionInfo,
 } from '../shared/types';
 
 export interface LoginParams {
@@ -48,10 +50,21 @@ export interface HandoffData {
     type_default: number;
     version: number;
   }>;
+  inventory_skel_lib?: Array<{
+    folder_id: string;
+    parent_id: string;
+    name: string;
+    type_default: number;
+    version: number;
+  }>;
   agent_appearance_service?: string;
   account_type?: string;
   account_level_benefits?: Record<string, unknown>;
   premium_packages?: Record<string, { benefits: Record<string, unknown> }>;
+  // Session continuation fields - viewer reuses bot's UDP port
+  session_continuation?: boolean;
+  sequence_number?: number;
+  local_port?: number;
 }
 
 export interface MetaverseConnectionEvents {
@@ -62,6 +75,7 @@ export interface MetaverseConnectionEvents {
   'friends-update': (friends: Friend[]) => void;
   'friend-online': (friend: Friend, online: boolean) => void;
   'groups-update': (groups: Group[]) => void;
+  'nearby-avatars-update': (avatars: NearbyAvatar[]) => void;
   'error': (error: Error) => void;
   'login-progress': (message: string) => void;
 }
@@ -72,6 +86,8 @@ export class MetaverseConnection extends EventEmitter {
   private friends: Map<string, Friend> = new Map();
   private groups: Map<string, Group> = new Map();
   private chatSessions: Map<string, ChatSession> = new Map();
+  private nearbyAvatars: Map<string, NearbyAvatar> = new Map();
+  private avatarLeftSubscriptions: Map<string, { unsubscribe: () => void }> = new Map();
   private loginResponse: Record<string, unknown> | null = null;
   private messageIdCounter = 0;
 
@@ -121,14 +137,15 @@ export class MetaverseConnection extends EventEmitter {
       this.emit('login-progress', 'Logging in...');
       this.loginResponse = await this.bot.login() as unknown as Record<string, unknown>;
 
-      this.emit('login-progress', 'Connecting to simulator...');
-      await this.bot.connectToSim();
-
-      // Set up event subscriptions
+      // Set up event subscriptions BEFORE connecting so we catch early events
       this.setupEventSubscriptions();
 
-      // Populate friends list from login response
+      // Populate friends list from login response BEFORE connecting
+      // so friend online events have friends to update
       this.populateFriendsFromLogin();
+
+      this.emit('login-progress', 'Connecting to simulator...');
+      await this.bot.connectToSim();
 
       // Groups will be populated from AgentGroupDataUpdate event
       // For now, initialize empty - groups arrive via event queue
@@ -158,6 +175,12 @@ export class MetaverseConnection extends EventEmitter {
     this.friends.clear();
     this.groups.clear();
     this.chatSessions.clear();
+    this.nearbyAvatars.clear();
+    // Clean up avatar subscriptions
+    for (const sub of this.avatarLeftSubscriptions.values()) {
+      sub.unsubscribe();
+    }
+    this.avatarLeftSubscriptions.clear();
     this.setState('disconnected');
   }
 
@@ -181,12 +204,20 @@ export class MetaverseConnection extends EventEmitter {
         [ChatSourceType.System]: 'system',
       };
 
+      // Skip our own messages - we already emit them locally in sendNearbyChat()
+      // This avoids duplicates while still allowing server confirmation
+      const fromId = event.from.toString();
+      if (fromId === this.bot?.agentID().toString()) {
+        // TODO: Could emit a 'message-confirmed' event here for UI feedback
+        return;
+      }
+
       const message: ChatMessage = {
         id: this.generateMessageId(),
         type: 'nearby',
         message: event.message,
         fromName: event.fromName,
-        fromId: event.from.toString(),
+        fromId,
         timestamp: Date.now(),
         chatType: chatTypeMap[event.chatType] || 'normal',
         sourceType: sourceTypeMap[event.sourceType] || 'agent',
@@ -199,7 +230,7 @@ export class MetaverseConnection extends EventEmitter {
     this.bot.clientEvents.onInstantMessage.subscribe((event) => {
       // Skip typing indicators
       if (event.flags & InstantMessageEventFlags.startTyping ||
-          event.flags & InstantMessageEventFlags.finishTyping) {
+        event.flags & InstantMessageEventFlags.finishTyping) {
         return;
       }
 
@@ -284,11 +315,16 @@ export class MetaverseConnection extends EventEmitter {
     // Friend online status
     this.bot.clientEvents.onFriendOnline.subscribe((event) => {
       const friendId = event.friend.getKey().toString();
+      console.log(`[MetaverseConnection] onFriendOnline: ${friendId} online=${event.online}`);
+      console.log(`[MetaverseConnection] Friends map has ${this.friends.size} entries`);
       const friend = this.friends.get(friendId);
       if (friend) {
+        console.log(`[MetaverseConnection] Found friend ${friend.name}, setting online=${event.online}`);
         friend.online = event.online;
         this.emit('friend-online', friend, event.online);
         this.emit('friends-update', Array.from(this.friends.values()));
+      } else {
+        console.log(`[MetaverseConnection] Friend ${friendId} not found in map`);
       }
     });
 
@@ -310,6 +346,75 @@ export class MetaverseConnection extends EventEmitter {
       this.friends.delete(friendId);
       this.emit('friends-update', Array.from(this.friends.values()));
     });
+
+    // Group data update (received from event queue after login)
+    this.bot.clientEvents.onAgentGroupDataUpdate.subscribe((event) => {
+      console.log(`[MetaverseConnection] onAgentGroupDataUpdate received with ${event.groups.length} groups`);
+      // Clear and rebuild groups map from event data
+      this.groups.clear();
+      for (const groupData of event.groups) {
+        const group: Group = {
+          id: groupData.groupID.toString(),
+          name: groupData.groupName,
+          insigniaId: groupData.groupInsigniaID.toString(),
+          contribution: groupData.contribution,
+          powers: groupData.groupPowers,
+        };
+        this.groups.set(group.id, group);
+        console.log(`[MetaverseConnection] Added group: ${group.name} (${group.id})`);
+      }
+      console.log(`[MetaverseConnection] Emitting groups-update with ${this.groups.size} groups`);
+      this.emit('groups-update', Array.from(this.groups.values()));
+    });
+
+    // Avatar entered region
+    this.bot.clientEvents.onAvatarEnteredRegion.subscribe((avatar) => {
+      const avatarId = avatar.getKey().toString();
+      // Skip our own avatar
+      if (avatarId === this.bot?.agentID().toString()) {
+        return;
+      }
+
+      const pos = avatar.position;
+      const nearbyAvatar: NearbyAvatar = {
+        id: avatarId,
+        name: avatar.getName(),
+        title: avatar.getTitle() || undefined,
+        position: { x: pos.x, y: pos.y, z: pos.z },
+      };
+      this.nearbyAvatars.set(avatarId, nearbyAvatar);
+
+      // Subscribe to avatar movement to update position
+      const moveSubscription = avatar.onMoved.subscribe(() => {
+        const existing = this.nearbyAvatars.get(avatarId);
+        if (existing) {
+          const newPos = avatar.position;
+          existing.position = { x: newPos.x, y: newPos.y, z: newPos.z };
+          this.emit('nearby-avatars-update', Array.from(this.nearbyAvatars.values()));
+        }
+      });
+
+      // Subscribe to avatar leaving
+      const leftSubscription = avatar.onLeftRegion.subscribe(() => {
+        this.nearbyAvatars.delete(avatarId);
+        const sub = this.avatarLeftSubscriptions.get(avatarId);
+        if (sub) {
+          sub.unsubscribe();
+          this.avatarLeftSubscriptions.delete(avatarId);
+        }
+        this.emit('nearby-avatars-update', Array.from(this.nearbyAvatars.values()));
+      });
+
+      // Store both subscriptions
+      this.avatarLeftSubscriptions.set(avatarId, {
+        unsubscribe: () => {
+          moveSubscription.unsubscribe();
+          leftSubscription.unsubscribe();
+        }
+      });
+
+      this.emit('nearby-avatars-update', Array.from(this.nearbyAvatars.values()));
+    });
   }
 
   /**
@@ -318,9 +423,12 @@ export class MetaverseConnection extends EventEmitter {
   private populateFriendsFromLogin(): void {
     if (!this.bot) return;
 
+    console.log(`[MetaverseConnection] populateFriendsFromLogin: ${this.bot.agent.buddyList.length} buddies`);
     for (const buddy of this.bot.agent.buddyList) {
+      const friendId = buddy.buddyID.toString();
+      console.log(`[MetaverseConnection] Adding friend: ${friendId}`);
       const friend: Friend = {
-        id: buddy.buddyID.toString(),
+        id: friendId,
         name: '', // Will be resolved later via name lookup
         online: false, // Will be updated via online notification
         canSeeOnline: buddy.buddyRightsHas,
@@ -457,11 +565,19 @@ export class MetaverseConnection extends EventEmitter {
    * Start a group chat session
    */
   async startGroupChatSession(groupId: string): Promise<ChatSession> {
+    console.log(`[MetaverseConnection] startGroupChatSession called for group ${groupId}, state: ${this.state}`);
     if (!this.bot || this.state !== 'metaverse_connected') {
       throw new Error('Not connected to metaverse');
     }
 
-    await this.bot.clientCommands.comms.startGroupChatSession(groupId, '');
+    try {
+      console.log(`[MetaverseConnection] Calling bot.clientCommands.comms.startGroupChatSession`);
+      await this.bot.clientCommands.comms.startGroupChatSession(groupId, '');
+      console.log(`[MetaverseConnection] Group chat session started successfully`);
+    } catch (err) {
+      console.error(`[MetaverseConnection] Error starting group chat session:`, err);
+      throw err;
+    }
 
     const group = this.groups.get(groupId);
     const session: ChatSession = {
@@ -472,6 +588,7 @@ export class MetaverseConnection extends EventEmitter {
       unreadCount: 0,
     };
     this.chatSessions.set(groupId, session);
+    console.log(`[MetaverseConnection] Emitting chat-session-update for group: ${session.name}`);
     this.emit('chat-session-update', session);
     return session;
   }
@@ -484,6 +601,23 @@ export class MetaverseConnection extends EventEmitter {
 
   getGroups(): Group[] {
     return Array.from(this.groups.values());
+  }
+
+  getNearbyAvatars(): NearbyAvatar[] {
+    return Array.from(this.nearbyAvatars.values());
+  }
+
+  getRegionInfo(): RegionInfo | null {
+    if (!this.bot?.currentRegion) return null;
+    const region = this.bot.currentRegion;
+    const x = region.xCoordinate;
+    const y = region.yCoordinate;
+    return {
+      name: region.regionName,
+      x,
+      y,
+      mapImageUrl: `https://secondlife-maps-cdn.akamaized.net/map-1-${x}-${y}-objects.jpg`,
+    };
   }
 
   getChatSessions(): ChatSession[] {
@@ -500,118 +634,6 @@ export class MetaverseConnection extends EventEmitter {
       session.unreadCount = 0;
       this.emit('chat-session-update', session);
     }
-  }
-
-  // ============ Handoff Methods ============
-
-  /**
-   * Prepare handoff data for viewer
-   * Teleports to destination and collects all necessary session data
-   * If no destination provided, uses the current region (requires teleport to same region)
-   */
-  async prepareHandoff(destination?: string): Promise<HandoffData> {
-    if (!this.bot || this.state !== 'metaverse_connected') {
-      throw new Error('Not connected to metaverse');
-    }
-
-    this.setState('handoff_in_progress');
-
-    try {
-      // Use current region name if no destination specified
-      const targetRegion = destination || this.bot.currentRegion?.regionName;
-      if (!targetRegion) {
-        throw new Error('No destination and no current region available');
-      }
-
-      // Get region info from grid
-      const destRegion = await this.bot.clientCommands.grid.getRegionByName(targetRegion);
-      const position = new Vector3([128, 128, 30]);
-      const lookAt = new Vector3([1, 0, 0]);
-
-      // Teleport to get fresh connection info
-      const tpEvent = await this.bot.clientCommands.teleport.teleportTo(
-        targetRegion,
-        position,
-        lookAt
-      );
-      const regionHandle = destRegion.handle.toString();
-
-      const circuit = this.bot.currentRegion.circuit;
-      const currentRegion = this.bot.currentRegion;
-
-      // For local teleports (same region), use current region's connection data
-      // The teleport event returns 'local' for sim_ip when staying in the same region
-      const isLocalTeleport = tpEvent.simIP === 'local';
-      const simIP = isLocalTeleport ? circuit.ipAddress : tpEvent.simIP;
-      const simPort = isLocalTeleport ? circuit.port : tpEvent.simPort;
-      const seedCapability = isLocalTeleport ? currentRegion.seedCapabilityURL : tpEvent.seedCapability;
-
-      console.log(`[MetaverseConnection] Handoff - isLocal: ${isLocalTeleport}, simIP: ${simIP}, simPort: ${simPort}`);
-
-      // Build inventory skeleton
-      const inventorySkeleton: HandoffData['inventory_skeleton'] = [];
-      if (this.bot.agent.inventory?.main?.skeleton) {
-        for (const [, folder] of this.bot.agent.inventory.main.skeleton) {
-          inventorySkeleton.push({
-            folder_id: folder.folderID.toString(),
-            parent_id: folder.parentID.toString(),
-            name: folder.name,
-            type_default: folder.typeDefault,
-            version: folder.version,
-          });
-        }
-      }
-
-      const handoffData: HandoffData = {
-        agent_id: this.bot.agent.agentID.toString(),
-        session_id: circuit.sessionID.toString(),
-        secure_session_id: circuit.secureSessionID.toString(),
-        circuit_code: circuit.circuitCode,
-        sim_ip: simIP,
-        sim_port: simPort,
-        seed_capability: seedCapability,
-        region_handle: regionHandle,
-        first_name: this.bot.agent.firstName,
-        last_name: this.bot.agent.lastName,
-        inventory_root: this.bot.agent.inventory?.main?.root?.toString(),
-        inventory_lib_root: this.bot.agent.inventory?.library?.root?.toString(),
-        inventory_lib_owner: this.bot.agent.inventory?.library?.owner?.toString(),
-        inventory_skeleton: inventorySkeleton,
-        agent_appearance_service: this.bot.agent.agentAppearanceService,
-        account_type: (this.loginResponse as Record<string, unknown>)?.accountType as string | undefined,
-        account_level_benefits: (this.loginResponse as Record<string, unknown>)?.accountLevelBenefits as Record<string, unknown> | undefined,
-        premium_packages: (this.loginResponse as Record<string, unknown>)?.premiumPackages as Record<string, { benefits: Record<string, unknown> }> | undefined,
-      };
-
-      return handoffData;
-
-    } catch (error) {
-      this.setState('metaverse_connected');
-      throw error;
-    }
-  }
-
-  /**
-   * Complete handoff - viewer takes over the session
-   * For local teleports (same region), we must close the UDP socket so the viewer
-   * can connect with the same circuit credentials. We use shutdownForHandoff()
-   * which closes only the UDP socket without:
-   * - Sending logout (which would invalidate session)
-   * - Closing caps (which would invalidate seed capability)
-   */
-  completeHandoff(): void {
-    console.log('[MetaverseConnection] Handoff complete - closing UDP for viewer takeover');
-
-    if (this.bot) {
-      try {
-        this.bot.shutdownForHandoff();
-        console.log('[MetaverseConnection] UDP circuit closed, viewer can now connect');
-      } catch (error) {
-        console.error('[MetaverseConnection] Error during handoff shutdown:', error);
-      }
-    }
-
-    this.setState('viewer_connected');
   }
 
   /**
@@ -664,6 +686,9 @@ export class MetaverseConnectionManager extends EventEmitter {
     });
     connection.on('groups-update', (groups) => {
       this.emit('groups-update', instanceId, groups);
+    });
+    connection.on('nearby-avatars-update', (avatars) => {
+      this.emit('nearby-avatars-update', instanceId, avatars);
     });
     connection.on('chat-session-update', (session) => {
       this.emit('chat-session-update', instanceId, session);

@@ -19,7 +19,7 @@ export const theme = createTheme({
       '#eaeaea',  // 0: text-primary
       '#a0a0a0',  // 1: text-secondary
       '#7a7a8a',  // 2: dimmed text (descriptions, hints)
-      '#4a4a5a',  // 3: borders
+      '#717397',  // 3: borders
       '#2a2a4a',  // 4: subtle borders
       '#1a1a2e',  // 5: bg-primary
       '#16213e',  // 6: bg-secondary

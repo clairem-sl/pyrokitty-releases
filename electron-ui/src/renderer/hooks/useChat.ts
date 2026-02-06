@@ -58,6 +58,32 @@ export function useChat({ instanceId }: UseChatOptions) {
           updated.set(sessionId, [...existing, message]);
           return updated;
         });
+
+        // Create session if it doesn't exist (for viewer WebSocket messages)
+        // Don't update existing sessions here - CHAT_SESSION_UPDATE handles that
+        setSessions((prev) => {
+          const existing = prev.find((s) => s.id === sessionId);
+          if (existing) {
+            // Session exists - just update name if needed, don't touch unreadCount
+            if (message.fromName && !existing.name) {
+              return prev.map((s) =>
+                s.id === sessionId ? { ...s, name: message.fromName } : s
+              );
+            }
+            return prev;
+          }
+          // New session (WebSocket message with no prior CHAT_SESSION_UPDATE)
+          const newSession: ChatSession = {
+            id: sessionId,
+            type: message.type === 'group' ? 'group' : 'im',
+            name: message.fromName,
+            participantId: message.fromId,
+            unreadCount: 1,
+            lastMessage: message.message,
+            lastMessageTime: message.timestamp,
+          };
+          return [...prev, newSession];
+        });
       }
     };
 
@@ -129,6 +155,18 @@ export function useChat({ instanceId }: UseChatOptions) {
     return session;
   }, [instanceId]);
 
+  // Mark session as read
+  const markSessionRead = useCallback(async (sessionId: string) => {
+    if (!instanceId) return;
+    await ipcRenderer.invoke(IPC_CHANNELS.MARK_SESSION_READ, instanceId, sessionId);
+  }, [instanceId]);
+
+  // Select session and mark as read
+  const selectSession = useCallback(async (sessionId: string) => {
+    setActiveSessionId(sessionId);
+    await markSessionRead(sessionId);
+  }, [markSessionRead]);
+
   // Get messages for a session
   const getSessionMessages = useCallback((sessionId: string): ChatMessage[] => {
     return messages.get(sessionId) || [];
@@ -151,7 +189,7 @@ export function useChat({ instanceId }: UseChatOptions) {
     sendGroupMessage,
     startIMSession,
     startGroupChat,
-    setActiveSessionId,
+    selectSession,
     getSessionMessages,
     clearNearbyMessages,
   };

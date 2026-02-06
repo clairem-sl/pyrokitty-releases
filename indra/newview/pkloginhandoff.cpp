@@ -219,3 +219,60 @@ LLSD PKLoginHandoff_GetSessionData()
 {
     return sSessionData;
 }
+
+// Helper function to check if an item is in the pre-attached list
+// NOTE: Currently unused. We originally used this to skip re-attaching items
+// that were attached on the bot, but this caused attachments to not appear
+// after handoff because the sim recreates the avatar after disconnect timeout.
+// Kept for potential future use with a different handoff approach.
+bool PKLoginHandoff_IsItemPreAttached(const LLUUID& item_id)
+{
+    if (!PKLoginHandoff::isSessionContinuation())
+    {
+        return false;
+    }
+
+    if (!sSessionData.has("attached_items") || !sSessionData["attached_items"].isArray())
+    {
+        return false;
+    }
+
+    std::string item_id_str = item_id.asString();
+    const LLSD& attached_items = sSessionData["attached_items"];
+    for (LLSD::array_const_iterator it = attached_items.beginArray();
+         it != attached_items.endArray(); ++it)
+    {
+        if (it->asString() == item_id_str)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Helper function to get all pre-attached item IDs
+// NOTE: Currently unused. See PKLoginHandoff_IsItemPreAttached comment above.
+void PKLoginHandoff_GetPreAttachedItems(uuid_vec_t& item_ids)
+{
+    item_ids.clear();
+    if (!PKLoginHandoff::isSessionContinuation())
+    {
+        return;
+    }
+
+    if (!sSessionData.has("attached_items") || !sSessionData["attached_items"].isArray())
+    {
+        return;
+    }
+
+    const LLSD& attached_items = sSessionData["attached_items"];
+    for (LLSD::array_const_iterator it = attached_items.beginArray();
+         it != attached_items.endArray(); ++it)
+    {
+        LLUUID item_id(it->asString());
+        if (item_id.notNull())
+        {
+            item_ids.push_back(item_id);
+        }
+    }
+}

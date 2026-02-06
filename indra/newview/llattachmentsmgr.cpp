@@ -36,6 +36,9 @@
 #include "llviewerinventory.h"
 #include "llviewerregion.h"
 #include "message.h"
+// <FS:Pyrokitty> Session continuation - skip pre-attached items
+#include "pkloginhandoff.h"
+// </FS:Pyrokitty>
 // [RLVa:KB] - Checked: 2011-05-22 (RLVa-1.3.1a)
 #include "rlvactions.h"
 #include "rlvlocks.h"
@@ -186,6 +189,15 @@ void LLAttachmentsMgr::requestAttachments(attachments_vec_t& attachment_requests
     {
         return;
     }
+
+    // <FS:Pyrokitty> Session continuation - attachment handling
+    // Previously, we tried to skip items that were "pre-attached" on the bot during
+    // session handoff. However, after the bot disconnects, the sim times out the
+    // connection (~2 seconds) and recreates the avatar, so those attachments are gone.
+    // The viewer must re-attach them through normal COF processing.
+    // Code that skipped pre-attached items was removed because it caused attachments
+    // to not appear after handoff.
+    // </FS:Pyrokitty>
 
     // For unknown reasons, requesting many attachments at once causes
     // frequent server-side failures. Here we're limiting the number

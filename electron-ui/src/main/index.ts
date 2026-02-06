@@ -9,7 +9,7 @@ let mainWindow: BrowserWindow | null = null;
 
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
-    width: 900,
+    width: 920,
     height: 700,
     minWidth: 600,
     minHeight: 500,

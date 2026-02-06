@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Button } from '@mantine/core';
 import { ChatMessage } from '../../shared/types';
 
 interface ChatPanelProps {
@@ -9,8 +10,10 @@ interface ChatPanelProps {
   showChatTypes?: boolean;
 }
 
-const formatTime = (timestamp: number): string => {
+const formatTime = (timestamp: number | undefined): string => {
+  if (!timestamp) return '';
   const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return `${timestamp}`;
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
@@ -94,9 +97,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
         />
-        <button type="submit" className="btn btn-primary chat-send-btn">
+        <Button type="submit" size="sm">
           Send
-        </button>
+        </Button>
       </form>
     </div>
   );

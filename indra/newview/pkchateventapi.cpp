@@ -256,6 +256,9 @@ void PKChatEventAPI::sendIM(const LLSD& request)
                         IM_ONLINE,
                         IM_NOTHING_SPECIAL);
 
+        // Add to local history so it appears in the IM window
+        LLIMModel::getInstance()->addMessage(session_id, name, gAgentID, message);
+
         response["success"] = true;
         response["session_id"] = session_id;
     }
@@ -279,6 +282,9 @@ void PKChatEventAPI::sendIM(const LLSD& request)
                         message,
                         IM_ONLINE,
                         IM_SESSION_SEND);
+
+        // Add to local history so it appears in the group chat window
+        LLIMModel::getInstance()->addMessage(session_id, name, gAgentID, message);
 
         response["success"] = true;
         response["session_id"] = session_id;

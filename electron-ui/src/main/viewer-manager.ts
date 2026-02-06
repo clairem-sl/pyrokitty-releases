@@ -9,8 +9,14 @@ import { connectionManager, ViewerConnection } from './viewer-connection';
 import { metaverseConnectionManager, MetaverseConnection } from './metaverse-connection';
 
 function getViewerPath(): string {
-  const appRoot = app.getAppPath();
-  return path.join(appRoot, '..', 'build-vc170-64', 'newview', 'Release', 'firestorm-bin.exe');
+  if (app.isPackaged) {
+    // Production: viewer is in resources/viewer/
+    return path.join(process.resourcesPath, 'viewer', 'firestorm-bin.exe');
+  } else {
+    // Development: viewer is in the build output directory
+    const appRoot = app.getAppPath();
+    return path.join(appRoot, '..', 'build-vc170-64', 'newview', 'Release', 'firestorm-bin.exe');
+  }
 }
 
 const BASE_WS_PORT = 9001;
@@ -19,6 +25,10 @@ export class ViewerManager extends EventEmitter {
   private instances: Map<string, ViewerInstance> = new Map();
   private processes: Map<string, ChildProcess> = new Map();
   private nextWsPort = BASE_WS_PORT;
+  // Track which instances should re-login when viewer exits
+  private shouldRelogin: Set<string> = new Set();
+  // Store password in memory for re-login (needed if not saved to disk)
+  private sessionPasswords: Map<string, string> = new Map();
 
   getInstances(): ViewerInstance[] {
     return Array.from(this.instances.values());
@@ -86,6 +96,8 @@ export class ViewerManager extends EventEmitter {
     };
 
     this.instances.set(instanceId, instance);
+    this.shouldRelogin.add(instanceId);
+    this.sessionPasswords.set(instanceId, loginPassword);
 
     try {
       // Step 1: Create MetaverseConnection and login via node-metaverse
@@ -116,9 +128,18 @@ export class ViewerManager extends EventEmitter {
         this.updateRegionName(instanceId, regionName);
       }
 
-      // Step 2: If viewer launch is requested, prepare handoff and launch viewer
+      // Step 2: If viewer launch is requested, launch with CLI login
+      // (Firestorm logging in will auto-disconnect node-metaverse)
       if (shouldLaunchViewer) {
-        await this.launchViewerWithHandoff(instanceId, instance, metaverse, grid.nick, wsPort, loginPassword);
+        await this.launchViewerWithLogin(
+          instanceId,
+          instance,
+          account.firstName,
+          account.lastName,
+          loginPassword,
+          grid.nick,
+          wsPort
+        );
       }
 
       return instance;
@@ -132,7 +153,8 @@ export class ViewerManager extends EventEmitter {
 
   /**
    * Launch the viewer for an existing metaverse session.
-   * Used when user is already logged in via node-metaverse and wants to launch the viewer.
+   * Firestorm will log in with CLI params, which automatically disconnects node-metaverse.
+   * When viewer exits, we re-login to node-metaverse.
    */
   async launchViewerForInstance(instanceId: string): Promise<void> {
     const instance = this.instances.get(instanceId);
@@ -159,141 +181,162 @@ export class ViewerManager extends EventEmitter {
       throw new Error('Grid not found');
     }
 
-    console.log(`[ViewerManager] Launching viewer for existing session ${instanceId}`);
+    // Get password from session (set during initial login) or account
+    const loginPassword = this.sessionPasswords.get(instanceId) || account.password;
+    if (!loginPassword) {
+      throw new Error('Password required for viewer launch');
+    }
 
-    await this.launchViewerWithHandoff(
+    console.log(`[ViewerManager] Launching viewer for ${account.firstName} ${account.lastName}`);
+
+    // Launch viewer with standard CLI login - this will auto-disconnect node-metaverse
+    await this.launchViewerWithLogin(
       instanceId,
       instance,
-      metaverse,
+      account.firstName,
+      account.lastName,
+      loginPassword,
       grid.nick,
-      instance.wsPort,
-      account.password || ''
+      instance.wsPort
     );
   }
 
   /**
-   * Launch the viewer process and perform session handoff
+   * Launch the viewer process with CLI login parameters.
+   * Firestorm logs in normally, which auto-disconnects node-metaverse.
+   * WebSocket is used only for chat relay.
    */
-  private async launchViewerWithHandoff(
+  private async launchViewerWithLogin(
     instanceId: string,
     instance: ViewerInstance,
-    metaverse: MetaverseConnection,
+    firstName: string,
+    lastName: string,
+    password: string,
     gridNick: string,
-    wsPort: number,
-    password: string
+    wsPort: number
   ): Promise<void> {
-    // Prepare handoff data (includes teleport if needed)
-    console.log(`[ViewerManager] Preparing handoff data...`);
-    const handoffData = await metaverse.prepareHandoff();
 
-    // Launch viewer in external login mode
     const viewerPath = getViewerPath();
     const args: string[] = [
-      '--external-login',
+      '--login', firstName, lastName, password,
+      '--grid', gridNick,
       '--set', 'PKWebSocketPort', wsPort.toString(),
     ];
 
-    console.log(`[ViewerManager] Launching viewer in external login mode`);
-    console.log(`[ViewerManager] Command: ${viewerPath} ${args.join(' ')}`);
+    console.log(`[ViewerManager] Launching viewer`);
+    console.log(`[ViewerManager] Command: ${viewerPath} ${args.map(a => a === password ? '***' : a).join(' ')}`);
 
-    const process = spawn(viewerPath, args, {
+    const childProcess = spawn(viewerPath, args, {
       detached: false,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    instance.pid = process.pid || 0;
-    this.processes.set(instanceId, process);
+    instance.pid = childProcess.pid || 0;
+    this.processes.set(instanceId, childProcess);
+
+    // Update state - viewer is now handling login
+    this.updateConnectionState(instanceId, 'handoff_in_progress');
 
     // Handle process events
-    process.on('spawn', () => {
+    childProcess.on('spawn', () => {
       console.log(`[ViewerManager] Viewer process spawned`);
     });
 
-    process.stdout?.on('data', (data) => {
+    childProcess.stdout?.on('data', (data) => {
       console.log(`[Viewer ${instanceId}] ${data}`);
     });
 
-    process.stderr?.on('data', (data) => {
+    childProcess.stderr?.on('data', (data) => {
       console.error(`[Viewer ${instanceId}] ${data}`);
     });
 
-    process.on('error', (error) => {
+    childProcess.on('error', (error) => {
       console.error(`[Viewer ${instanceId}] Error:`, error);
       this.updateStatus(instanceId, 'crashed');
     });
 
-    process.on('exit', (code, signal) => {
+    childProcess.on('exit', (code, signal) => {
       console.log(`[Viewer ${instanceId}] Exited with code ${code}, signal ${signal}`);
-      this.updateStatus(instanceId, 'disconnected');
-      this.cleanup(instanceId);
+      this.handleViewerExit(instanceId);
     });
 
-    // Wait for viewer WebSocket and send handoff
-    await this.connectAndHandoff(instanceId, wsPort, handoffData, metaverse);
+    // Schedule WebSocket connection for chat relay (viewer needs time to start)
+    this.scheduleWebSocketConnect(instanceId, wsPort);
   }
 
   /**
-   * Connect to viewer WebSocket and send handoff data
+   * Handle viewer process exit - re-login to node-metaverse
    */
-  private async connectAndHandoff(
-    instanceId: string,
-    wsPort: number,
-    handoffData: any,
-    metaverse: MetaverseConnection
-  ): Promise<void> {
-    const maxAttempts = 30;
-    const delayMs = 1000;
+  private async handleViewerExit(instanceId: string): Promise<void> {
+    const instance = this.instances.get(instanceId);
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        console.log(`[ViewerManager] WebSocket connect attempt ${attempt}/${maxAttempts}`);
+    // Disconnect WebSocket
+    connectionManager.disconnect(instanceId);
+    this.processes.delete(instanceId);
 
-        const connection = connectionManager.connect(instanceId, wsPort);
-
-        await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error('Connection timeout'));
-          }, 5000);
-
-          connection.once('connected', () => {
-            clearTimeout(timeout);
-            resolve();
-          });
-
-          connection.once('error', (err) => {
-            clearTimeout(timeout);
-            reject(err);
-          });
-
-          connection.connect();
-        });
-
-        // Connection successful, send handoff
-        console.log(`[ViewerManager] Connected to viewer WebSocket, sending handoff...`);
-
-        connection.send('PKLoginHandoff', {
-          op: 'session_handoff',
-          ...handoffData,
-        });
-
-        console.log(`[ViewerManager] Handoff sent successfully`);
-
-        // Complete handoff - viewer takes over (stops bot's UDP without logout)
-        metaverse.completeHandoff();
-        this.updateStatus(instanceId, 'connected');
-
-        // Subscribe to chat events
-        connection.subscribeToChat('all');
-
-        return;
-
-      } catch (error) {
-        if (attempt === maxAttempts) {
-          throw new Error(`Failed to connect to viewer after ${maxAttempts} attempts`);
-        }
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-      }
+    // Check if we should re-login
+    if (!instance || !this.shouldRelogin.has(instanceId)) {
+      this.cleanupInstance(instanceId);
+      return;
     }
+
+    // Get account and password for re-login
+    const account = accountManager.getAccount(instance.accountId);
+    const grid = gridManager.getGrid(instance.gridId);
+    const password = this.sessionPasswords.get(instanceId) || account?.password;
+
+    if (!account || !grid || !password) {
+      console.log(`[ViewerManager] Cannot re-login: missing account/grid/password`);
+      this.cleanupInstance(instanceId);
+      return;
+    }
+
+    console.log(`[ViewerManager] Viewer exited, re-logging in to node-metaverse...`);
+
+    try {
+      // Remove old metaverse connection if it exists
+      await metaverseConnectionManager.remove(instanceId);
+
+      // Create new connection and re-login
+      const metaverse = metaverseConnectionManager.create(instanceId);
+
+      // Forward state changes to instance
+      metaverse.on('state-change', (state: ConnectionState) => {
+        this.updateConnectionState(instanceId, state);
+      });
+
+      this.updateConnectionState(instanceId, 'logging_in');
+      this.updateStatus(instanceId, 'starting');
+
+      await metaverse.login({
+        firstName: account.firstName,
+        lastName: account.lastName,
+        password,
+        gridLoginUri: grid.loginUri,
+      });
+
+      console.log(`[ViewerManager] Re-login successful, connected to metaverse`);
+      this.updateStatus(instanceId, 'running');
+
+      // Update region name
+      const regionName = metaverse.getRegionName();
+      if (regionName) {
+        this.updateRegionName(instanceId, regionName);
+      }
+
+    } catch (error) {
+      console.error(`[ViewerManager] Re-login failed:`, error);
+      this.cleanupInstance(instanceId);
+      await metaverseConnectionManager.remove(instanceId);
+    }
+  }
+
+  private cleanupInstance(instanceId: string): void {
+    this.updateStatus(instanceId, 'disconnected');
+    this.updateConnectionState(instanceId, 'disconnected');
+    this.instances.delete(instanceId);
+    this.shouldRelogin.delete(instanceId);
+    this.sessionPasswords.delete(instanceId);
   }
 
   /**
@@ -396,18 +439,21 @@ export class ViewerManager extends EventEmitter {
 
     console.log(`[ViewerManager] Stopping viewer ${instanceId}`);
 
+    // Prevent re-login on exit (user explicitly stopped)
+    this.shouldRelogin.delete(instanceId);
+
     // Show disconnecting state in UI
     this.updateConnectionState(instanceId, 'disconnecting');
 
-    const process = this.processes.get(instanceId);
-    if (process) {
+    const childProcess = this.processes.get(instanceId);
+    if (childProcess) {
       // Try graceful shutdown first
-      process.kill('SIGTERM');
+      childProcess.kill('SIGTERM');
 
       // Force kill after timeout
       setTimeout(() => {
         if (this.processes.has(instanceId)) {
-          process.kill('SIGKILL');
+          childProcess.kill('SIGKILL');
         }
       }, 5000);
     } else {
@@ -444,17 +490,8 @@ export class ViewerManager extends EventEmitter {
   private async cleanup(instanceId: string): Promise<void> {
     connectionManager.disconnect(instanceId);
     await metaverseConnectionManager.remove(instanceId);
-
-    // Emit final disconnected state before removing
-    const instance = this.instances.get(instanceId);
-    if (instance) {
-      instance.connectionState = 'disconnected';
-      instance.status = 'disconnected';
-      this.emit('status-update', instance);
-    }
-
-    this.instances.delete(instanceId);
     this.processes.delete(instanceId);
+    this.cleanupInstance(instanceId);
   }
 
   private scheduleWebSocketConnect(instanceId: string, port: number, attempt = 1): void {
@@ -473,8 +510,11 @@ export class ViewerManager extends EventEmitter {
 
       connection.once('connected', () => {
         this.updateStatus(instanceId, 'connected');
+        this.updateConnectionState(instanceId, 'viewer_connected');
         // Auto-subscribe to chat events
         connection.subscribeToChat('all');
+        // Hide native chat UI since Electron handles it
+        connection.setChatVisible(false);
       });
 
       connection.once('error', () => {
@@ -500,6 +540,8 @@ export class ViewerManager extends EventEmitter {
     for (const [instanceId] of this.instances) {
       this.stopViewer(instanceId);
     }
+    this.shouldRelogin.clear();
+    this.sessionPasswords.clear();
   }
 
   /**

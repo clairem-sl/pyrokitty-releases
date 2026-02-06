@@ -1958,6 +1958,19 @@ void LLAgentWearables::sendAgentWearablesRequest()
     gAgent.sendReliableMessage();
 }
 
+// <FS:Pyrokitty> Session continuation - force wearables refresh
+void LLAgentWearables::resetForSessionContinuation()
+{
+    LL_INFOS("Wearables") << "Resetting wearables state for session continuation" << LL_ENDL;
+
+    // Reset the flag so we'll process the next AgentWearablesUpdate
+    mInitialWearablesUpdateReceived = false;
+
+    // Request fresh wearables data from the sim
+    gAgentWearables.sendAgentWearablesRequest();
+}
+// </FS:Pyrokitty>
+
 bool LLAgentWearables::itemUpdatePending(const LLUUID& item_id) const
 {
     return mItemsAwaitingWearableUpdate.find(item_id) != mItemsAwaitingWearableUpdate.end();

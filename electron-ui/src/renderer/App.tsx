@@ -1,15 +1,13 @@
 import React, { useState, useCallback } from 'react';
-import { MantineProvider } from '@mantine/core';
+import { MantineProvider, Alert } from '@mantine/core';
 import { theme } from './theme';
-import { useGrids, useAccounts, useViewers, useChat, useFriends, useGroups } from './hooks';
+import { useGrids, useAccounts, useViewers, useChat, useFriends, useGroups, useNearbyAvatars, useRegionInfo } from './hooks';
 import { AccountList } from './components/AccountList';
 import { LoginForm } from './components/LoginForm';
-import { ViewerStatus } from './components/ViewerStatus';
-import { InstancesPanel } from './components/InstancesPanel';
 import { Welcome } from './components/Welcome';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ChatWindow } from './components/ChatWindow';
-import { Friend, Group } from '../shared/types';
+import { Friend, Group, NearbyAvatar } from '../shared/types';
 
 type View = 'account' | 'add-account';
 
@@ -38,15 +36,14 @@ export const App: React.FC = () => {
     sendGroupMessage,
     startIMSession,
     startGroupChat,
-    setActiveSessionId,
+    selectSession,
     getSessionMessages,
   } = useChat({ instanceId: activeInstanceId });
 
   const { onlineFriends, offlineFriends } = useFriends({ instanceId: activeInstanceId });
   const { groups } = useGroups({ instanceId: activeInstanceId });
-
-  // Chat window show/hide state
-  const [showChat, setShowChat] = useState(false);
+  const { nearbyAvatars } = useNearbyAvatars({ instanceId: activeInstanceId });
+  const { regionInfo } = useRegionInfo({ instanceId: activeInstanceId });
 
   const handleSelectAccount = (accountId: string) => {
     setSelectedAccountId(accountId);
@@ -98,7 +95,6 @@ export const App: React.FC = () => {
       // Pass launchViewer: false to only login to metaverse
       await launchViewer(selectedAccountId, password, { launchViewer: false });
       setError(null);
-      setShowChat(true); // Auto-show chat panel on login
     } catch (err: any) {
       setError(err.message || 'Failed to login');
     }
@@ -134,6 +130,11 @@ export const App: React.FC = () => {
     await startIMSession(friend.id, friend.name);
   }, [activeInstanceId, startIMSession]);
 
+  const handleStartIMWithAvatar = useCallback(async (avatar: NearbyAvatar) => {
+    if (!activeInstanceId) return;
+    await startIMSession(avatar.id, avatar.name);
+  }, [activeInstanceId, startIMSession]);
+
   const handleOpenGroupChat = useCallback(async (group: Group) => {
     if (!activeInstanceId) return;
     await startGroupChat(group.id);
@@ -157,107 +158,86 @@ export const App: React.FC = () => {
 
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
-    <div className="app">
-      <header className="header">
-        <h1>PyroKitty</h1>
-        <div className="header-actions">
-          {canShowChat && (
-            <button
-              className={`btn ${showChat ? 'btn-primary' : 'btn-secondary'} header-chat-btn`}
-              onClick={() => setShowChat(!showChat)}
-            >
-              {showChat ? 'Hide Chat' : 'Show Chat'}
-            </button>
-          )}
-          <span className="header-info">
-            {instances.filter(isRunning).length} viewer(s) running
-          </span>
-        </div>
-      </header>
+      <div className="app">
+        <header className="header">
+          <h1>PyroKitty</h1>
+          <div className="header-actions">
+            <span className="header-info">
+              {instances.filter(isRunning).length} account(s) connected
+            </span>
+          </div>
+        </header>
 
-      <div className="main-content">
-        <aside className="sidebar">
-          <AccountList
-            accounts={accounts}
-            grids={grids}
-            instances={instances}
-            selectedAccountId={selectedAccountId}
-            onSelectAccount={handleSelectAccount}
-            onAddAccount={handleAddAccount}
-          />
-        </aside>
-
-        <main className="content">
-          {error && <div className="message error">{error}</div>}
-
-          {currentView === 'add-account' ? (
-            <LoginForm
+        <div className="main-content">
+          <aside className="sidebar">
+            <AccountList
+              accounts={accounts}
               grids={grids}
-              onSubmit={handleSaveAccount}
-              onCancel={() => setCurrentView('account')}
-              error={null}
-            />
-          ) : selectedAccount && selectedGrid && isRunning(selectedInstance) ? (
-            <ViewerStatus
-              account={selectedAccount}
-              grid={selectedGrid}
-              instance={selectedInstance}
-              onStop={() => handleStopViewer()}
-              onLaunchViewer={handleLaunchViewerFromMetaverse}
-            />
-          ) : selectedAccount ? (
-            <LoginForm
-              grids={grids}
-              account={selectedAccount}
-              onLogin={handleLogin}
-              onCancel={() => setSelectedAccountId(null)}
-              onRemove={handleRemoveAccount}
-              error={null}
-            />
-          ) : (
-            <Welcome />
-          )}
-
-          <InstancesPanel
-            instances={instances}
-            accounts={accounts}
-            grids={grids}
-            onStopInstance={handleStopViewer}
-          />
-        </main>
-
-        {/* Chat sidebar */}
-        {showChat && canShowChat && (
-          <aside className="chat-sidebar">
-            <ChatWindow
-              connectionState={connectionState}
-              nearbyMessages={nearbyMessages}
-              onSendNearbyChat={handleSendNearbyChat}
-              sessions={sessions}
-              activeSessionId={activeSessionId}
-              onSelectSession={setActiveSessionId}
-              getSessionMessages={getSessionMessages}
-              onSendIM={handleSendIM}
-              onSendGroupMessage={handleSendGroupMessage}
-              onlineFriends={onlineFriends}
-              offlineFriends={offlineFriends}
-              onStartIMWithFriend={handleStartIMWithFriend}
-              groups={groups}
-              onOpenGroupChat={handleOpenGroupChat}
+              instances={instances}
+              selectedAccountId={selectedAccountId}
+              onSelectAccount={handleSelectAccount}
+              onAddAccount={handleAddAccount}
+              onStopInstance={handleStopViewer}
+              onLaunchViewer={launchViewerForInstance}
             />
           </aside>
-        )}
-      </div>
-    </div>
 
-    <ConfirmDialog
-      opened={confirmRemoveOpen}
-      onClose={() => setConfirmRemoveOpen(false)}
-      onConfirm={confirmRemoveAccount}
-      title="Remove Account"
-      message="Are you sure you want to remove this account?"
-      confirmLabel="Remove"
-    />
+          <main className="content">
+            {error && <Alert color="red" mb="md">{error}</Alert>}
+
+            {currentView === 'add-account' ? (
+              <LoginForm
+                key="add-account"
+                grids={grids}
+                onSubmit={handleSaveAccount}
+                onCancel={() => setCurrentView('account')}
+                error={null}
+              />
+            ) : selectedAccount && canShowChat ? (
+              <ChatWindow
+                connectionState={connectionState}
+                nearbyMessages={nearbyMessages}
+                onSendNearbyChat={handleSendNearbyChat}
+                sessions={sessions}
+                activeSessionId={activeSessionId}
+                onSelectSession={selectSession}
+                getSessionMessages={getSessionMessages}
+                onSendIM={handleSendIM}
+                onSendGroupMessage={handleSendGroupMessage}
+                onlineFriends={onlineFriends}
+                offlineFriends={offlineFriends}
+                onStartIMWithFriend={handleStartIMWithFriend}
+                onStartIMWithAvatar={handleStartIMWithAvatar}
+                groups={groups}
+                onOpenGroupChat={handleOpenGroupChat}
+                nearbyAvatars={nearbyAvatars}
+                regionInfo={regionInfo}
+              />
+            ) : selectedAccount ? (
+              <LoginForm
+                key={selectedAccount.id}
+                grids={grids}
+                account={selectedAccount}
+                onLogin={handleLogin}
+                onCancel={() => setSelectedAccountId(null)}
+                onRemove={handleRemoveAccount}
+                error={null}
+              />
+            ) : (
+              <Welcome />
+            )}
+          </main>
+        </div>
+      </div>
+
+      <ConfirmDialog
+        opened={confirmRemoveOpen}
+        onClose={() => setConfirmRemoveOpen(false)}
+        onConfirm={confirmRemoveAccount}
+        title="Remove Account"
+        message="Are you sure you want to remove this account?"
+        confirmLabel="Remove"
+      />
     </MantineProvider>
   );
 };
