@@ -230,6 +230,7 @@ export class ObjectStoreLite implements IObjectStore
                                         override.textureTransforms = [];
                                         for (const transform of textureTransforms)
                                         {
+                                            if (!transform) { override.textureTransforms.push({}); continue; }
                                             const o = transform.get('o') as LLSDReal[] | undefined;
                                             const s = transform.get('s') as LLSDReal[] | undefined;
                                             const r = transform.get('r') as LLSDReal | undefined;

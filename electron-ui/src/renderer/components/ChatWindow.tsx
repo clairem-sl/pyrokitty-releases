@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ChatPanel } from './ChatPanel';
 import { MiniMap } from './MiniMap';
-import { ChatMessage, ChatSession, Friend, Group, ConnectionState, NearbyAvatar, RegionInfo } from '../../shared/types';
+import { ChatMessage, ChatSession, Friend, Group, ConnectionState, NearbyAvatar, RegionInfo, SyncStatus, displayName } from '../../shared/types';
 
 type Tab = 'nearby' | 'messages' | 'groups';
 
@@ -25,11 +25,18 @@ interface ChatWindowProps {
   onStartIMWithFriend: (friend: Friend) => void;
   // Nearby avatar IM
   onStartIMWithAvatar: (avatar: NearbyAvatar) => void;
+  // Session management
+  onDismissSession: (sessionId: string) => void;
+  onClearSessionHistory: (sessionId: string) => void;
   // Groups
   groups: Group[];
   onOpenGroupChat: (group: Group) => void;
   // Region info for mini-map
   regionInfo: RegionInfo | null;
+  // Inventory sync
+  syncStatus: SyncStatus;
+  onSyncNow: () => void;
+  onOpenSyncFolder: () => void;
 }
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
@@ -47,9 +54,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   offlineFriends,
   onStartIMWithFriend,
   onStartIMWithAvatar,
+  onDismissSession,
+  onClearSessionHistory,
   groups,
   onOpenGroupChat,
   regionInfo,
+  syncStatus,
+  onSyncNow,
+  onOpenSyncFolder,
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>('nearby');
 
@@ -91,6 +103,20 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const getGroupSession = (groupId: string): ChatSession | undefined => {
     return groupSessions.find((s) => s.groupId === groupId);
   };
+
+  // Resolve session display name: prefer friend name by UUID, then session name
+  const allFriends = [...onlineFriends, ...offlineFriends];
+  const friendById = new Map(allFriends.map((f) => [f.id, f]));
+  const sessionDisplayName = (s: ChatSession): string => {
+    const friend = s.participantId ? friendById.get(s.participantId) : undefined;
+    return displayName(friend?.name || s.name);
+  };
+
+  // IM sessions with non-friends (recent chats from nearby avatars, etc.)
+  const friendIds = new Set(allFriends.map((f) => f.id));
+  const nonFriendSessions = imSessions
+    .filter((s) => s.participantId && !friendIds.has(s.participantId))
+    .sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
 
   // Count unread for tabs
   const imUnread = imSessions.reduce((sum, s) => sum + s.unreadCount, 0);
@@ -134,6 +160,30 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         </button>
       </div>
 
+      {/* Inventory sync bar */}
+      <div className="sync-bar">
+        <span className="sync-status">
+          {syncStatus.phase === 'idle' && 'Sync: idle'}
+          {syncStatus.phase === 'preparing' && 'Sync: preparing...'}
+          {syncStatus.phase === 'downloading' && `Downloading ${syncStatus.current}/${syncStatus.total}`}
+          {syncStatus.phase === 'uploading' && `Uploading ${syncStatus.current}/${syncStatus.total}`}
+          {syncStatus.phase === 'done' && 'Sync: complete'}
+          {syncStatus.phase === 'error' && `Sync error: ${syncStatus.error}`}
+        </span>
+        {syncStatus.uploadCost === 0 && <span className="sync-uploads-free">uploads free</span>}
+        {syncStatus.uploadCost > 0 && <span className="sync-uploads-paid">uploads L${syncStatus.uploadCost}</span>}
+        <button
+          className="sync-btn"
+          onClick={onSyncNow}
+          disabled={syncStatus.phase === 'downloading' || syncStatus.phase === 'uploading' || syncStatus.phase === 'preparing' || connectionState === 'viewer_connected'}
+        >
+          Sync Now
+        </button>
+        <button className="sync-btn" onClick={onOpenSyncFolder}>
+          Open Folder
+        </button>
+      </div>
+
       {/* Tab content */}
       <div className="chat-content">
         {activeTab === 'nearby' && (
@@ -150,9 +200,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       key={avatar.id}
                       className="split-sidebar-item"
                       title={avatar.title || undefined}
+                      onClick={() => {
+                        onStartIMWithAvatar(avatar);
+                        setActiveTab('messages');
+                      }}
                     >
                       <span className="avatar-status-dot" />
-                      <span className="split-sidebar-name">{avatar.name}</span>
+                      <span className="split-sidebar-name">{displayName(avatar.name)}</span>
                     </div>
                   ))
                 )}
@@ -177,6 +231,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 title="Nearby Chat"
                 placeholder="Say something..."
                 showChatTypes={true}
+                onClear={() => onClearSessionHistory('nearby')}
               />
             </div>
           </div>
@@ -187,7 +242,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             {/* Friends sidebar */}
             <div className="split-sidebar">
               <div className="split-sidebar-section">
-                <div className="split-sidebar-header">Online ({onlineFriends.length})</div>
+                <div className="split-sidebar-header">Friends Online ({onlineFriends.length})</div>
                 {onlineFriends.length === 0 ? (
                   <div className="split-sidebar-empty">No friends online</div>
                 ) : (
@@ -207,7 +262,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                         }}
                       >
                         <span className="friend-status-dot online" />
-                        <span className="split-sidebar-name">{friend.name || friend.id}</span>
+                        <span className="split-sidebar-name">{displayName(friend.name) || friend.id}</span>
                         {session && session.unreadCount > 0 && (
                           <span className="split-sidebar-badge">{session.unreadCount}</span>
                         )}
@@ -217,7 +272,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 )}
               </div>
               <div className="split-sidebar-section">
-                <div className="split-sidebar-header">Offline ({offlineFriends.length})</div>
+                <div className="split-sidebar-header">Friends Offline ({offlineFriends.length})</div>
                 {offlineFriends.map((friend) => {
                   const session = getIMSessionForFriend(friend.id);
                   const isActive = session?.id === activeSessionId;
@@ -234,7 +289,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       }}
                     >
                       <span className="friend-status-dot offline" />
-                      <span className="split-sidebar-name">{friend.name || friend.id}</span>
+                      <span className="split-sidebar-name">{displayName(friend.name) || friend.id}</span>
                       {session && session.unreadCount > 0 && (
                         <span className="split-sidebar-badge">{session.unreadCount}</span>
                       )}
@@ -242,6 +297,36 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   );
                 })}
               </div>
+              {nonFriendSessions.length > 0 && (
+                <div className="split-sidebar-section">
+                  <div className="split-sidebar-header">Recent ({nonFriendSessions.length})</div>
+                  {nonFriendSessions.map((s) => {
+                    const isActive = s.id === activeSessionId;
+                    return (
+                      <div
+                        key={s.id}
+                        className={`split-sidebar-item ${isActive ? 'active' : ''} has-session`}
+                        onClick={() => onSelectSession(s.id)}
+                      >
+                        <span className="avatar-status-dot" />
+                        <span className="split-sidebar-name">{sessionDisplayName(s)}</span>
+                        {s.unreadCount > 0 && (
+                          <span className="split-sidebar-badge">{s.unreadCount}</span>
+                        )}
+                        <span
+                          className="split-sidebar-dismiss"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDismissSession(s.id);
+                          }}
+                        >
+                          &times;
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Chat area */}
@@ -250,12 +335,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 <ChatPanel
                   messages={activeSessionMessages}
                   onSendMessage={handleSendSessionMessage}
-                  title={activeSession.name}
-                  placeholder={`Message ${activeSession.name}...`}
+                  title={sessionDisplayName(activeSession)}
+                  placeholder={`Message ${sessionDisplayName(activeSession)}...`}
+                  onClear={() => onClearSessionHistory(activeSession.id)}
                 />
               ) : (
                 <div className="split-main-empty">
-                  Select a friend to start chatting
+                  Select a conversation to start chatting
                 </div>
               )}
             </div>
@@ -303,8 +389,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 <ChatPanel
                   messages={activeSessionMessages}
                   onSendMessage={handleSendSessionMessage}
-                  title={activeSession.name}
-                  placeholder={`Message ${activeSession.name}...`}
+                  title={sessionDisplayName(activeSession)}
+                  placeholder={`Message ${sessionDisplayName(activeSession)}...`}
+                  onClear={() => onClearSessionHistory(activeSession.id)}
                 />
               ) : (
                 <div className="split-main-empty">

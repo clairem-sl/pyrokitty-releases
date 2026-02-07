@@ -47,6 +47,15 @@ export interface ChatSession {
   lastMessageTime?: number;
 }
 
+// Persisted session metadata (no runtime state like unreadCount)
+export interface SessionMeta {
+  id: string;
+  type: 'im' | 'group';
+  name: string;
+  participantId?: string;
+  groupId?: string;
+}
+
 // Friend types
 export interface Friend {
   id: string;
@@ -81,6 +90,7 @@ export interface RegionInfo {
   x: number; // Grid X coordinate
   y: number; // Grid Y coordinate
   mapImageUrl: string;
+  agentPosition?: { x: number; y: number; z: number };
 }
 
 // Account stored in accounts.json
@@ -106,6 +116,18 @@ export interface ViewerInstance {
 }
 
 export type ViewerStatus = 'starting' | 'running' | 'connected' | 'disconnected' | 'crashed';
+
+// Inventory sync progress
+export type SyncPhase = 'idle' | 'preparing' | 'downloading' | 'uploading' | 'done' | 'error';
+
+export interface SyncStatus {
+  phase: SyncPhase;
+  current: number;
+  total: number;
+  currentFile?: string;
+  error?: string;
+  uploadCost: number; // -1 = unknown, 0 = free, >0 = costs L$
+}
 
 // IPC Channel names
 export const IPC_CHANNELS = {
@@ -164,6 +186,16 @@ export const IPC_CHANNELS = {
   // Chat log persistence
   LOAD_CHAT_LOG: 'chat-log:load',
   LOAD_ALL_CHAT_LOGS: 'chat-log:load-all',
+  LOAD_SESSION_META: 'chat-log:load-session-meta',
+  DISMISS_SESSION: 'chat-log:dismiss-session',
+  GET_DISMISSED_SESSIONS: 'chat-log:get-dismissed',
+  CLEAR_CHAT_LOG: 'chat-log:clear',
+
+  // Inventory sync
+  SYNC_START: 'inventory-sync:start',
+  SYNC_GET_STATUS: 'inventory-sync:status',
+  SYNC_PROGRESS: 'inventory-sync:progress',
+  SYNC_OPEN_FOLDER: 'inventory-sync:open-folder',
 } as const;
 
 // IPC Request/Response types
@@ -211,4 +243,10 @@ export interface ChatEvent {
 export interface ViewerAPI {
   name: string;
   desc: string;
+}
+
+/** Strip " Resident" last name from avatar display names */
+export function displayName(name: string): string {
+  if (!name) return name;
+  return name.endsWith(' Resident') ? name.slice(0, -9) : name;
 }

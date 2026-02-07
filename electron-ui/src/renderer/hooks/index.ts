@@ -6,3 +6,4 @@ export { useFriends } from './useFriends';
 export { useGroups } from './useGroups';
 export { useNearbyAvatars } from './useNearbyAvatars';
 export { useRegionInfo } from './useRegionInfo';
+export { useInventorySync } from './useInventorySync';

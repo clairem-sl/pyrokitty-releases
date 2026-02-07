@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
-import { ChatMessage } from '../shared/types';
+import { ChatMessage, ChatSession, SessionMeta } from '../shared/types';
 
 const DEBOUNCE_MS = 1000;
 
@@ -118,6 +118,104 @@ export class ChatLogManager {
     accountBuffer.delete(sessionId);
     if (accountBuffer.size === 0) {
       this.pendingWrites.delete(accountId);
+    }
+  }
+
+  /** Load dismissed session IDs for an account */
+  loadDismissedSessions(accountId: string): string[] {
+    try {
+      const filePath = path.join(this.getLogDir(accountId), '_dismissed.json');
+      if (!fs.existsSync(filePath)) return [];
+      return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Add a session to the dismissed list */
+  dismissSession(accountId: string, sessionId: string): void {
+    const dismissed = this.loadDismissedSessions(accountId);
+    if (!dismissed.includes(sessionId)) {
+      dismissed.push(sessionId);
+      const dir = this.getLogDir(accountId);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(path.join(dir, '_dismissed.json'), JSON.stringify(dismissed));
+    }
+  }
+
+  // --- Session metadata persistence ---
+
+  private getSessionMetaPath(accountId: string): string {
+    return path.join(this.getLogDir(accountId), '_sessions.json');
+  }
+
+  private loadSessionMetaMap(accountId: string): Record<string, SessionMeta> {
+    try {
+      const filePath = this.getSessionMetaPath(accountId);
+      if (!fs.existsSync(filePath)) return {};
+      return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    } catch {
+      return {};
+    }
+  }
+
+  private writeSessionMetaMap(accountId: string, map: Record<string, SessionMeta>): void {
+    const dir = this.getLogDir(accountId);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(this.getSessionMetaPath(accountId), JSON.stringify(map, null, 2));
+  }
+
+  /** Save or update session metadata */
+  saveSessionMeta(accountId: string, session: ChatSession): void {
+    const map = this.loadSessionMetaMap(accountId);
+    map[session.id] = {
+      id: session.id,
+      type: session.type,
+      name: session.name,
+      participantId: session.participantId,
+      groupId: session.groupId,
+    };
+    this.writeSessionMetaMap(accountId, map);
+  }
+
+  /** Load all saved session metadata for an account */
+  loadAllSessionMeta(accountId: string): SessionMeta[] {
+    const map = this.loadSessionMetaMap(accountId);
+    return Object.values(map);
+  }
+
+  /** Delete the log file for a specific session and clear pending writes */
+  deleteLog(accountId: string, sessionId: string): void {
+    // Cancel any pending flush timer
+    const timerKey = `${accountId}/${sessionId}`;
+    const timer = this.flushTimers.get(timerKey);
+    if (timer) {
+      clearTimeout(timer);
+      this.flushTimers.delete(timerKey);
+    }
+
+    // Clear pending writes buffer
+    const accountBuffer = this.pendingWrites.get(accountId);
+    if (accountBuffer) {
+      accountBuffer.delete(sessionId);
+      if (accountBuffer.size === 0) {
+        this.pendingWrites.delete(accountId);
+      }
+    }
+
+    // Delete the file
+    try {
+      const filePath = this.getLogPath(accountId, sessionId);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log(`[ChatLog] Deleted log file: ${filePath}`);
+      }
+    } catch (error) {
+      console.error(`[ChatLog] Error deleting log for ${accountId}/${sessionId}:`, error);
     }
   }
 

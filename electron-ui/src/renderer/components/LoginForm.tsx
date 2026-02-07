@@ -5,7 +5,7 @@ import { Grid, Account } from '../../shared/types';
 interface LoginFormProps {
   grids: Grid[];
   onSubmit?: (gridId: string, firstName: string, lastName: string, password: string, savePassword: boolean) => void;
-  onLogin?: (password?: string) => void;  // Login to metaverse
+  onLogin?: (password?: string, startLocation?: string) => void;  // Login to metaverse
   onCancel: () => void;
   onRemove?: () => void;
   error: string | null;
@@ -30,12 +30,21 @@ export const LoginForm: React.FC<LoginFormProps> = ({
   const [lastName, setLastName] = useState(account?.lastName || 'Resident');
   const [password, setPassword] = useState(account?.password || '');
   const [savePassword, setSavePassword] = useState(false);
+  const [startLocationType, setStartLocationType] = useState<'last' | 'home' | 'custom'>('last');
+  const [customLocation, setCustomLocation] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     // Default action is login only (not launch viewer)
     if (isLaunchMode && onLogin) {
-      onLogin(password || undefined);
+      let startLocation: string | undefined;
+      if (startLocationType === 'home') {
+        startLocation = 'home';
+      } else if (startLocationType === 'custom' && customLocation.trim()) {
+        startLocation = `uri:${customLocation.trim()}&128&128&0`;
+      }
+      // 'last' is the default, no need to pass it
+      onLogin(password || undefined, startLocation);
     } else if (onSubmit && selectedGridId && firstName.trim() && lastName.trim() && password) {
       onSubmit(selectedGridId, firstName.trim(), lastName.trim(), password, savePassword);
     }
@@ -102,6 +111,30 @@ export const LoginForm: React.FC<LoginFormProps> = ({
           description={hasPassword && !password ? 'Leave blank to use saved password' : undefined}
           mb="md"
         />
+
+        {isLaunchMode && (
+          <>
+            <NativeSelect
+              label="Start Location"
+              value={startLocationType}
+              onChange={(e) => setStartLocationType(e.currentTarget.value as 'last' | 'home' | 'custom')}
+              data={[
+                { value: 'last', label: 'My Last Location' },
+                { value: 'home', label: 'My Home' },
+                { value: 'custom', label: 'Region Name...' },
+              ]}
+              mb="md"
+            />
+            {startLocationType === 'custom' && (
+              <TextInput
+                placeholder="Region Name"
+                value={customLocation}
+                onChange={(e) => setCustomLocation(e.currentTarget.value)}
+                mb="md"
+              />
+            )}
+          </>
+        )}
 
         {!isLaunchMode && (
           <Checkbox

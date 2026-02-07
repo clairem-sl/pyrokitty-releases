@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { MantineProvider, Alert } from '@mantine/core';
 import { theme } from './theme';
-import { useGrids, useAccounts, useViewers, useChat, useFriends, useGroups, useNearbyAvatars, useRegionInfo } from './hooks';
+import { useGrids, useAccounts, useViewers, useChat, useFriends, useGroups, useNearbyAvatars, useRegionInfo, useInventorySync } from './hooks';
 import { AccountList } from './components/AccountList';
 import { LoginForm } from './components/LoginForm';
 import { Welcome } from './components/Welcome';
@@ -20,6 +20,7 @@ export const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('account');
   const [error, setError] = useState<string | null>(null);
   const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const selectedAccount = getAccount(selectedAccountId || '') || null;
   const selectedGrid = selectedAccount ? getGrid(selectedAccount.gridId) || null : null;
@@ -38,12 +39,15 @@ export const App: React.FC = () => {
     startGroupChat,
     selectSession,
     getSessionMessages,
+    dismissSession,
+    clearSessionHistory,
   } = useChat({ instanceId: activeInstanceId });
 
   const { onlineFriends, offlineFriends } = useFriends({ instanceId: activeInstanceId });
   const { groups } = useGroups({ instanceId: activeInstanceId });
   const { nearbyAvatars } = useNearbyAvatars({ instanceId: activeInstanceId });
   const { regionInfo } = useRegionInfo({ instanceId: activeInstanceId });
+  const { status: syncStatus, startSync, openFolder: openSyncFolder } = useInventorySync({ instanceId: activeInstanceId });
 
   const handleSelectAccount = (accountId: string) => {
     setSelectedAccountId(accountId);
@@ -84,7 +88,7 @@ export const App: React.FC = () => {
   };
 
   // Login to metaverse only (no viewer launch)
-  const handleLogin = async (password?: string) => {
+  const handleLogin = async (password?: string, startLocation?: string) => {
     if (!selectedAccountId) return;
 
     try {
@@ -93,7 +97,7 @@ export const App: React.FC = () => {
       }
 
       // Pass launchViewer: false to only login to metaverse
-      await launchViewer(selectedAccountId, password, { launchViewer: false });
+      await launchViewer(selectedAccountId, password, { launchViewer: false, startLocation });
       setError(null);
     } catch (err: any) {
       setError(err.message || 'Failed to login');
@@ -169,18 +173,27 @@ export const App: React.FC = () => {
         </header>
 
         <div className="main-content">
-          <aside className="sidebar">
-            <AccountList
-              accounts={accounts}
-              grids={grids}
-              instances={instances}
-              selectedAccountId={selectedAccountId}
-              onSelectAccount={handleSelectAccount}
-              onAddAccount={handleAddAccount}
-              onStopInstance={handleStopViewer}
-              onLaunchViewer={launchViewerForInstance}
-            />
+          <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+            <div className="sidebar-content">
+              <AccountList
+                accounts={accounts}
+                grids={grids}
+                instances={instances}
+                selectedAccountId={selectedAccountId}
+                onSelectAccount={handleSelectAccount}
+                onAddAccount={handleAddAccount}
+                onStopInstance={handleStopViewer}
+                onLaunchViewer={launchViewerForInstance}
+              />
+            </div>
           </aside>
+          <button
+            className="sidebar-toggle"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? 'Show accounts' : 'Hide accounts'}
+          >
+            {sidebarCollapsed ? '\u25B6' : '\u25C0'}
+          </button>
 
           <main className="content">
             {error && <Alert color="red" mb="md">{error}</Alert>}
@@ -210,8 +223,13 @@ export const App: React.FC = () => {
                 onStartIMWithAvatar={handleStartIMWithAvatar}
                 groups={groups}
                 onOpenGroupChat={handleOpenGroupChat}
+                onDismissSession={dismissSession}
+                onClearSessionHistory={clearSessionHistory}
                 nearbyAvatars={nearbyAvatars}
                 regionInfo={regionInfo}
+                syncStatus={syncStatus}
+                onSyncNow={startSync}
+                onOpenSyncFolder={openSyncFolder}
               />
             ) : selectedAccount ? (
               <LoginForm

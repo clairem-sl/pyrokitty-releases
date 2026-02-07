@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ipcRenderer } from 'electron';
-import { IPC_CHANNELS, ChatMessage, ChatSession, ChatType } from '../../shared/types';
+import { IPC_CHANNELS, ChatMessage, ChatSession, SessionMeta } from '../../shared/types';
 
 interface UseChatOptions {
   instanceId: string | null;
@@ -20,12 +20,26 @@ export function useChat({ instanceId }: UseChatOptions) {
     if (!instanceId) return;
 
     const load = async () => {
+      let liveSessions: ChatSession[] = [];
       try {
         const data = await ipcRenderer.invoke(IPC_CHANNELS.GET_CHAT_SESSIONS, instanceId);
-        setSessions(data || []);
+        liveSessions = data || [];
       } catch (e) {
         console.error('Failed to load chat sessions:', e);
       }
+
+      // Load dismissed session IDs and saved session metadata
+      let dismissed: string[] = [];
+      let sessionMetas: SessionMeta[] = [];
+      try {
+        [dismissed, sessionMetas] = await Promise.all([
+          ipcRenderer.invoke(IPC_CHANNELS.GET_DISMISSED_SESSIONS, instanceId).then((d: string[]) => d || []),
+          ipcRenderer.invoke(IPC_CHANNELS.LOAD_SESSION_META, instanceId).then((m: SessionMeta[]) => m || []),
+        ]);
+      } catch (e) {
+        console.error('Failed to load dismissed/meta:', e);
+      }
+      const metaById = new Map(sessionMetas.map((m) => [m.id, m]));
 
       // Load saved chat history
       try {
@@ -35,6 +49,8 @@ export function useChat({ instanceId }: UseChatOptions) {
         if (allLogs && allLogs.length > 0) {
           const ids = new Set<string>();
           const sessionMap = new Map<string, ChatMessage[]>();
+          const liveSessionIds = new Set(liveSessions.map((s) => s.id));
+          const dismissedIds = new Set(dismissed);
 
           for (const { sessionId, messages: msgs } of allLogs) {
             for (const msg of msgs) {
@@ -44,6 +60,36 @@ export function useChat({ instanceId }: UseChatOptions) {
               setNearbyMessages(msgs);
             } else {
               sessionMap.set(sessionId, msgs);
+
+              // Reconstruct session from saved metadata or fall back to message scraping
+              if (!liveSessionIds.has(sessionId) && !dismissedIds.has(sessionId) && msgs.length > 0) {
+                const meta = metaById.get(sessionId);
+                const lastMsg = msgs[msgs.length - 1];
+                if (meta) {
+                  liveSessions.push({
+                    ...meta,
+                    unreadCount: 0,
+                    lastMessage: lastMsg.message,
+                    lastMessageTime: lastMsg.timestamp,
+                  });
+                } else {
+                  // Fallback: scrape name from messages (for logs created before metadata)
+                  const incoming = msgs.find((m) =>
+                    !m.isOutgoing && m.fromName !== 'You' && m.fromName !== 'Second Life'
+                  );
+                  if (incoming) {
+                    liveSessions.push({
+                      id: sessionId,
+                      type: lastMsg.type === 'group' ? 'group' : 'im',
+                      name: incoming.fromName,
+                      participantId: incoming.fromId,
+                      unreadCount: 0,
+                      lastMessage: lastMsg.message,
+                      lastMessageTime: lastMsg.timestamp,
+                    });
+                  }
+                }
+              }
             }
           }
 
@@ -55,6 +101,8 @@ export function useChat({ instanceId }: UseChatOptions) {
       } catch (e) {
         console.error('Failed to load chat history:', e);
       }
+
+      setSessions(liveSessions);
     };
     load();
   }, [instanceId]);
@@ -209,10 +257,33 @@ export function useChat({ instanceId }: UseChatOptions) {
     return messages.get(sessionId) || [];
   }, [messages]);
 
-  // Clear nearby messages (for when user clears chat)
-  const clearNearbyMessages = useCallback(() => {
-    setNearbyMessages([]);
-  }, []);
+  // Dismiss a session (remove from sidebar, persist so it doesn't reappear)
+  const dismissSession = useCallback((sessionId: string) => {
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    if (activeSessionId === sessionId) {
+      setActiveSessionId(null);
+    }
+    if (instanceId) {
+      ipcRenderer.invoke(IPC_CHANNELS.DISMISS_SESSION, instanceId, sessionId);
+    }
+  }, [activeSessionId, instanceId]);
+
+  // Clear chat history for a specific session (deletes log file + clears in-memory)
+  const clearSessionHistory = useCallback(async (sessionId: string) => {
+    if (!instanceId) return;
+    // Delete log file on disk
+    await ipcRenderer.invoke(IPC_CHANNELS.CLEAR_CHAT_LOG, instanceId, sessionId);
+    // Clear in-memory messages
+    if (sessionId === 'nearby') {
+      setNearbyMessages([]);
+    } else {
+      setMessages((prev) => {
+        const updated = new Map(prev);
+        updated.delete(sessionId);
+        return updated;
+      });
+    }
+  }, [instanceId]);
 
   return {
     // Data
@@ -228,6 +299,7 @@ export function useChat({ instanceId }: UseChatOptions) {
     startGroupChat,
     selectSession,
     getSessionMessages,
-    clearNearbyMessages,
+    dismissSession,
+    clearSessionHistory,
   };
 }

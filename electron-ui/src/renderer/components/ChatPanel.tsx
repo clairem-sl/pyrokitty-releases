@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@mantine/core';
-import { ChatMessage } from '../../shared/types';
+import { ChatMessage, displayName } from '../../shared/types';
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -8,6 +8,7 @@ interface ChatPanelProps {
   title?: string;
   placeholder?: string;
   showChatTypes?: boolean;
+  onClear?: () => void;
 }
 
 const formatTime = (timestamp: number | undefined): string => {
@@ -23,14 +24,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   title = 'Chat',
   placeholder = 'Type a message...',
   showChatTypes = false,
+  onClear,
 }) => {
   const [input, setInput] = useState('');
   const [chatType, setChatType] = useState<'whisper' | 'normal' | 'shout'>('normal');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const prevCountRef = useRef(0);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom — instant for bulk loads, smooth for new messages
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const delta = messages.length - prevCountRef.current;
+    prevCountRef.current = messages.length;
+    const behavior = delta > 3 ? 'instant' as const : 'smooth' as const;
+    messagesEndRef.current?.scrollIntoView({ behavior });
   }, [messages]);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -52,6 +58,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     <div className="chat-panel">
       <div className="chat-header">
         <h4>{title}</h4>
+        {onClear && (
+          <button className="chat-clear-btn" onClick={onClear} title="Clear chat history">
+            Clear
+          </button>
+        )}
       </div>
 
       <div className="chat-messages">
@@ -64,7 +75,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               className={`chat-message ${msg.isOutgoing ? 'outgoing' : ''} ${msg.chatType || ''}`}
             >
               <span className="chat-time">{formatTime(msg.timestamp)}</span>
-              <span className="chat-sender">{msg.fromName}</span>
+              <span className="chat-sender">{displayName(msg.fromName)}</span>
               {msg.chatType && msg.chatType !== 'normal' && (
                 <span className={`chat-type-badge ${msg.chatType}`}>
                   {msg.chatType}

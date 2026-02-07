@@ -1,11 +1,32 @@
-import { ipcMain, BrowserWindow } from 'electron';
-import { IPC_CHANNELS, AddAccountRequest, LaunchViewerRequest, ChatMessage } from '../shared/types';
+import { ipcMain, BrowserWindow, shell } from 'electron';
+import { IPC_CHANNELS, AddAccountRequest, LaunchViewerRequest, ChatMessage, SyncStatus } from '../shared/types';
 import { gridManager } from './grid-manager';
 import { accountManager } from './account-manager';
 import { viewerManager } from './viewer-manager';
 import { connectionManager } from './viewer-connection';
 import { metaverseConnectionManager } from './metaverse-connection';
 import { chatLogManager } from './chat-log-manager';
+import { InventorySyncManager } from './inventory-sync-manager';
+
+// Track sync managers per instance
+const syncManagers = new Map<string, InventorySyncManager>();
+
+function getOrCreateSyncManager(instanceId: string, mainWindow: BrowserWindow): InventorySyncManager | null {
+  if (syncManagers.has(instanceId)) return syncManagers.get(instanceId)!;
+
+  const instance = viewerManager.getInstance(instanceId);
+  if (!instance) return null;
+
+  const metaverse = metaverseConnectionManager.get(instanceId);
+  const bot = metaverse?.getBot();
+  if (!bot) return null;
+
+  const manager = new InventorySyncManager(bot, instance.accountId, (progress) => {
+    mainWindow.webContents.send(IPC_CHANNELS.SYNC_PROGRESS, { instanceId, ...progress });
+  });
+  syncManagers.set(instanceId, manager);
+  return manager;
+}
 
 function saveChatMessage(instanceId: string, message: ChatMessage): void {
   const instance = viewerManager.getInstance(instanceId);
@@ -278,6 +299,72 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     return chatLogManager.loadAllSessions(instance.accountId);
   });
 
+  ipcMain.handle(IPC_CHANNELS.LOAD_SESSION_META, async (_, instanceId: string) => {
+    const instance = viewerManager.getInstance(instanceId);
+    if (!instance) return [];
+    return chatLogManager.loadAllSessionMeta(instance.accountId);
+  });
+
+  // Session dismiss persistence
+  ipcMain.handle(IPC_CHANNELS.DISMISS_SESSION, async (_, instanceId: string, sessionId: string) => {
+    const instance = viewerManager.getInstance(instanceId);
+    if (!instance) return;
+    chatLogManager.dismissSession(instance.accountId, sessionId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GET_DISMISSED_SESSIONS, async (_, instanceId: string) => {
+    const instance = viewerManager.getInstance(instanceId);
+    if (!instance) return [];
+    return chatLogManager.loadDismissedSessions(instance.accountId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CLEAR_CHAT_LOG, async (_, instanceId: string, sessionId: string) => {
+    const instance = viewerManager.getInstance(instanceId);
+    if (!instance) return;
+    chatLogManager.deleteLog(instance.accountId, sessionId);
+  });
+
+  // Inventory sync handlers
+  ipcMain.handle(IPC_CHANNELS.SYNC_START, async (_, instanceId: string) => {
+    const manager = getOrCreateSyncManager(instanceId, mainWindow);
+    if (!manager) throw new Error('Cannot sync: not connected');
+    // Run sync in background (don't await — progress updates via SYNC_PROGRESS events)
+    manager.sync().catch(err => console.error('[IPC] Sync error:', err));
+    return true;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SYNC_GET_STATUS, async (_, instanceId: string) => {
+    const manager = syncManagers.get(instanceId);
+    if (!manager) {
+      return { phase: 'idle', current: 0, total: 0, uploadCost: -1 } as SyncStatus;
+    }
+    return manager.getProgress();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SYNC_OPEN_FOLDER, async (_, instanceId: string) => {
+    const manager = syncManagers.get(instanceId);
+    if (manager) {
+      shell.openPath(manager.getLocalDir());
+    }
+  });
+
+  // Auto-start sync when metaverse connects
+  metaverseConnectionManager.on('state-change', (instanceId: string, state: string) => {
+    if (state === 'metaverse_connected') {
+      // Small delay to let everything settle
+      setTimeout(() => {
+        const manager = getOrCreateSyncManager(instanceId, mainWindow);
+        if (manager) {
+          console.log(`[IPC] Auto-starting inventory sync for ${instanceId}`);
+          manager.sync().catch(err => console.error('[IPC] Auto-sync error:', err));
+        }
+      }, 2000);
+    } else if (state === 'disconnected' || state === 'logging_in') {
+      // Clear stale sync manager so a fresh one is created with the new bot
+      syncManagers.delete(instanceId);
+    }
+  });
+
   // Forward WebSocket events to renderer
   connectionManager.on('viewer-connected', (instanceId: string, apis: any[]) => {
     mainWindow.webContents.send(IPC_CHANNELS.VIEWER_WS_CONNECTED, { instanceId, apis });
@@ -287,6 +374,16 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     console.log(`[IPC] viewer-message from ${instanceId}, pump: ${pump}, type: ${data.type}`);
     // Forward chat messages to renderer
     if (data.type === 'nearby' || data.type === 'im') {
+      // Skip system messages with no sender (e.g. "is online." / "is offline." friend notifications)
+      if (data.source_type === 0 && !data.from_name) {
+        return;
+      }
+
+      // Skip Firestorm LSL Bridge messages
+      if (data.from_name && data.from_name.startsWith('#Firestorm LSL Bridge')) {
+        return;
+      }
+
       // Transform snake_case from viewer to camelCase for renderer
       // For IMs, use from_id as sessionId to match node-metaverse behavior
       const sessionId = data.type === 'im' ? data.from_id : data.session_id;
@@ -314,6 +411,7 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
   });
 
   metaverseConnectionManager.on('nearby-chat', (instanceId: string, message: ChatMessage) => {
+    if (message.fromName?.startsWith('#Firestorm LSL Bridge')) return;
     mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...message });
     saveChatMessage(instanceId, message);
   });
@@ -346,5 +444,10 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
   metaverseConnectionManager.on('chat-session-update', (instanceId: string, session: any) => {
     mainWindow.webContents.send(IPC_CHANNELS.CHAT_SESSION_UPDATE, { instanceId, session });
+    // Persist session metadata for history reconstruction
+    const instance = viewerManager.getInstance(instanceId);
+    if (instance && session.name) {
+      chatLogManager.saveSessionMeta(instance.accountId, session);
+    }
   });
 }

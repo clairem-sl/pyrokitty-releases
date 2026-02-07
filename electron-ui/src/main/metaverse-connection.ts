@@ -612,11 +612,19 @@ export class MetaverseConnection extends EventEmitter {
     const region = this.bot.currentRegion;
     const x = region.xCoordinate;
     const y = region.yCoordinate;
+    // Get our own avatar position from the region's avatar list
+    let agentPosition: { x: number; y: number; z: number } | undefined;
+    const selfAvatar = region.agents.get(this.bot.agentID().toString());
+    if (selfAvatar) {
+      const pos = selfAvatar.position;
+      agentPosition = { x: pos.x, y: pos.y, z: pos.z };
+    }
     return {
       name: region.regionName,
       x,
       y,
       mapImageUrl: `https://secondlife-maps-cdn.akamaized.net/map-1-${x}-${y}-objects.jpg`,
+      agentPosition,
     };
   }
 

@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron';
 import * as path from 'path';
 import { setupIpcHandlers } from './ipc-handlers';
 import { gridManager } from './grid-manager';
@@ -7,6 +7,18 @@ import { viewerManager } from './viewer-manager';
 import { chatLogManager } from './chat-log-manager';
 
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let isQuitting = false;
+let cleanupDone = false;
+
+async function performCleanup(): Promise<void> {
+  if (cleanupDone) return;
+  cleanupDone = true;
+  console.log('[App] Logging out from SL and cleaning up...');
+  chatLogManager.flushAll();
+  await viewerManager.stopAll();
+  console.log('[App] Cleanup complete');
+}
 
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -39,20 +51,74 @@ async function createWindow(): Promise<void> {
     mainWindow.webContents.openDevTools();
   }
 
+  // Hide to tray instead of closing
+  mainWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      mainWindow?.hide();
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  // Create system tray icon
+  const iconPath = path.join(app.getAppPath(), '../indra/newview/icons/release/firestorm_icon.ico');
+  const icon = nativeImage.createFromPath(iconPath);
+  tray = new Tray(icon);
+  tray.setToolTip('PyroKitty');
+
+  // Menu item icons
+  const showIcon = nativeImage.createFromPath(
+    path.join(app.getAppPath(), '../indra/newview/icons/release/firestorm_16.png')
+  );
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Show PyroKitty',
+      icon: showIcon,
+      click: () => {
+        mainWindow?.show();
+        mainWindow?.focus();
+      },
+    },
+    {
+      label: 'Quit',
+      click: async () => {
+        isQuitting = true;
+        await performCleanup();
+        app.quit();
+      },
+    },
+  ]);
+  tray.setContextMenu(contextMenu);
+
+  tray.on('double-click', () => {
+    mainWindow?.show();
+    mainWindow?.focus();
   });
 }
 
 app.whenReady().then(createWindow);
 
+app.on('before-quit', (event) => {
+  isQuitting = true;
+
+  if (!cleanupDone) {
+    // Prevent quit until cleanup finishes
+    event.preventDefault();
+    performCleanup().then(() => app.quit());
+    return;
+  }
+
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
+});
+
 app.on('window-all-closed', () => {
-  // Flush any pending chat logs before exit
-  chatLogManager.flushAll();
-
-  // Stop all viewers when app closes
-  viewerManager.stopAll();
-
   if (process.platform !== 'darwin') {
     app.quit();
   }
