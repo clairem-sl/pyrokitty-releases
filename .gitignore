@@ -142,3 +142,4 @@ accounts.json
 /electron-ui/data/chat-logs/
 /electron-ui/data/inventory-sync/
 /electron-ui/data/display-names/
+.mcp.json
