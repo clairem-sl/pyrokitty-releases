@@ -61,6 +61,8 @@
 #include "llvoavatar.h"
 #include "llmeshrepository.h"
 #include "lltrans.h"
+#include "pkmirrorflags.h"
+#include "llvovolume.h"
 
 const F32 MAX_MANIP_SELECT_DISTANCE_SQUARED = 11.f * 11.f;
 const F32 SNAP_GUIDE_SCREEN_OFFSET = 0.05f;
@@ -373,6 +375,11 @@ bool LLManipScale::handleMouseDownOnPart( S32 x, S32 y, MASK mask )
     LLVector3 far_corner_agent = bbox.localToAgent( unitVectorToLocalBBoxExtent( -1.f * partToUnitVector( mManipPart ), bbox ) );
     mDragFarHitGlobal = gAgent.getPosGlobalFromAgent(far_corner_agent);
     mDragPointGlobal = mDragStartPointGlobal;
+    // <FS:Pyrokitty> Reset flip state for new drag. mPKMirrorFlipped gates the
+    // per-frame flip detection in dragFace. mPKMirrorDirtyDuringDrag tracks whether
+    // any flip happened (for notecard persistence in handleMouseUp).
+    mPKMirrorFlipped = false;
+    mPKMirrorDirtyDuringDrag = false;
 
     // we just started a drag, so save initial object positions, orientations, and scales
     LLSelectMgr::getInstance()->saveSelectedObjectTransform(SELECT_ACTION_TYPE_SCALE);
@@ -415,6 +422,40 @@ bool LLManipScale::handleMouseUp(S32 x, S32 y, MASK mask)
 
         //gAgent.setObjectTracking(gSavedSettings.getBOOL("TrackFocusObject"));
         LLSelectMgr::getInstance()->saveSelectedObjectTransform(SELECT_ACTION_TYPE_PICK);
+
+        // <FS:Pyrokitty> Persist mirror notecards for objects flipped during drag.
+        // During drag, setFlags() is called with nullptr to suppress notecard creation
+        // (would create hundreds of notecards from per-frame calls). Instead we create
+        // one notecard per object here when the drag ends.
+        if (mPKMirrorDirtyDuringDrag)
+        {
+            LL_INFOS("PKMirror") << "handleMouseUp: persisting notecards for drag-flipped objects" << LL_ENDL;
+            for (LLObjectSelection::iterator iter = mObjectSelection->begin();
+                 iter != mObjectSelection->end(); iter++)
+            {
+                LLSelectNode* selectNode = *iter;
+                LLViewerObject* cur = selectNode->getObject();
+                if (cur && cur->permModify() && cur->getPCode() == LL_PCODE_VOLUME)
+                {
+                    LLVOVolume* volobjp = (LLVOVolume*)cur;
+                    U8 flags = volobjp->getPKMirrorFlags();
+                    LL_INFOS("PKMirror") << "handleMouseUp: persist object " << cur->getID()
+                                         << " flags=" << (S32)flags << LL_ENDL;
+                    if (flags != 0)
+                    {
+                        // Mirrored: create/update notecard in object inventory
+                        PKMirrorFlags::getInstance()->persistNotecard(cur->getID(), cur);
+                    }
+                    else
+                    {
+                        // Un-flipped back to zero: remove notecard from object inventory
+                        PKMirrorFlags::getInstance()->clearFlags(cur->getID(), cur);
+                    }
+                }
+            }
+            mPKMirrorDirtyDuringDrag = false;
+        }
+        // </FS:Pyrokitty>
     }
     return LLManip::handleMouseUp(x, y, mask);
 }
@@ -1086,6 +1127,107 @@ void LLManipScale::dragFace( S32 x, S32 y )
     F32 dist_from_scale_line = dist_vec(scale_center_to_mouse, (mouse_on_scale_line - mScaleCenter));
     F32 dist_along_scale_line = scale_center_to_mouse * mScaleDir;
 
+    // <FS:Pyrokitty> Drag-past-zero flip detection
+    //
+    // How this works:
+    // - mScaleCenter is the opposite face (non-uniform) or bbox center (uniform)
+    // - mScaleDir points from mScaleCenter toward the dragged face
+    // - dist_along_scale_line = dot(mouse - mScaleCenter, mScaleDir)
+    // - When the mouse crosses mScaleCenter to the other side, dist goes negative
+    //
+    // The flip toggles the mirror flag on each selected object. We pass nullptr
+    // for obj to suppress notecard creation during drag (notecards are persisted
+    // in handleMouseUp via mPKMirrorDirtyDuringDrag).
+    //
+    // IMPORTANT: Only dragFace() manages mPKMirrorFlipped. An earlier version also
+    // had flip/reset logic in stretchFace(), but stretchFace runs AFTER the negate
+    // block below, so it sees positive values and would reset the flag every frame,
+    // causing oscillation (flip→reset→flip→reset...). See OBJECT_FLIP.md.
+    //
+    LL_DEBUGS("PKMirror") << "dragFace: dist_along_scale_line=" << dist_along_scale_line
+                          << " mPKMirrorFlipped=" << mPKMirrorFlipped << LL_ENDL;
+    if (dist_along_scale_line < 0.f && !mPKMirrorFlipped)
+    {
+        LLVector3 part_dir = partToUnitVector(mManipPart);
+        S32 flip_axis = part_dir.mV[0] ? 0 : (part_dir.mV[1] ? 1 : 2);
+
+        LL_INFOS("PKMirror") << "dragFace: FLIP TRIGGERED axis=" << flip_axis
+                             << " part_dir=" << part_dir << LL_ENDL;
+
+        for (LLObjectSelection::iterator iter = mObjectSelection->begin();
+             iter != mObjectSelection->end(); iter++)
+        {
+            LLSelectNode* selectNode = *iter;
+            LLViewerObject* cur = selectNode->getObject();
+            if (cur && cur->permModify() && cur->getPCode() == LL_PCODE_VOLUME)
+            {
+                LLVOVolume* volobjp = (LLVOVolume*)cur;
+                U8 old_flags = volobjp->getPKMirrorFlags();
+                U8 flags = old_flags ^ (1 << flip_axis);
+                LL_INFOS("PKMirror") << "dragFace: object " << cur->getID()
+                                     << " flags " << (S32)old_flags << " -> " << (S32)flags << LL_ENDL;
+                // Pass nullptr to suppress notecard creation during drag
+                PKMirrorFlags::getInstance()->setFlags(cur->getID(), flags, nullptr);
+                volobjp->setPKMirrorFlags(flags);
+            }
+        }
+        mPKMirrorFlipped = true;
+        mPKMirrorDirtyDuringDrag = true;
+    }
+    else if (dist_along_scale_line >= 0.f && mPKMirrorFlipped)
+    {
+        // Mouse crossed back from negative to positive side - this is also a
+        // zero crossing, so toggle the mirror flag (same as the negative crossing).
+        // Every zero crossing in either direction is a toggle.
+        LLVector3 part_dir = partToUnitVector(mManipPart);
+        S32 flip_axis = part_dir.mV[0] ? 0 : (part_dir.mV[1] ? 1 : 2);
+
+        LL_INFOS("PKMirror") << "dragFace: FLIP TRIGGERED (return crossing) axis=" << flip_axis << LL_ENDL;
+
+        for (LLObjectSelection::iterator iter = mObjectSelection->begin();
+             iter != mObjectSelection->end(); iter++)
+        {
+            LLSelectNode* selectNode = *iter;
+            LLViewerObject* cur = selectNode->getObject();
+            if (cur && cur->permModify() && cur->getPCode() == LL_PCODE_VOLUME)
+            {
+                LLVOVolume* volobjp = (LLVOVolume*)cur;
+                U8 old_flags = volobjp->getPKMirrorFlags();
+                U8 flags = old_flags ^ (1 << flip_axis);
+                LL_INFOS("PKMirror") << "dragFace: object " << cur->getID()
+                                     << " flags " << (S32)old_flags << " -> " << (S32)flags << LL_ENDL;
+                PKMirrorFlags::getInstance()->setFlags(cur->getID(), flags, nullptr);
+                volobjp->setPKMirrorFlags(flags);
+            }
+        }
+        mPKMirrorFlipped = false;
+        mPKMirrorDirtyDuringDrag = true;
+    }
+    // </FS:Pyrokitty>
+
+    // <FS:Pyrokitty> After flip: mirror drag distance so scale grows past zero
+    //
+    // Without this, the snap code clamps dist_along_scale_line to min_drag_dist
+    // (since it's negative), locking the object at 0.01m. By negating the distance
+    // and recomputing drag_delta, the snap code sees a positive value and the
+    // object's scale grows proportionally with how far the mouse is past zero.
+    //
+    // We also fix scale_center_to_mouse because the snap code uses it internally
+    // as drag_dist = scale_center_to_mouse * mScaleDir.
+    //
+    if (mPKMirrorFlipped && dist_along_scale_line < 0.f)
+    {
+        dist_along_scale_line = -dist_along_scale_line;
+        LLVector3 effective_point = mScaleCenter + dist_along_scale_line * mScaleDir;
+        drag_delta.set(effective_point - drag_start_point_agent);
+        if (uniform)
+        {
+            drag_delta *= 2.f;
+        }
+        scale_center_to_mouse = dist_along_scale_line * mScaleDir;
+    }
+    // </FS:Pyrokitty>
+
     bool snap_enabled = gSavedSettings.getBOOL("SnapEnabled");
 
     if (snap_enabled && dist_from_scale_line > mSnapRegimeOffset)
@@ -1237,7 +1379,21 @@ void LLManipScale::stretchFace( const LLVector3& drag_start_agent, const LLVecto
             F32 desired_delta_size  = is_approx_zero(denom) ? 0.f : (delta_local_mag / denom);  // in meters
 // <AW: opensim-limits>
 //          F32 desired_scale       = llclamp(selectNode->mSavedScale.mV[axis_index] + desired_delta_size, MIN_PRIM_SCALE, get_default_max_prim_scale(LLPickInfo::isFlora(cur)));
-            F32 desired_scale       = llclamp(selectNode->mSavedScale.mV[axis_index] + desired_delta_size, LLWorld::getInstance()->getRegionMinPrimScale(), get_default_max_prim_scale(LLPickInfo::isFlora(cur)));
+            F32 min_scale = LLWorld::getInstance()->getRegionMinPrimScale();
+            F32 raw_desired_scale = selectNode->mSavedScale.mV[axis_index] + desired_delta_size;
+
+            // <FS:Pyrokitty> Safety net for drag-past-zero flip.
+            // The main flip logic is in dragFace() which negates dist_along_scale_line
+            // and recomputes drag_delta. This handles edge cases where raw_desired_scale
+            // is still negative after the dragFace negate (e.g. snap disabled, rounding).
+            // DO NOT add flip detection or mPKMirrorFlipped reset here - see OBJECT_FLIP.md.
+            if (mPKMirrorFlipped && raw_desired_scale < 0.f)
+            {
+                raw_desired_scale = -raw_desired_scale;
+            }
+            // </FS:Pyrokitty>
+
+            F32 desired_scale       = llclamp(raw_desired_scale, min_scale, get_default_max_prim_scale(LLPickInfo::isFlora(cur)));
 // </AW: opensim-limits>
             // propagate scale constraint back to position offset
             desired_delta_size      = desired_scale - selectNode->mSavedScale.mV[axis_index]; // propagate constraint back to position
@@ -1249,7 +1405,22 @@ void LLManipScale::stretchFace( const LLVector3& drag_start_agent, const LLVecto
             LLVector3 delta_pos;
             if( !getUniform() )
             {
-                LLVector3 delta_pos_local = axis * (0.5f * desired_delta_size);
+                // <FS:Pyrokitty> After drag-past-zero flip, the object should be on the
+                // OTHER side of the anchored face. Normal formula places center at
+                // anchor + desired_scale/2. Flipped formula places it at
+                // anchor - desired_scale/2, giving delta = -(savedScale + desired_scale)/2.
+                // This creates a smooth visual transition: object shrinks to zero at the
+                // anchor, then appears on the other side growing away from it.
+                LLVector3 delta_pos_local;
+                if (mPKMirrorFlipped)
+                {
+                    delta_pos_local = axis * (-(selectNode->mSavedScale.mV[axis_index] + desired_scale) * 0.5f);
+                }
+                else
+                {
+                    delta_pos_local = axis * (0.5f * desired_delta_size);
+                }
+                // </FS:Pyrokitty>
                 LLVector3d delta_pos_global;
                 delta_pos_global.set(cur_bbox.localToAgent( delta_pos_local ) - cur_bbox.getCenterAgent());
                 LLVector3 cur_pos = cur->getPositionEdit();

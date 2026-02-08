@@ -1748,6 +1748,50 @@ Paste Rotation
              name="paste_size_clip_btn"
              tool_tip="Try pasting Size from Clipboard"
              width="20" />
+            <!-- FS:Pyrokitty - Per-axis mirroring -->
+            <text
+             type="string"
+             length="1"
+             follows="left|top"
+             height="10"
+             layout="topleft"
+             left="10"
+             name="label mirror"
+             top_pad="6"
+             width="40">
+                Mirror
+            </text>
+            <check_box
+             follows="left|top"
+             height="16"
+             label="X"
+             layout="topleft"
+             left_pad="2"
+             top_delta="0"
+             name="Mirror X"
+             tool_tip="Mirror object along X axis"
+             width="30" />
+            <check_box
+             follows="left|top"
+             height="16"
+             label="Y"
+             layout="topleft"
+             left_pad="2"
+             top_delta="0"
+             name="Mirror Y"
+             tool_tip="Mirror object along Y axis"
+             width="30" />
+            <check_box
+             follows="left|top"
+             height="16"
+             label="Z"
+             layout="topleft"
+             left_pad="2"
+             top_delta="0"
+             name="Mirror Z"
+             tool_tip="Mirror object along Z axis"
+             width="30" />
+            <!-- /FS:Pyrokitty -->
             <text
              type="string"
              length="1"

@@ -97,6 +97,7 @@
 #include "llvoavatarself.h"
 #include "llvovolume.h"
 #include "pipeline.h"
+#include "pkmirrorflags.h"
 #include "llviewershadermgr.h"
 // #include "llpanelface.h"  // <FS:Zi> switchable edit texture/materials panel - include not needed
 // [RLVa:KB] - Checked: 2011-05-22 (RLVa-1.3.1a)
@@ -6879,7 +6880,27 @@ void LLSelectMgr::renderSilhouettes(bool for_hud)
         {
             LLVertexBuffer::unbind();
             gGL.pushMatrix();
-            gGL.multMatrix((F32*)vobj->getRelativeXform().mMatrix);
+
+            // <FS:Pyrokitty> Per-axis mirroring - apply mirror to wireframe highlight matrix
+            U8 pk_mirror = vobj->getPKMirrorFlags();
+            if (pk_mirror)
+            {
+                LLMatrix4 mat = vobj->getRelativeXform();
+                for (U8 axis = 0; axis < 3; ++axis)
+                {
+                    if (pk_mirror & (1 << axis))
+                    {
+                        for (U8 col = 0; col < 4; ++col)
+                            mat.mMatrix[axis][col] = -mat.mMatrix[axis][col];
+                    }
+                }
+                gGL.multMatrix((F32*)mat.mMatrix);
+            }
+            else
+            // </FS:Pyrokitty>
+            {
+                gGL.multMatrix((F32*)vobj->getRelativeXform().mMatrix);
+            }
 
             if (objectp->mDrawable->isState(LLDrawable::RIGGED))
             {

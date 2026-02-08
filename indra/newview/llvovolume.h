@@ -357,6 +357,12 @@ public:
     bool mIsLocalMesh;
     bool mIsLocalMeshUsingScale;
 
+    // <FS:Pyrokitty> Per-axis mirroring
+    void setPKMirrorFlags(U8 flags);
+    U8 getPKMirrorFlags(); // Non-const: lazy-loads from cache on first call
+    void loadPKMirrorFlags();
+    // </FS:Pyrokitty>
+
     // Functions that deal with media, or media navigation
 
     // Update this object's media data with the given media data array
@@ -498,6 +504,11 @@ private:
 
     bool mSkinInfoUnavaliable;
     LLConstPointer<LLMeshSkinInfo> mSkinInfo;
+
+    // <FS:Pyrokitty> Per-axis mirroring
+    U8 mPKMirrorFlags = 0;
+    bool mPKMirrorFlagsLoaded = false;
+    // </FS:Pyrokitty>
     // statics
 public:
     static F32 sLODSlopDistanceFactor;// Changing this to zero, effectively disables the LOD transition slop

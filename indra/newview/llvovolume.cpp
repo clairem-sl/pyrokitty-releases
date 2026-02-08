@@ -94,6 +94,9 @@
 #include "rlvlocks.h"
 // [/RLVa:KB]
 #include "llviewernetwork.h"
+// <FS:Pyrokitty> Per-axis mirroring
+#include "pkmirrorflags.h"
+// </FS:Pyrokitty>
 
 const F32 FORCE_SIMPLE_RENDER_AREA = 512.f;
 const F32 FORCE_CULL_AREA = 8.f;
@@ -258,6 +261,10 @@ LLVOVolume::LLVOVolume(const LLUUID &id, const LLPCode pcode, LLViewerRegion *re
     mResetDebugText = false;
     mIsLocalMesh = false;
     mIsLocalMeshUsingScale = false;
+
+    // <FS:Pyrokitty> Per-axis mirroring
+    loadPKMirrorFlags();
+    // </FS:Pyrokitty>
 }
 
 LLVOVolume::~LLVOVolume()
@@ -4144,7 +4151,29 @@ void LLVOVolume::generateSilhouette(LLSelectNode* nodep, const LLVector3& view_p
             trans_mat.translate(getRegion()->getOriginAgent());
         }
 
-        volume->generateSilhouetteVertices(nodep->mSilhouetteVertices, nodep->mSilhouetteNormals, view_vector, trans_mat, mRelativeXformInvTrans, nodep->getTESelectMask());
+        // <FS:Pyrokitty> Per-axis mirroring - apply to silhouette matrices and view vector
+        LLMatrix3 norm_mat = mRelativeXformInvTrans;
+        if (mPKMirrorFlags)
+        {
+            // Mirror the view vector so edge detection picks the correct silhouette edges
+            if (mPKMirrorFlags & PK_MIRROR_X) view_vector.mV[VX] = -view_vector.mV[VX];
+            if (mPKMirrorFlags & PK_MIRROR_Y) view_vector.mV[VY] = -view_vector.mV[VY];
+            if (mPKMirrorFlags & PK_MIRROR_Z) view_vector.mV[VZ] = -view_vector.mV[VZ];
+
+            for (U8 axis = 0; axis < 3; ++axis)
+            {
+                if (mPKMirrorFlags & (1 << axis))
+                {
+                    for (U8 col = 0; col < 4; ++col)
+                        trans_mat.mMatrix[axis][col] = -trans_mat.mMatrix[axis][col];
+                    for (U8 col = 0; col < 3; ++col)
+                        norm_mat.mMatrix[axis][col] = -norm_mat.mMatrix[axis][col];
+                }
+            }
+        }
+        // </FS:Pyrokitty>
+
+        volume->generateSilhouetteVertices(nodep->mSilhouetteVertices, nodep->mSilhouetteNormals, view_vector, trans_mat, norm_mat, nodep->getTESelectMask());
 
         nodep->mSilhouetteExists = true;
     }
@@ -7297,3 +7326,56 @@ void LLHUDPartition::shift(const LLVector4a &offset)
 {
     //HUD objects don't shift with region crossing.  That would be silly.
 }
+
+// <FS:Pyrokitty> Per-axis mirroring
+// Sets mirror flags and triggers full geometry rebuild. REBUILD_ALL includes
+// REBUILD_VOLUME which sets full_rebuild=true in getGeometryVolume(), ensuring
+// rebuild_pos=true so the mirror transform on mat_vert is actually applied.
+void LLVOVolume::setPKMirrorFlags(U8 flags)
+{
+    if (mPKMirrorFlags != flags)
+    {
+        LL_INFOS("PKMirror") << "setPKMirrorFlags: object " << mID
+                             << " flags " << (S32)mPKMirrorFlags << " -> " << (S32)flags
+                             << " drawable=" << (mDrawable.notNull() ? "yes" : "null") << LL_ENDL;
+        mPKMirrorFlags = flags;
+        if (mDrawable.notNull())
+        {
+            gPipeline.markRebuild(mDrawable, LLDrawable::REBUILD_ALL);
+        }
+    }
+    else
+    {
+        LL_DEBUGS("PKMirror") << "setPKMirrorFlags: object " << mID
+                              << " flags unchanged at " << (S32)flags << LL_ENDL;
+    }
+}
+
+// Lazy-load: called from getPKMirrorFlags() on first access. Uses
+// setPKMirrorFlags() so markRebuild fires if drawable exists.
+// If PKMirrorFlags singleton doesn't exist yet (very early startup),
+// mPKMirrorFlagsLoaded stays false and we retry on next access.
+U8 LLVOVolume::getPKMirrorFlags()
+{
+    if (!mPKMirrorFlagsLoaded)
+    {
+        loadPKMirrorFlags();
+    }
+    return mPKMirrorFlags;
+}
+
+void LLVOVolume::loadPKMirrorFlags()
+{
+    if (PKMirrorFlags::instanceExists())
+    {
+        U8 flags = PKMirrorFlags::getInstance()->getFlags(mID);
+        if (flags != mPKMirrorFlags)
+        {
+            LL_INFOS("PKMirror") << "loadPKMirrorFlags: object " << mID
+                                 << " loaded flags=" << (S32)flags << LL_ENDL;
+            setPKMirrorFlags(flags);
+        }
+        mPKMirrorFlagsLoaded = true;
+    }
+}
+// </FS:Pyrokitty>

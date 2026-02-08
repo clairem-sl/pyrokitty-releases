@@ -69,6 +69,9 @@
 #include "rlvhandler.h"
 #include "llvoavatarself.h"
 // [/RLVa:KB]
+// <FS:Pyrokitty> Per-axis mirroring
+#include "pkmirrorflags.h"
+// </FS:Pyrokitty>
 
 //
 // Constants
@@ -208,6 +211,15 @@ bool    LLPanelObject::postBuild()
     mBtnCopyParams->setCommitCallback(boost::bind(&LLPanelObject::onCopyParams, this));
     mBtnPasteParams = getChild<LLButton>("paste_params_btn");
     mBtnPasteParams->setCommitCallback(boost::bind(&LLPanelObject::onPasteParams, this));
+
+    // <FS:Pyrokitty> Per-axis mirroring
+    mCtrlMirrorX = getChild<LLCheckBoxCtrl>("Mirror X");
+    mCtrlMirrorX->setCommitCallback(boost::bind(&LLPanelObject::onCommitMirror, this));
+    mCtrlMirrorY = getChild<LLCheckBoxCtrl>("Mirror Y");
+    mCtrlMirrorY->setCommitCallback(boost::bind(&LLPanelObject::onCommitMirror, this));
+    mCtrlMirrorZ = getChild<LLCheckBoxCtrl>("Mirror Z");
+    mCtrlMirrorZ->setCommitCallback(boost::bind(&LLPanelObject::onCommitMirror, this));
+    // </FS:Pyrokitty>
 
     //--------------------------------------------------------
 
@@ -576,6 +588,28 @@ void LLPanelObject::getState( )
     mBtnPasteSize->setEnabled( enable_scale && mHasClipboardSize );
     mBtnPasteSizeClip->setEnabled( enable_scale );
     // </FS>
+
+    // <FS:Pyrokitty> Per-axis mirroring - update mirror checkboxes
+    if (volobjp && enable_modify)
+    {
+        U8 mirror_flags = volobjp->getPKMirrorFlags();
+        mCtrlMirrorX->set((mirror_flags & PK_MIRROR_X) != 0);
+        mCtrlMirrorY->set((mirror_flags & PK_MIRROR_Y) != 0);
+        mCtrlMirrorZ->set((mirror_flags & PK_MIRROR_Z) != 0);
+        mCtrlMirrorX->setEnabled(true);
+        mCtrlMirrorY->setEnabled(true);
+        mCtrlMirrorZ->setEnabled(true);
+    }
+    else
+    {
+        mCtrlMirrorX->set(false);
+        mCtrlMirrorY->set(false);
+        mCtrlMirrorZ->set(false);
+        mCtrlMirrorX->setEnabled(false);
+        mCtrlMirrorY->setEnabled(false);
+        mCtrlMirrorZ->setEnabled(false);
+    }
+    // </FS:Pyrokitty>
 
     LLQuaternion object_rot = objectp->getRotationEdit();
     object_rot.getEulerAngles(&(mCurEulerDegrees.mV[VX]), &(mCurEulerDegrees.mV[VY]), &(mCurEulerDegrees.mV[VZ]));
@@ -3088,3 +3122,25 @@ void LLPanelObject::onPasteRotClip()
     }
 }
 // </FS>
+
+// <FS:Pyrokitty> Per-axis mirroring
+void LLPanelObject::onCommitMirror()
+{
+    if (mObject.isNull()) return;
+
+    LLVOVolume* volobjp = nullptr;
+    if (mObject->getPCode() == LL_PCODE_VOLUME)
+    {
+        volobjp = (LLVOVolume*)mObject.get();
+    }
+    if (!volobjp) return;
+
+    U8 flags = 0;
+    if (mCtrlMirrorX->get()) flags |= PK_MIRROR_X;
+    if (mCtrlMirrorY->get()) flags |= PK_MIRROR_Y;
+    if (mCtrlMirrorZ->get()) flags |= PK_MIRROR_Z;
+
+    PKMirrorFlags::getInstance()->setFlags(mObject->getID(), flags, mObject.get());
+    volobjp->setPKMirrorFlags(flags);
+}
+// </FS:Pyrokitty>

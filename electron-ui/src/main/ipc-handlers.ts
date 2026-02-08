@@ -7,6 +7,7 @@ import { connectionManager } from './viewer-connection';
 import { metaverseConnectionManager } from './metaverse-connection';
 import { chatLogManager } from './chat-log-manager';
 import { InventorySyncManager } from './inventory-sync-manager';
+import { ViewerInventoryAdapter } from './viewer-inventory-adapter';
 
 // Track sync managers per instance
 const syncManagers = new Map<string, InventorySyncManager>();
@@ -17,13 +18,27 @@ function getOrCreateSyncManager(instanceId: string, mainWindow: BrowserWindow): 
   const instance = viewerManager.getInstance(instanceId);
   if (!instance) return null;
 
+  const onProgress = (progress: SyncStatus) => {
+    mainWindow.webContents.send(IPC_CHANNELS.SYNC_PROGRESS, { instanceId, ...progress });
+  };
+
+  // Try viewer connection first (takes priority when viewer is running)
+  if (instance.connectionState === 'viewer_connected') {
+    const connection = viewerManager.getConnection(instanceId);
+    if (connection?.isConnected) {
+      const adapter = new ViewerInventoryAdapter(connection);
+      const manager = new InventorySyncManager(adapter, instance.accountId, onProgress);
+      syncManagers.set(instanceId, manager);
+      return manager;
+    }
+  }
+
+  // Fall back to bot (node-metaverse)
   const metaverse = metaverseConnectionManager.get(instanceId);
   const bot = metaverse?.getBot();
   if (!bot) return null;
 
-  const manager = new InventorySyncManager(bot, instance.accountId, (progress) => {
-    mainWindow.webContents.send(IPC_CHANNELS.SYNC_PROGRESS, { instanceId, ...progress });
-  });
+  const manager = new InventorySyncManager(bot, instance.accountId, onProgress);
   syncManagers.set(instanceId, manager);
   return manager;
 }
@@ -359,8 +374,8 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
           manager.sync().catch(err => console.error('[IPC] Auto-sync error:', err));
         }
       }, 2000);
-    } else if (state === 'disconnected' || state === 'logging_in') {
-      // Clear stale sync manager so a fresh one is created with the new bot
+    } else if (state === 'disconnected' || state === 'logging_in' || state === 'viewer_connected') {
+      // Clear stale sync manager so a fresh one is created with the appropriate backend
       syncManagers.delete(instanceId);
     }
   });

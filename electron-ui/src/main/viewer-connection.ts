@@ -18,6 +18,12 @@ export class ViewerConnection extends EventEmitter {
   private availableApis: ViewerAPI[] = [];
   private reconnectTimer: NodeJS.Timeout | null = null;
   private connected = false;
+  private nextReqId = 1;
+  private pendingRequests = new Map<number, {
+    resolve: (value: any) => void;
+    reject: (reason: any) => void;
+    timeout: NodeJS.Timeout;
+  }>();
 
   constructor(
     public readonly instanceId: string,
@@ -85,6 +91,13 @@ export class ViewerConnection extends EventEmitter {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+
+    // Reject all pending requests
+    for (const [reqid, pending] of this.pendingRequests) {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error('Disconnected'));
+    }
+    this.pendingRequests.clear();
 
     if (this.ws) {
       this.ws.close();
@@ -161,6 +174,26 @@ export class ViewerConnection extends EventEmitter {
     });
   }
 
+  /**
+   * Send a request and wait for a response matched by reqid.
+   */
+  request(pump: string, data: Record<string, unknown>, timeoutMs = 30000): Promise<any> {
+    return new Promise((resolve, reject) => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        return reject(new Error('Not connected'));
+      }
+
+      const reqid = this.nextReqId++;
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(reqid);
+        reject(new Error(`Request to ${pump} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      this.pendingRequests.set(reqid, { resolve, reject, timeout });
+      this.send(pump, { ...data, reply: this.replyPump, reqid });
+    });
+  }
+
   private handleMessage(rawData: string): void {
     try {
       const message = JSON.parse(rawData);
@@ -179,6 +212,23 @@ export class ViewerConnection extends EventEmitter {
 
       // Handle pump messages
       if (message.pump && message.data !== undefined) {
+        // Check if this is a response to a pending request
+        const data = message.data as Record<string, unknown>;
+        if (data.reqid != null) {
+          const reqid = data.reqid as number;
+          const pending = this.pendingRequests.get(reqid);
+          if (pending) {
+            this.pendingRequests.delete(reqid);
+            clearTimeout(pending.timeout);
+            if (data.error) {
+              pending.reject(new Error(data.error as string));
+            } else {
+              pending.resolve(data);
+            }
+            return;
+          }
+        }
+
         console.log(`[ViewerConnection ${this.instanceId}] Pump message: ${message.pump}`, message.data);
         this.emit('message', message.pump, message.data);
         return;

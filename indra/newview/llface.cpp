@@ -61,6 +61,9 @@
 #include "rlvhandler.h"
 // [/RLVa:KB]
 #include "llperfstats.h"
+// <FS:Pyrokitty> Per-axis mirroring
+#include "pkmirrorflags.h"
+// </FS:Pyrokitty>
 
 #if LL_LINUX
 // Work-around spurious used before init warning on Vector4a
@@ -1216,6 +1219,31 @@ bool LLFace::getGeometryVolume(const LLVolume& volume,
 
     bool rigged = isState(RIGGED);
 
+    // <FS:Pyrokitty> Per-axis mirroring - read flags early so they're available for indices and matrices
+    U8 pk_mirror_flags = 0;
+    bool pk_reverse_winding = false;
+    {
+        LLVOVolume* vobj = mDrawablep ? mDrawablep->getVOVolume() : nullptr;
+        if (vobj && !rigged)
+        {
+            pk_mirror_flags = vobj->getPKMirrorFlags();
+            if (pk_mirror_flags)
+            {
+                int axis_count = ((pk_mirror_flags & PK_MIRROR_X) ? 1 : 0)
+                               + ((pk_mirror_flags & PK_MIRROR_Y) ? 1 : 0)
+                               + ((pk_mirror_flags & PK_MIRROR_Z) ? 1 : 0);
+                pk_reverse_winding = (axis_count & 1) != 0;
+                if (face_index == 0)
+                {
+                    LL_INFOS("PKMirror") << "getGeometryVolume: mirror_flags=" << (S32)pk_mirror_flags
+                                         << " reverse_winding=" << pk_reverse_winding
+                                         << " object=" << vobj->getID() << LL_ENDL;
+                }
+            }
+        }
+    }
+    // </FS:Pyrokitty>
+
     const LLVolumeFace &vf = volume.getVolumeFace(face_index);
     S32 num_vertices = (S32)vf.mNumVertices;
     S32 num_indices = (S32) vf.mNumIndices;
@@ -1440,6 +1468,19 @@ bool LLFace::getGeometryVolume(const LLVolume& volume,
                 *idx++ = vf.mIndices[i]+index_offset;
             }
         }
+
+        // <FS:Pyrokitty> Per-axis mirroring - reverse triangle winding
+        if (pk_reverse_winding && num_indices >= 3)
+        {
+            U16* indices = (U16*) indicesp.get();
+            for (S32 j = 0; j < num_indices - 2; j += 3)
+            {
+                U16 tmp = indices[j + 1];
+                indices[j + 1] = indices[j + 2];
+                indices[j + 2] = tmp;
+            }
+        }
+        // </FS:Pyrokitty>
     }
 
 
@@ -1566,6 +1607,29 @@ bool LLFace::getGeometryVolume(const LLVolume& volume,
             mat_normal.loadu(mat_norm_in);
         }
     }
+
+    // <FS:Pyrokitty> Per-axis mirroring - apply mirror to transform matrices
+    if (pk_mirror_flags)
+    {
+        // Negate the corresponding row of mat_vert to mirror that axis.
+        // affineTransform does: res = v.x * row0 + v.y * row1 + v.z * row2 + row3
+        // Negating row N makes v's N-th component contribute negatively.
+        if (rebuild_pos)
+        {
+            if (pk_mirror_flags & PK_MIRROR_X) mat_vert.mMatrix[0].mul(-1.f);
+            if (pk_mirror_flags & PK_MIRROR_Y) mat_vert.mMatrix[1].mul(-1.f);
+            if (pk_mirror_flags & PK_MIRROR_Z) mat_vert.mMatrix[2].mul(-1.f);
+        }
+
+        // Same for normal matrix - negate rows to mirror normal directions
+        if (rebuild_normal || rebuild_tangent)
+        {
+            if (pk_mirror_flags & PK_MIRROR_X) mat_normal.mMatrix[0].mul(-1.f);
+            if (pk_mirror_flags & PK_MIRROR_Y) mat_normal.mMatrix[1].mul(-1.f);
+            if (pk_mirror_flags & PK_MIRROR_Z) mat_normal.mMatrix[2].mul(-1.f);
+        }
+    }
+    // </FS:Pyrokitty>
 
     {
         //if it's not fullbright and has no normals, bake sunlight based on face normal
@@ -2124,6 +2188,14 @@ bool LLFace::getGeometryVolume(const LLVolume& volume,
 #endif
 // </FS:Zi>
                 tangent_out.setSelectWithMask(mask, *src, tangent_out);
+                // <FS:Pyrokitty> Per-axis mirroring - flip tangent handedness for mirrored geometry
+                if (pk_reverse_winding)
+                {
+                    // Negate W component (handedness) since mirroring changes coordinate system chirality
+                    F32 w = tangent_out[3];
+                    tangent_out.getF32ptr()[3] = -w;
+                }
+                // </FS:Pyrokitty>
                 tangent_out.store4a(tangents);
 
                 src++;

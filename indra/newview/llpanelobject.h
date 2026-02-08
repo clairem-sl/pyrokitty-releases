@@ -85,6 +85,10 @@ public:
     void            onPasteRotClip();
     // </FS>
 
+    // <FS:Pyrokitty> Per-axis mirroring
+    void            onCommitMirror();
+    // </FS:Pyrokitty>
+
     static void     onCommitParametric(LLUICtrl* ctrl, void* userdata);
 
 
@@ -220,6 +224,12 @@ protected:
     LLComboBox      *mCtrlSculptType;
     LLCheckBoxCtrl  *mCtrlSculptMirror;
     LLCheckBoxCtrl  *mCtrlSculptInvert;
+
+    // <FS:Pyrokitty> Per-axis mirroring
+    LLCheckBoxCtrl  *mCtrlMirrorX;
+    LLCheckBoxCtrl  *mCtrlMirrorY;
+    LLCheckBoxCtrl  *mCtrlMirrorZ;
+    // </FS:Pyrokitty>
 
     LLVector3       mCurEulerDegrees;       // to avoid sending rotation when not changed
     bool            mIsPhysical;            // to avoid sending "physical" when not changed

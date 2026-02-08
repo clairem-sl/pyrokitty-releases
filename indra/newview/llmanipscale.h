@@ -175,6 +175,18 @@ private:
     S32             mFirstClickY;
     bool            mIsFirstClick;
 
+// <FS:Pyrokitty> Per-axis mirroring - drag past zero to flip
+    // Tracks whether a flip has occurred during the current drag. While true,
+    // dragFace() mirrors dist_along_scale_line so scale grows past zero instead
+    // of clamping to min. Reset when mouse returns to positive side of center.
+    // IMPORTANT: Only dragFace() should set/reset this flag. stretchFace() must
+    // NOT reset it, or the flag oscillates every frame (flip/unflip/flip/...).
+    bool            mPKMirrorFlipped = false;
+    // Tracks whether ANY flip happened during this drag (never reset until mouseUp).
+    // Used in handleMouseUp to persist notecards for objects that were flipped.
+    bool            mPKMirrorDirtyDuringDrag = false;
+// </FS:Pyrokitty>
+
 // <FS:Zi> Add middle mouse control for switching uniform scaling on the fly
 public:
     virtual bool    handleMiddleMouseDown( S32 x, S32 y, MASK mask );

@@ -7,6 +7,7 @@ import { InventoryFolder } from '../../node-metaverse/dist/lib/classes/Inventory
 import { InventoryItem } from '../../node-metaverse/dist/lib/classes/InventoryItem';
 import { j2cToPng, pngToJ2c, isAvailable as isJ2kAvailable } from './j2k-converter';
 import { SyncStatus } from '../shared/types';
+import { ViewerInventoryAdapter, ViewerInventoryFolder } from './viewer-inventory-adapter';
 
 const SYNC_FOLDER_NAME = 'PyroKitty Sync';
 const MANIFEST_FILE = 'sync-manifest.json';
@@ -14,8 +15,10 @@ const CONCURRENT_DOWNLOADS = 5;
 const DELAY_BETWEEN_MS = 100;
 const MAX_DEPTH = 10;
 
+// folder can be InventoryFolder (node-metaverse) or ViewerInventoryFolder (viewer adapter)
+// Both duck-type: name, folders[], items[], populate(), createFolder(), uploadAsset()
 interface FolderNode {
-  folder: InventoryFolder;
+  folder: InventoryFolder | ViewerInventoryFolder;
   relativePath: string;  // "" for root, "sub" for child, "a/b" for nested
   localDir: string;      // absolute local path for this folder
 }
@@ -75,15 +78,22 @@ function getLocalSubdirs(baseDir: string, relativePath: string = '', depth: numb
 }
 
 export class InventorySyncManager {
-  private bot: Bot;
+  private bot: Bot | null;
+  private adapter: ViewerInventoryAdapter | null;
   private accountId: string;
   private localDir: string;
   private manifest: Manifest;
   private progress: SyncStatus = { phase: 'idle', current: 0, total: 0, uploadCost: -1 };
   private onProgress?: (progress: SyncStatus) => void;
 
-  constructor(bot: Bot, accountId: string, onProgress?: (progress: SyncStatus) => void) {
-    this.bot = bot;
+  constructor(backend: Bot | ViewerInventoryAdapter, accountId: string, onProgress?: (progress: SyncStatus) => void) {
+    if (backend instanceof ViewerInventoryAdapter) {
+      this.bot = null;
+      this.adapter = backend;
+    } else {
+      this.bot = backend;
+      this.adapter = null;
+    }
     this.accountId = accountId;
     this.localDir = path.join(app.getAppPath(), 'data', 'inventory-sync', accountId);
     this.onProgress = onProgress;
@@ -128,7 +138,7 @@ export class InventorySyncManager {
       }
 
       // Get upload cost
-      const uploadCost = await this.bot.agent.currentRegion.getUploadCost();
+      const uploadCost = await this.getUploadCostValue();
       this.manifest.uploadCost = uploadCost;
 
       // Deduplicate names in SL (per folder)
@@ -158,9 +168,9 @@ export class InventorySyncManager {
   }
 
   /** BFS walk the SL folder tree starting from sync root */
-  private async buildFolderTree(syncFolder: InventoryFolder): Promise<FolderNode[]> {
+  private async buildFolderTree(syncFolder: InventoryFolder | ViewerInventoryFolder): Promise<FolderNode[]> {
     const tree: FolderNode[] = [];
-    const queue: Array<{ folder: InventoryFolder; relativePath: string; depth: number }> = [
+    const queue: Array<{ folder: InventoryFolder | ViewerInventoryFolder; relativePath: string; depth: number }> = [
       { folder: syncFolder, relativePath: '', depth: 0 }
     ];
 
@@ -192,9 +202,9 @@ export class InventorySyncManager {
     if (j2kAvailable) syncableTypes.unshift(AssetType.Texture);
 
     // Collect all downloadable items across all folders
-    const toDownload: Array<{ item: InventoryItem; node: FolderNode }> = [];
+    const toDownload: Array<{ item: InventoryItem | any; node: FolderNode }> = [];
     for (const node of folderTree) {
-      const syncableItems = node.folder.items.filter(i => syncableTypes.includes(i.type));
+      const syncableItems = (node.folder.items as any[]).filter(i => syncableTypes.includes(i.type));
       for (const item of syncableItems) {
         const key = manifestKey(node.relativePath, item.name);
         const existing = this.manifest.items[key];
@@ -249,7 +259,7 @@ export class InventorySyncManager {
   }
 
   /** Download a single texture from SL */
-  private async downloadOne(item: InventoryItem, relativePath: string, targetDir: string): Promise<void> {
+  private async downloadOne(item: InventoryItem | any, relativePath: string, targetDir: string): Promise<void> {
     const assetId = item.assetID.toString();
     const name = item.name;
     const safeName = sanitizeName(name);
@@ -259,7 +269,7 @@ export class InventorySyncManager {
 
     console.log(`[InventorySync] Downloading: ${key} (${assetId})`);
 
-    const j2cBuffer = await this.bot.clientCommands.asset.downloadAsset(AssetType.Texture, assetId);
+    const j2cBuffer = await this.downloadAssetData(item, AssetType.Texture);
     const pngBuffer = await j2cToPng(j2cBuffer);
 
     fs.writeFileSync(localPath, pngBuffer);
@@ -276,7 +286,7 @@ export class InventorySyncManager {
   }
 
   /** Download a single notecard from SL */
-  private async downloadOneNotecard(item: InventoryItem, relativePath: string, targetDir: string): Promise<void> {
+  private async downloadOneNotecard(item: InventoryItem | any, relativePath: string, targetDir: string): Promise<void> {
     const assetId = item.assetID.toString();
     const name = item.name;
     const safeName = sanitizeName(name);
@@ -286,11 +296,10 @@ export class InventorySyncManager {
 
     console.log(`[InventorySync] Downloading notecard: ${key} (${assetId})`);
 
-    // Notecards require permission checks — must use downloadInventoryAsset with item/owner IDs
-    const buffer = await this.bot.clientCommands.asset.downloadInventoryAsset(
-      item.itemID, item.permissions.owner, AssetType.Notecard, true
-    );
-    const notecard = new LLLindenText(buffer);
+    const rawBuffer = await this.downloadAssetData(item, AssetType.Notecard);
+
+    // Viewer adapter returns raw notecard asset data (same format as node-metaverse)
+    const notecard = new LLLindenText(rawBuffer);
     const textContent = notecard.body;
 
     fs.writeFileSync(localPath, textContent, 'utf-8');
@@ -308,7 +317,7 @@ export class InventorySyncManager {
   }
 
   /** Download a single LSL script from SL */
-  private async downloadOneScript(item: InventoryItem, relativePath: string, targetDir: string): Promise<void> {
+  private async downloadOneScript(item: InventoryItem | any, relativePath: string, targetDir: string): Promise<void> {
     const assetId = item.assetID.toString();
     const name = item.name;
     const safeName = sanitizeName(name);
@@ -318,11 +327,9 @@ export class InventorySyncManager {
 
     console.log(`[InventorySync] Downloading script: ${key} (${assetId})`);
 
-    // Scripts require permission checks — must use downloadInventoryAsset with item/owner IDs
-    const buffer = await this.bot.clientCommands.asset.downloadInventoryAsset(
-      item.itemID, item.permissions.owner, AssetType.LSLText, true
-    );
-    const script = new LLLindenText(buffer);
+    const rawBuffer = await this.downloadAssetData(item, AssetType.LSLText);
+
+    const script = new LLLindenText(rawBuffer);
     const textContent = script.body;
 
     fs.writeFileSync(localPath, textContent, 'utf-8');
@@ -452,11 +459,11 @@ export class InventorySyncManager {
 
       console.log(`[InventorySync] Creating SL folder: ${localRelPath}`);
       try {
-        const newFolder = await parentNode.folder.createFolder(folderName, FolderType.None);
+        const newFolder = await (parentNode.folder as any).createFolder(folderName, FolderType.None);
         await newFolder.populate(false);
 
         const node: FolderNode = {
-          folder: newFolder,
+          folder: newFolder as InventoryFolder | ViewerInventoryFolder,
           relativePath: localRelPath,
           localDir,
         };
@@ -473,7 +480,7 @@ export class InventorySyncManager {
   }
 
   /** Upload a single local PNG to SL */
-  private async uploadOne(slFolder: InventoryFolder, file: string, relativePath: string, localDir: string): Promise<void> {
+  private async uploadOne(slFolder: InventoryFolder | ViewerInventoryFolder, file: string, relativePath: string, localDir: string): Promise<void> {
     const slName = file.replace(/\.png$/i, '');
     const localPath = path.join(localDir, file);
     const pngBuffer = fs.readFileSync(localPath);
@@ -517,7 +524,7 @@ export class InventorySyncManager {
   }
 
   /** Upload a single local TXT as a notecard to SL */
-  private async uploadOneNotecard(slFolder: InventoryFolder, file: string, relativePath: string, localDir: string): Promise<void> {
+  private async uploadOneNotecard(slFolder: InventoryFolder | ViewerInventoryFolder, file: string, relativePath: string, localDir: string): Promise<void> {
     const slName = file.replace(/\.txt$/i, '');
     const localPath = path.join(localDir, file);
     const textContent = fs.readFileSync(localPath, 'utf-8');
@@ -564,7 +571,7 @@ export class InventorySyncManager {
   }
 
   /** Upload a single local LSL script to SL */
-  private async uploadOneScript(slFolder: InventoryFolder, file: string, relativePath: string, localDir: string): Promise<void> {
+  private async uploadOneScript(slFolder: InventoryFolder | ViewerInventoryFolder, file: string, relativePath: string, localDir: string): Promise<void> {
     const slName = file.replace(/\.lsl$/i, '');
     const localPath = path.join(localDir, file);
     const textContent = fs.readFileSync(localPath, 'utf-8');
@@ -674,8 +681,8 @@ export class InventorySyncManager {
     if (j2kAvailable) syncableTypes.unshift(AssetType.Texture);
 
     for (const node of folderTree) {
-      const syncableItems = node.folder.items.filter(i => syncableTypes.includes(i.type));
-      const nameCount = new Map<string, InventoryItem[]>();
+      const syncableItems = (node.folder.items as any[]).filter(i => syncableTypes.includes(i.type));
+      const nameCount = new Map<string, any[]>();
 
       for (const item of syncableItems) {
         const list = nameCount.get(item.name) || [];
@@ -700,17 +707,46 @@ export class InventorySyncManager {
   }
 
   /** Get or create the "PyroKitty Sync" folder in SL inventory */
-  private async getOrCreateSyncFolder(): Promise<InventoryFolder> {
-    const root = this.bot.clientCommands.inventory.getInventoryRoot();
+  private async getOrCreateSyncFolder(): Promise<InventoryFolder | ViewerInventoryFolder> {
+    const root = await this.getInventoryRoot();
     await root.populate(false);
 
-    let syncFolder = root.folders.find(f => f.name === SYNC_FOLDER_NAME);
+    let syncFolder = root.folders.find((f: any) => f.name === SYNC_FOLDER_NAME);
     if (!syncFolder) {
       console.log(`[InventorySync] Creating "${SYNC_FOLDER_NAME}" folder in inventory`);
       syncFolder = await root.createFolder(SYNC_FOLDER_NAME, FolderType.Texture);
     }
 
     return syncFolder;
+  }
+
+  // --- Backend routing helpers ---
+
+  private async getInventoryRoot(): Promise<InventoryFolder | ViewerInventoryFolder> {
+    if (this.adapter) {
+      return this.adapter.getRootFolder();
+    }
+    return this.bot!.clientCommands.inventory.getInventoryRoot();
+  }
+
+  private async getUploadCostValue(): Promise<number> {
+    if (this.adapter) {
+      return this.adapter.getUploadCost();
+    }
+    return this.bot!.agent.currentRegion.getUploadCost();
+  }
+
+  private async downloadAssetData(item: any, assetType: number): Promise<Buffer> {
+    if (this.adapter) {
+      return this.adapter.downloadAsset(item.itemID.toString(), assetType);
+    }
+    // For textures, use direct asset download; for notecards/scripts, use inventory download
+    if (assetType === AssetType.Texture) {
+      return this.bot!.clientCommands.asset.downloadAsset(AssetType.Texture, item.assetID.toString());
+    }
+    return this.bot!.clientCommands.asset.downloadInventoryAsset(
+      item.itemID, item.permissions.owner, assetType, true
+    );
   }
 
   // --- Manifest persistence ---

@@ -232,6 +232,7 @@
 #include "growlmanager.h"
 
 #include "fsassetblacklist.h"
+#include "pkmirrorflags.h" // <FS:Pyrokitty>
 #include "fsavatarrenderpersistence.h"
 #include "fscommon.h"
 #include "fscorehttputil.h"
@@ -1845,6 +1846,10 @@ bool idle_startup()
 
         // <FS:WS> Initalize Account based asset_blacklist
         FSAssetBlacklist::getInstance()->init();
+
+        // <FS:Pyrokitty> Per-axis mirroring - load cached mirror flags
+        PKMirrorFlags::getInstance()->init();
+        // </FS:Pyrokitty>
 
         // <FS:Techwolf Lupindo> load per grid data
         FSData::instance().downloadAgents();

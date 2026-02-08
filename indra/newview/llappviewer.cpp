@@ -64,6 +64,7 @@
 #include "llviewerjoystick.h"
 #include "llcalc.h"
 #include "pkchateventapi.h"
+#include "pkinventoryeventapi.h"
 #include "pkloginhandoff.h"
 #include "pkwebsocketserver.h"
 #include "llconversationlog.h"
@@ -3799,6 +3800,9 @@ bool LLAppViewer::initWindow()
 
     // <FS:Pyrokitty> Initialize chat event API for LEAP plugins
     new PKChatEventAPI();
+
+    // <FS:Pyrokitty> Initialize inventory event API for WebSocket inventory operations
+    new PKInventoryEventAPI();
 
     // Initialize login handoff API for external login via PyroKitty
     new PKLoginHandoff();

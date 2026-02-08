@@ -175,7 +175,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         <button
           className="sync-btn"
           onClick={onSyncNow}
-          disabled={syncStatus.phase === 'downloading' || syncStatus.phase === 'uploading' || syncStatus.phase === 'preparing' || connectionState === 'viewer_connected'}
+          disabled={syncStatus.phase === 'downloading' || syncStatus.phase === 'uploading' || syncStatus.phase === 'preparing'}
         >
           Sync Now
         </button>
