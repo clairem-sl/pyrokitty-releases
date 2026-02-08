@@ -20,6 +20,7 @@ import {
   NearbyAvatar,
   RegionInfo,
 } from '../shared/types';
+import { DisplayNameCache } from './display-name-cache';
 
 export interface LoginParams {
   firstName: string;
@@ -90,6 +91,8 @@ export class MetaverseConnection extends EventEmitter {
   private avatarLeftSubscriptions: Map<string, { unsubscribe: () => void }> = new Map();
   private loginResponse: Record<string, unknown> | null = null;
   private messageIdCounter = 0;
+  private displayNameCache: DisplayNameCache | null = null;
+  private accountId: string | null = null;
 
   constructor(public readonly instanceId: string) {
     super();
@@ -134,6 +137,10 @@ export class MetaverseConnection extends EventEmitter {
       // Enable teleport handoff mode for later viewer handoff
       this.bot.teleportHandoffMode = true;
 
+      // Create display name cache keyed by account
+      this.accountId = `${params.firstName}.${params.lastName}`.toLowerCase();
+      this.displayNameCache = new DisplayNameCache(this.accountId);
+
       this.emit('login-progress', 'Logging in...');
       this.loginResponse = await this.bot.login() as unknown as Record<string, unknown>;
 
@@ -153,6 +160,11 @@ export class MetaverseConnection extends EventEmitter {
       this.setState('metaverse_connected');
       this.emit('login-progress', `Connected to ${this.bot.currentRegion?.regionName || 'region'}`);
 
+      // Resolve display names for all friends in background
+      this.resolveDisplayNamesForFriends().catch((err) => {
+        console.error('[MetaverseConnection] Error resolving friend display names:', err);
+      });
+
     } catch (error) {
       this.setState('disconnected');
       this.bot = null;
@@ -164,6 +176,9 @@ export class MetaverseConnection extends EventEmitter {
    * Disconnect from Second Life
    */
   async logout(): Promise<void> {
+    if (this.displayNameCache) {
+      this.displayNameCache.flush();
+    }
     if (this.bot) {
       try {
         await this.bot.close();
@@ -212,11 +227,14 @@ export class MetaverseConnection extends EventEmitter {
         return;
       }
 
+      // Use cached display name if available
+      const displayName = this.displayNameCache?.getBestName(fromId);
+
       const message: ChatMessage = {
         id: this.generateMessageId(),
         type: 'nearby',
         message: event.message,
-        fromName: event.fromName,
+        fromName: displayName || event.fromName,
         fromId,
         timestamp: Date.now(),
         chatType: chatTypeMap[event.chatType] || 'normal',
@@ -236,13 +254,15 @@ export class MetaverseConnection extends EventEmitter {
 
       const fromId = event.from.toString();
       const sessionId = fromId; // IM sessions use participant ID as session ID
+      const displayName = this.displayNameCache?.getBestName(fromId);
+      const nameToUse = displayName || event.fromName;
 
       // Create or update chat session
       if (!this.chatSessions.has(sessionId)) {
         const session: ChatSession = {
           id: sessionId,
           type: 'im',
-          name: event.fromName,
+          name: nameToUse,
           participantId: fromId,
           unreadCount: 1,
           lastMessage: event.message,
@@ -255,6 +275,10 @@ export class MetaverseConnection extends EventEmitter {
         session.unreadCount++;
         session.lastMessage = event.message;
         session.lastMessageTime = Date.now();
+        // Update session name if we now have a display name
+        if (displayName) {
+          session.name = displayName;
+        }
         this.emit('chat-session-update', session);
       }
 
@@ -262,7 +286,7 @@ export class MetaverseConnection extends EventEmitter {
         id: this.generateMessageId(),
         type: 'im',
         message: event.message,
-        fromName: event.fromName,
+        fromName: nameToUse,
         fromId: fromId,
         timestamp: Date.now(),
         sessionId: sessionId,
@@ -298,15 +322,18 @@ export class MetaverseConnection extends EventEmitter {
         this.emit('chat-session-update', session);
       }
 
+      const groupFromId = event.from.toString();
+      const groupDisplayName = this.displayNameCache?.getBestName(groupFromId);
+
       const message: ChatMessage = {
         id: this.generateMessageId(),
         type: 'group',
         message: event.message,
-        fromName: event.fromName,
-        fromId: event.from.toString(),
+        fromName: groupDisplayName || event.fromName,
+        fromId: groupFromId,
         timestamp: Date.now(),
         sessionId: groupId,
-        isOutgoing: event.from.toString() === this.bot?.agentID().toString(),
+        isOutgoing: groupFromId === this.bot?.agentID().toString(),
       };
 
       this.emit('group-chat', message);
@@ -376,13 +403,27 @@ export class MetaverseConnection extends EventEmitter {
       }
 
       const pos = avatar.position;
+      // Use cached display name if available, fall back to legacy name
+      const cachedName = this.displayNameCache?.getBestName(avatarId);
       const nearbyAvatar: NearbyAvatar = {
         id: avatarId,
-        name: avatar.getName(),
+        name: cachedName || avatar.getName(),
         title: avatar.getTitle() || undefined,
         position: { x: pos.x, y: pos.y, z: pos.z },
       };
       this.nearbyAvatars.set(avatarId, nearbyAvatar);
+
+      // Resolve display name in background if not cached
+      if (!cachedName || this.displayNameCache?.isStale(avatarId)) {
+        this.resolveDisplayNames([avatarId]).then(() => {
+          const updated = this.nearbyAvatars.get(avatarId);
+          const newName = this.displayNameCache?.getBestName(avatarId);
+          if (updated && newName && updated.name !== newName) {
+            updated.name = newName;
+            this.emit('nearby-avatars-update', Array.from(this.nearbyAvatars.values()));
+          }
+        }).catch(() => {});
+      }
 
       // Subscribe to avatar movement to update position
       const moveSubscription = avatar.onMoved.subscribe(() => {
@@ -453,6 +494,16 @@ export class MetaverseConnection extends EventEmitter {
     if (!this.bot) return;
 
     try {
+      // Check display name cache first
+      const cachedName = this.displayNameCache?.getBestName(friendId);
+      if (cachedName) {
+        const friend = this.friends.get(friendId);
+        if (friend) {
+          friend.name = cachedName;
+          return; // Will emit friends-update in bulk after all resolves
+        }
+      }
+
       const { UUID } = await import('../../node-metaverse/dist/lib/classes/UUID');
       const uuid = new UUID(friendId);
       const nameResult = await this.bot.clientCommands.grid.avatarKey2Name(uuid);
@@ -468,6 +519,68 @@ export class MetaverseConnection extends EventEmitter {
     } catch (e) {
       // Name resolution failed, keep empty name
     }
+  }
+
+  // ============ Display Name Resolution ============
+
+  /**
+   * Batch-resolve display names for a list of UUIDs.
+   * Filters out already-cached (non-stale) entries before calling the server.
+   */
+  private async resolveDisplayNames(uuids: string[]): Promise<void> {
+    if (!this.bot || !this.displayNameCache) {
+      console.log(`[MetaverseConnection] resolveDisplayNames: skipped (bot=${!!this.bot}, cache=${!!this.displayNameCache})`);
+      return;
+    }
+
+    // Filter to only uncached or stale UUIDs
+    const toResolve = uuids.filter(uuid => !this.displayNameCache!.get(uuid) || this.displayNameCache!.isStale(uuid));
+    console.log(`[MetaverseConnection] resolveDisplayNames: ${uuids.length} total, ${toResolve.length} to resolve`);
+    if (toResolve.length === 0) return;
+
+    try {
+      const { UUID } = await import('../../node-metaverse/dist/lib/classes/UUID');
+      const uuidObjects = toResolve.map(id => new UUID(id));
+      const results = await this.bot.clientCommands.grid.getDisplayNames(uuidObjects);
+      console.log(`[MetaverseConnection] resolveDisplayNames: got ${results.size} results`);
+      if (results.size > 0) {
+        this.displayNameCache.bulkSet(results);
+        console.log(`[DisplayNameCache] Resolved ${results.size} display names`);
+      }
+    } catch (err) {
+      console.error('[MetaverseConnection] Error resolving display names:', err);
+    }
+  }
+
+  /**
+   * Resolve display names for all friends after login.
+   * Updates friend names with display names and re-emits friends-update.
+   */
+  private async resolveDisplayNamesForFriends(): Promise<void> {
+    const friendIds = Array.from(this.friends.keys());
+    if (friendIds.length === 0) return;
+
+    await this.resolveDisplayNames(friendIds);
+
+    // Update friend names with resolved display names
+    let updated = false;
+    for (const [friendId, friend] of this.friends) {
+      const displayName = this.displayNameCache?.getBestName(friendId);
+      if (displayName && friend.name !== displayName) {
+        friend.name = displayName;
+        updated = true;
+      }
+    }
+    if (updated) {
+      this.emit('friends-update', Array.from(this.friends.values()));
+    }
+  }
+
+  /**
+   * Get the display name cache (for use by IPC handlers)
+   */
+  getDisplayNameCache(): DisplayNameCache | null {
+    return this.displayNameCache;
   }
 
   // ============ Chat Methods ============

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@mantine/core';
 import { ChatMessage, displayName } from '../../shared/types';
+import { useUserContextMenu } from '../hooks/useUserContextMenu';
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -54,6 +55,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   };
 
+  const handleUserContextMenu = useUserContextMenu();
+
   return (
     <div className="chat-panel">
       <div className="chat-header">
@@ -75,7 +78,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               className={`chat-message ${msg.isOutgoing ? 'outgoing' : ''} ${msg.chatType || ''}`}
             >
               <span className="chat-time">{formatTime(msg.timestamp)}</span>
-              <span className="chat-sender">{displayName(msg.fromName)}</span>
+              <span
+                className="chat-sender"
+                onContextMenu={(e) => handleUserContextMenu(e, msg.fromId, msg.fromName)}
+              >{displayName(msg.fromName)}</span>
               {msg.chatType && msg.chatType !== 'normal' && (
                 <span className={`chat-type-badge ${msg.chatType}`}>
                   {msg.chatType}

@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, shell } from 'electron';
+import { ipcMain, BrowserWindow, Menu, shell } from 'electron';
 import { IPC_CHANNELS, AddAccountRequest, LaunchViewerRequest, ChatMessage, SyncStatus } from '../shared/types';
 import { gridManager } from './grid-manager';
 import { accountManager } from './account-manager';
@@ -399,6 +399,21 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
         return;
       }
 
+      // Cache display name from viewer for cross-reference when node-metaverse reconnects
+      if (data.from_id && data.from_name) {
+        const metaverse = metaverseConnectionManager.get(instanceId);
+        const cache = metaverse?.getDisplayNameCache();
+        if (cache && !cache.get(data.from_id)) {
+          cache.set(data.from_id, {
+            displayName: data.from_name,
+            legacyName: data.from_name, // Viewer already resolved; best we have
+            username: '',
+            isDefault: false,
+            fetchedAt: Date.now(),
+          });
+        }
+      }
+
       // Transform snake_case from viewer to camelCase for renderer
       // For IMs, use from_id as sessionId to match node-metaverse behavior
       const sessionId = data.type === 'im' ? data.from_id : data.session_id;
@@ -464,5 +479,31 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     if (instance && session.name) {
       chatLogManager.saveSessionMeta(instance.accountId, session);
     }
+  });
+
+  // Context menu: right-click on user names
+  ipcMain.on(IPC_CHANNELS.SHOW_USER_CONTEXT_MENU, (_event, { userId, userName, x, y }) => {
+    const menu = Menu.buildFromTemplate([
+      {
+        label: `View Profile: ${userName}`,
+        click: () => {
+          shell.openExternal(`https://world.secondlife.com/resident/${userId}`);
+        },
+      },
+    ]);
+    menu.popup({ window: mainWindow, x, y });
+  });
+
+  // Context menu: right-click on group names
+  ipcMain.on(IPC_CHANNELS.SHOW_GROUP_CONTEXT_MENU, (_event, { groupId, groupName, x, y }) => {
+    const menu = Menu.buildFromTemplate([
+      {
+        label: `View Group Profile: ${groupName}`,
+        click: () => {
+          shell.openExternal(`https://world.secondlife.com/group/${groupId}`);
+        },
+      },
+    ]);
+    menu.popup({ window: mainWindow, x, y });
   });
 }

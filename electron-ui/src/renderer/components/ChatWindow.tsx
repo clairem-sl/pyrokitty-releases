@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { ChatPanel } from './ChatPanel';
 import { MiniMap } from './MiniMap';
 import { ChatMessage, ChatSession, Friend, Group, ConnectionState, NearbyAvatar, RegionInfo, SyncStatus, displayName } from '../../shared/types';
+import { useUserContextMenu } from '../hooks/useUserContextMenu';
+import { useGroupContextMenu } from '../hooks/useGroupContextMenu';
 
 type Tab = 'nearby' | 'messages' | 'groups';
 
@@ -65,6 +67,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>('nearby');
 
+  const handleUserContextMenu = useUserContextMenu();
+  const handleGroupContextMenu = useGroupContextMenu();
   const isConnected = connectionState === 'metaverse_connected' || connectionState === 'viewer_connected';
 
   if (!isConnected) {
@@ -206,7 +210,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       }}
                     >
                       <span className="avatar-status-dot" />
-                      <span className="split-sidebar-name">{displayName(avatar.name)}</span>
+                      <span className="split-sidebar-name" onContextMenu={(e) => handleUserContextMenu(e, avatar.id, avatar.name)}>{displayName(avatar.name)}</span>
                     </div>
                   ))
                 )}
@@ -262,7 +266,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                         }}
                       >
                         <span className="friend-status-dot online" />
-                        <span className="split-sidebar-name">{displayName(friend.name) || friend.id}</span>
+                        <span className="split-sidebar-name" onContextMenu={(e) => handleUserContextMenu(e, friend.id, friend.name)}>{displayName(friend.name) || friend.id}</span>
                         {session && session.unreadCount > 0 && (
                           <span className="split-sidebar-badge">{session.unreadCount}</span>
                         )}
@@ -289,7 +293,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       }}
                     >
                       <span className="friend-status-dot offline" />
-                      <span className="split-sidebar-name">{displayName(friend.name) || friend.id}</span>
+                      <span className="split-sidebar-name" onContextMenu={(e) => handleUserContextMenu(e, friend.id, friend.name)}>{displayName(friend.name) || friend.id}</span>
                       {session && session.unreadCount > 0 && (
                         <span className="split-sidebar-badge">{session.unreadCount}</span>
                       )}
@@ -309,7 +313,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                         onClick={() => onSelectSession(s.id)}
                       >
                         <span className="avatar-status-dot" />
-                        <span className="split-sidebar-name">{sessionDisplayName(s)}</span>
+                        <span className="split-sidebar-name" onContextMenu={(e) => s.participantId && handleUserContextMenu(e, s.participantId, s.name)}>{sessionDisplayName(s)}</span>
                         {s.unreadCount > 0 && (
                           <span className="split-sidebar-badge">{s.unreadCount}</span>
                         )}
@@ -372,7 +376,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                           }
                         }}
                       >
-                        <span className="split-sidebar-name">{group.name}</span>
+                        <span className="split-sidebar-name" onContextMenu={(e) => handleGroupContextMenu(e, group.id, group.name)}>{group.name}</span>
                         {session && session.unreadCount > 0 && (
                           <span className="split-sidebar-badge">{session.unreadCount}</span>
                         )}

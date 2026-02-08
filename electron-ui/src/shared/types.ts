@@ -196,6 +196,10 @@ export const IPC_CHANNELS = {
   SYNC_GET_STATUS: 'inventory-sync:status',
   SYNC_PROGRESS: 'inventory-sync:progress',
   SYNC_OPEN_FOLDER: 'inventory-sync:open-folder',
+
+  // Context menus
+  SHOW_USER_CONTEXT_MENU: 'context-menu:user',
+  SHOW_GROUP_CONTEXT_MENU: 'context-menu:group',
 } as const;
 
 // IPC Request/Response types

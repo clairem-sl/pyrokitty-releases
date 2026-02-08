@@ -468,6 +468,95 @@ export class GridCommands extends CommandsBase
         }
     }
 
+    public async getDisplayNames(uuids: UUID[]): Promise<Map<string, { displayName: string; username: string; legacyFirst: string; legacyLast: string; isDefault: boolean }>>
+    {
+        const result = new Map<string, { displayName: string; username: string; legacyFirst: string; legacyLast: string; isDefault: boolean }>();
+        if (uuids.length === 0)
+        {
+            console.log('[GridCommands] getDisplayNames: empty UUID list');
+            return result;
+        }
+
+        console.log(`[GridCommands] getDisplayNames: resolving ${uuids.length} UUIDs`);
+
+        try
+        {
+            const capAvailable = await this.currentRegion.caps.isCapAvailable('GetDisplayNames');
+            console.log(`[GridCommands] GetDisplayNames cap available: ${capAvailable}`);
+            if (!capAvailable)
+            {
+                return result;
+            }
+
+            const capUrl = await this.currentRegion.caps.getCapability('GetDisplayNames');
+            console.log(`[GridCommands] GetDisplayNames cap URL: ${capUrl}`);
+
+            // Process in batches of 80 to stay under URL length limits
+            const batchSize = 80;
+            for (let i = 0; i < uuids.length; i += batchSize)
+            {
+                const batch = uuids.slice(i, i + batchSize);
+                // Build URL with repeated 'ids' params (capsGetXML can't do repeated keys)
+                const params = batch.map(id => `ids=${encodeURIComponent(id.toString())}`).join('&');
+                const fullUrl = `${capUrl}?${params}`;
+
+                try
+                {
+                    const response = await this.currentRegion.caps.capsPerformXMLGet(fullUrl);
+                    console.log(`[GridCommands] getDisplayNames response keys:`, Object.keys(response || {}));
+
+                    const typed = response as {
+                        agents?: Array<{
+                            id: string;
+                            display_name: string;
+                            display_name_next_update: string;
+                            is_display_name_default: boolean;
+                            legacy_first_name: string;
+                            legacy_last_name: string;
+                            username: string;
+                        }>;
+                    };
+
+                    if (typed.agents)
+                    {
+                        console.log(`[GridCommands] getDisplayNames: got ${typed.agents.length} agents`);
+                        if (typed.agents.length > 0)
+                        {
+                            console.log(`[GridCommands] First agent sample:`, JSON.stringify(typed.agents[0]));
+                        }
+                        for (const agent of typed.agents)
+                        {
+                            result.set(agent.id, {
+                                displayName: agent.display_name,
+                                username: agent.username,
+                                legacyFirst: agent.legacy_first_name,
+                                legacyLast: agent.legacy_last_name,
+                                isDefault: agent.is_display_name_default,
+                            });
+                        }
+                    }
+                    else
+                    {
+                        console.log(`[GridCommands] getDisplayNames: no 'agents' key in response. Full response:`, JSON.stringify(response).substring(0, 500));
+                    }
+                }
+                catch (batchErr)
+                {
+                    // Log but continue with remaining batches
+                    console.error('[GridCommands] getDisplayNames batch error:', batchErr);
+                }
+            }
+        }
+        catch (err)
+        {
+            // Cap unavailable (OpenSim) or other error — return whatever we have
+            console.error('[GridCommands] getDisplayNames error:', err);
+        }
+
+        console.log(`[GridCommands] getDisplayNames: returning ${result.size} results`);
+        return result;
+    }
+
     private async pay(target: UUID, amount: number, description: string, type: MoneyTransactionType, flags: TransactionFlags = TransactionFlags.None): Promise<void>
     {
         if (amount % 1 !== 0)
