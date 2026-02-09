@@ -96,11 +96,11 @@ export const objectTools: ToolDef[] = [
   },
   {
     name: 'sl_find_objects',
-    description: 'Find in-world objects by name (supports regex patterns).',
+    description: 'Find in-world objects by name. Uses micromatch glob patterns (case insensitive). Use "*keyword*" to match names containing a word, "exact name" for exact match. Examples: "*Minesweeper*", "*chair*", "Object".',
     inputSchema: {
       type: 'object',
       properties: {
-        pattern: { type: 'string', description: 'Name pattern to search for (string or regex)' },
+        pattern: { type: 'string', description: 'Glob pattern to match object names (e.g. "*keyword*")' },
       },
       required: ['pattern'],
     },
@@ -116,6 +116,47 @@ export const objectTools: ToolDef[] = [
         position: o.position,
       }));
       return { content: [{ type: 'text', text: JSON.stringify(info, null, 2) }] };
+    },
+  },
+  {
+    name: 'sl_get_object_children',
+    description: 'Get the child prims of a linkset by root object local ID. Returns each child\'s localId, name, and position (relative to root).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        localId: { type: 'number', description: 'Root object local ID' },
+      },
+      required: ['localId'],
+    },
+    handler: async (args, bot) => {
+      try {
+        const children = await bot.getObjectChildren(args.localId as number);
+        if (children.length === 0) {
+          return { content: [{ type: 'text', text: 'No child prims found (single prim object).' }] };
+        }
+        return { content: [{ type: 'text', text: `${children.length} children:\n${JSON.stringify(children, null, 2)}` }] };
+      } catch (err: any) {
+        return { content: [{ type: 'text', text: `Failed to get children: ${err.message}` }], isError: true };
+      }
+    },
+  },
+  {
+    name: 'sl_get_object_textures',
+    description: 'Get texture information for each face of a prim. Returns texture UUIDs, offsets, repeat, and rotation per face.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        localId: { type: 'number', description: 'Object local ID' },
+      },
+      required: ['localId'],
+    },
+    handler: async (args, bot) => {
+      try {
+        const textures = await bot.getObjectTextures(args.localId as number);
+        return { content: [{ type: 'text', text: JSON.stringify(textures, null, 2) }] };
+      } catch (err: any) {
+        return { content: [{ type: 'text', text: `Failed to get textures: ${err.message}` }], isError: true };
+      }
     },
   },
   {

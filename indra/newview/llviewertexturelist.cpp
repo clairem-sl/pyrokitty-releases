@@ -866,6 +866,10 @@ void LLViewerTextureList::updateImages(F32 max_time)
         sample(NUM_IMAGES, sNumImages);
         sample(NUM_RAW_IMAGES, LLImageRaw::sRawImageCount);
         sample(FORMATTED_MEM, F64Bytes(LLImageFormatted::sGlobalFormattedMemory));
+
+        auto gl_queue = LL::WorkQueue::getInstance("LLImageGL");
+        sample(GL_THREAD_QUEUE_DEPTH, gl_queue ? (S32)gl_queue->size() : 0);
+        sample(DECODE_THREAD_QUEUE_DEPTH, (S32)LLAppViewer::getImageDecodeThread()->getPending());
     }
 
     // make sure each call below gets at least its "fair share" of time
@@ -940,7 +944,7 @@ void LLViewerTextureList::updateImageDecodePriority(LLViewerFetchedTexture* imag
         bool on_screen = false;
 
         U32 face_count = 0;
-        U32 max_faces_to_check = 1024;
+        U32 max_faces_to_check = 256;
 
         // get adjusted bias based on image resolution
         LLImageGL* img = imagep->getGLTexture();
@@ -965,8 +969,9 @@ void LLViewerTextureList::updateImageDecodePriority(LLViewerFetchedTexture* imag
                     F32 radius;
                     F32 cos_angle_to_view_dir;
 
-                    if ((gFrameCount - face->mLastTextureUpdate) > 10)
-                    { // only call calcPixelArea at most once every 10 frames for a given face
+                    U32 throttle_frames = face->mInFrustum ? 10 : 60;
+                    if ((gFrameCount - face->mLastTextureUpdate) > throttle_frames)
+                    { // only call calcPixelArea at most once every 10 frames for a given face (60 for offscreen)
                         // this helps eliminate redundant calls to calcPixelArea for faces that have multiple textures
                         // assigned to them, such as is the case with GLTF materials or Blinn-Phong materials
                         face->mInFrustum = face->calcPixelArea(cos_angle_to_view_dir, radius);
@@ -1284,7 +1289,8 @@ F32 LLViewerTextureList::updateImagesFetchTextures(F32 max_time)
     // Deletion rules check ref count, so be careful not to hold any LLPointer references to the textures here other than the one in entries.
 
     //update MIN_UPDATE_COUNT or 5% of other textures, whichever is greater
-    update_count = llmax((U32) MIN_UPDATE_COUNT, (U32) mUUIDMap.size()/20);
+    static LLCachedControl<U32> texture_update_divisor(gSavedSettings, "TextureFetchUpdateDivisor", 20);
+    update_count = llmax((U32) MIN_UPDATE_COUNT, (U32) mUUIDMap.size() / llmax(texture_update_divisor(), (U32)1));
     if (LLViewerTexture::sDesiredDiscardBias > 1.f
         && LLViewerTexture::sBiasTexturesUpdated < (U32)mUUIDMap.size())
     {

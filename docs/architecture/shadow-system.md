@@ -7,7 +7,7 @@ The shadow system uses cascaded shadow mapping for sun shadows and additional pa
 ## Key Files
 
 - `indra/newview/pipeline.cpp` - Shadow generation and rendering (lines 10400-11600)
-- `indra/newview/pipeline.h` - Shadow render targets and cameras (lines 728, 749, 800-805)
+- `indra/newview/pipeline.h` - Shadow render targets, cameras, mMainShadow* state (lines 728, 749, 800-805)
 - `indra/newview/lldrawpoolavatar.cpp` - Avatar shadow passes
 - `indra/newview/lldrawpooltree.cpp` - Tree shadow rendering
 - `indra/newview/lldrawpoolterrain.cpp` - Terrain shadow rendering
@@ -83,7 +83,8 @@ Reducing splits nearly halves shadow render time but reduces shadow precision at
 | `RenderShadowSplits` | S32 | 3 | Cascade count (0-3) |
 | `RenderShadowResolutionScale` | F32 | 1.0 | Shadow map size multiplier |
 | `RenderShadowMinVertexCount` | U32 | 64 | Skip objects with fewer vertices |
-| `RenderShadowUpdateRate` | U32 | 1 | Frame skip rate (1=every frame, 2=every other) |
+| `RenderShadowUpdateRate` | U32 | 1 | Base frame skip rate (1=every frame, 2=every other) |
+| `RenderShadowSplitRateScale` | F32 | 2.0 | Geometric growth per cascade (rate = base * scale^j) |
 | `RenderShadowBlurSamples` | U32 | 4 | Blur samples (actual = value*2-1) |
 
 ### Quality Settings
@@ -169,46 +170,125 @@ if (LLPipeline::sShadowRender && LLPipeline::RenderShadowMinVertexCount > 0)
 
 This skips rendering small objects in shadow passes. Small objects contribute minimally to shadows but still consume draw calls.
 
-## RenderShadowUpdateRate Setting
+## RenderShadowUpdateRate and RenderShadowSplitRateScale
 
-Controls how often shadow maps are regenerated. Instead of rendering shadows every frame, this setting allows reusing shadow maps from previous frames.
+Controls how often shadow maps are regenerated, with per-cascade granularity. Near shadows update frequently while far shadows can update much less often without visible quality loss.
 
-| Value | Effect |
-|-------|--------|
-| 1 | Every frame (default) |
-| 2 | Every other frame (50% shadow GPU cost) |
-| 3 | Every 3rd frame (33% shadow GPU cost) |
-| 4 | Every 4th frame (25% shadow GPU cost) |
+### Settings
+
+| Setting | Type | Default | Effect |
+|---------|------|---------|--------|
+| `RenderShadowUpdateRate` | U32 | 1 | Base frame skip rate |
+| `RenderShadowSplitRateScale` | F32 | 2.0 | Geometric growth factor per cascade |
+
+**Effective rate for cascade j** = `base_rate * scale^j`
+
+### Examples
+
+| Base | Scale | Split 0 (near) | Split 1 | Split 2 | Split 3 (far) |
+|------|-------|-----------------|---------|---------|----------------|
+| 1 | 1.0 | every frame | every frame | every frame | every frame |
+| 1 | 2.0 | every frame | every 2nd | every 4th | every 8th |
+| 1 | 4.0 | every frame | every 4th | every 16th | every 64th |
+| 2 | 2.0 | every 2nd | every 4th | every 8th | every 16th |
+
+Set `RenderShadowSplitRateScale = 1.0` for uniform behavior (all cascades same rate).
 
 ### Implementation
 
-Located in `pipeline.cpp` in `generateSunShadow()`:
+Located in `pipeline.cpp` in `generateSunShadow()`.
 
+**Per-split rate computation** (before cascade loop):
 ```cpp
-// <FS:Pyrokitty> Skip shadow map rendering based on RenderShadowUpdateRate
-// When skipping, we still need to update the shadow matrices because they depend on
-// the current camera position (they transform from view space to shadow texture space).
-if (RenderShadowUpdateRate > 1 && (gFrameCount % RenderShadowUpdateRate) != 0)
+static LLCachedControl<F32> shadow_split_rate_scale(gSavedSettings, "RenderShadowSplitRateScale", 2.0f);
+static LLCachedControl<U32> shadow_update_rate(gSavedSettings, "RenderShadowUpdateRate", 1);
+U32 split_rates[4];
 {
-    // Update shadow matrices with current camera's inverse view matrix
-    glm::mat4 inv_view = glm::inverse(get_current_modelview());
-    glm::mat4 trans(...); // [-1,1] to [0,1] conversion
-
-    for (U32 j = 0; j < 4; j++)
-        mSunShadowMatrix[j] = trans * mShadowProjection[j] * mShadowModelview[j] * inv_view;
-
-    return;  // Reuse existing shadow map textures
+    F32 scale = llmax(1.0f, (F32)shadow_split_rate_scale);
+    U32 base = llmax(1u, (U32)shadow_update_rate);
+    F32 rate_f = (F32)base;
+    for (S32 i = 0; i < 4; i++)
+    {
+        split_rates[i] = llmax(1u, (U32)rate_f);
+        rate_f *= scale;
+    }
 }
-// </FS:Pyrokitty>
 ```
 
-**Why shadow matrices must be updated every frame:**
+**Per-split skip** (inside cascade loop):
+```cpp
+if (!gCubeSnapshot && split_rates[j] > 1 && (gFrameCount % split_rates[j]) != 0)
+{
+    // Reuse previous shadow map, just update view-to-shadow matrix
+    mSunShadowMatrix[j] = trans * mMainShadowProjection[j] * mMainShadowModelview[j] * inv_view;
+    continue;
+}
+```
+
+**Per-split save** (after `mRT->shadow[j].flush()` inside loop):
+```cpp
+if (!gCubeSnapshot)
+{
+    mMainShadowModelview[j] = mShadowModelview[j];
+    mMainShadowProjection[j] = mShadowProjection[j];
+}
+```
+
+**Spot light save** (end of function, indices 4-5 only):
+```cpp
+if (!gCubeSnapshot)
+{
+    for (U32 j = 4; j < 6; j++)
+    {
+        mMainShadowModelview[j] = mShadowModelview[j];
+        mMainShadowProjection[j] = mShadowProjection[j];
+    }
+}
+```
+
+**Members in `pipeline.h`:**
+```cpp
+glm::mat4  mMainShadowModelview[6];
+glm::mat4  mMainShadowProjection[6];
+```
+
+### Key design decisions
+
+- **Clip planes always fresh** — by removing the early return, `mSunClipPlanes` is computed every frame. No saved copy needed.
+- **Spot lights always render** — indices 4-5 are cheap (only 2 passes), always local, and not clobbered by probes.
+- **Skip at loop top** — skips all per-split work (frustum, point cloud, projection, render) for maximum perf gain.
+- **`gCubeSnapshot` guard** — probes only render 2 cascades and shouldn't use skip logic.
+
+### Why dedicated mMainShadow* arrays are needed
+
+The critical discovery: **reflection probe rendering overwrites pipeline shadow state**.
+
+**Frame order:**
+1. `display()` — generates shadows for main camera, renders scene
+2. `mReflectionMapManager.update()` — runs AFTER display, bakes reflection probes
+
+During step 2, each reflection probe calls `generateSunShadow()` again with a different camera (the probe's cube face camera). This overwrites:
+- `mShadowModelview[6]` — now contains probe camera values
+- `mShadowProjection[6]` — now contains probe projection values
+
+On the next frame's skip, if we read from `mShadowModelview`/`mShadowProjection`, we get the **probe's** shadow state, not the main camera's. This causes:
+- Far shadows flickering (wrong projection matrices)
+- Avatar shadows disappearing (wrong projection matrices)
+
+**Solution:** The `!gCubeSnapshot` guard ensures we only save state from the main camera render, not from probe renders. On skip frames, we read from `mMainShadow*` arrays which always contain the correct main camera state.
+
+### Why shadow matrices must be updated every frame
+
 - `mSunShadowMatrix` transforms from **current view space** to shadow texture space
 - It contains `inv_view` (inverse of current camera matrix) which changes when camera moves
 - Shadow map textures are in "sun space" and don't need updating
 - But the matrices mapping from camera view to those textures must stay current
 
 Shadow maps persist in render targets (`shadow[4]` and `mSpotShadow[2]`), so skipping shadow generation simply reuses the previous frame's maps while still updating the view-to-shadow transforms.
+
+### Previous failed attempt
+
+An earlier version of shadow frame skipping was implemented and removed because shadows appeared in wrong locations. The root cause was reading from `mShadowModelview`/`mShadowProjection` directly, which were being clobbered by reflection probe rendering between frames. The fix (dedicated `mMainShadow*` arrays + `!gCubeSnapshot` guard) resolved this.
 
 ### Trade-offs
 
@@ -266,7 +346,8 @@ RenderShadowDetail = 1           // Sun shadows only (no spot)
 RenderShadowSplits = 1           // 2 cascades instead of 4
 RenderShadowResolutionScale = 0.5  // Half resolution
 RenderShadowMinVertexCount = 256 // Skip small objects
-RenderShadowUpdateRate = 2       // Update every other frame
+RenderShadowUpdateRate = 1       // Base rate (1=every frame)
+RenderShadowSplitRateScale = 2.0 // Near every frame, far every 8th
 RenderShadowBlurSamples = 2      // Fewer blur samples
 ```
 

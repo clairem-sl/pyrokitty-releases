@@ -628,6 +628,7 @@ static void settings_to_globals()
     LLRender::sNsightDebugSupport = gSavedSettings.getBOOL("RenderNsightDebugSupport");
     LLImageGL::sGlobalUseAnisotropic    = gSavedSettings.getBOOL("RenderAnisotropic");
     LLImageGL::sCompressTextures        = gSavedSettings.getBOOL("RenderCompressTextures");
+    LLImageRaw::sPreCompressTextures    = gSavedSettings.getBOOL("RenderPreCompressTextures");
     LLVOVolume::sLODFactor              = llclamp(gSavedSettings.getF32("RenderVolumeLODFactor"), 0.01f, MAX_LOD_FACTOR);
     LLVOVolume::sDistanceFactor         = 1.f-LLVOVolume::sLODFactor * 0.1f;
     LLVolumeImplFlexible::sUpdateFactor = gSavedSettings.getF32("RenderFlexTimeFactor");

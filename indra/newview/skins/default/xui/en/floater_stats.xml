@@ -207,6 +207,16 @@
                     label="Bound Mem"
                     stat="glboundmemstat"
                     setting="DebugStatModeBoundMem"/>
+          <stat_bar name="glthreadqdepth"
+                    label="GL Thread Queue"
+                    stat="glthreadqdepth"
+                    show_history="true"
+                    setting="DebugStatModeGLThreadQ"/>
+          <stat_bar name="decodethreadqdepth"
+                    label="Decode Thread Queue"
+                    stat="decodethreadqdepth"
+                    show_history="true"
+                    setting="DebugStatModeDecodeThreadQ"/>
         </stat_view>
           <!-- <FS:minerjr> [FIRE-35083] Floater_stats.xml has in correct stat_view setting for materials -->
           <!-- The material stat_view had the incorrect setting, which was causing and convert_from_llsd warning and a bugsplat in Debug mode -->

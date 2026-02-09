@@ -188,7 +188,9 @@ extern LLTrace::SampleStatHandle<>      FPS_SAMPLE,
                                         SHADER_OBJECTS,
                                         DRAW_DISTANCE,
                                         WINDOW_WIDTH,
-                                        WINDOW_HEIGHT;
+                                        WINDOW_HEIGHT,
+                                        GL_THREAD_QUEUE_DEPTH,
+                                        DECODE_THREAD_QUEUE_DEPTH;
 
 extern LLTrace::SampleStatHandle<LLUnit<F32, LLUnits::Percent> > PACKETS_LOST_PERCENT;
 

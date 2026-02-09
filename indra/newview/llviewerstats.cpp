@@ -196,7 +196,9 @@ LLTrace::SampleStatHandle<> FPS_SAMPLE("fpssample"),
                             SHADER_OBJECTS("shaderobjects", "Object Shaders"),
                             DRAW_DISTANCE("drawdistance", "Draw Distance"),
                             WINDOW_WIDTH("windowwidth", "Window width"),
-                            WINDOW_HEIGHT("windowheight", "Window height");
+                            WINDOW_HEIGHT("windowheight", "Window height"),
+                            GL_THREAD_QUEUE_DEPTH("glthreadqdepth"),
+                            DECODE_THREAD_QUEUE_DEPTH("decodethreadqdepth");
 
 LLTrace::SampleStatHandle<LLUnit<F32, LLUnits::Percent> >
                             PACKETS_LOST_PERCENT("packetslostpercentstat");

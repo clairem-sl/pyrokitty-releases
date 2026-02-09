@@ -1581,6 +1581,13 @@ bool LLImageGL::createGLTexture(S32 discard_level, const LLImageRaw* imageraw, S
         mHasExplicitFormat = false;
     }
 
+    // If incoming raw data is not pre-compressed, clear explicit format so it's
+    // re-derived from components (previous upload may have set compressed format)
+    if (mHasExplicitFormat && !imageraw->hasCompressedData())
+    {
+        mHasExplicitFormat = false;
+    }
+
     if( !mHasExplicitFormat )
     {
         switch (mComponents)
@@ -1621,6 +1628,24 @@ bool LLImageGL::createGLTexture(S32 discard_level, const LLImageRaw* imageraw, S
         mLastBindTime = sLastFrameTime;
         mGLTextureCreated = false;
         return true ;
+    }
+
+    if (imageraw->hasCompressedData())
+    {
+        // Pre-compressed DXT5 path: analyze alpha and pick mask from raw RGBA
+        const U8* rawdata = imageraw->getData();
+        S32 raw_w = imageraw->getWidth();
+        S32 raw_h = imageraw->getHeight();
+        analyzeAlpha(rawdata, raw_w, raw_h);
+        updatePickMask(raw_w, raw_h, rawdata);
+
+        // Override format to DXT5
+        setExplicitFormat(GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,
+                          GL_COMPRESSED_RGBA_S3TC_DXT5_EXT, 0, false);
+
+        setCategory(category);
+        const U8* data = imageraw->getCompressedData();
+        return createGLTexture(discard_level, data, imageraw->hasCompressedMips(), usename, defer_copy, tex_name);
     }
 
     setCategory(category);
@@ -1901,10 +1926,26 @@ bool LLImageGL::readBackRaw(S32 discard_level, LLImageRaw* imageraw, bool compre
     }
     else
     {
-        if(!imageraw->allocateDataSize(width, height, ncomponents))
+        // If texture is stored compressed, read back as RGBA (4 components)
+        GLenum readback_format = mFormatPrimary;
+        GLenum readback_type = mFormatType;
+        S32 readback_components = ncomponents;
+        if (mFormatPrimary == GL_COMPRESSED_RGBA_S3TC_DXT5_EXT ||
+            mFormatPrimary == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT ||
+            mFormatPrimary == GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ||
+            mFormatPrimary == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT ||
+            mFormatPrimary == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT ||
+            mFormatPrimary == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT)
+        {
+            readback_format = GL_RGBA;
+            readback_type = GL_UNSIGNED_BYTE;
+            readback_components = 4;
+        }
+
+        if(!imageraw->allocateDataSize(width, height, readback_components))
         {
             constexpr F32 MAX_IMAGE_SIZE = 2048 * 2048;
-            F32 size = (F32)width * (F32)height * (F32)ncomponents;
+            F32 size = (F32)width * (F32)height * (F32)readback_components;
             if (size > 0 && size <= MAX_IMAGE_SIZE)
             {
                 LLError::LLUserWarningMsg::showOutOfMemory();
@@ -1913,12 +1954,12 @@ bool LLImageGL::readBackRaw(S32 discard_level, LLImageRaw* imageraw, bool compre
             else
             {
                 LL_WARNS() << "Memory allocation failed for reading back texture." << LL_ENDL;
-                LL_WARNS() << "width: " << width << "height: " << height << "components: " << ncomponents << LL_ENDL;
+                LL_WARNS() << "width: " << width << "height: " << height << "components: " << readback_components << LL_ENDL;
             }
             return false ;
         }
 
-        glGetTexImage(GL_TEXTURE_2D, gl_discard, mFormatPrimary, mFormatType, (GLvoid*)(imageraw->getData()));
+        glGetTexImage(GL_TEXTURE_2D, gl_discard, readback_format, readback_type, (GLvoid*)(imageraw->getData()));
         //stop_glerror();
     }
 
@@ -2149,6 +2190,15 @@ void LLImageGL::calcAlphaChannelOffsetAndStride()
     case GL_BGRA_EXT:
         mAlphaStride = 4;
         break;
+    case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+    case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT:
+    case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+    case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT:
+    case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+    case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT:
+        // Compressed formats - alpha already analyzed from raw data before compression
+        mNeedsAlphaAndPickMask = false;
+        return;
     default:
         break;
     }

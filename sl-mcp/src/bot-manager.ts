@@ -30,6 +30,7 @@ import { UUID } from '../../electron-ui/node-metaverse/dist/lib/classes/UUID.js'
 import { Quaternion } from '../../electron-ui/node-metaverse/dist/lib/classes/Quaternion.js';
 import { DeRezDestination } from '../../electron-ui/node-metaverse/dist/lib/enums/DeRezDestination.js';
 import { AssetType } from '../../electron-ui/node-metaverse/dist/lib/enums/AssetType.js';
+import { ControlFlags } from '../../electron-ui/node-metaverse/dist/lib/enums/ControlFlags.js';
 
 export type BotState = 'disconnected' | 'logging_in' | 'connected';
 
@@ -60,6 +61,14 @@ export interface IncomingIM {
   timestamp: number;
 }
 
+export interface NearbyChatMessage {
+  fromName: string;
+  fromId: string;
+  message: string;
+  chatType: string;
+  timestamp: number;
+}
+
 export class BotManager {
   private bot: Bot | null = null;
   private _state: BotState = 'disconnected';
@@ -67,7 +76,9 @@ export class BotManager {
   private groups = new Map<string, Group>();
   private nearbyAvatars = new Map<string, NearbyAvatar>();
   private recentIMs: IncomingIM[] = [];
+  private recentChat: NearbyChatMessage[] = [];
   private maxRecentIMs = 50;
+  private maxRecentChat = 100;
 
   get state(): BotState {
     return this._state;
@@ -106,9 +117,14 @@ export class BotManager {
 
       this.bot = new Bot(loginParams, BotOptionFlags.None);
       await this.bot.login();
+      // Set draw distance BEFORE connectToSim so the sim sends us objects within range
+      this.bot.agent.cameraFar = 32;
       this.setupEventSubscriptions();
       this.populateFriendsFromLogin();
       await this.bot.connectToSim();
+      // Request 360-degree interest list so sim sends all objects within draw distance
+      // (default mode only sends objects the camera is facing)
+      await this.bot.setInterestList('360').catch(() => { });
 
       this._state = 'connected';
       const region = this.bot.currentRegion?.regionName || 'unknown';
@@ -122,13 +138,14 @@ export class BotManager {
 
   async logout(): Promise<void> {
     if (this.bot) {
-      try { await this.bot.close(); } catch {}
+      try { await this.bot.close(); } catch { }
       this.bot = null;
     }
     this.friends.clear();
     this.groups.clear();
     this.nearbyAvatars.clear();
     this.recentIMs = [];
+    this.recentChat = [];
     this._state = 'disconnected';
   }
 
@@ -219,6 +236,185 @@ export class BotManager {
     return avatars;
   }
 
+  /**
+   * Walk the bot to a target position using avatar control flags.
+   *
+   * How it works:
+   * 1. Calculate yaw angle from current position to target
+   * 2. Set the agent's bodyRotation quaternion to face the target
+   *    (bodyRotation is private but we access it via (agent as any) since
+   *    TypeScript private is compile-time only)
+   * 3. Set AGENT_CONTROL_AT_POS flag (walk forward)
+   * 4. The agent's built-in 1-second agentUpdateTimer sends these to the server
+   * 5. We poll position every 250ms and update rotation to track the target
+   * 6. When within stopDistance, clear the walk flag and resolve
+   *
+   * SL coordinate system: X = East, Y = North, Z = Up.
+   * Identity rotation faces +X. Yaw is rotation around Z axis.
+   * Quaternion for yaw: (0, 0, sin(yaw/2), cos(yaw/2))
+   */
+  async walkTo(
+    targetX: number, targetY: number, targetZ: number,
+    stopDistance = 3.0, timeout = 30000
+  ): Promise<string> {
+    this.requireConnected();
+
+    const agent = this.bot!.agent;
+    const region = this.bot!.currentRegion;
+
+    const getMyPos = (): { x: number; y: number; z: number } | null => {
+      const self = region?.agents?.get(this.bot!.agentID().toString());
+      return self ? { x: self.position.x, y: self.position.y, z: self.position.z } : null;
+    };
+
+    const startPos = getMyPos();
+    if (!startPos) throw new Error('Cannot determine current position');
+
+    const setFacing = (fromX: number, fromY: number, toX: number, toY: number) => {
+      const dx = toX - fromX;
+      const dy = toY - fromY;
+      // atan2(dy, dx) gives angle from +X axis, which matches SL's identity forward
+      const yaw = Math.atan2(dy, dx);
+      const bodyRot = (agent as any).bodyRotation as Quaternion;
+      bodyRot.x = 0;
+      bodyRot.y = 0;
+      bodyRot.z = Math.sin(yaw / 2);
+      bodyRot.w = Math.cos(yaw / 2);
+    };
+
+    const cleanup = () => {
+      agent.clearControlFlag(ControlFlags.AGENT_CONTROL_AT_POS);
+      agent.clearControlFlag(ControlFlags.AGENT_CONTROL_FLY);
+      agent.clearControlFlag(ControlFlags.AGENT_CONTROL_UP_POS);
+      agent.clearControlFlag(ControlFlags.AGENT_CONTROL_UP_NEG);
+      agent.sendAgentUpdate();
+    };
+
+    // Face the target and start walking forward
+    setFacing(startPos.x, startPos.y, targetX, targetY);
+    agent.setControlFlag(ControlFlags.AGENT_CONTROL_AT_POS);
+    agent.sendAgentUpdate();
+
+    return new Promise((resolve) => {
+      const startTime = Date.now();
+      let flying = false;
+      let bestDist = Infinity;
+      let noProgressCount = 0;
+      let prevDist = Infinity;
+      let overshootCount = 0;
+
+      const poll = setInterval(() => {
+        const pos = getMyPos();
+        if (!pos) return;
+
+        const dx = targetX - pos.x;
+        const dy = targetY - pos.y;
+        const dz = targetZ - pos.z;
+        const dist2d = Math.sqrt(dx * dx + dy * dy);
+        const dist3d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const dist = flying ? dist3d : dist2d;
+
+        // Arrived?
+        if (dist <= stopDistance) {
+          clearInterval(poll);
+          cleanup();
+          resolve(`Arrived at (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}), ${dist.toFixed(1)}m from target`);
+          return;
+        }
+
+        // Deceleration zone: stop walking when close, let momentum coast us in
+        if (dist < stopDistance + 2) {
+          agent.clearControlFlag(ControlFlags.AGENT_CONTROL_AT_POS);
+          agent.sendAgentUpdate();
+        } else {
+          agent.setControlFlag(ControlFlags.AGENT_CONTROL_AT_POS);
+        }
+
+        // Overshoot detection: distance increasing means we passed the target
+        if (dist > prevDist + 0.2) {
+          overshootCount++;
+          if (overshootCount >= 2) {
+            // We overshot — stop and report current position
+            clearInterval(poll);
+            cleanup();
+            resolve(`Arrived at (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}), ${dist.toFixed(1)}m from target`);
+            return;
+          }
+        } else {
+          overshootCount = 0;
+        }
+        prevDist = dist;
+
+        // Timeout?
+        if (Date.now() - startTime > timeout) {
+          clearInterval(poll);
+          cleanup();
+          resolve(`Timed out after ${(timeout / 1000).toFixed(0)}s, ${dist.toFixed(1)}m from target at (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`);
+          return;
+        }
+
+        // Re-face target each tick to course-correct
+        setFacing(pos.x, pos.y, targetX, targetY);
+        agent.sendAgentUpdate();
+
+        // Stuck detection
+        if (dist < bestDist - 0.3) {
+          bestDist = dist;
+          noProgressCount = 0;
+        } else {
+          noProgressCount++;
+        }
+
+        // 4 seconds without getting closer → stuck
+        if (noProgressCount > 16) {
+          if (!flying && Math.abs(dz) > 1.5) {
+            flying = true;
+            noProgressCount = 0;
+            bestDist = dist3d;
+            agent.setControlFlag(ControlFlags.AGENT_CONTROL_FLY);
+            if (dz > 0) {
+              agent.setControlFlag(ControlFlags.AGENT_CONTROL_UP_POS);
+            } else {
+              agent.setControlFlag(ControlFlags.AGENT_CONTROL_UP_NEG);
+            }
+            agent.sendAgentUpdate();
+          } else {
+            clearInterval(poll);
+            cleanup();
+            resolve(`Got stuck at (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}), ${dist.toFixed(1)}m from target`);
+            return;
+          }
+        }
+
+        // While flying, manage altitude
+        if (flying) {
+          if (Math.abs(dz) < 1.0) {
+            agent.clearControlFlag(ControlFlags.AGENT_CONTROL_UP_POS);
+            agent.clearControlFlag(ControlFlags.AGENT_CONTROL_UP_NEG);
+          } else if (dz > 0) {
+            agent.setControlFlag(ControlFlags.AGENT_CONTROL_UP_POS);
+            agent.clearControlFlag(ControlFlags.AGENT_CONTROL_UP_NEG);
+          } else {
+            agent.setControlFlag(ControlFlags.AGENT_CONTROL_UP_NEG);
+            agent.clearControlFlag(ControlFlags.AGENT_CONTROL_UP_POS);
+          }
+        }
+      }, 250);
+    });
+  }
+
+  /** Enable or disable flight mode. */
+  setFlying(enabled: boolean): void {
+    this.requireConnected();
+    const agent = this.bot!.agent;
+    if (enabled) {
+      agent.setControlFlag(ControlFlags.AGENT_CONTROL_FLY);
+    } else {
+      agent.clearControlFlag(ControlFlags.AGENT_CONTROL_FLY);
+    }
+    agent.sendAgentUpdate();
+  }
+
   getRegionInfo(): Record<string, unknown> | null {
     if (!this.bot?.currentRegion) return null;
     const region = this.bot.currentRegion;
@@ -274,6 +470,10 @@ export class BotManager {
 
   getRecentIMs(): IncomingIM[] {
     return [...this.recentIMs];
+  }
+
+  getRecentChat(): NearbyChatMessage[] {
+    return [...this.recentChat];
   }
 
   // ============ Objects ============
@@ -342,6 +542,139 @@ export class BotManager {
       name: (o as any).name || '(unknown)',
       position: o.Position ? { x: o.Position.x, y: o.Position.y, z: o.Position.z } : { x: 0, y: 0, z: 0 },
     }));
+  }
+
+  /**
+   * Get child prims of a linkset. Resolves the root object which populates
+   * obj.children via populateChildren in the object store.
+   * Returns each child's localId, name, and position (relative to root).
+   */
+  async getObjectChildren(localId: number): Promise<Array<{
+    localId: number; uuid: string; name: string;
+    position: { x: number; y: number; z: number };
+  }>> {
+    this.requireConnected();
+    const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true);
+    if (!obj.children || obj.children.length === 0) {
+      return [];
+    }
+    return obj.children.map(c => ({
+      localId: c.ID,
+      uuid: c.FullID.toString(),
+      name: (c as any).name || '(unknown)',
+      position: c.Position
+        ? { x: c.Position.x, y: c.Position.y, z: c.Position.z }
+        : { x: 0, y: 0, z: 0 },
+    }));
+  }
+
+  /**
+   * Get texture information for each face of a prim.
+   * Returns the texture UUID, offset, repeat, and rotation per face.
+   * Also includes the defaultTexture if present.
+   */
+  async getObjectTextures(localId: number): Promise<{
+    defaultTexture?: { textureId: string; offsetU: number; offsetV: number; repeatU: number; repeatV: number; rotation: number };
+    faces: Array<{ face: number; textureId: string; offsetU: number; offsetV: number; repeatU: number; repeatV: number; rotation: number }>;
+  }> {
+    this.requireConnected();
+    const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true);
+    const te = obj.TextureEntry;
+    if (!te) {
+      return { faces: [] };
+    }
+
+    const faceData = (face: any) => ({
+      textureId: face.textureID?.toString() || '',
+      offsetU: face.offsetU ?? 0,
+      offsetV: face.offsetV ?? 0,
+      repeatU: face.repeatU ?? 1,
+      repeatV: face.repeatV ?? 1,
+      rotation: face.rotation ?? 0,
+    });
+
+    return {
+      defaultTexture: te.defaultTexture ? faceData(te.defaultTexture) : undefined,
+      faces: te.faces.map((f: any, i: number) => ({
+        face: i,
+        ...faceData(f),
+      })),
+    };
+  }
+
+  /**
+   * Read all child prims of a linkset and return every face's texture offset.
+   * Designed for reading game boards (like Minesweeper) where each face on each
+   * prim represents a cell, and the UV offset selects which sprite is displayed.
+   *
+   * Returns an array of { name, localId, faces: [{face, offsetU, offsetV}] }
+   * where faces includes ALL faces (explicit + default-inherited).
+   */
+  async readBoardState(rootLocalId: number): Promise<{
+    root: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number; w: number } };
+    cells: Array<{
+      name: string;
+      localId: number;
+      position: { x: number; y: number; z: number };
+      faces: Array<{ face: number; offsetU: number; offsetV: number }>;
+    }>;
+  }> {
+    this.requireConnected();
+    const root = await this.bot!.clientCommands.region.getObjectByLocalID(rootLocalId, true);
+    const rootPos = root.Position || { x: 0, y: 0, z: 0 };
+    const rootRot = root.Rotation || { x: 0, y: 0, z: 0, w: 1 };
+    if (!root.children || root.children.length === 0) {
+      return { root: { position: rootPos, rotation: rootRot }, cells: [] };
+    }
+
+    const results: Array<{
+      name: string;
+      localId: number;
+      position: { x: number; y: number; z: number };
+      faces: Array<{ face: number; offsetU: number; offsetV: number }>;
+    }> = [];
+
+    for (const child of root.children) {
+      const name = (child as any).name || '(unknown)';
+      // Skip non-cell prims (border, reset button, etc)
+      if (!name.match(/^\d+-\d+$/)) continue;
+
+      const te = child.TextureEntry;
+      if (!te) continue;
+
+      const defaultU = te.defaultTexture?.offsetU ?? 0;
+      const defaultV = te.defaultTexture?.offsetV ?? 0;
+
+      // Build complete face list: explicit faces + fill remaining with default
+      const faces: Array<{ face: number; offsetU: number; offsetV: number }> = [];
+      const explicitCount = te.faces?.length ?? 0;
+
+      for (let i = 0; i < Math.max(explicitCount, 8); i++) {
+        const f = te.faces?.[i];
+        if (f) {
+          faces.push({
+            face: i,
+            offsetU: f.offsetU ?? defaultU,
+            offsetV: f.offsetV ?? defaultV,
+          });
+        } else if (i < 8) {
+          // Fill with default for faces not explicitly listed
+          faces.push({ face: i, offsetU: defaultU, offsetV: defaultV });
+        }
+      }
+
+      const childPos = child.Position || { x: 0, y: 0, z: 0 };
+      results.push({ name, localId: child.ID, position: childPos, faces });
+    }
+
+    // Sort by name for consistent ordering (1-1, 1-2, 2-1, 2-2, ...)
+    results.sort((a, b) => {
+      const [aRow, aCol] = a.name.split('-').map(Number);
+      const [bRow, bCol] = b.name.split('-').map(Number);
+      return aRow - bRow || aCol - bCol;
+    });
+
+    return { root: { position: rootPos, rotation: rootRot }, cells: results };
   }
 
   /**
@@ -431,11 +764,36 @@ export class BotManager {
       }
     });
 
+    // Collect nearby chat (ring buffer of last N messages)
+    this.bot.clientEvents.onNearbyChat.subscribe((event) => {
+      // Skip our own messages
+      if (event.from.toString() === this.bot?.agentID().toString()) return;
+      // Only collect agent chat (not objects/system)
+      if (event.sourceType !== ChatSourceType.Agent) return;
+      // Skip typing indicators
+      if (event.chatType === ChatType.StartTyping || event.chatType === ChatType.StopTyping) return;
+      const chatTypeNames: Record<number, string> = {
+        [ChatType.Whisper]: 'whisper',
+        [ChatType.Normal]: 'normal',
+        [ChatType.Shout]: 'shout',
+      };
+      this.recentChat.push({
+        fromName: event.fromName,
+        fromId: event.from.toString(),
+        message: event.message,
+        chatType: chatTypeNames[event.chatType] || 'unknown',
+        timestamp: Date.now(),
+      });
+      if (this.recentChat.length > this.maxRecentChat) {
+        this.recentChat.shift();
+      }
+    });
+
     // Collect incoming IMs (ring buffer of last N messages)
     this.bot.clientEvents.onInstantMessage.subscribe((event) => {
       // Skip typing indicators
       if (event.flags & InstantMessageEventFlags.startTyping ||
-          event.flags & InstantMessageEventFlags.finishTyping) return;
+        event.flags & InstantMessageEventFlags.finishTyping) return;
       this.recentIMs.push({
         fromName: event.fromName,
         fromId: event.from.toString(),
@@ -469,7 +827,7 @@ export class BotManager {
           const friend = this.friends.get(friendId);
           if (friend && info) friend.name = info.getName();
         })
-        .catch(() => {});
+        .catch(() => { });
     }
   }
 }

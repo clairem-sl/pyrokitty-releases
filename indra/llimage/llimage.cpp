@@ -41,6 +41,9 @@
 #include "llimagedxt.h"
 #include "llmemory.h"
 
+#define STB_DXT_IMPLEMENTATION
+#include "stb_dxt.h"
+
 #include <boost/preprocessor.hpp>
 
 //..................................................................................
@@ -814,6 +817,7 @@ U32 LLImageBase::getAllocationErrors()
 //---------------------------------------------------------------------------
 
 S32 LLImageRaw::sRawImageCount = 0;
+bool LLImageRaw::sPreCompressTextures = true;
 
 LLImageRaw::LLImageRaw()
     : LLImageBase()
@@ -863,6 +867,7 @@ LLImageRaw::~LLImageRaw()
     // NOTE: ~LLimageBase() call to deleteData() calls LLImageBase::deleteData()
     //        NOT LLImageRaw::deleteData()
     deleteData();
+    freeCompressedData();
     --sRawImageCount;
 }
 
@@ -897,7 +902,146 @@ void LLImageRaw::deleteData()
 {
     LLImageDataLock lock(this);
 
+    freeCompressedData();
     LLImageBase::deleteData();
+}
+
+void LLImageRaw::freeCompressedData()
+{
+    if (mCompressedData)
+    {
+        ll_aligned_free_16(mCompressedData);
+        mCompressedData = nullptr;
+    }
+    mCompressedDataSize = 0;
+    mCompressedLevel0Offset = 0;
+    mHasCompressedData = false;
+    mHasCompressedMips = false;
+}
+
+// Compress a single RGBA image to DXT5 blocks at the given destination
+static void compressDXT5Blocks(const U8* rgba, S32 w, S32 h, S8 components, U8* dest)
+{
+    const S32 bw = (w + 3) / 4;
+    const S32 bh = (h + 3) / 4;
+    U8 block[64]; // 4x4 RGBA
+
+    for (S32 by = 0; by < bh; ++by)
+    {
+        for (S32 bx = 0; bx < bw; ++bx)
+        {
+            for (S32 py = 0; py < 4; ++py)
+            {
+                for (S32 px = 0; px < 4; ++px)
+                {
+                    S32 sx = llmin(bx * 4 + px, w - 1);
+                    S32 sy = llmin(by * 4 + py, h - 1);
+                    const U8* pixel = rgba + (sy * w + sx) * components;
+                    S32 dst_offset = (py * 4 + px) * 4;
+
+                    block[dst_offset + 0] = pixel[0];
+                    block[dst_offset + 1] = pixel[1];
+                    block[dst_offset + 2] = pixel[2];
+                    block[dst_offset + 3] = (components >= 4) ? pixel[3] : 255;
+                }
+            }
+
+            stb_compress_dxt_block(dest + (by * bw + bx) * 16, block, 1, STB_DXT_NORMAL);
+        }
+    }
+}
+
+bool LLImageRaw::compressToDXT5()
+{
+    const S32 w = getWidth();
+    const S32 h = getHeight();
+    const S8 components = getComponents();
+    const U8* src = getData();
+
+    if (!src || components < 3 || w < 4 || h < 4)
+    {
+        return false;
+    }
+
+    // Build mip level info: mips[0] = largest (wxh), mips[N-1] = smallest (1x1)
+    struct MipInfo { S32 w, h, compressed_size; };
+    std::vector<MipInfo> mips;
+    S32 total_compressed_size = 0;
+    {
+        S32 mw = w, mh = h;
+        while (true)
+        {
+            S32 bw = (mw + 3) / 4;
+            S32 bh = (mh + 3) / 4;
+            S32 cs = bw * bh * 16;
+            mips.push_back({mw, mh, cs});
+            total_compressed_size += cs;
+            if (mw == 1 && mh == 1) break;
+            mw = llmax(mw >> 1, 1);
+            mh = llmax(mh >> 1, 1);
+        }
+    }
+    const S32 num_mips = (S32)mips.size();
+
+    U8* buffer = (U8*)ll_aligned_malloc_16(total_compressed_size);
+    if (!buffer)
+    {
+        return false;
+    }
+
+    // Buffer layout: [smallest_mip] ... [mip_1] [mip_0_largest]
+    // Compute offset of each level in the buffer
+    std::vector<S32> level_offsets(num_mips);
+    {
+        S32 off = 0;
+        for (S32 i = num_mips - 1; i >= 0; --i)
+        {
+            level_offsets[i] = off;
+            off += mips[i].compressed_size;
+        }
+    }
+
+    // Generate and compress each mip level
+    U8* prev_rgba = nullptr;
+    bool free_prev = false;
+
+    for (S32 i = 0; i < num_mips; ++i)
+    {
+        S32 mw = mips[i].w;
+        S32 mh = mips[i].h;
+        U8* rgba;
+
+        if (i == 0)
+        {
+            rgba = (U8*)src;
+        }
+        else
+        {
+            rgba = new(std::nothrow) U8[mw * mh * components];
+            if (!rgba)
+            {
+                if (free_prev) delete[] prev_rgba;
+                ll_aligned_free_16(buffer);
+                return false;
+            }
+            LLImageBase::generateMip(prev_rgba, rgba, mw, mh, components);
+            if (free_prev) delete[] prev_rgba;
+            free_prev = true;
+        }
+
+        compressDXT5Blocks(rgba, mw, mh, components, buffer + level_offsets[i]);
+        prev_rgba = rgba;
+    }
+
+    if (free_prev) delete[] prev_rgba;
+
+    freeCompressedData();
+    mCompressedData = buffer;
+    mCompressedDataSize = total_compressed_size;
+    mCompressedLevel0Offset = level_offsets[0];
+    mHasCompressedData = true;
+    mHasCompressedMips = true;
+    return true;
 }
 
 void LLImageRaw::setDataAndSize(U8 *data, S32 width, S32 height, S8 components)

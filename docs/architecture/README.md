@@ -13,6 +13,4 @@ This documentation covers the internal architecture of the Phoenix Firestorm vie
 - [User Data Storage](user-data-storage.md) - Credentials and protected data
 - [Mesh Repository](mesh-repository.md) - Mesh loading and teleport handling
 - [Shadow System](shadow-system.md) - Shadow rendering, settings, and performance
-- [GPU Frustum Culling](gpu-frustum-cull-batched.md) - Persistent buffer GPU culling with compute shaders
-- [CPU/GPU Bottlenecks](cpu-gpu-bottlenecks.md) - Performance analysis and bottleneck identification
-- [Performance TODO](performance-todo.md) - Performance optimization roadmap and implemented features
+- [Performance TODO](performance-todo.md) - Performance optimization roadmap, implemented features, and CPU/GPU bottleneck analysis

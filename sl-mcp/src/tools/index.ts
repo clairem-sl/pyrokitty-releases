@@ -7,6 +7,7 @@ import { chatTools } from './chat.js';
 import { navigationTools } from './navigation.js';
 import { socialTools } from './social.js';
 import { objectTools } from './objects.js';
+import { minesweeperTools } from './minesweeper.js';
 
 export type { ToolDef };
 
@@ -16,4 +17,5 @@ export const allTools: ToolDef[] = [
   ...navigationTools,
   ...socialTools,
   ...objectTools,
+  ...minesweeperTools,
 ];

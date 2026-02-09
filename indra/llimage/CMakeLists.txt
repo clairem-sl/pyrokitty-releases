@@ -41,6 +41,7 @@ set(llimage_HEADER_FILES
     llimageworker.h
     llmapimagetype.h
     llpngwrapper.h
+    stb_dxt.h
     )
 
 list(APPEND llimage_SOURCE_FILES ${llimage_HEADER_FILES})

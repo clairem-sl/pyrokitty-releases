@@ -1,5 +1,5 @@
 /**
- * Chat tools: say, send IM, send group message, get recent IMs
+ * Chat tools: say, send IM, send group message, get recent IMs, get recent nearby chat
  */
 
 import type { ToolDef } from './session.js';
@@ -68,6 +68,21 @@ export const chatTools: ToolDef[] = [
       }
       const formatted = ims.map(im =>
         `[${new Date(im.timestamp).toLocaleTimeString()}] ${im.fromName}: ${im.message}`
+      ).join('\n');
+      return { content: [{ type: 'text', text: formatted }] };
+    },
+  },
+  {
+    name: 'sl_get_recent_chat',
+    description: 'Get recent nearby (local) chat messages from other avatars (up to 100 most recent).',
+    inputSchema: { type: 'object', properties: {} },
+    handler: async (_args, bot) => {
+      const msgs = bot.getRecentChat();
+      if (msgs.length === 0) {
+        return { content: [{ type: 'text', text: 'No recent nearby chat.' }] };
+      }
+      const formatted = msgs.map(m =>
+        `[${new Date(m.timestamp).toLocaleTimeString()}] ${m.fromName} (${m.chatType}): ${m.message}`
       ).join('\n');
       return { content: [{ type: 'text', text: formatted }] };
     },

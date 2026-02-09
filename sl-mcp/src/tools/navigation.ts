@@ -1,5 +1,5 @@
 /**
- * Navigation tools: teleport, get nearby avatars, get region info
+ * Navigation tools: teleport, walk to, get nearby avatars, get region info
  */
 
 import type { ToolDef } from './session.js';
@@ -31,6 +31,70 @@ export const navigationTools: ToolDef[] = [
       } catch (err: any) {
         return { content: [{ type: 'text', text: `Teleport failed: ${err.message}` }], isError: true };
       }
+    },
+  },
+  {
+    name: 'sl_walk_to',
+    description: 'Walk the bot to a target position (not teleport). The bot will physically walk across the ground. Can also walk to a nearby avatar by name.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        x: { type: 'number', description: 'Target X coordinate' },
+        y: { type: 'number', description: 'Target Y coordinate' },
+        z: { type: 'number', description: 'Target Z coordinate (optional, only affects stop height)' },
+        avatarName: { type: 'string', description: 'Walk to a nearby avatar by display name or legacy name (instead of specifying x/y/z)' },
+        stopDistance: { type: 'number', description: 'How close to get before stopping (default: 2.0m)' },
+      },
+    },
+    handler: async (args, bot) => {
+      try {
+        let targetX = args.x as number | undefined;
+        let targetY = args.y as number | undefined;
+        let targetZ = args.z as number | undefined ?? 0;
+
+        // If avatarName provided, find their position
+        if (args.avatarName) {
+          const avatars = await bot.getNearbyAvatars();
+          const name = (args.avatarName as string).toLowerCase();
+          const match = avatars.find(a =>
+            a.name.toLowerCase().includes(name) ||
+            (a.displayName && a.displayName.toLowerCase().includes(name))
+          );
+          if (!match) {
+            return { content: [{ type: 'text', text: `No nearby avatar matching "${args.avatarName}"` }], isError: true };
+          }
+          targetX = match.position.x;
+          targetY = match.position.y;
+          targetZ = match.position.z;
+        }
+
+        if (targetX === undefined || targetY === undefined) {
+          return { content: [{ type: 'text', text: 'Provide x/y coordinates or avatarName' }], isError: true };
+        }
+
+        const result = await bot.walkTo(
+          targetX, targetY, targetZ,
+          (args.stopDistance as number) || 2.0,
+        );
+        return { content: [{ type: 'text', text: result }] };
+      } catch (err: any) {
+        return { content: [{ type: 'text', text: `Walk failed: ${err.message}` }], isError: true };
+      }
+    },
+  },
+  {
+    name: 'sl_fly',
+    description: 'Toggle flight mode on or off for the bot.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled: { type: 'boolean', description: 'true to start flying, false to stop flying and land' },
+      },
+      required: ['enabled'],
+    },
+    handler: async (args, bot) => {
+      bot.setFlying(args.enabled as boolean);
+      return { content: [{ type: 'text', text: args.enabled ? 'Now flying' : 'Stopped flying' }] };
     },
   },
   {

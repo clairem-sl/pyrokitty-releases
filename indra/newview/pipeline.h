@@ -803,6 +803,11 @@ public:
     glm::mat4               mSunShadowMatrix[6];
     glm::mat4               mShadowModelview[6];
     glm::mat4               mShadowProjection[6];
+    // <FS:Pyrokitty> Saved main camera shadow state for per-split frame skipping
+    // (probe rendering overwrites mShadowModelview/mShadowProjection)
+    glm::mat4               mMainShadowModelview[6];
+    glm::mat4               mMainShadowProjection[6];
+    // </FS:Pyrokitty>
     glm::mat4               mReflectionModelView;
 
     LLPointer<LLDrawable>   mShadowSpotLight[2];

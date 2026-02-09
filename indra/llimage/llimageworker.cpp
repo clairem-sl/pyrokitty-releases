@@ -206,6 +206,15 @@ bool ImageRequest::processRequest()
         // some decoders are removing data when task is complete and there were errors
         mDecodedRaw = done && mDecodedImageRaw->getData();
 
+        // Pre-compress to DXT5 on this decode thread to reduce GL thread work
+        if (mDecodedRaw && LLImageRaw::sPreCompressTextures
+            && mDecodedImageRaw->getComponents() >= 3
+            && mDecodedImageRaw->getWidth() >= 4
+            && mDecodedImageRaw->getHeight() >= 4)
+        {
+            mDecodedImageRaw->compressToDXT5();
+        }
+
         // Pick up errors from decoding
         mErrorString = LLImage::getLastThreadError();
     }

@@ -2388,10 +2388,10 @@ F32 LLFace::getTextureVirtualSize()
 
 bool LLFace::calcPixelArea(F32& cos_angle_to_view_dir, F32& radius)
 {
-    constexpr F32 PIXEL_AREA_UPDATE_PERIOD = 0.1f;
     // this is an expensive operation and the result is valid (enough) for several frames
-    // don't update every frame
-    if (gFrameTimeSeconds - mLastPixelAreaUpdate < PIXEL_AREA_UPDATE_PERIOD)
+    // don't update every frame — rigged faces are extra expensive (joint iteration) so use a longer period
+    const F32 update_period = isState(RIGGED) ? 0.25f : 0.1f;
+    if (gFrameTimeSeconds - mLastPixelAreaUpdate < update_period)
     {
         return true;
     }
@@ -2505,7 +2505,7 @@ bool LLFace::calcPixelArea(F32& cos_angle_to_view_dir, F32& radius)
     mPixelArea = radius*radius * 3.14159f;
 
     // remember last update time, add 10% noise to avoid all faces updating at the same time
-    mLastPixelAreaUpdate = gFrameTimeSeconds + ll_frand() * PIXEL_AREA_UPDATE_PERIOD * 0.1f;
+    mLastPixelAreaUpdate = gFrameTimeSeconds + ll_frand() * update_period * 0.1f;
 
     LLVector4a x_axis;
     x_axis.load3(camera->getXAxis().mV);

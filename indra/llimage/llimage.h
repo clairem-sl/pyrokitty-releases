@@ -317,6 +317,15 @@ protected:
     void setDataAndSize(U8 *data, S32 width, S32 height, S8 components) ;
 
 public:
+    // Pre-compressed DXT5 data with mips (compressed on decode threads, uploaded via glCompressedTexImage2D)
+    bool compressToDXT5();
+    bool hasCompressedData() const { return mHasCompressedData; }
+    const U8* getCompressedData() const { return mCompressedData + mCompressedLevel0Offset; }
+    S32 getCompressedDataSize() const { return mCompressedDataSize; }
+    bool hasCompressedMips() const { return mHasCompressedMips; }
+    void freeCompressedData();
+
+    static bool sPreCompressTextures;
     static S32 sRawImageCount;
     // <FS:Techwolf Lupindo> texture comment metadata reader
     std::string mComment;
@@ -324,6 +333,12 @@ public:
 
 private:
     static bool validateSrcAndDst(std::string func, const LLImageRaw* src, const LLImageRaw* dst);
+
+    U8*    mCompressedData = nullptr;
+    S32    mCompressedDataSize = 0;
+    S32    mCompressedLevel0Offset = 0;
+    bool   mHasCompressedData = false;
+    bool   mHasCompressedMips = false;
 };
 
 // Compressed representation of image.

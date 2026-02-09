@@ -11119,8 +11119,38 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
     }
     else
     {
+        // <FS:Pyrokitty> Per-split shadow update rates
+        // Each cascade updates at a different frequency: base_rate * scale^j
+        // Near shadows update every frame, far shadows update less often.
+        static LLCachedControl<F32> shadow_split_rate_scale(gSavedSettings, "RenderShadowSplitRateScale", 2.0f);
+        static LLCachedControl<U32> shadow_update_rate(gSavedSettings, "RenderShadowUpdateRate", 1);
+        U32 split_rates[4];
+        {
+            F32 scale = llmax(1.0f, (F32)shadow_split_rate_scale);
+            U32 base = llmax(1u, (U32)shadow_update_rate);
+            F32 rate_f = (F32)base;
+            for (S32 i = 0; i < 4; i++)
+            {
+                split_rates[i] = llmax(1u, (U32)rate_f);
+                rate_f *= scale;
+            }
+        }
+        // </FS:Pyrokitty>
+
         for (S32 j = 0; j < (gCubeSnapshot ? 2 : 4); j++)
         {
+            // <FS:Pyrokitty> Per-split skip: reuse previous shadow map, just update matrix
+            if (!gCubeSnapshot && split_rates[j] > 1 && (gFrameCount % split_rates[j]) != 0)
+            {
+                glm::mat4 trans(0.5f, 0.0f, 0.0f, 0.0f,
+                                0.0f, 0.5f, 0.0f, 0.0f,
+                                0.0f, 0.0f, 0.5f, 0.0f,
+                                0.5f, 0.5f, 0.5f, 1.0f);
+                mSunShadowMatrix[j] = trans * mMainShadowProjection[j] * mMainShadowModelview[j] * inv_view;
+                continue;
+            }
+            // </FS:Pyrokitty>
+
             if (!hasRenderDebugMask(RENDER_DEBUG_SHADOW_FRUSTA) && !gCubeSnapshot)
             {
                 mShadowFrustPoints[j].clear();
@@ -11483,6 +11513,14 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
 
             mRT->shadow[j].flush();
 
+            // <FS:Pyrokitty> Save per-split shadow state for frame skipping
+            if (!gCubeSnapshot)
+            {
+                mMainShadowModelview[j] = mShadowModelview[j];
+                mMainShadowProjection[j] = mShadowProjection[j];
+            }
+            // </FS:Pyrokitty>
+
             if (!gPipeline.hasRenderDebugMask(LLPipeline::RENDER_DEBUG_SHADOW_FRUSTA) && !gCubeSnapshot)
             {
                 mShadowCamera[j+4] = shadow_cam;
@@ -11665,6 +11703,19 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
     set_last_projection(last_projection);
 
     popRenderTypeMask();
+
+    // <FS:Pyrokitty> Save spot light shadow state for frame skipping
+    // Sun cascade saves (0-3) are done per-split inside the cascade loop.
+    // Spot lights (4-5) are saved here since they always render.
+    if (!gCubeSnapshot)
+    {
+        for (U32 j = 4; j < 6; j++)
+        {
+            mMainShadowModelview[j] = mShadowModelview[j];
+            mMainShadowProjection[j] = mShadowProjection[j];
+        }
+    }
+    // </FS:Pyrokitty>
 
     if (!skip_avatar_update)
     {
