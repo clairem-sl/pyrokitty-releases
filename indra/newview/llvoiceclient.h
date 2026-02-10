@@ -113,7 +113,7 @@ struct LLVoiceVersionInfo
 /// @class LLVoiceP2POutgoingCallInterface
 /// @brief Outgoing call interface
 ///
-/// For providers that support P2P signaling (vivox)
+/// For providers that support P2P signaling
 /////////////////////////////////
 
 class LLVoiceP2POutgoingCallInterface
@@ -128,7 +128,7 @@ class LLVoiceP2POutgoingCallInterface
 /// @class LLVoiceP2PIncomingCallInterface
 /// @brief Incoming call interface
 ///
-/// For providers that support P2P signaling (vivox)
+/// For providers that support P2P signaling
 /////////////////////////////////
 class LLVoiceP2PIncomingCallInterface
 {
@@ -187,7 +187,7 @@ public:
     virtual bool deviceSettingsAvailable()=0;
     virtual bool deviceSettingsUpdated() = 0;
 
-    // Requery the vivox daemon for the current list of input/output devices.
+    // Requery the voice daemon for the current list of input/output devices.
     // If you pass true for clearCurrentList, deviceSettingsAvailable() will be false until the query has completed
     // (use this if you want to know when it's done).
     // If you pass false, you'll have no way to know when the query finishes, but the device lists will not appear empty in the interim.
@@ -409,7 +409,7 @@ public:
     bool deviceSettingsAvailable();
     bool deviceSettingsUpdated();   // returns true when the device list has been updated recently.
 
-    // Requery the vivox daemon for the current list of input/output devices.
+    // Requery the voice daemon for the current list of input/output devices.
     // If you pass true for clearCurrentList, deviceSettingsAvailable() will be false until the query has completed
     // (use this if you want to know when it's done).
     // If you pass false, you'll have no way to know when the query finishes, but the device lists will not appear empty in the interim.
@@ -548,9 +548,8 @@ protected:
 
     LLVoiceModuleInterface* mSpatialVoiceModule;
     LLVoiceModuleInterface* mNonSpatialVoiceModule;
-    LLSD                    mSpatialCredentials;  // used to store spatial credentials for vivox
-                                                  // so they're available when the region voice
-                                                  // server is retrieved.
+    LLSD                    mSpatialCredentials;  // spatial credentials, cached until region voice
+                                                  // server type is retrieved.
     LLPumpIO *m_servicePump;
 
     boost::signals2::connection  mSimulatorFeaturesReceivedSlot;
