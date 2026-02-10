@@ -263,7 +263,7 @@
 
 		<panel name="panel_material_type_media" label="Медиа">
 			<text name="media_info">URL-адрес выбранного медиа, если таковой имеется, находится здесь</text>
-			<web_browser name="title_media" start_url="about:blank" decouple_texture_size="true"/>
+			<web_browser name="title_media" start_url="" decouple_texture_size="true"/>
 			<button width="85" name="add_media" label="Выбрать..." tool_tip="Добавить медиа"/>
 			<button width="85" name="delete_media" label="Удалить" tool_tip="Удалите эту текстуру медиа"/>
 			<button width="85" name="button align" label="Выровнять" label_selected="Выравнивание медиа" tool_tip="Выровнять текстуру медиа (необходимо сначала загрузить)"/>

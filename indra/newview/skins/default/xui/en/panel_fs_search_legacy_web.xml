@@ -17,5 +17,5 @@ name="panel_ls_web">
 	 follows="all"
 	 name="webbrowser"
 	 trusted_content="true"
-	 start_url="about:blank" />
+	 start_url="" />
 </panel>

@@ -1729,6 +1729,7 @@ bool LLViewerMediaImpl::initializeMedia(const std::string& mime_type)
     if(!mMediaSource || pluginChanged)
     {
         // We don't have a plugin at all, or the new mime type is handled by a different plugin than the old mime type.
+        LL_INFOS("Media") << "Initializing media plugin for URL: " << mMediaURL << " (mime: " << mime_type << ") textureId=" << mTextureId << " homeURL=" << mHomeURL << LL_ENDL;
         (void)initializePlugin(mime_type);
     }
     else if(mimeTypeChanged)
@@ -1903,6 +1904,7 @@ LLPluginClassMedia* LLViewerMediaImpl::newSourceFromMediaType(std::string media_
             media_source->setTarget(target);
 
             const std::string plugin_dir = gDirUtilp->getLLPluginDir();
+            LL_INFOS("Media") << "Launching media plugin '" << plugin_name << "' for media type: " << media_type << LL_ENDL;
             if (media_source->init(launcher_name, plugin_dir, plugin_name, gSavedSettings.getBOOL("PluginAttachDebuggerToPlugins")))
             {
                 return media_source;

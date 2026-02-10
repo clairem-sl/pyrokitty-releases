@@ -2266,8 +2266,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>
-        http://lecs-viewer-web-components.s3.amazonaws.com/v3.0/[GRID_LOWERCASE]/vawp/index.html</string>
+      <string>http://lecs-viewer-web-components.s3.amazonaws.com/v3.0/[GRID_LOWERCASE]/vawp/index.html</string>
     </map>
     <key>AvatarRotateThresholdSlow</key>
     <map>
@@ -4922,7 +4921,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>http://lecs-viewer-web-components.s3.amazonaws.com/v3.0/[GRID_LOWERCASE]/guide.html</string>
+      <string></string>
       <key>Backup</key>
       <integer>0</integer>
     </map>
@@ -5980,8 +5979,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>
-        https://marketplace.secondlife.com/products/search?search[category_id]=200&amp;search[maturity][]=General&amp;search[page]=1&amp;search[per_page]=12</string>
+      <string></string>
     </map>
     <key>GridCrossSections</key>
     <map>
@@ -6096,7 +6094,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>about:blank</string>
+      <string></string>
       <key>Backup</key>
       <integer>0</integer>
     </map>
@@ -6109,8 +6107,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>
-        https://search.[GRID]/viewer/?query_term=[QUERY]&amp;search_type=[TYPE][COLLECTION]&amp;maturity=[MATURITY]&amp;lang=[LANGUAGE]&amp;sid=[SESSION_ID]</string>
+      <string></string>
       <key>Backup</key>
       <integer>0</integer>
       <!-- LL, possibly privacy leaking search string
@@ -7550,7 +7547,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_objectFemale</key>
     <map>
@@ -7561,7 +7558,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/attachments</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_objectMale</key>
     <map>
@@ -7572,7 +7569,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/attachments</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_clothingFemale</key>
     <map>
@@ -7583,7 +7580,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/clothing_female_avatar</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_clothingMale</key>
     <map>
@@ -7594,7 +7591,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/clothing_male_avatar</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_bodypartFemale</key>
     <map>
@@ -7605,7 +7602,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_bodypartMale</key>
     <map>
@@ -7616,7 +7613,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_glovesMale</key>
     <map>
@@ -7627,7 +7624,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/gloves_both_women_and_men</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_glovesFemale</key>
     <map>
@@ -7638,7 +7635,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/gloves_both_women_and_men</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_jacketFemale</key>
     <map>
@@ -7649,7 +7646,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/jacket_womens</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_jacketMale</key>
     <map>
@@ -7660,7 +7657,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/jacket_mens</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_physicsFemale</key>
     <map>
@@ -7671,7 +7668,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>http://marketplace.secondlife.com</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_physicsMale</key>
     <map>
@@ -7682,7 +7679,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>http://marketplace.secondlife.com/</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_shirtFemale</key>
     <map>
@@ -7693,7 +7690,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/shirt_womens</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_shirtMale</key>
     <map>
@@ -7704,7 +7701,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/shirt_mens</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_undershirtFemale</key>
     <map>
@@ -7715,7 +7712,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/undershirt_womens</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_undershirtMale</key>
     <map>
@@ -7726,7 +7723,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/undershirt_mens</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_skirtFemale</key>
     <map>
@@ -7737,7 +7734,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/skirts_women</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_skirtMale</key>
     <map>
@@ -7748,7 +7745,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/skirts_women</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_pantsFemale</key>
     <map>
@@ -7759,7 +7756,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/pants_women</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_pantsMale</key>
     <map>
@@ -7770,7 +7767,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/pants_men</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_underpantsFemale</key>
     <map>
@@ -7781,7 +7778,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/underwear_women</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_underpantsMale</key>
     <map>
@@ -7792,7 +7789,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/underwear_men</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_shoesFemale</key>
     <map>
@@ -7803,7 +7800,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/shoes_women</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_shoesMale</key>
     <map>
@@ -7814,7 +7811,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/shoes_men</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_socksFemale</key>
     <map>
@@ -7825,7 +7822,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/socks_women</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_socksMale</key>
     <map>
@@ -7836,7 +7833,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/socks_women</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_tattooMale</key>
     <map>
@@ -7847,7 +7844,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/tattoo_both_women_and_men</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_tattooFemale</key>
     <map>
@@ -7858,7 +7855,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/tattoo_both_women_and_men</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_hairFemale</key>
     <map>
@@ -7869,7 +7866,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/womens_hair</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_hairMale</key>
     <map>
@@ -7880,7 +7877,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/mens_hair</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_eyesFemale</key>
     <map>
@@ -7891,7 +7888,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/womens_eyes</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_eyesMale</key>
     <map>
@@ -7902,7 +7899,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/mens_eyes</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_shapeFemale</key>
     <map>
@@ -7913,7 +7910,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/womens_shape</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_shapeMale</key>
     <map>
@@ -7924,7 +7921,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/mens_shape</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_skinFemale</key>
     <map>
@@ -7935,7 +7932,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/womens_skin</string>
+      <string></string>
     </map>
     <key>MarketplaceURL_skinMale</key>
     <map>
@@ -7946,7 +7943,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://marketplace.secondlife.com/trampoline/viewer21/mens_skin</string>
+      <string></string>
     </map>
     <key>MaxDragDistance</key>
     <map>
@@ -9812,7 +9809,7 @@
       <key>Type</key>
       <string>Boolean</string>
       <key>Value</key>
-      <integer>1</integer>
+      <integer>0</integer>
     </map>
     <key>PlaySoundFriendIM</key>
     <map>

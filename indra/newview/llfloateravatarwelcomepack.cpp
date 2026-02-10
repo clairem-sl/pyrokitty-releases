@@ -66,12 +66,26 @@ bool LLFloaterAvatarWelcomePack::postBuild()
     mAvatarPicker = findChild<LLMediaCtrl>("avatar_picker_contents");
     if (mAvatarPicker)
     {
-        mAvatarPicker->clearCache();
         mAvatarPicker->setErrorPageURL(gSavedSettings.getString("GenericErrorPageURL"));
-        // <FS:AW> optional opensim support
-        //std::string url = gSavedSettings.getString("AvatarWelcomePack");
-        //url = LLWeb::expandURLSubstitutions(url, LLSD());
-        //mAvatarPicker->navigateTo(url, HTTP_CONTENT_TEXT_HTML);
+    }
+
+    return true;
+}
+
+// <FS:Ansariel> Avatar chooser does not change between OpenSim grids
+void LLFloaterAvatarWelcomePack::onOpen(const LLSD& key)
+{
+    // Connect during onOpen instead of ctor because LLFloaterAvatarWelcomePack instance
+    // gets created before we can safely create a LFSimFeatureHandler instance!
+    if (!mAvatarPickerUrlChangedSignal.connected())
+    {
+        mAvatarPickerUrlChangedSignal = LFSimFeatureHandler::instance().setAvatarPickerCallback(boost::bind(&LLFloaterAvatarWelcomePack::handleUrlChanged, this, _1));
+    }
+
+    // Navigate each time the floater opens (media source is unloaded on close)
+    if (mAvatarPicker)
+    {
+        mAvatarPicker->clearCache();
 
         std::string avatar_picker_url;
 #ifdef OPENSIM
@@ -94,23 +108,16 @@ bool LLFloaterAvatarWelcomePack::postBuild()
             LL_DEBUGS("WebApi") << "AvatarPickerURL \"" << avatar_picker_url << "\"" << LL_ENDL;
             mAvatarPicker->navigateTo(avatar_picker_url, HTTP_CONTENT_TEXT_HTML);
         }
-        // </FS:AW> optional opensim support
     }
-
-    return true;
 }
 
-// <FS:Ansariel> Avatar chooser does not change between OpenSim grids
-void LLFloaterAvatarWelcomePack::onOpen(const LLSD& key)
+void LLFloaterAvatarWelcomePack::onClose(bool app_quitting)
 {
-    // Connect during onOpen instead of ctor because LLFloaterAvatarWelcomePack instance
-    // gets created before we can safely create a LFSimFeatureHandler instance!
-    // Assuming we receive the avatar picker URL via login response and it
-    // is the same URL being sent by region caps so we will be good for the initial
-    // region the avatar logs into as well.
-    if (!mAvatarPickerUrlChangedSignal.connected())
+    if (mAvatarPicker)
     {
-        mAvatarPickerUrlChangedSignal = LFSimFeatureHandler::instance().setAvatarPickerCallback(boost::bind(&LLFloaterAvatarWelcomePack::handleUrlChanged, this, _1));
+        mAvatarPicker->navigateStop();
+        mAvatarPicker->clearCache();
+        mAvatarPicker->unloadMediaSource();
     }
 }
 

@@ -41,6 +41,7 @@
              filename="panel_profile_secondlife.xml"
              help_topic="profile_secondlife_tab"
             />
+            <!-- <FS:Pyrokitty> Removed web profile tab — spawns CEF/dullahan_host.exe
             <panel
              name="panel_profile_web"
              label="Feed"
@@ -49,6 +50,7 @@
              filename="panel_profile_web.xml"
              help_topic="profile_web_tab"
             />
+            -->
             <panel
              name="panel_profile_picks"
              label="Picks"

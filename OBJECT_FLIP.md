@@ -14,13 +14,13 @@ into vertex buffers at `getGeometryVolume()` time). This document covers the
 
 ### Key Files
 
-| File | Role |
-|------|------|
-| `llmanipscale.cpp` | Drag detection, flip triggering, scale/position math |
-| `llmanipscale.h` | `mPKMirrorFlipped`, `mPKMirrorDirtyDuringDrag` members |
-| `pkmirrorflags.cpp` | Mirror flag cache, notecard persistence |
+| File                | Role                                                     |
+| ------------------- | -------------------------------------------------------- |
+| `llmanipscale.cpp`  | Drag detection, flip triggering, scale/position math     |
+| `llmanipscale.h`    | `mPKMirrorFlipped`, `mPKMirrorDirtyDuringDrag` members   |
+| `pkmirrorflags.cpp` | Mirror flag cache, notecard persistence                  |
 | `llvovolume.h/.cpp` | `mPKMirrorFlags`, lazy-load from cache, geometry rebuild |
-| `llface.cpp` | `getGeometryVolume()` applies mirror to vertex buffer |
+| `llface.cpp`        | `getGeometryVolume()` applies mirror to vertex buffer    |
 
 ### Data Flow
 
@@ -93,6 +93,7 @@ negative → positive:  toggle mirror flag, set mPKMirrorFlipped = false
 This means dragging back and forth across zero rapidly toggles the mirror each time,
 which feels natural (like Blender). The `mPKMirrorFlipped` flag does NOT track
 the mirror state — it tracks which side of zero the mouse is on, controlling:
+
 - The **negate block**: only fires when mouse is on negative side
 - The **position formula** in `stretchFace()`: uses opposite-side formula when negative
 
@@ -111,16 +112,17 @@ This creates a smooth visual transition: the object shrinks to zero at the ancho
 then appears on the opposite side growing away from it.
 
 Derivation:
-- Anchored face position = savedCenter - axis * savedScale/2
-- After flip, new center = anchoredFace - axis * desired_scale/2
+
+- Anchored face position = savedCenter - axis \* savedScale/2
+- After flip, new center = anchoredFace - axis \* desired_scale/2
 - Delta from savedCenter = -(savedScale + desired_scale) / 2
 
 ## Notecard Persistence
 
 - **During drag**: `setFlags(id, flags, nullptr)` — updates local cache only, no notecard
 - **On mouseUp**: checks final flags per object:
-  - `flags != 0`: `persistNotecard()` creates/updates `.pk_mirror_XYZ` notecard
-  - `flags == 0`: `clearFlags(id, obj)` removes notecard from object inventory
+    - `flags != 0`: `persistNotecard()` creates/updates `.pk_mirror_XYZ` notecard
+    - `flags == 0`: `clearFlags(id, obj)` removes notecard from object inventory
 
 ## Lazy-Load on Relog
 
@@ -249,6 +251,7 @@ flag and calls `loadPKMirrorFlags()` on first access. `loadPKMirrorFlags()` uses
 All logging uses the `PKMirror` tag with `LL_INFOS` (always visible in log).
 
 Key log messages:
+
 - `dragFace: FLIP TRIGGERED axis=N` - positive→negative crossing
 - `dragFace: FLIP TRIGGERED (return crossing) axis=N` - negative→positive crossing
 - `setPKMirrorFlags: flags X -> Y drawable=yes` - volume flags updated, rebuild queued
@@ -259,7 +262,7 @@ Key log messages:
 - `setFlags: UPDATING cache from X to Y` - cache miss, updating
 - `setFlags: skipping notecard (obj=nullptr, drag mode)` - drag suppression active
 
-Log file: `C:\Users\callcolor\AppData\Roaming\PyroKitty_x64\logs\PyroKitty.log`
+Log file: `~\AppData\Roaming\PyroKitty_x64\logs\PyroKitty.log`
 
 Filter: `grep PKMirror PyroKitty.log`
 Exclude geometry spam: `grep PKMirror PyroKitty.log | grep -v getGeometryVolume`

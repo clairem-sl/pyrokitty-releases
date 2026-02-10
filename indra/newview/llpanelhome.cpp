@@ -43,12 +43,7 @@ LLPanelHome::LLPanelHome() :
 
 void LLPanelHome::onOpen(const LLSD& key)
 {
-    // display the home page the first time we open the panel
-    // *NOTE: this seems to happen during login. Can we avoid that?
-    if (mFirstView && mBrowser)
-    {
-        mBrowser->navigateHome();
-    }
+    // <FS:Pyrokitty> Don't navigate — avoids spawning CEF/dullahan_host.exe
     mFirstView = false;
 }
 
@@ -57,11 +52,8 @@ bool LLPanelHome::postBuild()
     mBrowser = getChild<LLMediaCtrl>("browser");
     if (mBrowser)
     {
-        // read the URL to display from settings.xml
-        std::string url = LLViewerHome::getHomeURL();
-
         mBrowser->addObserver(this);
-        mBrowser->setHomePageUrl(url);
+        // <FS:Pyrokitty> Don't set home URL — avoids spawning CEF/dullahan_host.exe
     }
 
     return true;

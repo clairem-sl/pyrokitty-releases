@@ -38,8 +38,8 @@
 //static
 std::string LLViewerHome::getHomeURL()
 {
-    // <FS:Pyrokitty> Disable home page loading for privacy
-    return "about:blank";
+    // <FS:Pyrokitty> Don't load home page — avoids spawning CEF/dullahan_host.exe
+    return LLStringUtil::null;
     // </FS:Pyrokitty>
 
 #if 0 // Original code disabled

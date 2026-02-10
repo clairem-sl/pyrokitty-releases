@@ -2904,7 +2904,7 @@
    enabled="false"
    border_visible="true"
    name="title_media"
-   start_url="about:blank"
+   start_url=""
    decouple_texture_size="true"
 />
 

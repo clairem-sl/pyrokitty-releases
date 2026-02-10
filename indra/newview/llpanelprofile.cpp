@@ -2598,7 +2598,7 @@ bool LLPanelProfileWeb::postBuild()
 {
     mWebBrowser = getChild<LLMediaCtrl>("profile_html");
     mWebBrowser->addObserver(this);
-    mWebBrowser->setHomePageUrl("about:blank");
+    // <FS:Pyrokitty> Don't set home URL — avoids spawning CEF/dullahan_host.exe
 
     // <FS:PP> Load cookies in the profile, in feed tab
     mWebBrowser->setErrorPageURL(gSavedSettings.getString("GenericErrorPageURL"));
@@ -2610,7 +2610,7 @@ bool LLPanelProfileWeb::postBuild()
 
 void LLPanelProfileWeb::resetData()
 {
-    mWebBrowser->navigateHome();
+    // <FS:Pyrokitty> Don't navigate — avoids spawning CEF/dullahan_host.exe
 }
 
 void LLPanelProfileWeb::updateData()
@@ -3335,7 +3335,7 @@ void LLPanelProfile::onOpen(const LLSD& key)
     mPanelNotes         = findChild<LLPanelProfileNotes>(PANEL_NOTES);
 
     mPanelSecondlife->onOpen(avatar_id);
-    mPanelWeb->onOpen(avatar_id);
+    if (mPanelWeb) mPanelWeb->onOpen(avatar_id); // <FS:Pyrokitty> Web tab removed
     mPanelPicks->onOpen(avatar_id);
     mPanelClassifieds->onOpen(avatar_id);
     mPanelFirstlife->onOpen(avatar_id);
@@ -3453,7 +3453,7 @@ void LLPanelProfile::commitUnsavedChanges()
         data.avatar_id = gAgentID;
         // these three collate data so need to be called in sequence.
         mPanelFirstlife->apply(&data);
-        mPanelWeb->apply(&data);
+        if (mPanelWeb) mPanelWeb->apply(&data); // <FS:Pyrokitty> Web tab removed
         mPanelSecondlife->apply(&data);
         // These three triggered above
         // mPanelInterests->apply();

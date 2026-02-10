@@ -5705,6 +5705,7 @@ bool process_login_success_response(U32& first_sim_size_x, U32& first_sim_size_y
     // </FS:AW  opensim destinations and avatar picker>
 
     // <FS:CR> Legacy search killswitch!
+    // <FS:Pyrokitty> Always use legacy search — web search spawns CEF/dullahan_host.exe
     if (LLGridManager::getInstance()->isInOpenSim())
     {
         LLFloaterReg::add("search", "floater_fs_search.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterSearch>);
@@ -5712,16 +5713,9 @@ bool process_login_success_response(U32& first_sim_size_x, U32& first_sim_size_y
     else
 #endif // OPENSIM
     {
-        if (FSData::instance().enableLegacySearch())
-        {
-            LLFloaterReg::add("search", "floater_fs_search.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterSearch>);
-        }
-        else
-        {
-            LLFloaterReg::add("search", "floater_search.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloaterSearch>);
-        }
+        LLFloaterReg::add("search", "floater_fs_search.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterSearch>);
     }
-    // </FS:CR>
+    // </FS:Pyrokitty>
 
     // <FS:Techwolf Lupindo> fsdata support
     if (FSData::instance().isAgentFlag(gAgentID, FSData::NO_USE))

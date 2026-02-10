@@ -45,6 +45,7 @@ class LLFloaterAvatarWelcomePack:
 
     // <FS:Ansariel> Avatar chooser does not change between OpenSim grids
     void onOpen(const LLSD& key) override;
+    void onClose(bool app_quitting) override;
     void handleUrlChanged(const std::string& url);
 
     boost::signals2::connection mAvatarPickerUrlChangedSignal;

@@ -1581,9 +1581,10 @@ bool LLImageGL::createGLTexture(S32 discard_level, const LLImageRaw* imageraw, S
         mHasExplicitFormat = false;
     }
 
-    // If incoming raw data is not pre-compressed, clear explicit format so it's
-    // re-derived from components (previous upload may have set compressed format)
-    if (mHasExplicitFormat && !imageraw->hasCompressedData())
+    // If incoming raw data is not pre-compressed, clear explicit format ONLY if
+    // the current format is a compressed type (previous upload may have set it).
+    // Don't clear for non-compressed explicit formats like GL_BGRA (media textures).
+    if (mHasExplicitFormat && !imageraw->hasCompressedData() && isCompressed())
     {
         mHasExplicitFormat = false;
     }

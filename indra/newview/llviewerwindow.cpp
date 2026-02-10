@@ -2539,15 +2539,16 @@ void LLViewerWindow::initWorldUI()
         physical_mem = LLMemory::getMaxMemKB();
     }
 
-    if (!gNonInteractive && physical_mem > MIN_PHYSICAL_MEMORY)
-    {
-        LL_INFOS() << "Preloading cef instances" << LL_ENDL;
-
-        LLFloaterReg::getInstance("destinations");
-        LLFloaterReg::getInstance("avatar_welcome_pack");
-        LLFloaterReg::getInstance("search");
-        LLFloaterReg::getInstance("marketplace");
-    }
+    // <FS:Pyrokitty> Don't preload CEF floaters — they spawn dullahan_host.exe processes
+    // These will be created on-demand when the user actually opens them.
+    // if (!gNonInteractive && physical_mem > MIN_PHYSICAL_MEMORY)
+    // {
+    //     LLFloaterReg::getInstance("destinations");
+    //     LLFloaterReg::getInstance("avatar_welcome_pack");
+    //     LLFloaterReg::getInstance("search");
+    //     LLFloaterReg::getInstance("marketplace");
+    // }
+    // </FS:Pyrokitty>
 
     // <FS:Zi> Autohide main chat bar if applicable
     bool visible = !gSavedSettings.getBOOL("AutohideChatBar");
