@@ -26,34 +26,38 @@
 		Échec d&apos;initialisation des graphiques. Veuillez mettre votre pilote graphique à jour.
 	</string>
 	<string name="AboutHeader">
-		[APP_NAME] [VIEWER_VERSION_0].[VIEWER_VERSION_1].[VIEWER_VERSION_2] ([VIEWER_VERSION_3]) [BUILD_DATE] [BUILD_TIME] ([ADDRESS_SIZE]bit / [SIMD]) ([CHANNEL])
-[[VIEWER_RELEASE_NOTES_URL] [ReleaseNotes]]
+		[APP_NAME] [VIEWER_VERSION_0].[VIEWER_VERSION_1].[VIEWER_VERSION_2] ([VIEWER_VERSION_3])
+		[BUILD_DATE] [BUILD_TIME] ([ADDRESS_SIZE]bit / [SIMD]) ([CHANNEL])
+		[[VIEWER_RELEASE_NOTES_URL] [ReleaseNotes]]
+		Parité avec le client Second Life: [VIEWER_VERSION_LL]
 	</string>
 	<string name="AboutCompiler">
 		Compilé avec [COMPILER] version [COMPILER_VERSION]
 	</string>
 	<string name="AboutPosition">
-		Vous êtes à [POSITION_LOCAL_0,number,1], [POSITION_LOCAL_1,number,1], [POSITION_LOCAL_2,number,1] dans [REGION], se trouvant à &lt;nolink&gt;[HOSTNAME]&lt;/nolink&gt;
-SLURL : &lt;nolink&gt;[SLURL]&lt;/nolink&gt;
-(coordonnées globales [POSITION_0,number,1], [POSITION_1,number,1], [POSITION_2,number,1])
-[SERVER_VERSION]
-[SERVER_RELEASE_NOTES_URL]
+		Vous êtes à [POSITION_LOCAL_0,number,1], [POSITION_LOCAL_1,number,1],
+		[POSITION_LOCAL_2,number,1] dans [REGION], se trouvant à
+		&lt;nolink&gt;[HOSTNAME]&lt;/nolink&gt;
+		SLURL : &lt;nolink&gt;[SLURL]&lt;/nolink&gt;
+		(coordonnées globales [POSITION_0,number,1], [POSITION_1,number,1], [POSITION_2,number,1])
+		[SERVER_VERSION]
+		[SERVER_RELEASE_NOTES_URL]
 	</string>
 	<string name="AboutPositionRLVShowLoc">
-Vous êtes à [REGION]
-[SERVER_VERSION]
-[SERVER_RELEASE_NOTES_URL]
+		Vous êtes à [REGION]
+		[SERVER_VERSION]
+		[SERVER_RELEASE_NOTES_URL]
 	</string>
 	<string name="AboutSystem">
 		CPU : [CPU]
-Mémoire : [MEMORY_MB] Mo (Utilisée : [USED_RAM] Mo)
-Concurrence: [CONCURRENCY]
-Version OS : [OS_VERSION]
-Distributeur de cartes graphiques : [GRAPHICS_CARD_VENDOR]
-Carte graphique : [GRAPHICS_CARD]
-Mémoire de carte graphique : [GRAPHICS_CARD_MEMORY] Mo
-Mémoire de carte graphique (Détectée): [GRAPHICS_CARD_MEMORY_DETECTED] Mo
-Mémoire de carte graphique (Capacité): [VRAM_BUDGET]
+		Mémoire : [MEMORY_MB] Mo (Utilisée : [USED_RAM] Mo)
+		Concurrence: [CONCURRENCY]
+		Version OS : [OS_VERSION]
+		Distributeur de cartes graphiques : [GRAPHICS_CARD_VENDOR]
+		Carte graphique : [GRAPHICS_CARD]
+		Mémoire de carte graphique : [GRAPHICS_CARD_MEMORY] Mo
+		Mémoire de carte graphique (Détectée): [GRAPHICS_CARD_MEMORY_DETECTED] Mo
+		Mémoire de carte graphique (Capacité): [VRAM_BUDGET]
 	</string>
 	<string name="AboutDriver">
 		Version Windows Graphics Driver : [GRAPHICS_DRIVER_VERSION]
@@ -62,16 +66,16 @@ Mémoire de carte graphique (Capacité): [VRAM_BUDGET]
 		Version OpenGL : [OPENGL_VERSION]
 	</string>
 	<string name="AboutSettings">
-Mode de réglage : [MODE]
-Skin du client : [SKIN] ([THEME])
-Taille de la fenêtre : [WINDOW_WIDTH]x[WINDOW_HEIGHT] px
-Police utilisée : [FONT] ([FONT_SCREEN_DPI] dpi)
-Taille de la police : [FONT_SIZE] pt
-Mise à l'échelle de l'UI : [UI_SCALE_FACTOR]
-Distance d'affichage : [DRAW_DISTANCE] m
-Bande passante : [BANDWIDTH] kbit/s
-Facteur LOD : [LOD]
-Qualité du rendu : [RENDERQUALITY]
+		Mode de réglage : [MODE]
+		Skin du client : [SKIN] ([THEME])
+		Taille de la fenêtre : [WINDOW_WIDTH]x[WINDOW_HEIGHT] px
+		Police utilisée : [FONT] ([FONT_SCREEN_DPI] dpi)
+		Taille de la police : [FONT_SIZE] pt
+		Mise à l'échelle de l'UI : [UI_SCALE_FACTOR]
+		Distance d'affichage : [DRAW_DISTANCE] m
+		Bande passante : [BANDWIDTH] kbit/s
+		Facteur LOD : [LOD]
+		Qualité du rendu : [RENDERQUALITY]
 	</string>
 	<string name="AboutCache">
 		Cache disque : [DISK_CACHE_INFO]
@@ -80,18 +84,19 @@ Qualité du rendu : [RENDERQUALITY]
 		Mode d&apos;affichage HiDPI : [HIDPI]
 	</string>
 	<string name="AboutLibs">
-Version libcurl : [LIBCURL_VERSION]
-Version J2C Decoder : [J2C_VERSION]
-Version Audio Driver : [AUDIO_DRIVER_VERSION]
-[LIBCEF_VERSION]
-Version LibVLC : [LIBVLC_VERSION]
-Version serveur vocal : [VOICE_VERSION]
+		Version libcurl : [LIBCURL_VERSION]
+		Version J2C Decoder : [J2C_VERSION]
+		Version Audio Driver : [AUDIO_DRIVER_VERSION]
+		[LIBCEF_VERSION]
+		Version LibVLC : [LIBVLC_VERSION]
+		Version serveur vocal : [VOICE_VERSION]
 	</string>
 	<string name="AboutTraffic">
 		Paquets perdus : [PACKETS_LOST,number,0]/[PACKETS_IN,number,0] ([PACKETS_PCT,number,1]%)
 	</string>
 	<string name="AboutTime">
-		[month, datetime, slt] [day, datetime, slt] [year, datetime, slt] [hour, datetime, slt]:[min, datetime, slt]:[second,datetime,slt]
+		[month, datetime, slt] [day, datetime, slt] [year, datetime, slt] [hour, datetime,
+		slt]:[min, datetime, slt]:[second,datetime,slt]
 	</string>
 	<string name="ErrorFetchingServerReleaseNotesURL">
 		Erreur lors de la récupération de l&apos;URL des notes de version du serveur.
@@ -169,31 +174,38 @@ Version serveur vocal : [VOICE_VERSION]
 		Habits en cours de téléchargement...
 	</string>
 	<string name="InvalidCertificate">
-		Certificat non valide ou corrompu renvoyé par le serveur. Contactez l&apos;administrateur de la grille.
+		Certificat non valide ou corrompu renvoyé par le serveur. Contactez l&apos;administrateur de
+		la grille.
 	</string>
 	<string name="CertInvalidHostname">
-		Nom d&apos;hôte non valide utilisé pour accéder au serveur. Vérifiez votre nom d&apos;hôte de grille ou SLURL.
+		Nom d&apos;hôte non valide utilisé pour accéder au serveur. Vérifiez votre nom d&apos;hôte
+		de grille ou SLURL.
 	</string>
 	<string name="CertExpired">
-		Il semble que le certificat renvoyé par la grille ait expiré.  Vérifiez votre horloge système ou contactez l&apos;administrateur de la grille.
+		Il semble que le certificat renvoyé par la grille ait expiré. Vérifiez votre horloge système
+		ou contactez l&apos;administrateur de la grille.
 	</string>
 	<string name="CertKeyUsage">
-		Impossible d&apos;utiliser le certificat renvoyé par le serveur pour SSL. Contactez l&apos;administrateur de la grille.
+		Impossible d&apos;utiliser le certificat renvoyé par le serveur pour SSL. Contactez
+		l&apos;administrateur de la grille.
 	</string>
 	<string name="CertBasicConstraints">
-		Certificats trop nombreux dans la chaîne des certificats du serveur. Contactez l&apos;administrateur de la grille.
+		Certificats trop nombreux dans la chaîne des certificats du serveur. Contactez
+		l&apos;administrateur de la grille.
 	</string>
 	<string name="CertInvalid">
 		Impossible de charger le certificat. Veuillez contacter votre administrateur de grille.
 	</string>
 	<string name="CertInvalidSignature">
-		Impossible de vérifier la signature de certificat renvoyée par le serveur de la grille.  Contactez l&apos;administrateur de la grille.
+		Impossible de vérifier la signature de certificat renvoyée par le serveur de la grille.
+		Contactez l&apos;administrateur de la grille.
 	</string>
 	<string name="CertAllocationFailure">
 		Échec de l'allocation de la mémoire openssl pour le certificat.
 	</string>
 	<string name="LoginFailedNoNetwork">
-		Erreur réseau : impossible d&apos;établir la connexion. Veuillez vérifier votre connexion réseau.
+		Erreur réseau : impossible d&apos;établir la connexion. Veuillez vérifier votre connexion
+		réseau.
 	</string>
 	<string name="LoginFailedHeader">
 		Échec de la connexion.
@@ -211,15 +223,18 @@ Version serveur vocal : [VOICE_VERSION]
 		Grille de test bêta Second Life (Aditi)
 	</string>
 	<string name="LoginFailedViewerNotPermitted">
-		Le client que vous utilisez ne permet plus d&apos;accéder à Second Life. Téléchargez un nouveau client à la page suivante :
-http://secondlife.com/download
+		Le client que vous utilisez ne permet plus d&apos;accéder à Second Life. Téléchargez un
+		nouveau client à la page suivante :
+		http://secondlife.com/download
 
-Pour plus d&apos;informations, consultez la page FAQ ci-dessous :
-http://secondlife.com/viewer-access-faq
+		Pour plus d&apos;informations, consultez la page FAQ ci-dessous :
+		http://secondlife.com/viewer-access-faq
 	</string>
 	<string name="LoginFailed">
-		Le processus de connexion n'a pas abouti en raison d'un problème du système. Réessayez dans quelques minutes.
-Si vous pensez qu'il s'agit d'une erreur, veuillez contacter le service d'assistance du réseau.
+		Le processus de connexion n'a pas abouti en raison d'un problème du système. Réessayez dans
+		quelques minutes.
+		Si vous pensez qu'il s'agit d'une erreur, veuillez contacter le service d'assistance du
+		réseau.
 	</string>
 	<string name="LoginIntermediateOptionalUpdateAvailable">
 		Mise à jour facultative du client disponible : [VERSION]
@@ -232,63 +247,68 @@ Si vous pensez qu'il s'agit d'une erreur, veuillez contacter le service d'assist
 	</string>
 	<string name="LoginFailedAuthenticationFailed">
 		Désolé ! La connexion a échoué.
-Veuillez vérifier que les éléments ci-dessous ont été correctement saisis :
-    * Nom d&apos;utilisateur (par exemple, bobsmith12 ou steller.sunshine)
-    * Mot de passe
-    * Jeton de second facteur (si activé)
-Assurez-vous également que la touche Verr. maj n&apos;est pas activée.
+		Veuillez vérifier que les éléments ci-dessous ont été correctement saisis :
+		* Nom d&apos;utilisateur (par exemple, bobsmith12 ou steller.sunshine)
+		* Mot de passe
+		* Jeton de second facteur (si activé)
+		Assurez-vous également que la touche Verr. maj n&apos;est pas activée.
 	</string>
 	<string name="LoginFailedPasswordChanged">
 		Votre mot de passe a été modifié pour des raisons de sécurité.
-Veuillez accéder à votre compte à la page http://secondlife.com/password
-et répondre à la question de sécurité afin de réinitialiser votre mot de passe.
-Nous vous prions de nous excuser pour la gêne occasionnée.
+		Veuillez accéder à votre compte à la page http://secondlife.com/password
+		et répondre à la question de sécurité afin de réinitialiser votre mot de passe.
+		Nous vous prions de nous excuser pour la gêne occasionnée.
 	</string>
 	<string name="LoginFailedPasswordReset">
-		Vous allez devoir réinitialiser votre mot de passe suite à quelques changements effectués sur notre système.
-Pour cela, accédez à votre compte à la page http://secondlife.com/password
-et répondez à la question de sécurité. Votre mot de passe sera réinitialisé.
-Nous vous prions de nous excuser pour la gêne occasionnée.
+		Vous allez devoir réinitialiser votre mot de passe suite à quelques changements effectués
+		sur notre système.
+		Pour cela, accédez à votre compte à la page http://secondlife.com/password
+		et répondez à la question de sécurité. Votre mot de passe sera réinitialisé.
+		Nous vous prions de nous excuser pour la gêne occasionnée.
 	</string>
 	<string name="LoginFailedEmployeesOnly">
 		Second Life est temporairement fermé pour des raisons de maintenance.
-Seuls les employés peuvent actuellement y accéder.
-Consultez la page www.secondlife.com/status pour plus d&apos;informations.
+		Seuls les employés peuvent actuellement y accéder.
+		Consultez la page www.secondlife.com/status pour plus d&apos;informations.
 	</string>
 	<string name="LoginFailedPremiumOnly">
-		Les connexions à Second Life sont temporairement limitées afin de s&apos;assurer que l&apos;expérience des utilisateurs présents dans le monde virtuel soit optimale.
+		Les connexions à Second Life sont temporairement limitées afin de s&apos;assurer que
+		l&apos;expérience des utilisateurs présents dans le monde virtuel soit optimale.
 
-Les personnes disposant de comptes gratuits ne pourront pas accéder à Second Life pendant ce temps afin de permettre à celles qui ont payé pour pouvoir utiliser Second Life de le faire.
+		Les personnes disposant de comptes gratuits ne pourront pas accéder à Second Life pendant ce
+		temps afin de permettre à celles qui ont payé pour pouvoir utiliser Second Life de le faire.
 	</string>
 	<string name="LoginFailedComputerProhibited">
 		Impossible d&apos;accéder à Second Life depuis cet ordinateur.
-Si vous pensez qu&apos;il s&apos;agit d&apos;une erreur, contactez
-l&apos;Assistance à l&apos;adresse suivante : support@secondlife.com.
+		Si vous pensez qu&apos;il s&apos;agit d&apos;une erreur, contactez
+		l&apos;Assistance à l&apos;adresse suivante : support@secondlife.com.
 	</string>
 	<string name="LoginFailedAcountSuspended">
 		Votre compte est inaccessible jusqu&apos;à
-[TIME], heure du Pacifique.
+		[TIME], heure du Pacifique.
 	</string>
 	<string name="LoginFailedAccountDisabled">
 		Impossible de traiter votre demande à l&apos;heure actuelle.
-Pour obtenir de l&apos;aide, veuillez contacter l&apos;Assistance Second Life à la page suivante : http://support.secondlife.com.
+		Pour obtenir de l&apos;aide, veuillez contacter l&apos;Assistance Second Life à la page
+		suivante : http://support.secondlife.com.
 	</string>
 	<string name="LoginFailedTransformError">
 		Incohérence des données lors de la connexion.
-Veuillez contacter support@secondlife.com.
+		Veuillez contacter support@secondlife.com.
 	</string>
 	<string name="LoginFailedAccountMaintenance">
 		Des opérations de maintenance mineures sont actuellement effectuées sur votre compte.
-Votre compte est inaccessible jusqu&apos;à
-[TIME], heure du Pacifique.
-Si vous pensez qu&apos;il s&apos;agit d&apos;une erreur, contactez l&apos;Assistance à l&apos;adresse suivante : support@secondlife.com
+		Votre compte est inaccessible jusqu&apos;à
+		[TIME], heure du Pacifique.
+		Si vous pensez qu&apos;il s&apos;agit d&apos;une erreur, contactez l&apos;Assistance à
+		l&apos;adresse suivante : support@secondlife.com
 	</string>
 	<string name="LoginFailedPendingLogoutFault">
 		Le simulateur a renvoyé une erreur en réponse à la demande de déconnexion.
 	</string>
 	<string name="LoginFailedPendingLogout">
 		Le système est en train de vous déconnecter.
-Veuillez réessayer de vous connecter dans une minute.
+		Veuillez réessayer de vous connecter dans une minute.
 	</string>
 	<string name="LoginFailedUnableToCreateSession">
 		Impossible de créer de session valide.
@@ -298,60 +318,66 @@ Veuillez réessayer de vous connecter dans une minute.
 	</string>
 	<string name="LoginFailedRestrictedHours">
 		Votre compte permet uniquement d&apos;accéder à Second Life
-entre [START] et [END], heure du Pacifique.
-Veuillez réessayer au cours de la période indiquée.
-Si vous pensez qu&apos;il s&apos;agit d&apos;une erreur, contactez l&apos;Assistance à l&apos;adresse suivante : support@secondlife.com
+		entre [START] et [END], heure du Pacifique.
+		Veuillez réessayer au cours de la période indiquée.
+		Si vous pensez qu&apos;il s&apos;agit d&apos;une erreur, contactez l&apos;Assistance à
+		l&apos;adresse suivante : support@secondlife.com
 	</string>
 	<string name="LoginFailedIncorrectParameters">
 		Paramètres incorrects.
-Si vous pensez qu&apos;il s&apos;agit d&apos;une erreur, contactez l&apos;Assistance à l&apos;adresse suivante : support@secondlife.com
+		Si vous pensez qu&apos;il s&apos;agit d&apos;une erreur, contactez l&apos;Assistance à
+		l&apos;adresse suivante : support@secondlife.com
 	</string>
 	<string name="LoginFailedFirstNameNotAlphanumeric">
 		Le paramètre Prénom doit être alphanumérique.
-Si vous pensez qu&apos;il s&apos;agit d&apos;une erreur, contactez l&apos;Assistance à l&apos;adresse suivante : support@secondlife.com
+		Si vous pensez qu&apos;il s&apos;agit d&apos;une erreur, contactez l&apos;Assistance à
+		l&apos;adresse suivante : support@secondlife.com
 	</string>
 	<string name="LoginFailedLastNameNotAlphanumeric">
 		Le paramètre Nom doit être alphanumérique.
-Si vous pensez qu&apos;il s&apos;agit d&apos;une erreur, contactez l&apos;Assistance à l&apos;adresse suivante : support@secondlife.com
+		Si vous pensez qu&apos;il s&apos;agit d&apos;une erreur, contactez l&apos;Assistance à
+		l&apos;adresse suivante : support@secondlife.com
 	</string>
 	<string name="LogoutFailedRegionGoingOffline">
 		La région est en train d&apos;être mise hors ligne.
-Veuillez réessayer de vous connecter dans une minute.
+		Veuillez réessayer de vous connecter dans une minute.
 	</string>
 	<string name="LogoutFailedAgentNotInRegion">
 		Agent absent de la région.
-Veuillez réessayer de vous connecter dans une minute.
+		Veuillez réessayer de vous connecter dans une minute.
 	</string>
 	<string name="LogoutFailedPendingLogin">
 		Une autre session était en cours d&apos;ouverture au sein de la région.
-Veuillez réessayer de vous connecter dans une minute.
+		Veuillez réessayer de vous connecter dans une minute.
 	</string>
 	<string name="LogoutFailedLoggingOut">
 		La session précédente était en cours de fermeture au sein de la région.
-Veuillez réessayer de vous connecter dans une minute.
+		Veuillez réessayer de vous connecter dans une minute.
 	</string>
 	<string name="LogoutFailedStillLoggingOut">
 		Fermeture de la session précédente toujours en cours pour la région.
-Veuillez réessayer de vous connecter dans une minute.
+		Veuillez réessayer de vous connecter dans une minute.
 	</string>
 	<string name="LogoutSucceeded">
 		Dernière session fermée au sein de la région.
-Veuillez réessayer de vous connecter dans une minute.
+		Veuillez réessayer de vous connecter dans une minute.
 	</string>
 	<string name="LogoutFailedLogoutBegun">
 		Processus de déconnexion commencé pour la région.
-Veuillez réessayer de vous connecter dans une minute.
+		Veuillez réessayer de vous connecter dans une minute.
 	</string>
 	<string name="LoginFailedLoggingOutSession">
 		Le système a commencé à fermer votre dernière session.
-Veuillez réessayer de vous connecter dans une minute.
+		Veuillez réessayer de vous connecter dans une minute.
 	</string>
 	<string name="LoginFailedAuthenticationMFARequired">
-		Entrez un nouveau jeton à partir de votre application d'authentification pour pouvoir vous connecter
-Si vous pensez qu'il s'agit d'une erreur, veuillez contacter support@secondlife.com.
+		Entrez un nouveau jeton à partir de votre application d'authentification pour pouvoir vous
+		connecter
+		Si vous pensez qu'il s'agit d'une erreur, veuillez contacter support@secondlife.com.
 	</string>
 	<string name="AgentLostConnection">
-		Il y a peut-être des problèmes techniques dans cette région.  Veuillez vérifier votre connexion Internet.
+		Il y a peut-être des problèmes techniques dans cette région. Veuillez vérifier votre
+		connexion Internet.
 	</string>
 	<string name="SavingSettings">
 		Enregistrement des paramètres...
@@ -504,9 +530,11 @@ Si vous pensez qu'il s'agit d'une erreur, veuillez contacter support@secondlife.
 		Impossible de faire glisser plus d&apos;un objet ici
 	</string>
 	<string name="TooltipTooManyWearables">
-		Vous ne pouvez pas porter un dossier contenant plus de [AMOUNT] articles.  Vous pouvez modifier cette limite dans Avancé &gt; Afficher les paramètres de débogage &gt; WearFolderLimit.
+		Vous ne pouvez pas porter un dossier contenant plus de [AMOUNT] articles. Vous pouvez
+		modifier cette limite dans Avancé &gt; Afficher les paramètres de débogage &gt;
+		WearFolderLimit.
 	</string>
-	<string name="TooltipPrice" value="[AMOUNT] L$ :"/>
+	<string name="TooltipPrice" value="[AMOUNT] L$ :" />
 	<string name="TooltipSLIcon">
 		Il s’agit d’un lien vers une page dans le domaine officiel SecondLife.com ou LindenLab.com.
 	</string>
@@ -547,22 +575,29 @@ Si vous pensez qu'il s'agit d'une erreur, veuillez contacter support@secondlife.
 		Vous ne pouvez pas rezzer (charger) des articles du dossier Annonces de la Place de marché
 	</string>
 	<string name="TooltipOutboxWorn">
-		Vous ne pouvez pas mettre d&apos;articles que vous portez dans le dossier Annonces de la Place du marché
+		Vous ne pouvez pas mettre d&apos;articles que vous portez dans le dossier Annonces de la
+		Place du marché
 	</string>
 	<string name="TooltipOutboxFolderLevels">
-		Le niveau de dossiers imbriqués dépasse [AMOUNT]. Diminuez le nombre de niveaux de dossiers imbriqués dans d&apos;autres dossiers. Si nécessaire, placez certains articles dans une boîte.
+		Le niveau de dossiers imbriqués dépasse [AMOUNT]. Diminuez le nombre de niveaux de dossiers
+		imbriqués dans d&apos;autres dossiers. Si nécessaire, placez certains articles dans une
+		boîte.
 	</string>
 	<string name="TooltipOutboxTooManyFolders">
-		Le nombre de sous-dossiers dépasse [AMOUNT]. Diminuez le nombre de sous-dossiers dans votre annonce. Si nécessaire, placez certains articles dans une boîte.
+		Le nombre de sous-dossiers dépasse [AMOUNT]. Diminuez le nombre de sous-dossiers dans votre
+		annonce. Si nécessaire, placez certains articles dans une boîte.
 	</string>
 	<string name="TooltipOutboxTooManyObjects">
-		Le nombre d&apos;articles dépasse [AMOUNT]. Pour pouvoir vendre plus de [AMOUNT] articles au sein d&apos;une même annonce, vous devez placer certains de ces articles dans une boîte.
+		Le nombre d&apos;articles dépasse [AMOUNT]. Pour pouvoir vendre plus de [AMOUNT] articles au
+		sein d&apos;une même annonce, vous devez placer certains de ces articles dans une boîte.
 	</string>
 	<string name="TooltipOutboxTooManyStockItems">
 		Le nombre d&apos;articles de stock dépasse [AMOUNT].
 	</string>
 	<string name="TooltipOutboxCannotDropOnRoot">
-		Vous pouvez uniquement déposer des articles ou des dossiers dans les onglets TOUS ou NON ASSOCIÉS. Sélectionnez l’un de ces onglets et déplacez à nouveau votre ou vos article ou dossiers.
+		Vous pouvez uniquement déposer des articles ou des dossiers dans les onglets TOUS ou NON
+		ASSOCIÉS. Sélectionnez l’un de ces onglets et déplacez à nouveau votre ou vos article ou
+		dossiers.
 	</string>
 	<string name="TooltipOutboxNoTransfer">
 		Impossible de vendre ou de transférer un ou plusieurs de ces objets
@@ -586,7 +621,8 @@ Si vous pensez qu'il s'agit d'une erreur, veuillez contacter support@secondlife.
 		tous les articles d&apos;un dossier de stock doivent avoir le même type et droit
 	</string>
 	<string name="TooltipOutfitNotInInventory">
-		Vous pouvez uniquement placer des articles ou des tenues de votre inventaire personnel dans "Mes tenues".
+		Vous pouvez uniquement placer des articles ou des tenues de votre inventaire personnel dans
+		"Mes tenues".
 	</string>
 	<string name="TooltipCantCreateOutfit">
 		Un ou plusieurs articles ne peuvent pas être utilisés dans des "Mes tenues".
@@ -660,7 +696,7 @@ Si vous pensez qu'il s'agit d'une erreur, veuillez contacter support@secondlife.
 	<string name="TooltipFSUrlEntryWear">
 		Cliquez pour porter le contenu d'un dossier d'inventaire
 	</string>
-	<string name="CurrentURL" value=" URL actuelle : [CurrentURL]"/>
+	<string name="CurrentURL" value=" URL actuelle : [CurrentURL]" />
 	<string name="TooltipEmail">
 		Cliquez pour composer un message
 	</string>
@@ -720,12 +756,12 @@ Si vous pensez qu'il s'agit d'une erreur, veuillez contacter support@secondlife.
 	</string>
 	<string name="TooltipNotecardNotAllowedTypeDrop">
 		Les éléments de ce type ne peuvent pas être attachés
-aux notes de cette région.
+		aux notes de cette région.
 	</string>
 	<string name="TooltipNotecardOwnerRestrictedDrop">
 		Seuls des éléments avec des autorisation
-illimitées pour le &apos;prochain propriétaire&apos;
-peuvent être joints aux notes.
+		illimitées pour le &apos;prochain propriétaire&apos;
+		peuvent être joints aux notes.
 	</string>
 	<string name="Searching">
 		Recherche...
@@ -804,7 +840,7 @@ peuvent être joints aux notes.
 	</string>
 	<string name="AssetUploadRequestInvalid">
 		Erreur dans la demande de chargement. Veuillez consulter le site :
-http://secondlife.com/support pour vous aider à résoudre ce problème.
+		http://secondlife.com/support pour vous aider à résoudre ce problème.
 	</string>
 	<string name="SettingValidationError">
 		Échec de la validation pour l&apos;importation des paramètres [NAME]
@@ -1155,7 +1191,8 @@ http://secondlife.com/support pour vous aider à résoudre ce problème.
 		(Distance: [DISTANCE] m)
 	</string>
 	<string name="minimap_no_focus">
-		La caméra ne peut pas faire la mise au point sur l'utilisateur parce qu'il est en dehors de votre distance d'affichage.
+		La caméra ne peut pas faire la mise au point sur l'utilisateur parce qu'il est en dehors de
+		votre distance d'affichage.
 	</string>
 	<string name="Ok">
 		OK
@@ -1197,10 +1234,12 @@ http://secondlife.com/support pour vous aider à résoudre ce problème.
 		Vous allez maintenant être reconnecté(e) au chat vocal près de vous.
 	</string>
 	<string name="ScriptQuestionCautionChatGranted">
-		&apos;[OBJECTNAME]&apos;, un objet appartenant à [OWNERNAME], situé dans [REGIONNAME] à [REGIONPOS], a reçu le droit de : [PERMISSIONS].
+		&apos;[OBJECTNAME]&apos;, un objet appartenant à [OWNERNAME], situé dans [REGIONNAME] à
+		[REGIONPOS], a reçu le droit de : [PERMISSIONS].
 	</string>
 	<string name="ScriptQuestionCautionChatDenied">
-		&apos;[OBJECTNAME]&apos;, un objet appartenant à [OWNERNAME], situé dans [REGIONNAME] à [REGIONPOS], n&apos;a pas reçu le droit de : [PERMISSIONS].
+		&apos;[OBJECTNAME]&apos;, un objet appartenant à [OWNERNAME], situé dans [REGIONNAME] à
+		[REGIONPOS], n&apos;a pas reçu le droit de : [PERMISSIONS].
 	</string>
 	<string name="AdditionalPermissionsRequestHeader">
 		Si vous autorisez un accès à votre compte, vous autorisez également l&apos;objet à :
@@ -1262,7 +1301,7 @@ http://secondlife.com/support pour vous aider à résoudre ce problème.
 	<string name="AgentNameSubst">
 		(Vous)
 	</string>
-	<string name="JoinAnExperience"/>
+	<string name="JoinAnExperience" />
 	<string name="SilentlyManageEstateAccess">
 		Supprimer les alertes lors de la gestion des listes d&apos;accès aux domaines
 	</string>
@@ -1384,17 +1423,29 @@ http://secondlife.com/support pour vous aider à résoudre ce problème.
 		Fichiers de programmes exécutables
 	</string>
 	<string name="Validator_InvalidNumericString">Chaîne numérique non valide : "[STR]"</string>
-	<string name="Validator_ShouldNotBeMinus">Caractère initial non valide : '[CH]' (ne doit pas être un moins)</string>
-	<string name="Validator_ShouldNotBeMinusOrZero">Caractère initial non valide : '[CH]' (ne doit être ni un moins ni un zéro)</string>
-	<string name="Validator_ShouldBeDigit">Caractère non valide [NR] : '[CH]' (ne doit être qu'un chiffre)</string>
-	<string name="Validator_ShouldBeDigitOrDot">Caractère non valide [NR] : '[CH]' (ne doit être qu'un chiffre ou un point décimal)</string>
-	<string name="Validator_ShouldBeDigitOrAlpha">Caractère non valide [NR] : '[CH]' (ne peut être qu'un chiffre ou un caractère alphanumérique ASCII)</string>
-	<string name="Validator_ShouldBeDigitOrAlphaOrSpace">Caractère non valide [NR] : '[CH]' (ne peut être qu'un chiffre, un caractère alphanumérique ASCII ou un espace.)</string>
-	<string name="Validator_ShouldBeDigitOrAlphaOrPunct">Caractère non valide [NR] : '[CH]' (ne peut être qu'un chiffre, un caractère alphanumérique ASCII ou un signe de ponctuation.)</string>
-	<string name="Validator_ShouldBeDigitOrAlphaOrPunctNotSpace">Caractère non valide [NR] : '[CH]' (ne peut être qu'un chiffre ou un caractère alphanumérique ASCII ou une ponctuation sans espace.)</string>
-	<string name="Validator_ShouldBeDigitNotSpace">Caractère non valide [NR] : '[CH]' (ne doit être qu'un chiffre sans espace)</string>
-	<string name="Validator_ShouldBeASCII">Caractère non valide [NR] : '[CH]' (ne peut être qu'un caractère ASCII)</string>
-	<string name="Validator_ShouldBeNewLineOrASCII">Caractère non valide [NR] : '[CH]' (ne doit être qu'un caractère ASCII ou une nouvelle ligne.)</string>
+	<string name="Validator_ShouldNotBeMinus">Caractère initial non valide : '[CH]' (ne doit pas
+		être un moins)</string>
+	<string name="Validator_ShouldNotBeMinusOrZero">Caractère initial non valide : '[CH]' (ne doit
+		être ni un moins ni un zéro)</string>
+	<string name="Validator_ShouldBeDigit">Caractère non valide [NR] : '[CH]' (ne doit être qu'un
+		chiffre)</string>
+	<string name="Validator_ShouldBeDigitOrDot">Caractère non valide [NR] : '[CH]' (ne doit être
+		qu'un chiffre ou un point décimal)</string>
+	<string name="Validator_ShouldBeDigitOrAlpha">Caractère non valide [NR] : '[CH]' (ne peut être
+		qu'un chiffre ou un caractère alphanumérique ASCII)</string>
+	<string name="Validator_ShouldBeDigitOrAlphaOrSpace">Caractère non valide [NR] : '[CH]' (ne peut
+		être qu'un chiffre, un caractère alphanumérique ASCII ou un espace.)</string>
+	<string name="Validator_ShouldBeDigitOrAlphaOrPunct">Caractère non valide [NR] : '[CH]' (ne peut
+		être qu'un chiffre, un caractère alphanumérique ASCII ou un signe de ponctuation.)</string>
+	<string name="Validator_ShouldBeDigitOrAlphaOrPunctNotSpace">Caractère non valide [NR] : '[CH]'
+		(ne peut être qu'un chiffre ou un caractère alphanumérique ASCII ou une ponctuation sans
+		espace.)</string>
+	<string name="Validator_ShouldBeDigitNotSpace">Caractère non valide [NR] : '[CH]' (ne doit être
+		qu'un chiffre sans espace)</string>
+	<string name="Validator_ShouldBeASCII">Caractère non valide [NR] : '[CH]' (ne peut être qu'un
+		caractère ASCII)</string>
+	<string name="Validator_ShouldBeNewLineOrASCII">Caractère non valide [NR] : '[CH]' (ne doit être
+		qu'un caractère ASCII ou une nouvelle ligne.)</string>
 	<string name="LSLTipSleepTime" translate="false">Pause le script pendant [SLEEP_TIME] secondes.</string>
 	<string name="shape">
 		Silhouette
@@ -1634,13 +1685,16 @@ http://secondlife.com/support pour vous aider à résoudre ce problème.
 		Appuyez sur ESC pour quitter la vue subjective
 	</string>
 	<string name="InventoryNoMatchingItems">
-		Vous n&apos;avez pas trouvé ce que vous cherchiez ? Essayez [secondlife:///app/search/all/[SEARCH_TERM] Rechercher].
+		Vous n&apos;avez pas trouvé ce que vous cherchiez ? Essayez
+		[secondlife:///app/search/all/[SEARCH_TERM] Rechercher].
 	</string>
 	<string name="InventoryNoMatchingRecentItems">
-		Avez-vous trouvé ce que vous cherchiez ? Essayez [secondlife:///app/inventory/filters Show filters].
+		Avez-vous trouvé ce que vous cherchiez ? Essayez [secondlife:///app/inventory/filters Show
+		filters].
 	</string>
 	<string name="PlacesNoMatchingItems">
-		Vous n&apos;avez pas trouvé ce que vous cherchiez ? Essayez [secondlife:///app/search/places/[SEARCH_TERM] Rechercher].
+		Vous n&apos;avez pas trouvé ce que vous cherchiez ? Essayez
+		[secondlife:///app/search/places/[SEARCH_TERM] Rechercher].
 	</string>
 	<string name="FavoritesNoMatchingItems">
 		Faites glisser un repère ici pour l&apos;ajouter à vos Favoris.
@@ -1661,7 +1715,8 @@ http://secondlife.com/support pour vous aider à résoudre ce problème.
 		Vous n&apos;avez pas de copie de cette texture dans votre inventaire
 	</string>
 	<string name="InventoryInboxNoItems">
-		Les achats que vous avez effectués sur la Place du marché s&apos;affichent ici. Vous pouvez alors les faire glisser vers votre inventaire afin de les utiliser.
+		Les achats que vous avez effectués sur la Place du marché s&apos;affichent ici. Vous pouvez
+		alors les faire glisser vers votre inventaire afin de les utiliser.
 	</string>
 	<string name="MarketplaceURL">
 		https://marketplace.[MARKETPLACE_DOMAIN_NAME]/
@@ -1690,22 +1745,26 @@ http://secondlife.com/support pour vous aider à résoudre ce problème.
 	<string name="InventoryOutboxNotMerchantTitle">
 		Tout le monde peut vendre des articles sur la Place du marché.
 	</string>
-	<string name="InventoryOutboxNotMerchantTooltip"/>
+	<string name="InventoryOutboxNotMerchantTooltip" />
 	<string name="InventoryOutboxNotMerchant">
-		Pour devenir vendeur, vous devez [[MARKETPLACE_CREATE_STORE_URL] créer une boutique sur la Place du marché].
+		Pour devenir vendeur, vous devez [[MARKETPLACE_CREATE_STORE_URL] créer une boutique sur la
+		Place du marché].
 	</string>
 	<string name="InventoryOutboxNoItemsTitle">
 		Votre boîte d&apos;envoi est vide.
 	</string>
-	<string name="InventoryOutboxNoItemsTooltip"/>
+	<string name="InventoryOutboxNoItemsTooltip" />
 	<string name="InventoryOutboxNoItems">
-		Pour mettre des dossiers en vente sur la [[MARKETPLACE_DASHBOARD_URL] Place du marché], faites-les glisser vers cette zone et cliquez sur &quot;Envoyer vers la Place du marché&quot;.
+		Pour mettre des dossiers en vente sur la [[MARKETPLACE_DASHBOARD_URL] Place du marché],
+		faites-les glisser vers cette zone et cliquez sur &quot;Envoyer vers la Place du
+		marché&quot;.
 	</string>
 	<string name="InventoryOutboxInitializingTitle">
 		Initialisation de la Place du marché...
 	</string>
 	<string name="InventoryOutboxInitializing">
-		Nous sommes en train d&apos;accéder à votre compte dans la [[MARKETPLACE_CREATE_STORE_URL] boutique de la Place du marché].
+		Nous sommes en train d&apos;accéder à votre compte dans la [[MARKETPLACE_CREATE_STORE_URL]
+		boutique de la Place du marché].
 	</string>
 	<string name="InventoryOutboxErrorTitle">
 		Erreurs de la Place du marché.
@@ -1715,21 +1774,25 @@ http://secondlife.com/support pour vous aider à résoudre ce problème.
 	</string>
 	<string name="InventoryMarketplaceError">
 		Une erreur est survenue lors de l’ouverture des annonces de la Place du marché.
-Si vous continuez de recevoir ce message, contactez l’assistance Second Life à http://support.secondlife.com pour obtenir de l’aide.
+		Si vous continuez de recevoir ce message, contactez l’assistance Second Life à
+		http://support.secondlife.com pour obtenir de l’aide.
 	</string>
 	<string name="InventoryMarketplaceConnectionError">
 		La connexion au listing de Marketplace a échoué.
-Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Second Life à l'adresse suivante http://support.secondlife.com
+		Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Second Life à
+		l'adresse suivante http://support.secondlife.com
 	</string>
 	<string name="InventoryMarketplaceConnectionErrorReason">
 		La connexion au listing de Marketplace a échoué. Raison :: [REASON]
-Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Second Life à l'adresse suivante http://support.secondlife.com
+		Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Second Life à
+		l'adresse suivante http://support.secondlife.com
 	</string>
 	<string name="InventoryMarketplaceListingsNoItemsTitle">
 		Votre dossier Annonces de la Place du marché est vide.
 	</string>
 	<string name="InventoryMarketplaceListingsNoItems">
-		Pour mettre des dossiers en vente sur la [[MARKETPLACE_DASHBOARD_URL] Place du marché], faites-les glisser vers cette zone.
+		Pour mettre des dossiers en vente sur la [[MARKETPLACE_DASHBOARD_URL] Place du marché],
+		faites-les glisser vers cette zone.
 	</string>
 	<string name="InventoryItemsCount">
 		( [ITEMS]/[CATEGORIES] Articles )
@@ -1738,7 +1801,8 @@ Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Sec
 		le dossier de stock doit être contenu dans un dossier de version
 	</string>
 	<string name="Marketplace Validation Error Mixed Stock">
-		: Erreur : tous les articles d&apos;un dossier de stock doivent être non reproductibles et de même type
+		: Erreur : tous les articles d&apos;un dossier de stock doivent être non reproductibles et
+		de même type
 	</string>
 	<string name="Marketplace Validation Error Subfolder In Stock">
 		: Erreur : un dossier de stock ne peut pas contenir de sous-dossiers
@@ -1756,7 +1820,8 @@ Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Sec
 		: Avertissement : déplacement d&apos;articles
 	</string>
 	<string name="Marketplace Validation Warning Delete">
-		: Avertissement : contenu du dossier transféré vers le dossier de stock, suppression du dossier vide
+		: Avertissement : contenu du dossier transféré vers le dossier de stock, suppression du
+		dossier vide
 	</string>
 	<string name="Marketplace Validation Error Stock Item">
 		: Erreur : les articles non reproductibles doivent être contenus dans un dossier de stock
@@ -1786,7 +1851,8 @@ Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Sec
 		Erreur :
 	</string>
 	<string name="Marketplace Error Not Merchant">
-		Avant d&apos;envoyer des articles vers la Place du marché, vous devez vous configurer comme vendeur (gratuit).
+		Avant d&apos;envoyer des articles vers la Place du marché, vous devez vous configurer comme
+		vendeur (gratuit).
 	</string>
 	<string name="Marketplace Error Not Accepted">
 		Impossible de déplacer l&apos;article dans ce dossier.
@@ -1816,7 +1882,8 @@ Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Sec
 		mise à jour...
 	</string>
 	<string name="UploadFeeInfo">
-		Les frais dépendent de votre niveau d'abonnement. Les niveaux supérieurs sont soumis à des frais moins élevés. [https://secondlife.com/my/account/membership.php? En savoir plus]
+		Les frais dépendent de votre niveau d'abonnement. Les niveaux supérieurs sont soumis à des
+		frais moins élevés. [https://secondlife.com/my/account/membership.php? En savoir plus]
 	</string>
 	<string name="Open landmarks">
 		Points de repère ouverts
@@ -1824,53 +1891,53 @@ Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Sec
 	<string name="Unconstrained">
 		Sans contrainte
 	</string>
-	<string name="no_transfer" value=" (pas de transfert)"/>
-	<string name="no_modify" value=" (pas de modification)"/>
-	<string name="no_copy" value=" (pas de copie)"/>
-	<string name="worn" value=" (porté)"/>
-	<string name="link" value=" (lien)"/>
-	<string name="broken_link" value=" (broken_link)"/>
+	<string name="no_transfer" value=" (pas de transfert)" />
+	<string name="no_modify" value=" (pas de modification)" />
+	<string name="no_copy" value=" (pas de copie)" />
+	<string name="worn" value=" (porté)" />
+	<string name="link" value=" (lien)" />
+	<string name="broken_link" value=" (broken_link)" />
 	<string name="LoadingContents">
 		chargement des contenus en cours...
 	</string>
 	<string name="NoContents">
 		Aucun contenu
 	</string>
-	<string name="WornOnAttachmentPoint" value=" (porté sur [ATTACHMENT_POINT])"/>
-	<string name="AttachmentErrorMessage" value="([ATTACHMENT_ERROR])"/>
-	<string name="ActiveGesture" value="[GESLABEL] (actif)"/>
+	<string name="WornOnAttachmentPoint" value=" (porté sur [ATTACHMENT_POINT])" />
+	<string name="AttachmentErrorMessage" value="([ATTACHMENT_ERROR])" />
+	<string name="ActiveGesture" value="[GESLABEL] (actif)" />
 	<string name="PermYes">
 		Oui
 	</string>
 	<string name="PermNo">
 		Non
 	</string>
-	<string name="Chat Message" value="Chat :"/>
-	<string name="Sound" value=" Son :"/>
-	<string name="Wait" value=" --- Attendre :"/>
-	<string name="AnimFlagStop" value=" Arrêter l&apos;animation :"/>
-	<string name="AnimFlagStart" value=" Lancer l&apos;animation :"/>
-	<string name="Wave" value=" Faire signe"/>
-	<string name="GestureActionNone" value="À choisir"/>
-	<string name="HelloAvatar" value=" Bonjour, avatar !"/>
-	<string name="ViewAllGestures" value="  Tout afficher &gt;&gt;"/>
-	<string name="GetMoreGestures" value="Plus &gt;&gt;"/>
-	<string name="Animations" value=" Animations,"/>
-	<string name="Calling Cards" value=" Cartes de visite,"/>
-	<string name="Clothing" value=" Habits,"/>
-	<string name="Gestures" value=" Gestes,"/>
-	<string name="Landmarks" value=" Repères,"/>
+	<string name="Chat Message" value="Chat :" />
+	<string name="Sound" value=" Son :" />
+	<string name="Wait" value=" --- Attendre :" />
+	<string name="AnimFlagStop" value=" Arrêter l&apos;animation :" />
+	<string name="AnimFlagStart" value=" Lancer l&apos;animation :" />
+	<string name="Wave" value=" Faire signe" />
+	<string name="GestureActionNone" value="À choisir" />
+	<string name="HelloAvatar" value=" Bonjour, avatar !" />
+	<string name="ViewAllGestures" value="  Tout afficher &gt;&gt;" />
+	<string name="GetMoreGestures" value="Plus &gt;&gt;" />
+	<string name="Animations" value=" Animations," />
+	<string name="Calling Cards" value=" Cartes de visite," />
+	<string name="Clothing" value=" Habits," />
+	<string name="Gestures" value=" Gestes," />
+	<string name="Landmarks" value=" Repères," />
 	<string name="Materials" value=" Matériaux," />
-	<string name="Notecards" value=" Notes,"/>
-	<string name="Objects" value=" Objets,"/>
-	<string name="Scripts" value=" Scripts,"/>
-	<string name="Sounds" value=" Sons,"/>
-	<string name="Textures" value=" Textures,"/>
+	<string name="Notecards" value=" Notes," />
+	<string name="Objects" value=" Objets," />
+	<string name="Scripts" value=" Scripts," />
+	<string name="Sounds" value=" Sons," />
+	<string name="Textures" value=" Textures," />
 	<string name="Settings" value=" Paramètres," />
-	<string name="Snapshots" value=" Photos,"/>
+	<string name="Snapshots" value=" Photos," />
 	<string name="Folders" value=" Dossiers," />
-	<string name="No Filters" value="Non "/>
-	<string name="Since Logoff" value="depuis la déconnexion"/>
+	<string name="No Filters" value="Non " />
+	<string name="Since Logoff" value="depuis la déconnexion" />
 	<string name="Modifiable" value="Modifiable" />
 	<string name="Copyable" value="Copiable" />
 	<string name="Transferable" value="Transférable" />
@@ -2409,17 +2476,17 @@ Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Sec
 	<string name="GroupsNone">
 		aucun
 	</string>
-	<string name="Group" value=" (groupe)"/>
+	<string name="Group" value=" (groupe)" />
 	<string name="Unknown">
 		(Inconnu)
 	</string>
-	<string name="SummaryForTheWeek" value="Récapitulatif de la semaine, début le "/>
-	<string name="NextStipendDay" value=". Prochaine prime le "/>
+	<string name="SummaryForTheWeek" value="Récapitulatif de la semaine, début le " />
+	<string name="NextStipendDay" value=". Prochaine prime le " />
 	<string name="GroupPlanningDate">
 		[day,datetime,utc]/[mthnum,datetime,utc]/[year,datetime,utc]
 	</string>
-	<string name="GroupIndividualShare" value="                      Groupe    Part individuelle"/>
-	<string name="GroupColumn" value="Groupe"/>
+	<string name="GroupIndividualShare" value="                      Groupe    Part individuelle" />
+	<string name="GroupColumn" value="Groupe" />
 	<string name="Balance">
 		Solde
 	</string>
@@ -2718,22 +2785,35 @@ Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Sec
 		Ce résident a activé Ne pas déranger et verra votre message plus tard.
 	</string>
 	<string name="AutoResponseModeDefault">
-		Le résident auquel vous avez envoyé un message a activé le mode réponse automatique du client [APP_NAME], ce qui signifie qu'il a demandé à ne pas être dérangé. Votre message sera quand même affiché dans la fenêtre de messagerie instantanée pour être consulté ultèrieurement.
+		Le résident auquel vous avez envoyé un message a activé le mode réponse automatique du
+		client [APP_NAME], ce qui signifie qu'il a demandé à ne pas être dérangé. Votre message sera
+		quand même affiché dans la fenêtre de messagerie instantanée pour être consulté
+		ultèrieurement.
 	</string>
 	<string name="AutoResponseModeNonFriendsDefault">
-		Le résident auquel vous avez envoyé un message a activé le mode réponse automatique du client [APP_NAME], ce qui signifie qu'il a demandé à ne pas être dérangé. Votre message sera quand même affiché dans la fenêtre de messagerie instantanée pour être consulté ultèrieurement.
+		Le résident auquel vous avez envoyé un message a activé le mode réponse automatique du
+		client [APP_NAME], ce qui signifie qu'il a demandé à ne pas être dérangé. Votre message sera
+		quand même affiché dans la fenêtre de messagerie instantanée pour être consulté
+		ultèrieurement.
 	</string>
 	<string name="RejectTeleportOffersResponseDefault">
-		Le résident auquel vous avez envoyé un message a activé le mode rejet de toutes les offres ou demandes de téléportation du client [APP_NAME], ce qui signifie qu'il a demandé à ne pas être dérangé par les offres ou demandes de téléportations. Vous pouvez quand même lui envoyer un message privé.
+		Le résident auquel vous avez envoyé un message a activé le mode rejet de toutes les offres
+		ou demandes de téléportation du client [APP_NAME], ce qui signifie qu'il a demandé à ne pas
+		être dérangé par les offres ou demandes de téléportations. Vous pouvez quand même lui
+		envoyer un message privé.
 	</string>
 	<string name="RejectFriendshipRequestsResponseDefault">
-		Le résident auquel vous avez envoyé un message a activé le mode rejet de toutes les demandes d'amitié du client [APP_NAME], ce qui signifie qu'il a demandé à ne pas être dérangé par les demandes de d'amitié. Vous pouvez quand même lui envoyer un message privé.
+		Le résident auquel vous avez envoyé un message a activé le mode rejet de toutes les demandes
+		d'amitié du client [APP_NAME], ce qui signifie qu'il a demandé à ne pas être dérangé par les
+		demandes de d'amitié. Vous pouvez quand même lui envoyer un message privé.
 	</string>
 	<string name="MutedAvatarsResponseDefault">
-		Le résident à qui vous avez envoyé un message a bloqué l'envoi de tous message de votre part.
+		Le résident à qui vous avez envoyé un message a bloqué l'envoi de tous message de votre
+		part.
 	</string>
 	<string name="AwayAvatarResponseDefault">
-		Le résident auquel vous avez envoyé un message est actuellement absent. Votre message sera affiché dans la fenêtre de messagerie instantanée pour être consulté ultèrieurement.
+		Le résident auquel vous avez envoyé un message est actuellement absent. Votre message sera
+		affiché dans la fenêtre de messagerie instantanée pour être consulté ultèrieurement.
 	</string>
 	<string name="MuteByName">
 		(par nom)
@@ -2754,11 +2834,12 @@ Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Sec
 		Il n&apos;y a aucun règlement pour ce domaine.
 	</string>
 	<string name="RegionNoCovenantOtherOwner">
-		Il n&apos;y a aucun règlement pour ce domaine. Le terrain sur ce domaine est vendu par le propriétaire.  Pour en savoir plus, veuillez contacter le propriétaire.
+		Il n&apos;y a aucun règlement pour ce domaine. Le terrain sur ce domaine est vendu par le
+		propriétaire. Pour en savoir plus, veuillez contacter le propriétaire.
 	</string>
-	<string name="covenant_last_modified" value="Dernière modification :"/>
-	<string name="none_text" value=" (aucun)"/>
-	<string name="never_text" value=" (jamais)"/>
+	<string name="covenant_last_modified" value="Dernière modification :" />
+	<string name="none_text" value=" (aucun)" />
+	<string name="never_text" value=" (jamais)" />
 	<string name="GroupOwned">
 		Propriété du groupe
 	</string>
@@ -2799,13 +2880,15 @@ Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Sec
 		(mise à jour après la publication)
 	</string>
 	<string name="NoPicksClassifiedsText">
-		Vous n&apos;avez pas créé de favoris ni de petites annonces Cliquez sur le bouton Plus pour créer un favori ou une petite annonce.
+		Vous n&apos;avez pas créé de favoris ni de petites annonces Cliquez sur le bouton Plus pour
+		créer un favori ou une petite annonce.
 	</string>
 	<string name="NoPicksText">
 		Vous n&apos;avez pas créé de favoris Cliquer sur le bouton Nouveau pour créer un favori
 	</string>
 	<string name="NoClassifiedsText">
-		Vous n&apos;avez pas créé de petites annonces Cliquer sur le bouton Nouveau pour créer une petite annonce.
+		Vous n&apos;avez pas créé de petites annonces Cliquer sur le bouton Nouveau pour créer une
+		petite annonce.
 	</string>
 	<string name="NoAvatarPicksClassifiedsText">
 		L&apos;utilisateur n&apos;a ni favoris ni petites annonces.
@@ -2826,7 +2909,8 @@ Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Sec
 		L'utilisateur n'a pas de favoris.
 	</string>
 	<string name="NoClassifiedsText">
-		Vous n'avez pas créé d'annonces. Cliquez sur le bouton Plus ci-dessous pour créer une annonce.
+		Vous n'avez pas créé d'annonces. Cliquez sur le bouton Plus ci-dessous pour créer une
+		annonce.
 	</string>
 	<string name="NoAvatarClassifiedsText">
 		L'utilisateur n'a pas d'annonces
@@ -2914,7 +2998,7 @@ Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Sec
 	</string>
 	<string name="UnknownFileExtension">
 		Extension de fichier inconnue .%s
-.wav, .tga, .bmp, .jpg, .jpeg, ou .anim acceptés
+		.wav, .tga, .bmp, .jpg, .jpeg, ou .anim acceptés
 	</string>
 	<string name="MuteObject2">
 		Ignorer
@@ -3130,8 +3214,8 @@ Si vous continuez à recevoir ce message, veuillez contacter l'assistance de Sec
 	</string>
 	<string name="MBCmdLineError">
 		Une erreur est survenue lors de la lecture de la ligne de commande.
-Merci de consulter : http://wiki.secondlife.com/wiki/Client_parameters
-Erreur :
+		Merci de consulter : http://wiki.secondlife.com/wiki/Client_parameters
+		Erreur :
 	</string>
 	<string name="MBCmdLineUsg">
 		[APP_NAME] - Utilisation de la ligne de commande :
@@ -3139,9 +3223,11 @@ Erreur :
 	<string name="MBUnableToAccessFile">
 		[APP_NAME] ne peut accéder à un fichier requis.
 
-Cela vient du fait que quelqu&apos;un a ouvert plusieurs copies ou que votre système pense qu&apos;un fichier est ouvert.
-Si ce message persiste, veuillez redémarrer votre ordinateur.
-Si le problème persiste, vous devrez peut-être complètement désinstaller puis réinstaller [APP_NAME].
+		Cela vient du fait que quelqu&apos;un a ouvert plusieurs copies ou que votre système pense
+		qu&apos;un fichier est ouvert.
+		Si ce message persiste, veuillez redémarrer votre ordinateur.
+		Si le problème persiste, vous devrez peut-être complètement désinstaller puis réinstaller
+		[APP_NAME].
 	</string>
 	<string name="MBFatalError">
 		Erreur fatale
@@ -3150,37 +3236,42 @@ Si le problème persiste, vous devrez peut-être complètement désinstaller pui
 		Erreur de l'application - Ne paniquez pas
 	</string>
 	<string name="MBApplicationErrorDetails">
-		Nous sommes désolés, mais [NOM_Application] a planté et doit être fermé. Si vous constatez que ce problème se répète, veuillez contacter notre équipe d'assistance et soumettre le message suivant :
+		Nous sommes désolés, mais [NOM_Application] a planté et doit être fermé. Si vous constatez
+		que ce problème se répète, veuillez contacter notre équipe d'assistance et soumettre le
+		message suivant :
 
-[ERROR_DETAILS]
+		[ERROR_DETAILS]
 	</string>
 	<string name="MBRequiresAltiVec">
 		[APP_NAME] nécessite un microprocesseur AltiVec (version G4 ou antérieure).
 	</string>
 	<string name="MBAlreadyRunning">
 		[APP_NAME] est déjà en cours d&apos;exécution.
-Vérifiez si une version minimisée du programme apparaît dans votre barre de tâches.
-Si ce message persiste, redémarrez votre ordinateur.
+		Vérifiez si une version minimisée du programme apparaît dans votre barre de tâches.
+		Si ce message persiste, redémarrez votre ordinateur.
 	</string>
 	<string name="MBFrozenCrashed">
 		[APP_NAME] semble avoir crashé lors de l&apos;utilisation précédente.
-Voulez-vous envoyer un rapport de crash ?
+		Voulez-vous envoyer un rapport de crash ?
 	</string>
 	<string name="MBAlert">
 		Notification
 	</string>
 	<string name="MBNoDirectX">
 		[APP_NAME] ne peut détecter DirectX 9.0b ou une version supérieure.
-[APP_NAME] utilise DirectX pour détecter les matériels et/ou les pilotes qui ne sont pas à jour et peuvent causer des problèmes de stabilité, de performance ou des plantages.  Bien que vous puissiez utiliser [APP_NAME] sans DirectX, nous vous recommandons de l&apos;utiliser avec DirectX 9.0b.
+		[APP_NAME] utilise DirectX pour détecter les matériels et/ou les pilotes qui ne sont pas à
+		jour et peuvent causer des problèmes de stabilité, de performance ou des plantages. Bien que
+		vous puissiez utiliser [APP_NAME] sans DirectX, nous vous recommandons de l&apos;utiliser
+		avec DirectX 9.0b.
 
-Voulez-vous continuer ?
+		Voulez-vous continuer ?
 	</string>
 	<string name="MBWarning">
 		Avertissement
 	</string>
 	<string name="MBNoAutoUpdate">
 		Les mises à jour automatiques n&apos;existent pas encore pour Linux.
-Veuillez télécharger la dernière version sur www.secondlife.com.
+		Veuillez télécharger la dernière version sur www.secondlife.com.
 	</string>
 	<string name="MBRegClassFailed">
 		RegisterClass a échoué
@@ -3190,7 +3281,7 @@ Veuillez télécharger la dernière version sur www.secondlife.com.
 	</string>
 	<string name="MBFullScreenErr">
 		Impossible d&apos;ouvrir le mode plein écran à [WIDTH] x [HEIGHT].
-Utilisation du mode fenêtré.
+		Utilisation du mode fenêtré.
 	</string>
 	<string name="MBDestroyWinFailed">
 		Erreur de fermeture lors de la destruction de la fenêtre (DestroyWindow() a échoué)
@@ -3209,13 +3300,16 @@ Utilisation du mode fenêtré.
 	</string>
 	<string name="MBTrueColorWindow">
 		[APP_NAME] nécessite True Color (32 bits) pour s&apos;exécuter.
-Accédez aux paramètres d&apos;affichage de votre ordinateur et réglez le mode couleur sur 32 bits.
+		Accédez aux paramètres d&apos;affichage de votre ordinateur et réglez le mode couleur sur 32
+		bits.
 	</string>
 	<string name="MBAlpha">
-		[APP_NAME] ne peut pas s&apos;exécuter, car il n&apos;y pas de canal alpha 8 bits accessible.  En général, ceci vient de problèmes avec le pilote de la carte vidéo.
-Assurez-vous d&apos;avoir installé le pilote de carte vidéo le plus récent possible.
-Assurez-vous aussi que votre écran est réglé sur True Color (32 bits) sous Panneau de configuration &gt; Affichage &gt; Paramètres.
-Si ce message persiste, veuillez aller sur la page [SUPPORT_SITE].
+		[APP_NAME] ne peut pas s&apos;exécuter, car il n&apos;y pas de canal alpha 8 bits
+		accessible. En général, ceci vient de problèmes avec le pilote de la carte vidéo.
+		Assurez-vous d&apos;avoir installé le pilote de carte vidéo le plus récent possible.
+		Assurez-vous aussi que votre écran est réglé sur True Color (32 bits) sous Panneau de
+		configuration &gt; Affichage &gt; Paramètres.
+		Si ce message persiste, veuillez aller sur la page [SUPPORT_SITE].
 	</string>
 	<string name="MBPixelFmtSetErr">
 		Impossible de trouver le format pixel approprié
@@ -3227,22 +3321,30 @@ Si ce message persiste, veuillez aller sur la page [SUPPORT_SITE].
 		Impossible d&apos;activer le contexte de rendu GL
 	</string>
 	<string name="MBVideoDrvErr">
-		[APP_NAME] ne peut pas s&apos;exécuter car les pilotes de votre carte vidéo n&apos;ont pas été installés correctement, ne sont pas à jour, ou sont pour du matériel non pris en charge. Assurez-vous d&apos;avoir des pilotes de cartes vidéos récents, et même si vous avez les plus récents, réinstallez-les.
+		[APP_NAME] ne peut pas s&apos;exécuter car les pilotes de votre carte vidéo n&apos;ont pas
+		été installés correctement, ne sont pas à jour, ou sont pour du matériel non pris en charge.
+		Assurez-vous d&apos;avoir des pilotes de cartes vidéos récents, et même si vous avez les
+		plus récents, réinstallez-les.
 
-Si ce message persiste, veuillez aller sur la page [SUPPORT_SITE].
+		Si ce message persiste, veuillez aller sur la page [SUPPORT_SITE].
 	</string>
 	<string name="MBOutOfMemoryTitle">
 		Out Of Memory
 	</string>
 	<string name="MBOutOfMemoryErr">
-		La demande de mémoire de [APP_NAME] a échoué. L'application ne peut pas continuer et sera fermée.
+		La demande de mémoire de [APP_NAME] a échoué. L'application ne peut pas continuer et sera
+		fermée.
 
-Si la mémoire vive de votre ordinateur est faible, quittez les applications lourdes avant de lancer [APP_NAME], allouez un fichier de page ou réduisez les paramètres graphiques tels que la distance de rendu.
+		Si la mémoire vive de votre ordinateur est faible, quittez les applications lourdes avant de
+		lancer [APP_NAME], allouez un fichier de page ou réduisez les paramètres graphiques tels que
+		la distance de rendu.
 	</string>
 	<string name="MBMissingFile">
-		[APP_NAME] n'a pas pu accéder ou trouver certains des fichiers dont il a besoin et sera fermé.
+		[APP_NAME] n'a pas pu accéder ou trouver certains des fichiers dont il a besoin et sera
+		fermé.
 
-Veuillez réinstaller la le clientuse à partir de [DOWNLOAD_URL] et contacter [SUPPORT_SITE] si le problème persiste après la réinstallation.
+		Veuillez réinstaller la le clientuse à partir de [DOWNLOAD_URL] et contacter [SUPPORT_SITE]
+		si le problème persiste après la réinstallation.
 	</string>
 	<string name="5 O'Clock Shadow">
 		Ombre de 5 heures
@@ -4709,10 +4811,12 @@ Veuillez réinstaller la le clientuse à partir de [DOWNLOAD_URL] et contacter [
 		Région de type Général
 	</string>
 	<string name="LocationCtrlSeeAVsTooltip">
-		Les avatars à l&apos;extérieur de cette parcelle ne peuvent pas voir ni entendre les avatars qui se trouvent à l&apos;intérieur.
+		Les avatars à l&apos;extérieur de cette parcelle ne peuvent pas voir ni entendre les avatars
+		qui se trouvent à l&apos;intérieur.
 	</string>
 	<string name="LocationCtrlPathfindingDirtyTooltip">
-		Les objets mobiles risquent de ne pas se comporter correctement dans cette région tant qu&apos;elle n&apos;est pas refigée.
+		Les objets mobiles risquent de ne pas se comporter correctement dans cette région tant
+		qu&apos;elle n&apos;est pas refigée.
 	</string>
 	<string name="LocationCtrlPathfindingDisabledTooltip">
 		La recherche de chemin dynamique n&apos;est pas activée dans cette région.
@@ -4727,7 +4831,8 @@ Veuillez réinstaller la le clientuse à partir de [DOWNLOAD_URL] et contacter [
 		Installation de [APP_NAME]...
 	</string>
 	<string name="UpdaterUpdatingDescriptive">
-		Le client [APP_NAME] est en train d&apos;être mis à jour.  Cela peut prendre un certain temps, merci de votre patience.
+		Le client [APP_NAME] est en train d&apos;être mis à jour. Cela peut prendre un certain
+		temps, merci de votre patience.
 	</string>
 	<string name="UpdaterProgressBarTextWithEllipses">
 		Mise à jour en cours...
@@ -4739,7 +4844,8 @@ Veuillez réinstaller la le clientuse à partir de [DOWNLOAD_URL] et contacter [
 		Le téléchargement de la mise à jour a échoué
 	</string>
 	<string name="UpdaterFailUpdateDescriptive">
-		Une erreur est survenue lors de la mise à jour de [APP_NAME]. Veuillez télécharger la dernière version sur www.secondlife.com.
+		Une erreur est survenue lors de la mise à jour de [APP_NAME]. Veuillez télécharger la
+		dernière version sur www.secondlife.com.
 	</string>
 	<string name="UpdaterFailInstallTitle">
 		L&apos;installation de la mise à jour a échoué
@@ -4748,10 +4854,12 @@ Veuillez réinstaller la le clientuse à partir de [DOWNLOAD_URL] et contacter [
 		Impossible de lancer le client
 	</string>
 	<string name="ItemsComingInTooFastFrom">
-		[APP_NAME] : transfert trop rapide des articles de [FROM_NAME] ; aperçu automatique désactivé pendant [TIME] secondes
+		[APP_NAME] : transfert trop rapide des articles de [FROM_NAME] ; aperçu automatique
+		désactivé pendant [TIME] secondes
 	</string>
 	<string name="ItemsComingInTooFast">
-		[APP_NAME] : transfert trop rapide des articles ; aperçu automatique désactivé pendant [TIME] secondes
+		[APP_NAME] : transfert trop rapide des articles ; aperçu automatique désactivé pendant
+		[TIME] secondes
 	</string>
 	<string name="IM_logging_string">
 		-- Archivage des IM activé --
@@ -4784,7 +4892,8 @@ Veuillez réinstaller la le clientuse à partir de [DOWNLOAD_URL] et contacter [
 		(Enregistrement : [LONG_TIMESTAMP])
 	</string>
 	<string name="IM_unblock_only_groups_friends">
-		Pour afficher ce message, vous devez désactiver la case Seuls mes amis et groupes peuvent m&apos;appeler ou m&apos;envoyer un IM, sous Préférences/Confidentialité.
+		Pour afficher ce message, vous devez désactiver la case Seuls mes amis et groupes peuvent
+		m&apos;appeler ou m&apos;envoyer un IM, sous Préférences/Confidentialité.
 	</string>
 	<string name="OnlineStatus">
 		En ligne
@@ -4817,7 +4926,8 @@ Veuillez réinstaller la le clientuse à partir de [DOWNLOAD_URL] et contacter [
 		Vous avez rejoint l&apos;appel
 	</string>
 	<string name="you_auto_rejected_call-im">
-		Vous avez automatiquement refusé l&apos;appel vocal quand le mode Ne pas déranger était activé.
+		Vous avez automatiquement refusé l&apos;appel vocal quand le mode Ne pas déranger était
+		activé.
 	</string>
 	<string name="name_started_call">
 		[NAME] appelle.
@@ -4848,7 +4958,7 @@ Veuillez réinstaller la le clientuse à partir de [DOWNLOAD_URL] et contacter [
 	</string>
 	<string name="bot_warning">
 		Vous discutez avec un bot, [NAME]. Ne partagez aucune information personnelle.
-Pour en savoir plus, rendez-vous sur https://second.life/scripted-agents.
+		Pour en savoir plus, rendez-vous sur https://second.life/scripted-agents.
 	</string>
 	<string name="inventory_item_offered_rlv">
 		Article d'inventaire offert à [NAME]
@@ -5042,7 +5152,7 @@ Pour en savoir plus, rendez-vous sur https://second.life/scripted-agents.
 	<string name="uploading_abuse_report">
 		Chargement...
 
-du rapport d&apos;infraction
+		du rapport d&apos;infraction
 	</string>
 	<string name="New Shape">
 		Nouvelle silhouette
@@ -5324,20 +5434,23 @@ du rapport d&apos;infraction
 		Impossible de charger des images de taille supérieure à [WIDTH]*[HEIGHT]
 	</string>
 	<string name="outfit_photo_load_dimensions_error">
-		Taille max. de la photo de la tenue : [WIDTH]*[HEIGHT]. Redimensionnez l’image ou utilisez-en une autre.
+		Taille max. de la photo de la tenue : [WIDTH]*[HEIGHT]. Redimensionnez l’image ou
+		utilisez-en une autre.
 	</string>
 	<string name="outfit_photo_select_dimensions_error">
 		Taille max. de la photo de la tenue : [WIDTH]*[HEIGHT]. Sélectionnez une autre texture.
 	</string>
 	<string name="outfit_photo_verify_dimensions_error">
-		Impossible de vérifier les dimensions de la photo. Attendez que la taille de la photo s’affiche dans le sélecteur.
+		Impossible de vérifier les dimensions de la photo. Attendez que la taille de la photo
+		s’affiche dans le sélecteur.
 	</string>
-	<string name="words_separator" value=","/>
+	<string name="words_separator" value="," />
 	<string name="server_is_down">
 		Malgré nos efforts, une erreur inattendue s’est produite.
 
-Veuillez vous reporter à https://secondlife-status.statuspage.io afin de déterminer si un problème connu existe avec ce service.
-Si le problème persiste, vérifiez la configuration de votre réseau et de votre pare-feu.
+		Veuillez vous reporter à https://secondlife-status.statuspage.io afin de déterminer si un
+		problème connu existe avec ce service.
+		Si le problème persiste, vérifiez la configuration de votre réseau et de votre pare-feu.
 	</string>
 	<string name="dateTimeWeekdaysNames">
 		Dimanche:Lundi:Mardi:Mercredi:Jeudi:Vendredi:Samedi
@@ -5346,7 +5459,7 @@ Si le problème persiste, vérifiez la configuration de votre réseau et de votr
 		Dim:Lun:Mar:Mer:Jeu:Ven:Sam
 	</string>
 	<string name="dateTimeMonthNames">
-			Janvier:Février:Mars:Avril:Mai:Juin:Juillet:Août:Septembre:Octobre:Novembre:Décembre
+		Janvier:Février:Mars:Avril:Mai:Juin:Juillet:Août:Septembre:Octobre:Novembre:Décembre
 	</string>
 	<string name="dateTimeMonthShortNames">
 		Jan:Fév:Mar:Avr:Mai:Juin:Juil:Août:Sep:Oct:Nov:Déc
@@ -5430,13 +5543,14 @@ Si le problème persiste, vérifiez la configuration de votre réseau et de votr
 		Cette tenue ne contient aucun article.
 	</string>
 	<string name="ExternalEditorNotSet">
-		Sélectionnez un éditeur en définissant la variable d'environnement LL_SCRIPT_EDITOR ou le paramètre ExternalEditor.
-Voyez https://wiki.secondlife.com/wiki/LSL_Alternate_Editors
+		Sélectionnez un éditeur en définissant la variable d'environnement LL_SCRIPT_EDITOR ou le
+		paramètre ExternalEditor.
+		Voyez https://wiki.secondlife.com/wiki/LSL_Alternate_Editors
 	</string>
 	<string name="ExternalEditorNotFound">
 		Éditeur externe spécifié introuvable.
-Essayez avec le chemin d&apos;accès à l&apos;éditeur entre guillemets doubles
-(par ex. : &quot;/chemin_accès/editor&quot; &quot;%s&quot;).
+		Essayez avec le chemin d&apos;accès à l&apos;éditeur entre guillemets doubles
+		(par ex. : &quot;/chemin_accès/editor&quot; &quot;%s&quot;).
 	</string>
 	<string name="ExternalEditorCommandParseError">
 		Erreur lors de l&apos;analyse de la commande d&apos;éditeur externe.
@@ -6002,7 +6116,7 @@ Essayez avec le chemin d&apos;accès à l&apos;éditeur entre guillemets doubles
 	<string name="Command_Omnifilter_Label">
 		Omnifiltre
 	</string>
-	 <string name="Command_360_Capture_Tooltip">
+	<string name="Command_360_Capture_Tooltip">
 		Capturez une image équirectangulaire de 360°.
 	</string>
 	<string name="Command_AboutLand_Tooltip">
@@ -6159,7 +6273,8 @@ Essayez avec le chemin d&apos;accès à l&apos;éditeur entre guillemets doubles
 		Ouvre le radar pour détecter les avatars à proximité
 	</string>
 	<string name="Command_Conversation_Log_Tooltip">
-		Ouvre l'historique des conversations pour consulter les transcriptions des conversations passées
+		Ouvre l'historique des conversations pour consulter les transcriptions des conversations
+		passées
 	</string>
 	<string name="Command_Move_Lock_Tooltip">
 		Immobilise l'avatar dans sa position actuelle (CTRL+ALT+P)
@@ -6180,10 +6295,13 @@ Essayez avec le chemin d&apos;accès à l&apos;éditeur entre guillemets doubles
 		Ouvre la liste des vêtements préférés
 	</string>
 	<string name="Command_RFO_Tooltip">
-		Ne montrez que vos amis, tous les autres avatars seront supprimés. Une fois activé, une téléportation est nécessaire pour rétablir la visibilité des autres.
+		Ne montrez que vos amis, tous les autres avatars seront supprimés. Une fois activé, une
+		téléportation est nécessaire pour rétablir la visibilité des autres.
 	</string>
 	<string name="Command_DAO_Tooltip">
-		Ne pas afficher les objets animés (aka Animesh) - Ne pas afficher temporairement tous les animesh visibles (attachés et en liberté). Les animesh qui ne sont pas affichés réapparaitront aprés une téléportation
+		Ne pas afficher les objets animés (aka Animesh) - Ne pas afficher temporairement tous les
+		animesh visibles (attachés et en liberté). Les animesh qui ne sont pas affichés
+		réapparaitront aprés une téléportation
 	</string>
 	<string name="Command_Beacons_Tooltip">
 		Montrer les balises
@@ -6294,7 +6412,8 @@ Essayez avec le chemin d&apos;accès à l&apos;éditeur entre guillemets doubles
 		Le contrôle du paramètre &quot;[CONTROL_NAME]&quot; doit être entre [VALUE_1] et [VALUE_2].
 	</string>
 	<string name="SanityCheckNotBetween">
-		Le contrôle du paramètre &quot;[CONTROL_NAME]&quot; ne doit pas être entre [VALUE_1] et [VALUE_2].
+		Le contrôle du paramètre &quot;[CONTROL_NAME]&quot; ne doit pas être entre [VALUE_1] et
+		[VALUE_2].
 	</string>
 	<string name="MediaFilterActionAllow">
 		Autoriser
@@ -6329,9 +6448,9 @@ Essayez avec le chemin d&apos;accès à l&apos;éditeur entre guillemets doubles
 	<string name="MediaFilterMediaContentUrlAlwaysBlocked">
 		Les médias de l'URL [MEDIAURL] ne seront jamais joués.
 	</string>
-	 <string name="MediaFilterAudioContentBlocked">
+	<string name="MediaFilterAudioContentBlocked">
 		Le flux audio du domaine [DOMAIN] a été bloqué.
-	 </string>
+	</string>
 	<string name="MediaFilterAudioContentDomainAlwaysAllowed">
 		Le flux audio du domaine [DOMAIN] sera toujours joué.
 	</string>
@@ -6505,13 +6624,18 @@ Essayez avec le chemin d&apos;accès à l&apos;éditeur entre guillemets doubles
 		--- Les charger tous ---
 	</string>
 	<string name="logging_calls_disabled_log_empty">
-		Les conversations ne sont pas archivées. Pour commencer à tenir un journal, choisissez Enregistrer : Journal seul ou Enregistrer : Journal et transcriptions sous Préférences &gt; Chat.
+		Les conversations ne sont pas archivées. Pour commencer à tenir un journal, choisissez
+		Enregistrer : Journal seul ou Enregistrer : Journal et transcriptions sous Préférences &gt;
+		Chat.
 	</string>
 	<string name="logging_calls_disabled_log_not_empty">
-		Aucune conversation ne sera plus enregistrée. Pour recommencer à tenir un journal, choisissez Enregistrer : Journal seul ou Enregistrer : Journal et transcriptions sous Préférences &gt; Chat.
+		Aucune conversation ne sera plus enregistrée. Pour recommencer à tenir un journal,
+		choisissez Enregistrer : Journal seul ou Enregistrer : Journal et transcriptions sous
+		Préférences &gt; Chat.
 	</string>
 	<string name="logging_calls_enabled_log_empty">
-		Il n&apos;y a aucune conversation enregistrée. Quand quelqu&apos;un vous contacte ou quand vous contactez quelqu&apos;un, une entrée de journal s&apos;affiche ici.
+		Il n&apos;y a aucune conversation enregistrée. Quand quelqu&apos;un vous contacte ou quand
+		vous contactez quelqu&apos;un, une entrée de journal s&apos;affiche ici.
 	</string>
 	<string name="loading_chat_logs">
 		Chargement...
@@ -6532,43 +6656,49 @@ Essayez avec le chemin d&apos;accès à l&apos;éditeur entre guillemets doubles
 		Aucune limite
 	</string>
 	<string name="Mav_Details_MAV_FOUND_DEGENERATE_TRIANGLES">
-		La forme physique contient des triangles trop petits. Essayez de simplifier le modèle physique.
+		La forme physique contient des triangles trop petits. Essayez de simplifier le modèle
+		physique.
 	</string>
 	<string name="Mav_Details_MAV_CONFIRMATION_DATA_MISMATCH">
-		La forme physique contient de mauvaises données de confirmation. Essayez de corriger le modèle physique.
+		La forme physique contient de mauvaises données de confirmation. Essayez de corriger le
+		modèle physique.
 	</string>
 	<string name="Mav_Details_MAV_UNKNOWN_VERSION">
-		La forme physique n’a pas la version correcte. Configurez la version correcte pour le modèle physique.
+		La forme physique n’a pas la version correcte. Configurez la version correcte pour le modèle
+		physique.
 	</string>
 	<string name="couldnt_resolve_host">
 		DNS n&apos;a pas pu résoudre le nom d&apos;hôte([HOSTNAME]).
-Veuillez vérifier que vous parvenez à vous connecter au site www.secondlife.com.
-Si c&apos;est le cas, et que vous continuez à recevoir ce message d&apos;erreur, veuillez vous
-rendre à la section Support et signaler ce problème
+		Veuillez vérifier que vous parvenez à vous connecter au site www.secondlife.com.
+		Si c&apos;est le cas, et que vous continuez à recevoir ce message d&apos;erreur, veuillez
+		vous
+		rendre à la section Support et signaler ce problème
 	</string>
 	<string name="ssl_peer_certificate">
 		Le serveur d&apos;identification a rencontré une erreur de connexion SSL.
-Si vous continuez à recevoir ce message d&apos;erreur,
-veuillez vous rendre à la section Support du site web
-SecondLife.com et signaler ce problème
+		Si vous continuez à recevoir ce message d&apos;erreur,
+		veuillez vous rendre à la section Support du site web
+		SecondLife.com et signaler ce problème
 	</string>
 	<string name="ssl_connect_error">
 		Ceci est souvent dû à un mauvais réglage de l&apos;horloge de votre ordinateur.
-Veuillez aller à Tableaux de bord et assurez-vous que l&apos;heure et la date sont réglés
-correctement. Vérifiez également que votre réseau et votre pare-feu sont configurés
-correctement. Si vous continuez à recevoir ce message d&apos;erreur, veuillez vous rendre
-à la section Support du site web SecondLife.com et signaler ce problème.
-
-[https://community.secondlife.com/knowledgebase/english/error-messages-r520/#Section__3 Base de connaissances]
+		Veuillez aller à Tableaux de bord et assurez-vous que l&apos;heure et la date sont réglés
+		correctement. Vérifiez également que votre réseau et votre pare-feu sont configurés
+		correctement. Si vous continuez à recevoir ce message d&apos;erreur, veuillez vous rendre
+		à la section Support du site web SecondLife.com et signaler ce problème.
+		[https://community.secondlife.com/knowledgebase/english/error-messages-r520/#Section__3 Base
+		de connaissances]
 	</string>
 	<string name="LoadCameraPositionNoneSaved">
 		Aucune vue de la caméra n'a encore été enregistrée.
 	</string>
 	<string name="LoadCameraPositionOutsideDrawDistance">
-		Impossible de restaurer la vue de la caméra parce que la position de la caméra est au-delà de la distance d'affichage.
+		Impossible de restaurer la vue de la caméra parce que la position de la caméra est au-delà
+		de la distance d'affichage.
 	</string>
 	<string name="DrawDistanceSteppingGestureObsolete">
-		En raison des modifications apportées au code, il n'est plus nécessaire d'utiliser ce geste. Le réglage progressif de la distance d'affichage a été activé..
+		En raison des modifications apportées au code, il n'est plus nécessaire d'utiliser ce geste.
+		Le réglage progressif de la distance d'affichage a été activé..
 	</string>
 	<string name="FSCameraPositionCopied">
 		Position de la caméra [POS] copiée dans le presse-papiers.
@@ -6583,7 +6713,13 @@ correctement. Si vous continuez à recevoir ce message d&apos;erreur, veuillez v
 		Vous devez fournir des valeurs positives pour les dés (max 100) et les faces (max 1000).
 	</string>
 	<string name="FSCmdLineRollDiceModifiersInvalid">
-		Si vous souhaitez utiliser un modificateur, vous devez fournir un numéro de modificateur valide et le type de modificateur. Le modificateur doit être compris entre -1000 et 1000. Les types de modificateurs valides sont "+" (bonus), "-" (pénalités), "&gt;", "&lt;" (succès), "r&gt;", "r&lt;", "r" (relancer), "!p&gt;", "!p&lt;", "!p" (pénétrations), "!&gt;", "!&lt;" and "!" (explosions). Vous ne pouvez utiliser qu'un seul type de modificateur par tirage. Exemples : "[COMMAND] 1 20 + 5", "[COMMAND] 5 40 &gt; 15", "[COMMAND] 10 25 ! 25", "[COMMAND] 15 25 !&lt; 10".
+		Si vous souhaitez utiliser un modificateur, vous devez fournir un numéro de modificateur
+		valide et le type de modificateur. Le modificateur doit être compris entre -1000 et 1000.
+		Les types de modificateurs valides sont "+" (bonus), "-" (pénalités), "&gt;", "&lt;"
+		(succès), "r&gt;", "r&lt;", "r" (relancer), "!p&gt;", "!p&lt;", "!p" (pénétrations),
+		"!&gt;", "!&lt;" and "!" (explosions). Vous ne pouvez utiliser qu'un seul type de
+		modificateur par tirage. Exemples : "[COMMAND] 1 20 + 5", "[COMMAND] 5 40 &gt; 15",
+		"[COMMAND] 10 25 ! 25", "[COMMAND] 15 25 !&lt; 10".
 	</string>
 	<string name="FSCmdLineRollDiceExploded">
 		Explosé
@@ -6598,10 +6734,12 @@ correctement. Si vous continuez à recevoir ce message d&apos;erreur, veuillez v
 		Relancer
 	</string>
 	<string name="FSCmdLineRollDiceFreezeGuard">
-		Cette opération ne peut être réalisée car le client se figerait dans une boucle infinie. Veuillez modifier les critères.
+		Cette opération ne peut être réalisée car le client se figerait dans une boucle infinie.
+		Veuillez modifier les critères.
 	</string>
 	<string name="FSCmdLineCalcRandError">
-		'[RAND]' n'est pas une expression valable pour RAND(min,max). MAX doit être supérieur à MIN, les deux dans une fourchette de -10000 à 10000.
+		'[RAND]' n'est pas une expression valable pour RAND(min,max). MAX doit être supérieur à MIN,
+		les deux dans une fourchette de -10000 à 10000.
 	</string>
 	<string name="FSCmdLineRSP">
 		Bande passante maximale réglée à [VALUE] KBPS.
@@ -6632,7 +6770,8 @@ correctement. Si vous continuez à recevoir ce message d&apos;erreur, veuillez v
 		Toutes catégories
 	</string>
 	<string name="search_banned">
-		Certains termes de votre requête de recherche ont été exclus en raison de restrictions de contenu, comme précisé dans les Community Standards.
+		Certains termes de votre requête de recherche ont été exclus en raison de restrictions de
+		contenu, comme précisé dans les Community Standards.
 	</string>
 	<string name="search_short">
 		Vos termes de recherche étant trop courts, aucune recherche n'a été effectuée.
@@ -6665,13 +6804,16 @@ correctement. Si vous continuez à recevoir ce message d&apos;erreur, veuillez v
 		Inconnu, au-delà de la normale, vérifiez le paramètre de débogage RenderQualityPerformance
 	</string>
 	<string name="fsbridge_cant_create_disabled">
-		[APP_NAME] ne peut pas créer le bridge LSL si "Activer le Bridge LSL" est désactivé dans les Préférences.
+		[APP_NAME] ne peut pas créer le bridge LSL si "Activer le Bridge LSL" est désactivé dans les
+		Préférences.
 	</string>
 	<string name="fsbridge_no_library">
-		[APP_NAME] n'a pas pu créer un bridge LSL. Veuillez activer votre bibliothèque et vous reconnecter.
+		[APP_NAME] n'a pas pu créer un bridge LSL. Veuillez activer votre bibliothèque et vous
+		reconnecter.
 	</string>
 	<string name="fsbridge_already_creating">
-		Création d'un bridge en cours, impossible d'en lancer un autre. Veuillez attendre quelques minutes avant de réessayer.
+		Création d'un bridge en cours, impossible d'en lancer un autre. Veuillez attendre quelques
+		minutes avant de réessayer.
 	</string>
 	<string name="fsbridge_creating">
 		Création du bridge. Cela peut prendre un moment, veuillez patienter.
@@ -6680,19 +6822,27 @@ correctement. Si vous continuez à recevoir ce message d&apos;erreur, veuillez v
 		Bridge non créé. Le script de bridge n'a pas pu être créé.
 	</string>
 	<string name="fsbridge_failure_creation_bad_name">
-		Bridge non créé. Le bridge porte un nom incorrect. Veuillez utiliser le menu 'Moi/Santé de l'avatar/Recréer le Bridge' LSL de [APP_NAME] pour recréer le bridge.
+		Bridge non créé. Le bridge porte un nom incorrect. Veuillez utiliser le menu 'Moi/Santé de
+		l'avatar/Recréer le Bridge' LSL de [APP_NAME] pour recréer le bridge.
 	</string>
 	<string name="fsbridge_failure_creation_null">
-		Bridge non créé. Le bridge n'a pas pu être trouvé dans l'inventaire. Veuillez utiliser le menu 'Moi/Santé de l'avatar/Recréer le Bridge' LSL de [APP_NAME] pour recréer le bridge.
+		Bridge non créé. Le bridge n'a pas pu être trouvé dans l'inventaire. Veuillez utiliser le
+		menu 'Moi/Santé de l'avatar/Recréer le Bridge' LSL de [APP_NAME] pour recréer le bridge.
 	</string>
 	<string name="fsbridge_failure_attach_wrong_object">
-		Le bridge n'a pas réussi à s'attacher. Il ne s'agit pas de la version actuelle du bridge. Veuillez utiliser le menu 'Moi/Santé de l'avatar/Recréer le Bridge' LSL de [APP_NAME] pour recréer le bridge.
+		Le bridge n'a pas réussi à s'attacher. Il ne s'agit pas de la version actuelle du bridge.
+		Veuillez utiliser le menu 'Moi/Santé de l'avatar/Recréer le Bridge' LSL de [APP_NAME] pour
+		recréer le bridge.
 	</string>
 	<string name="fsbridge_failure_attach_wrong_location">
-		Le bridge ne s'est pas attaché. Le bridge n'a pas été trouvé dans le bon emplacement de l'inventaire. Veuillez utiliser le menu 'Moi/Santé de l'avatar/Recréer le Bridge' LSL de [APP_NAME] pour recréer le bridge.
+		Le bridge ne s'est pas attaché. Le bridge n'a pas été trouvé dans le bon emplacement de
+		l'inventaire. Veuillez utiliser le menu 'Moi/Santé de l'avatar/Recréer le Bridge' LSL de
+		[APP_NAME] pour recréer le bridge.
 	</string>
 	<string name="fsbridge_failure_attach_point_in_use">
-		Le bridge ne s'est pas attaché. Quelque chose d'autre utilisait le point d'attache du bridge. Veuillez utiliser le menu 'Moi/Santé de l'avatar/Recréer le Bridge' LSL de [APP_NAME] pour recréer le bridge.
+		Le bridge ne s'est pas attaché. Quelque chose d'autre utilisait le point d'attache du
+		bridge. Veuillez utiliser le menu 'Moi/Santé de l'avatar/Recréer le Bridge' LSL de
+		[APP_NAME] pour recréer le bridge.
 	</string>
 	<string name="fsbridge_failure_not_found">
 		L'objet bridge n'a pas pu être trouvé. Impossible de procéder à sa création, fin de tâche.
@@ -6701,7 +6851,8 @@ correctement. Si vous continuez à recevoir ce message d&apos;erreur, veuillez v
 		L'inventaire du bridge contient des éléments inattendus.
 	</string>
 	<string name="fsbridge_warning_not_finished">
-		Le bridge n'a pas fini de se créer, vous devrez peut-être utiliser la fonction 'Moi/Santé de l'avatar/Recréer le Bridge' LSL de [APP_NAME] pour le recréer avant de l'utiliser.
+		Le bridge n'a pas fini de se créer, vous devrez peut-être utiliser la fonction 'Moi/Santé de
+		l'avatar/Recréer le Bridge' LSL de [APP_NAME] pour le recréer avant de l'utiliser.
 	</string>
 	<string name="fsbridge_detached">
 		Bridge détaché.
@@ -6710,33 +6861,37 @@ correctement. Si vous continuez à recevoir ce message d&apos;erreur, veuillez v
 		Bridge créé.
 	</string>
 	<string name="fsbridge_script_info">
-		Infos sur le script : '[OBJECT_NAME]': [[OBJECT_RUNNING_SCRIPT_COUNT]/[OBJECT_TOTAL_SCRIPT_COUNT]] scripts en cours d'exécution, [OBJECT_SCRIPT_MEMORY] KB taille limite de mémoire autorisée, [OBJECT_SCRIPT_TIME] ms de temps CPU utilisé.[PATHFINDING_TEXT]
+		Infos sur le script : '[OBJECT_NAME]':
+		[[OBJECT_RUNNING_SCRIPT_COUNT]/[OBJECT_TOTAL_SCRIPT_COUNT]] scripts en cours d'exécution,
+		[OBJECT_SCRIPT_MEMORY] KB taille limite de mémoire autorisée, [OBJECT_SCRIPT_TIME] ms de
+		temps CPU utilisé.[PATHFINDING_TEXT]
 	</string>
 	<string name="fsbridge_script_info_pf">
-		Temps moyen d'utilisation du CPU pour la navigation avec recherche de chemin : [OBJECT_CHARACTER_TIME] ms.
+		Temps moyen d'utilisation du CPU pour la navigation avec recherche de chemin :
+		[OBJECT_CHARACTER_TIME] ms.
 	</string>
 	<string name="fsbridge_script_info_ext">
-ID de l'objet : [INSPECTING_KEY]
-Description: [OBJECT_DESC]
-Prim racine : [OBJECT_ROOT]
-Prim count: [OBJECT_PRIM_COUNT]
-Impact sur le terrain : [OBJECT_PRIM_EQUIVALENCE]
-Articles de l'inventaire : [OBJECT_TOTAL_INVENTORY_COUNT]
-Vélocité : [OBJECT_VELOCITY]
-Position: [OBJECT_POS]
-Rotation: [OBJECT_ROT]
-Vitesse angulaire : [OBJECT_OMEGA] (radians per second)
-Créateur : [OBJECT_CREATOR]
-Propriétaire : [OBJECT_OWNER]
-Propriétaire précédent : [OBJECT_LAST_OWNER_ID]
-Posé par : [OBJECT_REZZER_KEY]
-Groupe : [OBJECT_GROUP]
-Date de création : [OBJECT_CREATION_TIME]
-Temps pour apparaitre : [OBJECT_REZ_TIME]
-Type de cheminement : [OBJECT_PATHFINDING_TYPE]
-Point d'attache : [OBJECT_ATTACHED_POINT]
-Attaché temporairement : [OBJECT_TEMP_ATTACHED]
-Votre position actuelle : [AVATAR_POS]
+		ID de l'objet : [INSPECTING_KEY]
+		Description: [OBJECT_DESC]
+		Prim racine : [OBJECT_ROOT]
+		Prim count: [OBJECT_PRIM_COUNT]
+		Impact sur le terrain : [OBJECT_PRIM_EQUIVALENCE]
+		Articles de l'inventaire : [OBJECT_TOTAL_INVENTORY_COUNT]
+		Vélocité : [OBJECT_VELOCITY]
+		Position: [OBJECT_POS]
+		Rotation: [OBJECT_ROT]
+		Vitesse angulaire : [OBJECT_OMEGA] (radians per second)
+		Créateur : [OBJECT_CREATOR]
+		Propriétaire : [OBJECT_OWNER]
+		Propriétaire précédent : [OBJECT_LAST_OWNER_ID]
+		Posé par : [OBJECT_REZZER_KEY]
+		Groupe : [OBJECT_GROUP]
+		Date de création : [OBJECT_CREATION_TIME]
+		Temps pour apparaitre : [OBJECT_REZ_TIME]
+		Type de cheminement : [OBJECT_PATHFINDING_TYPE]
+		Point d'attache : [OBJECT_ATTACHED_POINT]
+		Attaché temporairement : [OBJECT_TEMP_ATTACHED]
+		Votre position actuelle : [AVATAR_POS]
 	</string>
 	<string name="fsbridge_error_scriptinfonotfound">
 		Info script : L'objet à vérifier n'est pas valable ou est hors de portée.
@@ -6745,10 +6900,16 @@ Votre position actuelle : [AVATAR_POS]
 		Info script : Réception d'une réponse malformée du bridge. Réessayez.
 	</string>
 	<string name="fsbridge_error_injection">
-		NOTICE : Un ou plusieurs scripts ont été ajoutés au bridge de votre [APP_NAME] ! Si vous ne vous attendiez pas à recevoir ce message, utilisez le menu Moi/Santé de l'avatar/Recréer le bridge LSL de [APP_NAME] pour recréer le bridge.
+		NOTICE : Un ou plusieurs scripts ont été ajoutés au bridge de votre [APP_NAME] ! Si vous ne
+		vous attendiez pas à recevoir ce message, utilisez le menu Moi/Santé de l'avatar/Recréer le
+		bridge LSL de [APP_NAME] pour recréer le bridge.
 	</string>
 	<string name="fsbridge_error_wrongvm">
-		NOTICE : Le script du Bridge utilise l'ancien LSO (Limite de mémoire de 16 Ko) au lieu de la nouvelle machine virtuelle Mono (Limite de mémoire de 64 Ko), qui crée une forte probabilité de collision entre piles et de défaillance du bridge par manque de mémoire. Utilisez le menu Moi/Santé de l'avatar/Recréer le bridge LSL de [APP_NAME] pour recréer le bridge. Si vous voyez ce message à nouveau - veuillez essayer à nouveau dans une autre région.
+		NOTICE : Le script du Bridge utilise l'ancien LSO (Limite de mémoire de 16 Ko) au lieu de la
+		nouvelle machine virtuelle Mono (Limite de mémoire de 64 Ko), qui crée une forte probabilité
+		de collision entre piles et de défaillance du bridge par manque de mémoire. Utilisez le menu
+		Moi/Santé de l'avatar/Recréer le bridge LSL de [APP_NAME] pour recréer le bridge. Si vous
+		voyez ce message à nouveau - veuillez essayer à nouveau dans une autre région.
 	</string>
 
 	<!-- <FS:Zi> Animation overrider enable/disable messages - FIRE-24160 -->
@@ -6849,12 +7010,14 @@ Votre position actuelle : [AVATAR_POS]
 		Mute de la discussion de groupe de [NAME].
 	</string>
 	<string name="IgnoredAdHocSession">
-		Vous avez été invité à une conférence (ad-hoc) par [AVATAR_NAME], mais le client l'a automatiquement ignoré à cause de vos réglages.
+		Vous avez été invité à une conférence (ad-hoc) par [AVATAR_NAME], mais le client l'a
+		automatiquement ignoré à cause de vos réglages.
 	</string>
 
 	<!-- <FS:Ansariel> Radar notifications -->
 	<string name="camera_no_focus">
-		L'appareil photo ne peut pas faire la mise au point sur l'utilisateur [AVATARNAME] parce qu'il est en dehors de votre distance d'affichage.
+		L'appareil photo ne peut pas faire la mise au point sur l'utilisateur [AVATARNAME] parce
+		qu'il est en dehors de votre distance d'affichage.
 	</string>
 	<string name="entering_draw_distance">
 		est entré dans la distance d'affichage ([DISTANCE] m).
@@ -6883,13 +7046,16 @@ Votre position actuelle : [AVATAR_POS]
 	<string name="avatar_age_not_available">n.d.</string>
 
 	<string name="TotalScriptCountChangeIncrease">
-		Le nombre total de scripts dans la région est passé de [OLD_VALUE] à [NEW_VALUE] ([DIFFERENCE]).
+		Le nombre total de scripts dans la région est passé de [OLD_VALUE] à [NEW_VALUE]
+		([DIFFERENCE]).
 	</string>
 	<string name="TotalScriptCountChangeDecrease">
-		Le nombre total de scripts dans la région est passé de [OLD_VALUE] à [NEW_VALUE] ([DIFFERENCE]).
+		Le nombre total de scripts dans la région est passé de [OLD_VALUE] à [NEW_VALUE]
+		([DIFFERENCE]).
 	</string>
 	<string name="preproc_toggle_warning">
-		Le basculement du préprocesseur ne prendra effet que lorsque vous fermerez et rouvrirez cet éditeur.
+		Le basculement du préprocesseur ne prendra effet que lorsque vous fermerez et rouvrirez cet
+		éditeur.
 	</string>
 
 	<!-- <FS:Cron> FIRE-9335 -->
@@ -6926,7 +7092,8 @@ Votre position actuelle : [AVATAR_POS]
 	</string>
 	<!-- LSL Optimizer -->
 	<string name="fs_preprocessor_optimizer_start">
-		Optimisation des fonctions définies par l'utilisateur et des variables globales non référencées.
+		Optimisation des fonctions définies par l'utilisateur et des variables globales non
+		référencées.
 	</string>
 	<string name="fs_preprocessor_optimizer_regex_err">
 		Expression régulière non valide : '[WHAT]' ; optimisation LSL ignorée.
@@ -6955,7 +7122,8 @@ Votre position actuelle : [AVATAR_POS]
 		Appliquer la conversion de liste paresseuse.
 	</string>
 	<string name="fs_preprocessor_lazylist_regex_err">
-		Pas une expression régulière valide : '[WHAT]' ; Le convertisseur de liste paresseux a été ignoré.
+		Pas une expression régulière valide : '[WHAT]' ; Le convertisseur de liste paresseux a été
+		ignoré.
 	</string>
 	<string name="fs_preprocessor_lazylist_exception">
 		Exception interceptée : '[WHAT]' ; le convertisseur de liste paresseux a été ignoré.
@@ -6968,10 +7136,12 @@ Votre position actuelle : [AVATAR_POS]
 		Application de la conversion des instructions de commutation.
 	</string>
 	<string name="fs_preprocessor_switchstatement_regex_err">
-		Expression régulière non valide : '[WHAT]' ; Le convertisseur d'instruction de commutation a été ignoré.
+		Expression régulière non valide : '[WHAT]' ; Le convertisseur d'instruction de commutation a
+		été ignoré.
 	</string>
 	<string name="fs_preprocessor_switchstatement_exception">
-		Exception interceptée : '[WHAT]' ; Le convertisseur d'instruction de commutation a été ignoré.
+		Exception interceptée : '[WHAT]' ; Le convertisseur d'instruction de commutation a été
+		ignoré.
 	</string>
 	<string name="fs_preprocessor_switchstatement_unexpected_exception">
 		Exception inattendue dans le convertisseur d'instruction de commutation ; non appliquée.
@@ -6987,22 +7157,26 @@ Votre position actuelle : [AVATAR_POS]
 		La mise en cache est terminée pour '[FILENAME]'.
 	</string>
 	<string name="fs_preprocessor_cache_unsafe">
-		Erreur : le script nommé '[FILENAME]' n'est pas fiable pour être copié dans le système de fichiers. Cet include échouera.
+		Erreur : le script nommé '[FILENAME]' n'est pas fiable pour être copié dans le système de
+		fichiers. Cet include échouera.
 	</string>
 	<string name="fs_preprocessor_caching_err">
 		Erreur de mise en cache du fichier inclus '[FILENAME]'.
 	</string>
 	<string name="fs_preprocessor_truncated">
-		Avertissement : La sortie du préprocesseur a été tronquée en raison de la taille excessive du texte du script. Ce script ne fonctionnera probablement pas.
+		Avertissement : La sortie du préprocesseur a été tronquée en raison de la taille excessive
+		du texte du script. Ce script ne fonctionnera probablement pas.
 	</string>
 	<!-- </FS:Cron> -->
 
 	<!-- <FS:Zi> Notify user about preferences settings changes to skin defaults -->
 	<string name="skin_defaults_starlight_location">
-		L'affichage de votre position actuelle dans la barre de menu a été désactivé par défaut pour la série de skin Starlight.
+		L'affichage de votre position actuelle dans la barre de menu a été désactivé par défaut pour
+		la série de skin Starlight.
 	</string>
 	<string name="skin_defaults_starlight_navbar">
-		L'affichage de la barre de navigation a été activé par défaut pour la série de skin Starlight.
+		L'affichage de la barre de navigation a été activé par défaut pour la série de skin
+		Starlight.
 	</string>
 
 	<!-- Animation Explorer -->
@@ -7057,7 +7231,8 @@ Votre position actuelle : [AVATAR_POS]
 		Toujours courir désactivé.
 	</string>
 	<string name="FSRegionRestartInLocalChat">
-		La région où vous êtes est sur le point de redémarrer. Si vous restez, vous serez déconnecté.
+		La région où vous êtes est sur le point de redémarrer. Si vous restez, vous serez
+		déconnecté.
 	</string>
 	<string name="Mute_Add">
 		'[NAME]' a été ajouté à la liste de blocage.
@@ -7069,7 +7244,8 @@ Votre position actuelle : [AVATAR_POS]
 		Je demande des informations sur la configuration de votre système.
 	</string>
 	<string name="Reqsysinfo_Chat_Reason">
-		Je demande des informations sur la configuration de votre système pour la raison suivante : [REASON]
+		Je demande des informations sur la configuration de votre système pour la raison suivante :
+		[REASON]
 	</string>
 	<string name="Reqsysinfo_Chat_Information_sent">
 		Informations envoyées : [DATA]
@@ -7130,7 +7306,7 @@ Votre position actuelle : [AVATAR_POS]
 	</string>
 	<string name="Asset_Uploading">
 		Envoi...
-[ASSET_NAME]
+		[ASSET_NAME]
 	</string>
 	<string name="Yes">
 		Oui
@@ -7178,7 +7354,8 @@ Votre position actuelle : [AVATAR_POS]
 		Le fichier importé ne contient aucun UUID valide.
 	</string>
 	<string name="ImportListTooLarge">
-		Trop d'entrées. Le fichier CSV contient [COUNT] entrées et il y a [MAX] emplacements disponibles.
+		Trop d'entrées. Le fichier CSV contient [COUNT] entrées et il y a [MAX] emplacements
+		disponibles.
 	</string>
 	<string name="ImportSuccessful">
 		[COUNT] entrées traitées avec succès.
