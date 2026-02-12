@@ -44,6 +44,7 @@ class LLSD;
  * - sendNearby: Send nearby chat (whisper/normal/shout)
  * - sendIM: Send an instant message (creates session if needed)
  * - setVisible: Show/hide native chat UI
+ * - requestQuit: Request the viewer to quit gracefully
  */
 class PKChatEventAPI : public LLEventAPI
 {
@@ -57,6 +58,7 @@ private:
     void sendNearby(const LLSD& request);
     void sendIM(const LLSD& request);
     void setVisible(const LLSD& request);
+    void requestQuit(const LLSD& request);
 
     // Internal handlers for chat signals
     void onNearbyChat(const LLSD& chat);

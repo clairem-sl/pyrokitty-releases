@@ -640,6 +640,25 @@ body {
   padding: 8px 12px 6px;
 }
 
+.split-sidebar-header.collapsible {
+  cursor: pointer;
+  user-select: none;
+}
+
+.split-sidebar-header.collapsible:hover {
+  color: var(--text-primary);
+}
+
+.collapse-arrow {
+  display: inline-block;
+  margin-right: 4px;
+  transition: transform 0.15s ease;
+}
+
+.collapse-arrow.collapsed {
+  transform: rotate(-90deg);
+}
+
 .split-sidebar-empty {
   color: var(--text-secondary);
   font-size: 12px;

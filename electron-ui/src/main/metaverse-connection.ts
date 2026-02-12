@@ -7,6 +7,7 @@
 
 import { EventEmitter } from 'events';
 import { Bot, BotOptionFlags, LoginParameters, Vector3 } from '../../node-metaverse/dist/lib';
+import { LoginError } from '../../node-metaverse/dist/lib/classes/LoginError';
 import { ChatType } from '../../node-metaverse/dist/lib/enums/ChatType';
 import { ChatSourceType } from '../../node-metaverse/dist/lib/enums/ChatSourceType';
 import { InstantMessageEventFlags } from '../../node-metaverse/dist/lib/enums/InstantMessageEventFlags';
@@ -28,6 +29,8 @@ export interface LoginParams {
   password: string;
   gridLoginUri: string;
   startLocation?: string;
+  mfaHash?: string;
+  token?: string;
 }
 
 export interface HandoffData {
@@ -79,6 +82,7 @@ export interface MetaverseConnectionEvents {
   'nearby-avatars-update': (avatars: NearbyAvatar[]) => void;
   'error': (error: Error) => void;
   'login-progress': (message: string) => void;
+  'mfa-required': () => void;
 }
 
 export class MetaverseConnection extends EventEmitter {
@@ -93,6 +97,8 @@ export class MetaverseConnection extends EventEmitter {
   private messageIdCounter = 0;
   private displayNameCache: DisplayNameCache | null = null;
   private accountId: string | null = null;
+  private lastLoginParams: LoginParams | null = null;
+  private lastMfaHash?: string;
 
   constructor(public readonly instanceId: string) {
     super();
@@ -117,32 +123,50 @@ export class MetaverseConnection extends EventEmitter {
    * Login to Second Life via node-metaverse
    */
   async login(params: LoginParams): Promise<void> {
-    if (this.state !== 'disconnected') {
+    if (this.state !== 'disconnected' && this.state !== 'mfa_pending') {
       throw new Error(`Cannot login: connection is ${this.state}`);
     }
 
+    const isMfaRetry = this.state === 'mfa_pending' && this.bot !== null;
+    this.lastLoginParams = params;
     this.setState('logging_in');
-    this.emit('login-progress', 'Initializing...');
+    this.emit('login-progress', isMfaRetry ? 'Verifying MFA token...' : 'Initializing...');
 
     try {
-      const loginParams = new LoginParameters();
-      loginParams.firstName = params.firstName;
-      loginParams.lastName = params.lastName;
-      loginParams.password = params.password;
-      loginParams.url = params.gridLoginUri;
-      loginParams.start = params.startLocation || 'last';
+      if (!isMfaRetry) {
+        // Fresh login — create Bot
+        const loginParams = new LoginParameters();
+        loginParams.firstName = params.firstName;
+        loginParams.lastName = params.lastName;
+        loginParams.password = params.password;
+        loginParams.url = params.gridLoginUri;
+        loginParams.start = params.startLocation || 'last';
+        if (params.mfaHash) loginParams.mfa_hash = params.mfaHash;
+        if (params.token) loginParams.token = params.token;
 
-      this.bot = new Bot(loginParams, BotOptionFlags.None);
+        this.bot = new Bot(loginParams, BotOptionFlags.None);
 
-      // Enable teleport handoff mode for later viewer handoff
-      this.bot.teleportHandoffMode = true;
+        // Enable teleport handoff mode for later viewer handoff
+        this.bot.teleportHandoffMode = true;
 
-      // Create display name cache keyed by account
-      this.accountId = `${params.firstName}.${params.lastName}`.toLowerCase();
-      this.displayNameCache = new DisplayNameCache(this.accountId);
+        // Create display name cache keyed by account
+        this.accountId = `${params.firstName}.${params.lastName}`.toLowerCase();
+        this.displayNameCache = new DisplayNameCache(this.accountId);
+      } else {
+        // MFA retry — just set token on existing bot
+        if (params.token) {
+          this.bot!.loginParameters.token = params.token;
+        }
+      }
 
       this.emit('login-progress', 'Logging in...');
-      this.loginResponse = await this.bot.login() as unknown as Record<string, unknown>;
+      this.loginResponse = await this.bot!.login() as unknown as Record<string, unknown>;
+
+      // Extract mfaHash from login response for persistence
+      const loginResp = this.loginResponse as Record<string, unknown>;
+      if (loginResp.mfaHash) {
+        this.lastMfaHash = String(loginResp.mfaHash);
+      }
 
       // Set up event subscriptions BEFORE connecting so we catch early events
       this.setupEventSubscriptions();
@@ -152,13 +176,13 @@ export class MetaverseConnection extends EventEmitter {
       this.populateFriendsFromLogin();
 
       this.emit('login-progress', 'Connecting to simulator...');
-      await this.bot.connectToSim();
+      await this.bot!.connectToSim();
 
       // Groups will be populated from AgentGroupDataUpdate event
       // For now, initialize empty - groups arrive via event queue
 
       this.setState('metaverse_connected');
-      this.emit('login-progress', `Connected to ${this.bot.currentRegion?.regionName || 'region'}`);
+      this.emit('login-progress', `Connected to ${this.bot!.currentRegion?.regionName || 'region'}`);
 
       // Resolve display names for all friends in background
       this.resolveDisplayNamesForFriends().catch((err) => {
@@ -166,10 +190,35 @@ export class MetaverseConnection extends EventEmitter {
       });
 
     } catch (error) {
+      if (error instanceof LoginError && error.reason === 'mfa_challenge') {
+        // MFA required — keep bot alive for token retry
+        console.log('[MetaverseConnection] MFA challenge received, waiting for token');
+        this.setState('mfa_pending');
+        this.emit('mfa-required');
+        return;
+      }
       this.setState('disconnected');
       this.bot = null;
       throw error;
     }
+  }
+
+  /**
+   * Submit an MFA token after an mfa_challenge. Retries login with the token.
+   */
+  async submitMfaToken(token: string): Promise<void> {
+    if (this.state !== 'mfa_pending' || !this.lastLoginParams) {
+      throw new Error(`Cannot submit MFA token: connection is ${this.state}`);
+    }
+    await this.login({ ...this.lastLoginParams, token });
+  }
+
+  /**
+   * Get the MFA hash returned by the server after successful MFA login.
+   * Used to persist for future logins so the user isn't prompted again.
+   */
+  getLastMfaHash(): string | undefined {
+    return this.lastMfaHash;
   }
 
   /**
@@ -207,6 +256,11 @@ export class MetaverseConnection extends EventEmitter {
 
     // Nearby chat
     this.bot.clientEvents.onNearbyChat.subscribe((event) => {
+      // Skip typing indicators and other non-message chat types
+      if (event.chatType === ChatType.StartTyping || event.chatType === ChatType.StopTyping) {
+        return;
+      }
+
       const chatTypeMap: Record<number, 'whisper' | 'normal' | 'shout'> = {
         0: 'whisper',
         1: 'normal',
@@ -816,6 +870,9 @@ export class MetaverseConnectionManager extends EventEmitter {
     });
     connection.on('error', (error) => {
       this.emit('error', instanceId, error);
+    });
+    connection.on('mfa-required', () => {
+      this.emit('mfa-required', instanceId);
     });
 
     return connection;

@@ -27,6 +27,8 @@
 
 #include "llagent.h"
 #include "llagentui.h"
+#include "llappviewer.h"
+#include "llcallbacklist.h"
 #include "llevents.h"
 #include "llfloaterreg.h"
 #include "llimview.h"
@@ -74,6 +76,11 @@ PKChatEventAPI::PKChatEventAPI()
         "Control visibility of native chat UI.\n"
         "[\"visible\"] boolean to show (true) or hide (false) chat floaters [required]",
         &PKChatEventAPI::setVisible);
+
+    add("requestQuit",
+        "Request the viewer to quit gracefully.\n"
+        "The viewer will save settings and log out before exiting.",
+        &PKChatEventAPI::requestQuit);
 }
 
 PKChatEventAPI::~PKChatEventAPI()
@@ -371,4 +378,33 @@ void PKChatEventAPI::onIMMessage(const LLSD& msg)
     event["num_unread"] = msg["num_unread"];
 
     LLEventPumps::instance().obtain(mReplyPump).post(event);
+}
+
+void PKChatEventAPI::requestQuit(const LLSD& request)
+{
+    Response response(LLSD(), request);
+
+    LL_INFOS("PKChatEventAPI") << "Quit requested by external app" << LL_ENDL;
+    response["success"] = true;
+
+    // Send logout to SL immediately so the avatar doesn't linger in-world,
+    // then force quit after a short delay to let the packet flush.
+    // We can't use the normal requestQuit() flow because it requires multiple
+    // idle frames and the parent process (Electron) may exit and kill us first.
+    doOnIdleOneTime([]()
+    {
+        LLAppViewer::instance()->sendSimpleLogoutRequest();
+
+        // Give the network a few frames to flush the logout packet, then exit
+        doOnIdleRepeating([]() -> bool
+        {
+            static int frames = 0;
+            if (++frames >= 3)
+            {
+                LLAppViewer::instance()->forceQuit();
+                return true;
+            }
+            return false;
+        });
+    });
 }

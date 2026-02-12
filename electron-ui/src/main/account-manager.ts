@@ -82,7 +82,7 @@ export class AccountManager {
     return newAccount;
   }
 
-  updateAccount(accountId: string, updates: Partial<{ firstName: string; lastName: string; password: string }>): Account | null {
+  updateAccount(accountId: string, updates: Partial<{ firstName: string; lastName: string; password: string; mfaHash: string }>): Account | null {
     const account = this.accounts.find(a => a.id === accountId);
     if (!account) {
       return null;
@@ -91,6 +91,7 @@ export class AccountManager {
     if (updates.firstName) account.firstName = updates.firstName;
     if (updates.lastName) account.lastName = updates.lastName;
     if (updates.password) account.password = updates.password;
+    if (updates.mfaHash !== undefined) account.mfaHash = updates.mfaHash;
 
     this.saveAccounts();
     return account;

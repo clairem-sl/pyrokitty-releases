@@ -22,6 +22,7 @@ import { AgentFlags } from '../enums/AgentFlags';
 import { ControlFlags } from '../enums/ControlFlags';
 import { PacketFlags } from '../enums/PacketFlags';
 import { FolderType } from '../enums/FolderType';
+import { InventoryType } from '../enums/InventoryType';
 import type { Subscription } from 'rxjs';
 import { Subject } from 'rxjs';
 import { InventoryFolder } from './InventoryFolder';
@@ -249,7 +250,10 @@ export class Agent {
         const currentOutfitFolder = await this.getWearables();
         const wornObjects = this.currentRegion.objects.getObjectsByParent(this.localID);
         for (const item of currentOutfitFolder.items) {
-            if (item.type === AssetType.Notecard) {
+            const isAttachment = item.inventoryType === InventoryType.Object
+                || item.inventoryType === InventoryType.Attachment
+                || item.type === AssetType.Object;
+            if (isAttachment) {
                 let found = false;
                 for (const obj of wornObjects) {
                     if (obj.hasNameValueEntry('AttachItemID')) {
@@ -282,6 +286,33 @@ export class Agent {
         }
         this.appearanceComplete = true;
         this.appearanceCompleteEvent.next();
+
+        this.requestServerAppearanceUpdate().catch((err) => {
+            console.warn('Server appearance update failed:', err);
+        });
+    }
+
+    public async requestServerAppearanceUpdate(): Promise<void> {
+        try {
+            const cofFolder = await this.getWearables();
+            const cofId = cofFolder.folderID?.toString();
+            if (!cofId) {
+                console.warn('No Current Outfit folder ID found');
+                return;
+            }
+            const caps = this.currentRegion.caps;
+            if (!caps || !await caps.isCapAvailable('UpdateAvatarAppearance')) {
+                console.warn('UpdateAvatarAppearance capability not available');
+                return;
+            }
+            await caps.capsPostXML('UpdateAvatarAppearance', {
+                'cof_version': -1,
+                'folder_id': new UUID(cofId),
+            });
+            console.log('Server appearance update requested');
+        } catch (err) {
+            console.warn('requestServerAppearanceUpdate error:', err);
+        }
     }
 
     public setControlFlag(flag: ControlFlags): void {

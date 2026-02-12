@@ -13,7 +13,9 @@ import { ViewerInventoryAdapter } from './viewer-inventory-adapter';
 const syncManagers = new Map<string, InventorySyncManager>();
 
 function getOrCreateSyncManager(instanceId: string, mainWindow: BrowserWindow): InventorySyncManager | null {
-  if (syncManagers.has(instanceId)) return syncManagers.get(instanceId)!;
+  const cached = syncManagers.get(instanceId);
+  if (cached?.isBackendValid()) return cached;
+  if (cached) { cached.stopWatching(); syncManagers.delete(instanceId); }
 
   const instance = viewerManager.getInstance(instanceId);
   if (!instance) return null;
@@ -33,10 +35,11 @@ function getOrCreateSyncManager(instanceId: string, mainWindow: BrowserWindow): 
     }
   }
 
-  // Fall back to bot (node-metaverse)
+  // Fall back to bot (node-metaverse) — only if actually connected
   const metaverse = metaverseConnectionManager.get(instanceId);
   const bot = metaverse?.getBot();
   if (!bot) return null;
+  try { bot.clientCommands; } catch { return null; }
 
   const manager = new InventorySyncManager(bot, instance.accountId, onProgress);
   syncManagers.set(instanceId, manager);
@@ -94,6 +97,11 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
   ipcMain.handle(IPC_CHANNELS.LAUNCH_VIEWER_FOR_INSTANCE, async (_, instanceId: string) => {
     return viewerManager.launchViewerForInstance(instanceId);
+  });
+
+  // MFA handlers
+  ipcMain.handle(IPC_CHANNELS.MFA_SUBMIT, async (_, instanceId: string, token: string) => {
+    return viewerManager.submitMfaToken(instanceId, token);
   });
 
   ipcMain.handle(IPC_CHANNELS.GET_INSTANCES, async () => {
@@ -344,7 +352,7 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     const manager = getOrCreateSyncManager(instanceId, mainWindow);
     if (!manager) throw new Error('Cannot sync: not connected');
     // Run sync in background (don't await — progress updates via SYNC_PROGRESS events)
-    manager.sync().catch(err => console.error('[IPC] Sync error:', err));
+    manager.sync().then(() => manager.startWatching()).catch(err => console.error('[IPC] Sync error:', err));
     return true;
   });
 
@@ -368,14 +376,22 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     if (state === 'metaverse_connected') {
       // Small delay to let everything settle
       setTimeout(() => {
+        // Check state hasn't changed (e.g. viewer launched and kicked the bot)
+        const instance = viewerManager.getInstance(instanceId);
+        if (!instance || instance.connectionState !== 'metaverse_connected') {
+          console.log(`[IPC] Skipping auto-sync: state is now ${instance?.connectionState ?? 'gone'}`);
+          return;
+        }
         const manager = getOrCreateSyncManager(instanceId, mainWindow);
         if (manager) {
           console.log(`[IPC] Auto-starting inventory sync for ${instanceId}`);
-          manager.sync().catch(err => console.error('[IPC] Auto-sync error:', err));
+          manager.sync().then(() => manager.startWatching()).catch(err => console.error('[IPC] Auto-sync error:', err));
         }
       }, 2000);
     } else if (state === 'disconnected' || state === 'logging_in' || state === 'viewer_connected') {
-      // Clear stale sync manager so a fresh one is created with the appropriate backend
+      // Stop watching and clear stale sync manager so a fresh one is created with the appropriate backend
+      const oldManager = syncManagers.get(instanceId);
+      if (oldManager) oldManager.stopWatching();
       syncManagers.delete(instanceId);
     }
   });
@@ -470,6 +486,10 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
   metaverseConnectionManager.on('nearby-avatars-update', (instanceId: string, avatars: any[]) => {
     mainWindow.webContents.send(IPC_CHANNELS.NEARBY_AVATARS_UPDATE, { instanceId, avatars });
+  });
+
+  metaverseConnectionManager.on('mfa-required', (instanceId: string) => {
+    mainWindow.webContents.send(IPC_CHANNELS.MFA_REQUIRED, { instanceId });
   });
 
   metaverseConnectionManager.on('chat-session-update', (instanceId: string, session: any) => {

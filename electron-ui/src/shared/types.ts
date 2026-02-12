@@ -13,6 +13,7 @@ export interface Grid {
 export type ConnectionState =
   | 'disconnected'
   | 'logging_in'
+  | 'mfa_pending'
   | 'metaverse_connected'
   | 'handoff_in_progress'
   | 'viewer_connected'
@@ -100,6 +101,7 @@ export interface Account {
   firstName: string;
   lastName: string;
   password?: string; // Only saved if user opted in
+  mfaHash?: string; // Saved after successful MFA login to skip future prompts
 }
 
 // Running viewer instance
@@ -196,6 +198,10 @@ export const IPC_CHANNELS = {
   SYNC_GET_STATUS: 'inventory-sync:status',
   SYNC_PROGRESS: 'inventory-sync:progress',
   SYNC_OPEN_FOLDER: 'inventory-sync:open-folder',
+
+  // MFA
+  MFA_REQUIRED: 'mfa:required',
+  MFA_SUBMIT: 'mfa:submit',
 
   // Context menus
   SHOW_USER_CONTEXT_MENU: 'context-menu:user',

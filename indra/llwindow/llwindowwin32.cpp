@@ -672,15 +672,8 @@ LLWindowWin32::LLWindowWin32(LLWindowCallbacks* callbacks,
         // We will set the cursor ourselves
         wc.hCursor = NULL;
 
-        // background color is not used
-        if (clearBg)
-        {
-            wc.hbrBackground = (HBRUSH) GetStockObject(WHITE_BRUSH);
-        }
-        else
-        {
-            wc.hbrBackground = (HBRUSH) NULL;
-        }
+        // Use black background to avoid white flash before GL renders
+        wc.hbrBackground = (HBRUSH) GetStockObject(BLACK_BRUSH);
 
         // we don't use windows menus
         wc.lpszMenuName = NULL;

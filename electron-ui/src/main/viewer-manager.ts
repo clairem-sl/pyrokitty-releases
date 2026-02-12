@@ -117,6 +117,7 @@ export class ViewerManager extends EventEmitter {
         password: loginPassword,
         gridLoginUri: grid.loginUri,
         startLocation: options?.startLocation,
+        mfaHash: account.mfaHash,
       });
 
       console.log(`[ViewerManager] Login successful, connected to metaverse`);
@@ -128,9 +129,17 @@ export class ViewerManager extends EventEmitter {
         this.updateRegionName(instanceId, regionName);
       }
 
+      // Save mfaHash if server returned one
+      const mfaHash = metaverse.getLastMfaHash();
+      if (mfaHash) {
+        accountManager.updateAccount(account.id, { mfaHash });
+      }
+
       // Step 2: If viewer launch is requested, launch with CLI login
       // (Firestorm logging in will auto-disconnect node-metaverse)
       if (shouldLaunchViewer) {
+        // Store whether viewer launch was requested so submitMfaToken can continue
+        (instance as any)._pendingViewerLaunch = true;
         await this.launchViewerWithLogin(
           instanceId,
           instance,
@@ -145,6 +154,12 @@ export class ViewerManager extends EventEmitter {
       return instance;
 
     } catch (error) {
+      // If MFA is pending, keep the instance alive for token submission
+      if (metaverse.connectionState === 'mfa_pending') {
+        console.log(`[ViewerManager] MFA required for ${account.firstName} ${account.lastName}`);
+        (instance as any)._pendingViewerLaunch = shouldLaunchViewer;
+        return instance;
+      }
       console.error(`[ViewerManager] Launch failed:`, error);
       this.cleanup(instanceId);
       throw error;
@@ -313,10 +328,17 @@ export class ViewerManager extends EventEmitter {
         lastName: account.lastName,
         password,
         gridLoginUri: grid.loginUri,
+        mfaHash: account.mfaHash,
       });
 
       console.log(`[ViewerManager] Re-login successful, connected to metaverse`);
       this.updateStatus(instanceId, 'running');
+
+      // Save mfaHash if server returned one
+      const mfaHash = metaverse.getLastMfaHash();
+      if (mfaHash) {
+        accountManager.updateAccount(account.id, { mfaHash });
+      }
 
       // Update region name
       const regionName = metaverse.getRegionName();
@@ -325,6 +347,11 @@ export class ViewerManager extends EventEmitter {
       }
 
     } catch (error) {
+      // If MFA is pending, keep instance alive for token submission
+      if (metaverse.connectionState === 'mfa_pending') {
+        console.log(`[ViewerManager] MFA required on re-login for ${account.firstName} ${account.lastName}`);
+        return;
+      }
       console.error(`[ViewerManager] Re-login failed:`, error);
       this.cleanupInstance(instanceId);
       await metaverseConnectionManager.remove(instanceId);
@@ -445,22 +472,88 @@ export class ViewerManager extends EventEmitter {
     // Show disconnecting state in UI
     this.updateConnectionState(instanceId, 'disconnecting');
 
+    // Tell the viewer to quit gracefully via WebSocket
+    const connection = connectionManager.getConnection(instanceId);
+    if (connection?.isConnected) {
+      console.log(`[ViewerManager] Sending requestQuit to viewer ${instanceId}`);
+      connection.requestQuit();
+    }
+
     const childProcess = this.processes.get(instanceId);
     if (childProcess) {
-      // Try graceful shutdown first
-      childProcess.kill('SIGTERM');
+      // Wait for viewer to exit gracefully (it sends logout to SL then quits)
+      await new Promise<void>((resolve) => {
+        const forceKillTimer = setTimeout(() => {
+          if (this.processes.has(instanceId)) {
+            console.log(`[ViewerManager] Force-killing viewer ${instanceId}`);
+            childProcess.kill('SIGKILL');
+          }
+          resolve();
+        }, 10000);
 
-      // Force kill after timeout
-      setTimeout(() => {
-        if (this.processes.has(instanceId)) {
-          childProcess.kill('SIGKILL');
-        }
-      }, 5000);
+        childProcess.once('exit', () => {
+          clearTimeout(forceKillTimer);
+          resolve();
+        });
+      });
     } else {
       await this.cleanup(instanceId);
     }
 
     return true;
+  }
+
+  /**
+   * Submit an MFA token for a pending instance. Completes login and optionally launches viewer.
+   */
+  async submitMfaToken(instanceId: string, token: string): Promise<void> {
+    const instance = this.instances.get(instanceId);
+    if (!instance) {
+      throw new Error('Instance not found');
+    }
+
+    const metaverse = metaverseConnectionManager.get(instanceId);
+    if (!metaverse) {
+      throw new Error('Metaverse connection not found');
+    }
+
+    await metaverse.submitMfaToken(token);
+
+    console.log(`[ViewerManager] MFA login successful`);
+    this.updateStatus(instanceId, 'running');
+
+    // Save mfaHash for future logins
+    const account = accountManager.getAccount(instance.accountId);
+    const mfaHash = metaverse.getLastMfaHash();
+    if (account && mfaHash) {
+      accountManager.updateAccount(account.id, { mfaHash });
+    }
+
+    // Set region name
+    const regionName = metaverse.getRegionName();
+    if (regionName) {
+      this.updateRegionName(instanceId, regionName);
+    }
+
+    // If viewer launch was pending before MFA, continue with it
+    const pendingViewerLaunch = (instance as any)._pendingViewerLaunch;
+    delete (instance as any)._pendingViewerLaunch;
+
+    if (pendingViewerLaunch && account) {
+      const grid = gridManager.getGrid(instance.gridId);
+      const password = this.sessionPasswords.get(instanceId) || account.password;
+      if (grid && password) {
+        await this.launchViewerWithLogin(
+          instanceId,
+          instance,
+          account.firstName,
+          account.lastName,
+          password,
+          grid.nick,
+          instance.wsPort
+        );
+      }
+    }
   }
 
   private updateStatus(instanceId: string, status: ViewerStatus): void {
@@ -535,11 +628,12 @@ export class ViewerManager extends EventEmitter {
   }
 
   async stopAll(): Promise<void> {
+    // Tell all viewers to quit gracefully before disconnecting
+    for (const [instanceId] of this.instances) {
+      await this.stopViewer(instanceId);
+    }
     connectionManager.disconnectAll();
     await metaverseConnectionManager.removeAll();
-    for (const [instanceId] of this.instances) {
-      this.stopViewer(instanceId);
-    }
     this.shouldRelogin.clear();
     this.sessionPasswords.clear();
   }

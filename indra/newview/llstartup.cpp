@@ -1195,7 +1195,9 @@ bool idle_startup()
         }
 
         // [RLVa:KB] - Patch: RLVa-2.1.0
-        if (gSavedSettings.get<bool>(RlvSettingNames::Main))
+        // <FS:Pyrokitty> Allow auto-login when credentials were passed via --login command line
+        if (gSavedSettings.get<bool>(RlvSettingNames::Main) && gSavedSettings.getLLSD("UserLoginInfoCmdLine").size() != 3)
+        // </FS:Pyrokitty>
         {
             show_connect_box = true;
         }

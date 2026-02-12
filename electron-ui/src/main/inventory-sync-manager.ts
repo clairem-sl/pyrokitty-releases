@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { app } from 'electron';
+import { app, shell } from 'electron';
 import { Bot, AssetType, FolderType, InventoryType, LLLindenText } from '../../node-metaverse/dist/lib';
 import { InventoryFolder } from '../../node-metaverse/dist/lib/classes/InventoryFolder';
 import { InventoryItem } from '../../node-metaverse/dist/lib/classes/InventoryItem';
@@ -9,7 +9,7 @@ import { j2cToPng, pngToJ2c, isAvailable as isJ2kAvailable } from './j2k-convert
 import { SyncStatus } from '../shared/types';
 import { ViewerInventoryAdapter, ViewerInventoryFolder } from './viewer-inventory-adapter';
 
-const SYNC_FOLDER_NAME = 'PyroKitty Sync';
+const SYNC_FOLDER_NAME = '#Inventory Sync';
 const MANIFEST_FILE = 'sync-manifest.json';
 const CONCURRENT_DOWNLOADS = 5;
 const DELAY_BETWEEN_MS = 100;
@@ -85,6 +85,10 @@ export class InventorySyncManager {
   private manifest: Manifest;
   private progress: SyncStatus = { phase: 'idle', current: 0, total: 0, uploadCost: -1 };
   private onProgress?: (progress: SyncStatus) => void;
+  private watcher: fs.FSWatcher | null = null;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private syncing = false;
+  private pendingWatch = false;
 
   constructor(backend: Bot | ViewerInventoryAdapter, accountId: string, onProgress?: (progress: SyncStatus) => void) {
     if (backend instanceof ViewerInventoryAdapter) {
@@ -108,8 +112,74 @@ export class InventorySyncManager {
     return this.localDir;
   }
 
+  /** Check if the backend (bot or viewer adapter) is still usable */
+  isBackendValid(): boolean {
+    if (this.adapter) return true;
+    if (this.bot) {
+      try { this.bot.clientCommands; return true; } catch { return false; }
+    }
+    return false;
+  }
+
+  /** Start watching the local sync folder for changes */
+  startWatching(): void {
+    if (this.watcher) return;
+
+    if (!fs.existsSync(this.localDir)) {
+      fs.mkdirSync(this.localDir, { recursive: true });
+    }
+
+    try {
+      this.watcher = fs.watch(this.localDir, { recursive: true }, (_eventType, filename) => {
+        if (!filename) return;
+        // Ignore manifest file
+        if (filename === MANIFEST_FILE || filename.endsWith(path.sep + MANIFEST_FILE)) return;
+        // Ignore non-syncable files
+        const ext = path.extname(filename).toLowerCase();
+        if (!['.png', '.txt', '.lsl'].includes(ext)) return;
+
+        this.scheduleSync();
+      });
+      console.log(`[InventorySync] Watching ${this.localDir} for changes`);
+    } catch (err) {
+      console.error('[InventorySync] Failed to start file watcher:', err);
+    }
+  }
+
+  /** Stop watching the local sync folder */
+  stopWatching(): void {
+    if (this.watcher) {
+      this.watcher.close();
+      this.watcher = null;
+      console.log('[InventorySync] Stopped watching for changes');
+    }
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+  }
+
+  /** Debounce file changes — wait 1.5s after last change, then sync */
+  private scheduleSync(): void {
+    if (this.syncing) {
+      this.pendingWatch = true;
+      return;
+    }
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+    }
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      console.log('[InventorySync] File change detected, syncing...');
+      this.sync().catch(err => console.error('[InventorySync] Watch-triggered sync error:', err));
+    }, 1500);
+  }
+
   /** Run a full sync: download from SL, then upload to SL (if free) */
   async sync(): Promise<void> {
+    if (this.syncing) return;
+    this.syncing = true;
+
     const j2kAvailable = isJ2kAvailable();
     if (!j2kAvailable) {
       console.warn('[InventorySync] OpenJPEG binaries not found — texture sync disabled, notecard sync only');
@@ -164,6 +234,13 @@ export class InventorySyncManager {
     } catch (error: any) {
       console.error('[InventorySync] Sync failed:', error);
       this.setProgress({ phase: 'error', current: 0, total: 0, error: error.message });
+    } finally {
+      this.syncing = false;
+      // If a file change came in while syncing, schedule another
+      if (this.pendingWatch) {
+        this.pendingWatch = false;
+        this.scheduleSync();
+      }
     }
   }
 
@@ -329,8 +406,8 @@ export class InventorySyncManager {
 
     const rawBuffer = await this.downloadAssetData(item, AssetType.LSLText);
 
-    const script = new LLLindenText(rawBuffer);
-    const textContent = script.body;
+    // Scripts are raw text, not wrapped in notecard format
+    const textContent = rawBuffer.toString('utf-8');
 
     fs.writeFileSync(localPath, textContent, 'utf-8');
 
@@ -509,7 +586,7 @@ export class InventorySyncManager {
       InventoryType.Texture,
       j2cBuffer,
       slName,
-      'PyroKitty Sync'
+      SYNC_FOLDER_NAME
     );
 
     this.manifest.items[key] = {
@@ -531,8 +608,28 @@ export class InventorySyncManager {
     const fileMd5 = md5(Buffer.from(textContent, 'utf-8'));
     const key = manifestKey(relativePath, slName);
 
-    // If replacing an existing item, delete the old one in SL
+    const notecard = new LLLindenText();
+    notecard.body = textContent;
+    const assetBuffer = notecard.toAsset();
+
     const existing = this.manifest.items[key];
+
+    // If the item exists in SL and we're using the viewer adapter, update in-place
+    if (existing && this.adapter) {
+      console.log(`[InventorySync] Updating notecard in-place: ${key}`);
+      const result = await this.adapter.updateAsset(existing.itemId, assetBuffer);
+
+      this.manifest.items[key] = {
+        ...existing,
+        assetId: result.assetId,
+        md5: fileMd5,
+        lastSynced: Date.now(),
+        direction: 'upload',
+      };
+      return;
+    }
+
+    // Otherwise delete + recreate (bot path, or new item)
     if (existing) {
       try {
         const oldItem = slFolder.items.find(i => i.itemID.toString() === existing.itemId);
@@ -546,16 +643,12 @@ export class InventorySyncManager {
     }
 
     console.log(`[InventorySync] Uploading notecard: ${key}`);
-    const notecard = new LLLindenText();
-    notecard.body = textContent;
-    const assetBuffer = notecard.toAsset();
-
     const newItem = await slFolder.uploadAsset(
       AssetType.Notecard,
       InventoryType.Notecard,
       assetBuffer,
       slName,
-      'PyroKitty Sync'
+      SYNC_FOLDER_NAME
     );
 
     this.manifest.items[key] = {
@@ -578,8 +671,27 @@ export class InventorySyncManager {
     const fileMd5 = md5(Buffer.from(textContent, 'utf-8'));
     const key = manifestKey(relativePath, slName);
 
-    // If replacing an existing item, delete the old one in SL
+    // Scripts are raw text, not wrapped in notecard format
+    const assetBuffer = Buffer.from(textContent, 'utf-8');
+
     const existing = this.manifest.items[key];
+
+    // If the item exists in SL and we're using the viewer adapter, update in-place
+    if (existing && this.adapter) {
+      console.log(`[InventorySync] Updating script in-place: ${key}`);
+      const result = await this.adapter.updateAsset(existing.itemId, assetBuffer);
+
+      this.manifest.items[key] = {
+        ...existing,
+        assetId: result.assetId,
+        md5: fileMd5,
+        lastSynced: Date.now(),
+        direction: 'upload',
+      };
+      return;
+    }
+
+    // Otherwise delete + recreate (bot path, or new item)
     if (existing) {
       try {
         const oldItem = slFolder.items.find(i => i.itemID.toString() === existing.itemId);
@@ -593,16 +705,12 @@ export class InventorySyncManager {
     }
 
     console.log(`[InventorySync] Uploading script: ${key}`);
-    const script = new LLLindenText();
-    script.body = textContent;
-    const assetBuffer = script.toAsset();
-
     const newItem = await slFolder.uploadAsset(
       AssetType.LSLText,
       InventoryType.LSL,
       assetBuffer,
       slName,
-      'PyroKitty Sync'
+      SYNC_FOLDER_NAME
     );
 
     this.manifest.items[key] = {
@@ -644,10 +752,37 @@ export class InventorySyncManager {
         const localPath = path.join(entryDir, entry.localFile);
         if (fs.existsSync(localPath)) {
           console.log(`[InventorySync] Removing deleted item: ${key}`);
-          fs.unlinkSync(localPath);
+          await shell.trashItem(localPath);
         }
         delete this.manifest.items[key];
       }
+    }
+
+    // Move SL items to trash when local file was deleted
+    for (const [key, entry] of Object.entries(this.manifest.items)) {
+      const entryDir = entry.relativePath
+        ? path.join(this.localDir, ...entry.relativePath.split('/').map(sanitizeName))
+        : this.localDir;
+      const localPath = path.join(entryDir, entry.localFile);
+
+      if (fs.existsSync(localPath)) continue; // file still exists, skip
+
+      // Find the SL item by itemId across all folders
+      let slItem: any = null;
+      for (const node of folderTree) {
+        slItem = node.folder.items.find((i: any) => i.itemID.toString() === entry.itemId);
+        if (slItem) break;
+      }
+
+      if (slItem) {
+        try {
+          console.log(`[InventorySync] Local file deleted, moving SL item to trash: ${key}`);
+          await slItem.delete(); // moves to Trash, not permanent delete
+        } catch (error) {
+          console.warn(`[InventorySync] Failed to trash SL item ${key}:`, error);
+        }
+      }
+      delete this.manifest.items[key];
     }
 
     // Walk local subdirectories bottom-up; remove empty directories without matching SL folder
@@ -706,7 +841,7 @@ export class InventorySyncManager {
     }
   }
 
-  /** Get or create the "PyroKitty Sync" folder in SL inventory */
+  /** Get or create the sync folder in SL inventory */
   private async getOrCreateSyncFolder(): Promise<InventoryFolder | ViewerInventoryFolder> {
     const root = await this.getInventoryRoot();
     await root.populate(false);
@@ -714,7 +849,7 @@ export class InventorySyncManager {
     let syncFolder = root.folders.find((f: any) => f.name === SYNC_FOLDER_NAME);
     if (!syncFolder) {
       console.log(`[InventorySync] Creating "${SYNC_FOLDER_NAME}" folder in inventory`);
-      syncFolder = await root.createFolder(SYNC_FOLDER_NAME, FolderType.Texture);
+      syncFolder = await root.createFolder(SYNC_FOLDER_NAME, FolderType.None);
     }
 
     return syncFolder;

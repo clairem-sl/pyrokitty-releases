@@ -365,6 +365,14 @@ export class Bot
             SessionID: circuit.sessionID
         };
         circuit.sendMessage(agentRequest, PacketFlags.Reliable);
+        try
+        {
+            await this.waitForEventQueue(10000);
+        }
+        catch (_ignore: unknown)
+        {
+            console.warn('Event queue not ready before appearance setup');
+        }
         await this.agent.setInitialAppearance();
         this.agent.circuitActive();
 

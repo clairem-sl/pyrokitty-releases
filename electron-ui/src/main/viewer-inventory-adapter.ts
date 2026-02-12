@@ -150,6 +150,16 @@ export class ViewerInventoryAdapter {
     return Buffer.from(result.data, 'base64');
   }
 
+  /** Update an existing item's asset data in-place (no delete+recreate) */
+  async updateAsset(itemId: string, data: Buffer): Promise<{ assetId: string }> {
+    const result = await this.connection.request('InventoryAPI', {
+      op: 'updateAsset',
+      item_id: itemId,
+      data: data.toString('base64'),
+    }, 60000);
+    return { assetId: result.asset_id || '' };
+  }
+
   // AssetType enum values used by node-metaverse
   static readonly ASSET_TEXTURE = 0;
   static readonly ASSET_NOTECARD = 7;

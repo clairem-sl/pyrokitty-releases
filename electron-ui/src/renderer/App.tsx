@@ -1,4 +1,5 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { ipcRenderer } from 'electron';
 import { MantineProvider, Alert } from '@mantine/core';
 import { theme } from './theme';
 import { useGrids, useAccounts, useViewers, useChat, useFriends, useGroups, useNearbyAvatars, useRegionInfo, useInventorySync } from './hooks';
@@ -6,8 +7,9 @@ import { AccountList } from './components/AccountList';
 import { LoginForm } from './components/LoginForm';
 import { Welcome } from './components/Welcome';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { MfaModal } from './components/MfaModal';
 import { ChatWindow } from './components/ChatWindow';
-import { Friend, Group, NearbyAvatar } from '../shared/types';
+import { Friend, Group, NearbyAvatar, IPC_CHANNELS } from '../shared/types';
 
 type View = 'account' | 'add-account';
 
@@ -21,6 +23,24 @@ export const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mfaState, setMfaState] = useState<{ instanceId: string } | null>(null);
+
+  // Listen for MFA challenges from main process
+  useEffect(() => {
+    const handler = (_event: any, data: { instanceId: string }) => {
+      setMfaState({ instanceId: data.instanceId });
+    };
+    ipcRenderer.on(IPC_CHANNELS.MFA_REQUIRED, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.MFA_REQUIRED, handler);
+    };
+  }, []);
+
+  const handleMfaSubmit = async (token: string) => {
+    if (!mfaState) return;
+    await ipcRenderer.invoke(IPC_CHANNELS.MFA_SUBMIT, mfaState.instanceId, token);
+    setMfaState(null);
+  };
 
   const selectedAccount = getAccount(selectedAccountId || '') || null;
   const selectedGrid = selectedAccount ? getGrid(selectedAccount.gridId) || null : null;
@@ -158,7 +178,7 @@ export const App: React.FC = () => {
 
   // Determine if we should show chat panel
   const connectionState = selectedInstance?.connectionState || 'disconnected';
-  const canShowChat = selectedInstance && ['metaverse_connected', 'viewer_connected', 'logging_in', 'handoff_in_progress'].includes(connectionState);
+  const canShowChat = selectedInstance && ['metaverse_connected', 'viewer_connected', 'logging_in', 'handoff_in_progress', 'mfa_pending'].includes(connectionState);
 
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
@@ -255,6 +275,13 @@ export const App: React.FC = () => {
         title="Remove Account"
         message="Are you sure you want to remove this account?"
         confirmLabel="Remove"
+      />
+
+      <MfaModal
+        opened={mfaState !== null}
+        onClose={() => setMfaState(null)}
+        onSubmit={handleMfaSubmit}
+        accountName={selectedAccount ? `${selectedAccount.firstName} ${selectedAccount.lastName}` : undefined}
       />
     </MantineProvider>
   );

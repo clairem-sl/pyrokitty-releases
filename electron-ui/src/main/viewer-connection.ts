@@ -175,6 +175,15 @@ export class ViewerConnection extends EventEmitter {
   }
 
   /**
+   * Request the viewer to quit gracefully (saves settings, logs out).
+   */
+  requestQuit(): void {
+    this.send('ChatAPI', {
+      op: 'requestQuit',
+    });
+  }
+
+  /**
    * Send a request and wait for a response matched by reqid.
    */
   request(pump: string, data: Record<string, unknown>, timeoutMs = 30000): Promise<any> {

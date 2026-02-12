@@ -31,7 +31,10 @@
 #include "llbase64.h"
 #include "llevents.h"
 #include "llfilesystem.h"
+#include "llfloaterreg.h"
 #include "llinventorymodel.h"
+#include "llpreviewnotecard.h"
+#include "llpreviewscript.h"
 #include "llviewerassetupload.h"
 #include "llviewerinventory.h"
 #include "llviewermenufile.h"
@@ -93,6 +96,15 @@ PKInventoryEventAPI::PKInventoryEventAPI()
         "Get the current texture upload cost in L$.\n"
         "Returns [\"upload_cost\"] integer.",
         &PKInventoryEventAPI::getUploadCost);
+
+    add("updateAsset",
+        "Update an existing inventory item's asset data in-place (async).\n"
+        "Uses the same capability the editor uses when you press Save.\n"
+        "[\"item_id\"] UUID of the inventory item [required]\n"
+        "[\"data\"] base64-encoded asset data [required]\n"
+        "Returns [\"asset_id\"] new asset UUID via reply pump.\n"
+        "If the item is open in an editor, the editor is refreshed automatically.",
+        &PKInventoryEventAPI::updateAsset);
 }
 
 PKInventoryEventAPI::~PKInventoryEventAPI()
@@ -455,4 +467,158 @@ void PKInventoryEventAPI::getUploadCost(const LLSD& request)
     Response response(LLSD(), request);
     S32 cost = LLAgentBenefitsMgr::current().getTextureUploadCost();
     response["upload_cost"] = cost;
+}
+
+void PKInventoryEventAPI::updateAsset(const LLSD& request)
+{
+    // Async operation - update an existing inventory item's asset in-place
+    if (!request.has("reply") || !request.has("item_id") || !request.has("data"))
+    {
+        Response response(LLSD(), request);
+        return response.error("'reply', 'item_id', and 'data' are required");
+    }
+
+    std::string reply_pump = request["reply"].asString();
+    LLSD reqid = request["reqid"];
+    LLUUID item_id = request["item_id"].asUUID();
+    std::string data_b64 = request["data"].asString();
+
+    if (item_id.isNull())
+    {
+        Response response(LLSD(), request);
+        return response.error("Invalid item_id");
+    }
+
+    LLViewerInventoryItem* item = gInventory.getItem(item_id);
+    if (!item)
+    {
+        Response response(LLSD(), request);
+        return response.error("Item not found in inventory");
+    }
+
+    std::string buffer = LLBase64::decodeAsString(data_b64);
+    if (buffer.empty())
+    {
+        Response response(LLSD(), request);
+        return response.error("Failed to decode base64 data");
+    }
+
+    const LLViewerRegion* region = gAgent.getRegion();
+    if (!region)
+    {
+        Response response(LLSD(), request);
+        return response.error("No active region");
+    }
+
+    LLAssetType::EType asset_type = item->getType();
+    LLUUID old_asset_id = item->getAssetUUID();
+
+    if (asset_type == LLAssetType::AT_LSL_TEXT)
+    {
+        std::string url = region->getCapability("UpdateScriptAgent");
+        if (url.empty())
+        {
+            Response response(LLSD(), request);
+            return response.error("UpdateScriptAgent capability not available");
+        }
+
+        LLBufferedAssetUploadInfo::invnUploadFinish_f finish =
+            [reply_pump, reqid, item_id, old_asset_id](LLUUID itemId, LLUUID newAssetId, LLUUID newItemId, LLSD upload_response)
+            {
+                // Clean up old cached asset
+                LLFileSystem::removeFile(old_asset_id, LLAssetType::AT_LSL_TEXT);
+
+                LLSD response;
+                response["reqid"] = reqid;
+                response["asset_id"] = newAssetId;
+                response["item_id"] = itemId;
+
+                if (upload_response.has("compiled") && !upload_response["compiled"].asBoolean())
+                {
+                    response["compile_errors"] = upload_response["errors"];
+                }
+
+                LLEventPumps::instance().obtain(reply_pump).post(response);
+
+                // Refresh open script editor if any
+                LLPreview* preview = LLFloaterReg::findTypedInstance<LLPreview>(
+                    "preview_script", LLSD(item_id));
+                if (preview)
+                {
+                    preview->loadAsset();
+                }
+            };
+
+        LLBufferedAssetUploadInfo::uploadFailed_f failure =
+            [reply_pump, reqid](LLUUID itemId, LLUUID taskId, LLSD upload_response, std::string reason) -> bool
+            {
+                LLSD response;
+                response["reqid"] = reqid;
+                response["error"] = reason;
+                LLEventPumps::instance().obtain(reply_pump).post(response);
+                return false;
+            };
+
+        // Use LLScriptAssetUpload which generates the right POST body for UpdateScriptAgent
+        LLResourceUploadInfo::ptr_t uploadInfo(
+            std::make_shared<LLScriptAssetUpload>(
+                item_id,
+                buffer,
+                finish,
+                failure));
+
+        LLViewerAssetUpload::EnqueueInventoryUpload(url, uploadInfo);
+    }
+    else if (asset_type == LLAssetType::AT_NOTECARD)
+    {
+        std::string url = region->getCapability("UpdateNotecardAgentInventory");
+        if (url.empty())
+        {
+            Response response(LLSD(), request);
+            return response.error("UpdateNotecardAgentInventory capability not available");
+        }
+
+        LLBufferedAssetUploadInfo::invnUploadFinish_f finish =
+            [reply_pump, reqid, item_id](LLUUID itemId, LLUUID newAssetId, LLUUID newItemId, LLSD upload_response)
+            {
+                LLSD response;
+                response["reqid"] = reqid;
+                response["asset_id"] = newAssetId;
+                response["item_id"] = itemId;
+                LLEventPumps::instance().obtain(reply_pump).post(response);
+
+                // Refresh open notecard editor if any
+                LLPreviewNotecard* nc = LLFloaterReg::findTypedInstance<LLPreviewNotecard>(
+                    "preview_notecard", LLSD(item_id));
+                if (nc)
+                {
+                    nc->refreshFromInventory();
+                }
+            };
+
+        LLBufferedAssetUploadInfo::uploadFailed_f failure =
+            [reply_pump, reqid](LLUUID itemId, LLUUID taskId, LLSD upload_response, std::string reason) -> bool
+            {
+                LLSD response;
+                response["reqid"] = reqid;
+                response["error"] = reason;
+                LLEventPumps::instance().obtain(reply_pump).post(response);
+                return false;
+            };
+
+        LLResourceUploadInfo::ptr_t uploadInfo(
+            std::make_shared<LLBufferedAssetUploadInfo>(
+                item_id,
+                LLAssetType::AT_NOTECARD,
+                buffer,
+                finish,
+                failure));
+
+        LLViewerAssetUpload::EnqueueInventoryUpload(url, uploadInfo);
+    }
+    else
+    {
+        Response response(LLSD(), request);
+        return response.error("updateAsset only supports notecards and scripts");
+    }
 }

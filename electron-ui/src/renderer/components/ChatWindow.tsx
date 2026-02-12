@@ -66,6 +66,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onOpenSyncFolder,
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>('nearby');
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+
+  const toggleSection = (section: string) => {
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(section)) next.delete(section);
+      else next.add(section);
+      return next;
+    });
+  };
 
   const handleUserContextMenu = useUserContextMenu();
   const handleGroupContextMenu = useGroupContextMenu();
@@ -246,11 +256,47 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             {/* Friends sidebar */}
             <div className="split-sidebar">
               <div className="split-sidebar-section">
-                <div className="split-sidebar-header">Friends Online ({onlineFriends.length})</div>
-                {onlineFriends.length === 0 ? (
-                  <div className="split-sidebar-empty">No friends online</div>
-                ) : (
-                  onlineFriends.map((friend) => {
+                <div className="split-sidebar-header collapsible" onClick={() => toggleSection('friends-online')}>
+                  <span className={`collapse-arrow ${collapsedSections.has('friends-online') ? 'collapsed' : ''}`}>{'\u25BE'}</span>
+                  Friends Online ({onlineFriends.length})
+                </div>
+                {!collapsedSections.has('friends-online') && (
+                  onlineFriends.length === 0 ? (
+                    <div className="split-sidebar-empty">No friends online</div>
+                  ) : (
+                    onlineFriends.map((friend) => {
+                      const session = getIMSessionForFriend(friend.id);
+                      const isActive = session?.id === activeSessionId;
+                      return (
+                        <div
+                          key={friend.id}
+                          className={`split-sidebar-item ${isActive ? 'active' : ''} ${session ? 'has-session' : ''}`}
+                          onClick={() => {
+                            if (session) {
+                              onSelectSession(session.id);
+                            } else {
+                              onStartIMWithFriend(friend);
+                            }
+                          }}
+                        >
+                          <span className="friend-status-dot online" />
+                          <span className="split-sidebar-name" onContextMenu={(e) => handleUserContextMenu(e, friend.id, friend.name)}>{displayName(friend.name) || friend.id}</span>
+                          {session && session.unreadCount > 0 && (
+                            <span className="split-sidebar-badge">{session.unreadCount}</span>
+                          )}
+                        </div>
+                      );
+                    })
+                  )
+                )}
+              </div>
+              <div className="split-sidebar-section">
+                <div className="split-sidebar-header collapsible" onClick={() => toggleSection('friends-offline')}>
+                  <span className={`collapse-arrow ${collapsedSections.has('friends-offline') ? 'collapsed' : ''}`}>{'\u25BE'}</span>
+                  Friends Offline ({offlineFriends.length})
+                </div>
+                {!collapsedSections.has('friends-offline') && (
+                  offlineFriends.map((friend) => {
                     const session = getIMSessionForFriend(friend.id);
                     const isActive = session?.id === activeSessionId;
                     return (
@@ -265,7 +311,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                           }
                         }}
                       >
-                        <span className="friend-status-dot online" />
+                        <span className="friend-status-dot offline" />
                         <span className="split-sidebar-name" onContextMenu={(e) => handleUserContextMenu(e, friend.id, friend.name)}>{displayName(friend.name) || friend.id}</span>
                         {session && session.unreadCount > 0 && (
                           <span className="split-sidebar-badge">{session.unreadCount}</span>
@@ -274,32 +320,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     );
                   })
                 )}
-              </div>
-              <div className="split-sidebar-section">
-                <div className="split-sidebar-header">Friends Offline ({offlineFriends.length})</div>
-                {offlineFriends.map((friend) => {
-                  const session = getIMSessionForFriend(friend.id);
-                  const isActive = session?.id === activeSessionId;
-                  return (
-                    <div
-                      key={friend.id}
-                      className={`split-sidebar-item ${isActive ? 'active' : ''} ${session ? 'has-session' : ''}`}
-                      onClick={() => {
-                        if (session) {
-                          onSelectSession(session.id);
-                        } else {
-                          onStartIMWithFriend(friend);
-                        }
-                      }}
-                    >
-                      <span className="friend-status-dot offline" />
-                      <span className="split-sidebar-name" onContextMenu={(e) => handleUserContextMenu(e, friend.id, friend.name)}>{displayName(friend.name) || friend.id}</span>
-                      {session && session.unreadCount > 0 && (
-                        <span className="split-sidebar-badge">{session.unreadCount}</span>
-                      )}
-                    </div>
-                  );
-                })}
               </div>
               {nonFriendSessions.length > 0 && (
                 <div className="split-sidebar-section">

@@ -14,9 +14,25 @@ export function useChat({ instanceId }: UseChatOptions) {
 
   // Track message IDs we've already loaded from history to avoid duplicates
   const loadedIdsRef = useRef<Set<string>>(new Set());
+  // Remember active session per instance so it restores when switching back
+  const savedSessionRef = useRef<Map<string, string>>(new Map());
+  const prevInstanceRef = useRef<string | null>(null);
 
   // Load initial chat sessions and chat history
   useEffect(() => {
+    // Save active session for the instance we're leaving
+    if (prevInstanceRef.current && activeSessionId) {
+      savedSessionRef.current.set(prevInstanceRef.current, activeSessionId);
+    }
+    prevInstanceRef.current = instanceId;
+
+    // Reset state when switching accounts
+    setNearbyMessages([]);
+    setMessages(new Map());
+    setSessions([]);
+    setActiveSessionId(instanceId ? (savedSessionRef.current.get(instanceId) ?? null) : null);
+    loadedIdsRef.current = new Set();
+
     if (!instanceId) return;
 
     const load = async () => {

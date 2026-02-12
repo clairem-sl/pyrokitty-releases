@@ -68,6 +68,7 @@ private:
     void createFolder(const LLSD& request);
     void downloadAsset(const LLSD& request);
     void uploadAsset(const LLSD& request);
+    void updateAsset(const LLSD& request);
 };
 
 #endif // PK_PKINVENTORYEVENTAPI_H
