@@ -21,12 +21,18 @@ async function performCleanup(): Promise<void> {
 }
 
 async function createWindow(): Promise<void> {
+  const iconsDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'icons')
+    : path.join(__dirname, '..', '..', '..', 'indra', 'newview', 'icons', 'release');
+  const iconPath = path.join(iconsDir, 'firestorm_icon.ico');
+
   mainWindow = new BrowserWindow({
     width: 920,
     height: 700,
     minWidth: 600,
     minHeight: 500,
     title: 'PyroKitty',
+    icon: iconPath,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -64,14 +70,13 @@ async function createWindow(): Promise<void> {
   });
 
   // Create system tray icon
-  const iconPath = path.join(app.getAppPath(), '../indra/newview/icons/release/firestorm_icon.ico');
   const icon = nativeImage.createFromPath(iconPath);
   tray = new Tray(icon);
   tray.setToolTip('PyroKitty');
 
   // Menu item icons
   const showIcon = nativeImage.createFromPath(
-    path.join(app.getAppPath(), '../indra/newview/icons/release/firestorm_16.png')
+    path.join(iconsDir, 'firestorm_16.png')
   );
 
   const contextMenu = Menu.buildFromTemplate([

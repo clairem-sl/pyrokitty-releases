@@ -19,6 +19,8 @@ SKIP_VIEWER_BUILD=false
 SKIP_CONFIGURE=false
 FORCE_REBUILD=false
 
+OVERRIDE_VERSION=""
+
 show_help() {
     echo "Usage: $0 [options]"
     echo ""
@@ -26,6 +28,7 @@ show_help() {
     echo "  --skip-viewer     Skip building Firestorm (use existing build)"
     echo "  --skip-configure  Skip autobuild configure step (just build)"
     echo "  --force           Force rebuild even if files are up to date"
+    echo "  --version X.Y.Z   Set version explicitly (skip GitHub fetch)"
     echo "  --help            Show this help"
     echo ""
     echo "Examples:"
@@ -34,20 +37,30 @@ show_help() {
     echo "  $0 --skip-viewer      Just package (viewer already built)"
 }
 
-for arg in "$@"; do
-    case $arg in
+while [[ $# -gt 0 ]]; do
+    case $1 in
         --skip-viewer)
             SKIP_VIEWER_BUILD=true
+            shift
             ;;
         --skip-configure)
             SKIP_CONFIGURE=true
+            shift
             ;;
         --force)
             FORCE_REBUILD=true
+            shift
+            ;;
+        --version)
+            OVERRIDE_VERSION="$2"
+            shift 2
             ;;
         --help|-h)
             show_help
             exit 0
+            ;;
+        *)
+            shift
             ;;
     esac
 done
@@ -74,6 +87,32 @@ needs_rebuild() {
     return 1  # Up to date
 }
 
+# Sync version
+if [ -n "$OVERRIDE_VERSION" ]; then
+    VERSION="$OVERRIDE_VERSION"
+    echo "Using provided version: $VERSION"
+else
+    echo "Fetching latest release version..."
+    LATEST=$(gh release list --limit 1 --json tagName --repo pyrokitty64/pyrokitty-releases -q '.[0].tagName' 2>/dev/null || echo "")
+    if [ -z "$LATEST" ]; then
+        VERSION="0.1.0"
+    else
+        # Strip leading 'v' for package.json (expects X.Y.Z not vX.Y.Z)
+        VERSION="${LATEST#v}"
+    fi
+fi
+
+# Update package.json version
+cd "$ELECTRON_DIR"
+CURRENT_VERSION=$(node -p "require('./package.json').version")
+if [ "$CURRENT_VERSION" != "$VERSION" ]; then
+    echo "  Updating version: $CURRENT_VERSION -> $VERSION"
+    npm version "$VERSION" --no-git-tag-version --allow-same-version
+else
+    echo "  Version already at $VERSION"
+fi
+
+echo ""
 echo "=== PyroKitty Packaging Script ==="
 echo ""
 
@@ -182,5 +221,3 @@ npm run dist
 
 echo ""
 echo "=== Packaging Complete ==="
-echo "Output: $ELECTRON_DIR/release/"
-ls -la "$ELECTRON_DIR/release/"

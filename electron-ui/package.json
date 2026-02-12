@@ -1,6 +1,6 @@
 {
     "name": "pyrokitty-ui",
-    "version": "1.0.0",
+    "version": "0.1.10",
     "description": "PyroKitty Viewer Manager - Multi-account Second Life/OpenSim launcher",
     "main": "dist/main/index.js",
     "scripts": {
@@ -55,12 +55,22 @@
                 "filter": [
                     "**/*"
                 ]
+            },
+            {
+                "from": "../indra/newview/icons/release/firestorm_icon.ico",
+                "to": "icons/firestorm_icon.ico"
+            },
+            {
+                "from": "../indra/newview/icons/release/firestorm_16.png",
+                "to": "icons/firestorm_16.png"
             }
         ],
         "win": {
             "target": [
-                "dir"
+                "dir",
+                "7z"
             ],
+            "artifactName": "PyroKitty-Launcher-${version}.${ext}",
             "icon": "../indra/newview/icons/release/firestorm_icon.ico"
         }
     }
