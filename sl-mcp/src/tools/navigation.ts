@@ -98,6 +98,51 @@ export const navigationTools: ToolDef[] = [
     },
   },
   {
+    name: 'sl_sit',
+    description: 'Sit the bot on an in-world object by its local ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        localId: { type: 'number', description: 'Object local ID to sit on' },
+      },
+      required: ['localId'],
+    },
+    handler: async (args, bot) => {
+      try {
+        await bot.sitOnObject(args.localId as number);
+        return { content: [{ type: 'text', text: `Sat on object ${args.localId}` }] };
+      } catch (err: any) {
+        return { content: [{ type: 'text', text: `Failed to sit: ${err.message}` }], isError: true };
+      }
+    },
+  },
+  {
+    name: 'sl_stand',
+    description: 'Stand up from sitting.',
+    inputSchema: { type: 'object', properties: {} },
+    handler: async (_args, bot) => {
+      try {
+        bot.standUp();
+        return { content: [{ type: 'text', text: 'Stood up' }] };
+      } catch (err: any) {
+        return { content: [{ type: 'text', text: `Failed to stand: ${err.message}` }], isError: true };
+      }
+    },
+  },
+  {
+    name: 'sl_sit_on_ground',
+    description: 'Sit on the ground.',
+    inputSchema: { type: 'object', properties: {} },
+    handler: async (_args, bot) => {
+      try {
+        bot.sitOnGround();
+        return { content: [{ type: 'text', text: 'Sat on ground' }] };
+      } catch (err: any) {
+        return { content: [{ type: 'text', text: `Failed to sit on ground: ${err.message}` }], isError: true };
+      }
+    },
+  },
+  {
     name: 'sl_get_nearby_avatars',
     description: 'List avatars currently in the same region, with their positions.',
     inputSchema: { type: 'object', properties: {} },

@@ -82,12 +82,20 @@ void LLMemoryReserve::release()
 
 static LLMemoryReserve gEmergencyMemoryReserve;
 
+// <FS:Pyrokitty> Unhandled exception filter — only fires for real crashes, not first-chance exceptions
+static LPTOP_LEVEL_EXCEPTION_FILTER sPrevExceptionFilter = NULL;
 
-LONG NTAPI vectoredHandler(PEXCEPTION_POINTERS exception_infop)
+LONG WINAPI unhandledExceptionFilter(PEXCEPTION_POINTERS exception_infop)
 {
     LLWinDebug::instance().generateMinidump(exception_infop);
+
+    if (sPrevExceptionFilter)
+    {
+        return sPrevExceptionFilter(exception_infop);
+    }
     return EXCEPTION_CONTINUE_SEARCH;
 }
+// </FS:Pyrokitty>
 
 // static
 void  LLWinDebug::initSingleton()
@@ -96,7 +104,7 @@ void  LLWinDebug::initSingleton()
     // Load the dbghelp dll now, instead of waiting for the crash.
     // Less potential for stack mangling
 
-    // Don't install vectored exception handler if being debugged.
+    // Don't install exception handler if being debugged.
     if(IsDebuggerPresent()) return;
 
     if (s_first_run)
@@ -130,8 +138,11 @@ void  LLWinDebug::initSingleton()
 
         s_first_run = false;
 
-        // Add this exeption hanlder to save windows style minidump.
-        AddVectoredExceptionHandler(0, &vectoredHandler);
+        // <FS:Pyrokitty> Use unhandled exception filter instead of vectored handler.
+        // Vectored handlers fire for ALL exceptions (including handled first-chance ones),
+        // but we only want to write a minidump for actual unhandled crashes.
+        sPrevExceptionFilter = SetUnhandledExceptionFilter(&unhandledExceptionFilter);
+        // </FS:Pyrokitty>
     }
 }
 
@@ -144,7 +155,7 @@ void LLWinDebug::writeDumpToFile(MINIDUMP_TYPE type, MINIDUMP_EXCEPTION_INFORMAT
 {
     // Temporary fix to switch out the code that writes the DMP file.
     // Fix coming that doesn't write a mini dump file for regular C++ exceptions.
-    const bool enable_write_dump_file = false;
+    const bool enable_write_dump_file = true;
     if ( enable_write_dump_file )
     {
         if(f_mdwp == NULL || gDirUtilp == NULL)

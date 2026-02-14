@@ -471,6 +471,25 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
     LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Render");
     LL_PROFILE_GPU_ZONE("Render");
 
+    // Check for GPU driver reset (TDR recovery)
+    if (gGLManager.mHasRobustness && glGetGraphicsResetStatus)
+    {
+        GLenum resetStatus = glGetGraphicsResetStatus();
+        if (resetStatus != GL_NO_ERROR)
+        {
+            LL_WARNS() << "GL graphics reset detected! Status: " << std::hex << resetStatus << std::dec << LL_ENDL;
+            if (resetStatus == GL_GUILTY_CONTEXT_RESET)
+                LL_WARNS() << "This context caused the reset (GUILTY)" << LL_ENDL;
+            else if (resetStatus == GL_INNOCENT_CONTEXT_RESET)
+                LL_WARNS() << "Another context caused the reset (INNOCENT)" << LL_ENDL;
+            else if (resetStatus == GL_UNKNOWN_CONTEXT_RESET)
+                LL_WARNS() << "Unknown cause of reset" << LL_ENDL;
+
+            LLAppViewer::instance()->forceQuit();
+            return;
+        }
+    }
+
     LLPerfStats::RecordSceneTime T (LLPerfStats::StatType_t::RENDER_DISPLAY); // render time capture - This is the main stat for overall rendering.
 
     LLViewerCamera& camera = LLViewerCamera::instance(); // <FS:Ansariel> Factor out calls to getInstance

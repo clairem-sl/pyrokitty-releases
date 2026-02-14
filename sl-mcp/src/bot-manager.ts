@@ -79,6 +79,7 @@ export class BotManager {
   private recentChat: NearbyChatMessage[] = [];
   private maxRecentIMs = 50;
   private maxRecentChat = 100;
+  private cameraInterval: ReturnType<typeof setInterval> | null = null;
 
   get state(): BotState {
     return this._state;
@@ -90,6 +91,48 @@ export class BotManager {
 
   getBot(): Bot | null {
     return this.bot;
+  }
+
+  // ============ Camera ============
+
+  /**
+   * Update the bot's camera to its current avatar position (slightly above, looking forward).
+   * The sim uses camera position to determine which objects to stream — without this,
+   * objects near the avatar won't be sent to the bot.
+   */
+  /**
+   * Wait until the bot's avatar appears in the agent list with a valid position.
+   */
+  private waitForAgentPosition(timeout = 10000): Promise<void> {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const check = () => {
+        const region = this.bot?.currentRegion;
+        const self = region?.agents?.get(this.bot!.agentID().toString());
+        if (self && (self.position.x !== 0 || self.position.y !== 0)) {
+          resolve();
+          return;
+        }
+        if (Date.now() - start > timeout) {
+          resolve(); // give up silently, camera stays at region center
+          return;
+        }
+        setTimeout(check, 250);
+      };
+      check();
+    });
+  }
+
+  private updateCamera(): void {
+    if (!this.bot) return;
+    const region = this.bot.currentRegion;
+    const self = region?.agents?.get(this.bot.agentID().toString());
+    if (!self) return;
+
+    const pos = self.position;
+    const camPos = new Vector3([pos.x, pos.y, pos.z + 2.0]);
+    const lookAt = new Vector3([1, 0, 0]); // forward
+    this.bot.clientCommands.agent.setCamera(camPos, lookAt);
   }
 
   // ============ Session ============
@@ -117,14 +160,23 @@ export class BotManager {
 
       this.bot = new Bot(loginParams, BotOptionFlags.None);
       await this.bot.login();
-      // Set draw distance BEFORE connectToSim so the sim sends us objects within range
-      this.bot.agent.cameraFar = 32;
+      // Set draw distance and camera BEFORE connectToSim so the sim streams nearby objects.
+      // The default cameraCenter is hardcoded to (199,203,24) which is wrong — use region center
+      // as initial guess, then update to actual avatar position after connecting.
+      this.bot.agent.cameraFar = 256;
+      this.bot.agent.cameraCenter = new Vector3([128, 128, 30]);
       this.setupEventSubscriptions();
       this.populateFriendsFromLogin();
       await this.bot.connectToSim();
       // Request 360-degree interest list so sim sends all objects within draw distance
       // (default mode only sends objects the camera is facing)
       await this.bot.setInterestList('360').catch(() => { });
+
+      // Wait for agent position then move camera so sim streams nearby objects
+      await this.waitForAgentPosition(10000);
+      this.updateCamera();
+      // Keep camera synced to avatar position (sim uses camera for interest list)
+      this.cameraInterval = setInterval(() => this.updateCamera(), 5000);
 
       this._state = 'connected';
       const region = this.bot.currentRegion?.regionName || 'unknown';
@@ -137,6 +189,10 @@ export class BotManager {
   }
 
   async logout(): Promise<void> {
+    if (this.cameraInterval) {
+      clearInterval(this.cameraInterval);
+      this.cameraInterval = null;
+    }
     if (this.bot) {
       try { await this.bot.close(); } catch { }
       this.bot = null;
@@ -199,6 +255,7 @@ export class BotManager {
     const position = new Vector3([x, y, z]);
     const lookAt = new Vector3([0, 1, 0]);
     await this.bot!.clientCommands.teleport.teleportTo(regionName, position, lookAt);
+    this.updateCamera();
     return `Teleported to ${regionName} (${x}, ${y}, ${z})`;
   }
 
@@ -355,6 +412,8 @@ export class BotManager {
 
         // Re-face target each tick to course-correct
         setFacing(pos.x, pos.y, targetX, targetY);
+        // Update camera to follow avatar so sim streams objects along path
+        this.updateCamera();
         agent.sendAgentUpdate();
 
         // Stuck detection
@@ -415,6 +474,25 @@ export class BotManager {
     agent.sendAgentUpdate();
   }
 
+  /** Sit the bot on an object by its local ID. */
+  async sitOnObject(localId: number): Promise<void> {
+    this.requireConnected();
+    const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true);
+    await this.bot!.clientCommands.movement.sitOnObject(obj.FullID, new Vector3([0, 0, 0]));
+  }
+
+  /** Stand up from sitting. */
+  standUp(): void {
+    this.requireConnected();
+    this.bot!.clientCommands.movement.stand();
+  }
+
+  /** Sit on ground. */
+  sitOnGround(): void {
+    this.requireConnected();
+    this.bot!.clientCommands.movement.sitOnGround();
+  }
+
   getRegionInfo(): Record<string, unknown> | null {
     if (!this.bot?.currentRegion) return null;
     const region = this.bot.currentRegion;
@@ -440,6 +518,44 @@ export class BotManager {
 
   getGroups(): Group[] {
     return Array.from(this.groups.values());
+  }
+
+  /**
+   * Get an avatar's state: sitting/standing and what they're sitting on.
+   * Accesses the private _gameObject.ParentID to check sit state.
+   */
+  async getAvatarState(avatarId: string): Promise<{
+    sitting: boolean;
+    sittingOnLocalId?: number;
+    sittingOnName?: string;
+    position: { x: number; y: number; z: number };
+  } | null> {
+    this.requireConnected();
+    const region = this.bot!.currentRegion;
+    const avatar = region?.agents?.get(avatarId);
+    if (!avatar) return null;
+
+    const pos = avatar.position;
+    const go = (avatar as any)._gameObject;
+    const parentId = go?.ParentID as number | undefined;
+    const sitting = parentId != null && parentId > 0;
+
+    let sittingOnName: string | undefined;
+    if (sitting) {
+      try {
+        // getObjectByLocalID with resolve=true fetches object properties (name) from sim
+        const obj = await this.bot!.clientCommands.region.getObjectByLocalID(parentId, true, 3000);
+        sittingOnName = (obj as any)?.name || undefined;
+      } catch {
+        // Object not available from sim
+      }
+    }
+
+    return {
+      sitting,
+      ...(sitting ? { sittingOnLocalId: parentId, sittingOnName } : {}),
+      position: { x: pos.x, y: pos.y, z: pos.z },
+    };
   }
 
   /**

@@ -172,7 +172,7 @@ void APIENTRY gl_debug_callback(GLenum source,
     }
 
     // No needs to halt when is called from LLViewerWindow::stopGL()
-    if (severity == GL_DEBUG_SEVERITY_HIGH && !gGLManager.mIsDisabled)
+    if (severity == GL_DEBUG_SEVERITY_HIGH && !gGLManager.mIsDisabled && gDebugGL)
     {
         LL_ERRS() << "Halting on GL Error" << LL_ENDL;
     }
@@ -1470,6 +1470,7 @@ void LLGLManager::initExtensions()
     mHasCubeMapArray = mGLVersion >= 3.99f;
     mHasTransformFeedback = mGLVersion >= 3.99f;
     mHasDebugOutput = mGLVersion >= 4.29f;
+    mHasRobustness = mGLVersion >= 4.49f;
     mHasAnisotropic = mGLVersion >= 4.59f;
     if(!mHasAnisotropic && gGLHExts.mSysExts)
     {

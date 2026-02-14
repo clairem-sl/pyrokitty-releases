@@ -62,9 +62,9 @@
 #include "llcommandlineparser.h"
 #include "lltrans.h"
 
-#ifndef LL_RELEASE_FOR_DOWNLOAD
+// <FS:Pyrokitty> Always include llwindebug for crash dump support
 #include "llwindebug.h"
-#endif
+// </FS:Pyrokitty>
 
 #include "stringize.h"
 #include "lldir.h"
@@ -885,13 +885,13 @@ bool LLAppViewerWin32::init()
     // (Don't send our data to Microsoft--at least until we are Logo approved and have a way
     // of getting the data back from them.)
     //
-    LL_INFOS() << "Turning off Windows error reporting." << LL_ENDL;
-    disableWinErrorReporting();
+    // <FS:Pyrokitty> Keep WER enabled as a fallback for crashes that bypass our
+    // in-process handlers (GL robustness handles TDR gracefully, but WER catches the rest).
+    // disableWinErrorReporting();
+    // </FS:Pyrokitty>
 
-#ifndef LL_RELEASE_FOR_DOWNLOAD
     // Merely requesting the LLSingleton instance initializes it.
     LLWinDebug::instance();
-#endif
 
 #if LL_SEND_CRASH_REPORTS
 #if ! defined(LL_BUGSPLAT)

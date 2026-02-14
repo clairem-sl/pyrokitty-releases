@@ -95,6 +95,7 @@ public:
     // GL 4.x capabilities
     bool mHasCubeMapArray = false;
     bool mHasDebugOutput = false;
+    bool mHasRobustness = false;
     bool mHasTransformFeedback = false;
     bool mHasAnisotropic = false;
 

@@ -73,6 +73,33 @@ export const socialTools: ToolDef[] = [
     },
   },
   {
+    name: 'sl_get_avatar_state',
+    description: 'Get an avatar\'s state (sitting/standing) and what they\'re sitting on, by UUID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        avatarId: { type: 'string', description: 'Target avatar UUID' },
+      },
+      required: ['avatarId'],
+    },
+    handler: async (args, bot) => {
+      try {
+        const state = await bot.getAvatarState(args.avatarId as string);
+        if (!state) {
+          return { content: [{ type: 'text', text: 'Avatar not found in region.' }], isError: true };
+        }
+        const pos = `(${state.position.x.toFixed(1)}, ${state.position.y.toFixed(1)}, ${state.position.z.toFixed(1)})`;
+        if (state.sitting) {
+          const onObj = state.sittingOnName ? ` on "${state.sittingOnName}" (localId ${state.sittingOnLocalId})` : ` on object localId ${state.sittingOnLocalId}`;
+          return { content: [{ type: 'text', text: `Sitting${onObj} at ${pos}` }] };
+        }
+        return { content: [{ type: 'text', text: `Standing at ${pos}` }] };
+      } catch (err: any) {
+        return { content: [{ type: 'text', text: `Failed: ${err.message}` }], isError: true };
+      }
+    },
+  },
+  {
     name: 'sl_get_balance',
     description: 'Get the bot\'s L$ (Linden Dollar) balance.',
     inputSchema: { type: 'object', properties: {} },

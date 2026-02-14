@@ -851,11 +851,13 @@ LLRender::~LLRender()
 bool LLRender::init(bool needs_vertex_buffer)
 {
 #if LL_WINDOWS
-    if (gGLManager.mHasDebugOutput && gDebugGL)
+    if (gGLManager.mHasDebugOutput)
     { //setup debug output callback
-        //glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_LOW_ARB, 0, NULL, GL_TRUE);
         glDebugMessageCallback((GLDEBUGPROC) gl_debug_callback, NULL);
-        glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+        if (gDebugGL)
+        {
+            glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+        }
     }
 #endif
 
