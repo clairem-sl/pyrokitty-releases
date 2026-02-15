@@ -103,6 +103,7 @@ export class Caps
         req.push('ParcelVoiceInfoRequest');
         req.push('ProductInfoRequest');
         req.push('ProvisionVoiceAccountRequest');
+        req.push('VoiceSignalingRequest');
         req.push('ReadOfflineMsgs');
         req.push('RegionObjects');
         req.push('RemoteParcelRequest');

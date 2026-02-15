@@ -65,6 +65,7 @@
 #include "llcalc.h"
 #include "pkchateventapi.h"
 #include "pkinventoryeventapi.h"
+#include "pkvoiceeventapi.h"
 #include "pkloginhandoff.h"
 #include "pkwebsocketserver.h"
 #include "llconversationlog.h"
@@ -3804,6 +3805,9 @@ bool LLAppViewer::initWindow()
 
     // <FS:Pyrokitty> Initialize inventory event API for WebSocket inventory operations
     new PKInventoryEventAPI();
+
+    // <FS:Pyrokitty> Initialize voice event API for external voice sidecar
+    new PKVoiceEventAPI();
 
     // Initialize login handoff API for external login via PyroKitty
     new PKLoginHandoff();

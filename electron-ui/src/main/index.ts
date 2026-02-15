@@ -52,6 +52,22 @@ async function createWindow(): Promise<void> {
   const htmlPath = path.join(__dirname, '../renderer/index.html');
   mainWindow.loadFile(htmlPath);
 
+  // Right-click context menu with Copy/Select All
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const menuItems: Electron.MenuItemConstructorOptions[] = [];
+    if (params.selectionText) {
+      menuItems.push({ label: 'Copy', role: 'copy' });
+    }
+    menuItems.push({ label: 'Select All', role: 'selectAll' });
+    if (params.isEditable) {
+      menuItems.push({ label: 'Cut', role: 'cut' });
+      menuItems.push({ label: 'Paste', role: 'paste' });
+    }
+    if (menuItems.length > 0) {
+      Menu.buildFromTemplate(menuItems).popup({ window: mainWindow! });
+    }
+  });
+
   // Open DevTools in development
   if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools();

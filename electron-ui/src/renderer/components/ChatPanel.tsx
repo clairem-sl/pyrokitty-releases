@@ -3,6 +3,45 @@ import { Button } from '@mantine/core';
 import { ChatMessage, displayName } from '../../shared/types';
 import { useUserContextMenu } from '../hooks/useUserContextMenu';
 
+const { shell } = window.require('electron');
+
+// Parse message text into spans and clickable links.
+// Handles SL-style [url label] and bare URLs.
+function renderMessageText(text: string): React.ReactNode {
+  // Combined pattern: SL links [url label] or bare URLs
+  const pattern = /\[(https?:\/\/\S+)\s+([^\]]+)\]|(https?:\/\/[^\s\]]+)/g;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+
+  while ((match = pattern.exec(text)) !== null) {
+    // Text before this match
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    const url = match[1] || match[3];
+    const label = match[2] || url;
+    parts.push(
+      <a
+        key={key++}
+        className="chat-link"
+        href="#"
+        title={url}
+        onClick={(e) => { e.preventDefault(); shell.openExternal(url); }}
+      >{label}</a>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : text;
+}
+
 interface ChatPanelProps {
   messages: ChatMessage[];
   onSendMessage: (message: string, type?: 'whisper' | 'normal' | 'shout') => void;
@@ -87,7 +126,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                   {msg.chatType}
                 </span>
               )}
-              <span className="chat-text">{msg.message}</span>
+              <span className="chat-text">{renderMessageText(msg.message)}</span>
             </div>
           ))
         )}

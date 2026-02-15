@@ -7,6 +7,7 @@ import { accountManager } from './account-manager';
 import { gridManager } from './grid-manager';
 import { connectionManager, ViewerConnection } from './viewer-connection';
 import { metaverseConnectionManager, MetaverseConnection } from './metaverse-connection';
+import { voiceManager } from './voice-manager';
 
 function getViewerPath(): string {
   if (app.isPackaged) {
@@ -133,6 +134,13 @@ export class ViewerManager extends EventEmitter {
       const mfaHash = metaverse.getLastMfaHash();
       if (mfaHash) {
         accountManager.updateAccount(account.id, { mfaHash });
+      }
+
+      // Start voice sidecar with bot caps
+      try {
+        await voiceManager.connectWithBot(metaverse.getBot());
+      } catch (err) {
+        console.warn(`[ViewerManager] Voice connect failed (non-fatal):`, err);
       }
 
       // Step 2: If viewer launch is requested, launch with CLI login
@@ -285,6 +293,12 @@ export class ViewerManager extends EventEmitter {
   private async handleViewerExit(instanceId: string): Promise<void> {
     const instance = this.instances.get(instanceId);
 
+    // Detach voice from viewer before disconnecting WebSocket
+    const viewerConn = connectionManager.getConnection(instanceId);
+    if (viewerConn) {
+      voiceManager.detachFromViewer(viewerConn);
+    }
+
     // Disconnect WebSocket
     connectionManager.disconnect(instanceId);
     this.processes.delete(instanceId);
@@ -344,6 +358,13 @@ export class ViewerManager extends EventEmitter {
       const regionName = metaverse.getRegionName();
       if (regionName) {
         this.updateRegionName(instanceId, regionName);
+      }
+
+      // Reconnect voice with bot caps
+      try {
+        await voiceManager.connectWithBot(metaverse.getBot());
+      } catch (err) {
+        console.warn(`[ViewerManager] Voice reconnect failed (non-fatal):`, err);
       }
 
     } catch (error) {
@@ -581,6 +602,9 @@ export class ViewerManager extends EventEmitter {
   }
 
   private async cleanup(instanceId: string): Promise<void> {
+    // Disconnect voice
+    voiceManager.disconnect();
+
     connectionManager.disconnect(instanceId);
     await metaverseConnectionManager.remove(instanceId);
     this.processes.delete(instanceId);
@@ -608,6 +632,10 @@ export class ViewerManager extends EventEmitter {
         connection.subscribeToChat('all');
         // Hide native chat UI since Electron handles it
         connection.setChatVisible(false);
+        // Switch voice to viewer caps
+        voiceManager.connectWithViewer(connection).catch(err => {
+          console.warn(`[ViewerManager] Voice switch to viewer failed (non-fatal):`, err);
+        });
       });
 
       connection.once('error', () => {
@@ -628,6 +656,9 @@ export class ViewerManager extends EventEmitter {
   }
 
   async stopAll(): Promise<void> {
+    // Stop voice sidecar
+    voiceManager.stop();
+
     // Tell all viewers to quit gracefully before disconnecting
     for (const [instanceId] of this.instances) {
       await this.stopViewer(instanceId);

@@ -8,6 +8,7 @@
         "dev": "npm run build && concurrently --kill-others \"npm run watch:main\" \"npm run watch:renderer\" \"electron .\"",
         "build": "npm run build:metaverse && npm run build:main && npm run build:renderer",
         "build:metaverse": "cd node-metaverse && npm run build",
+        "build:voice": "cd voice && dotnet publish -c Release -r win-x64 --self-contained -o ../dist/voice",
         "build:main": "esbuild src/main/index.ts --bundle --outfile=dist/main/index.js --platform=node --target=node18 --format=cjs --external:electron",
         "build:renderer": "esbuild src/renderer/index.tsx --bundle --outfile=dist/renderer/index.js --platform=browser --target=chrome114 --external:electron && esbuild src/renderer/styles/index.css --bundle --outfile=dist/renderer/styles/index.css && npm run copy:assets",
         "copy:assets": "node -e \"const fs=require('fs');fs.copyFileSync('src/renderer/index.html','dist/renderer/index.html');\"",

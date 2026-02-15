@@ -877,6 +877,7 @@ set(viewer_SOURCE_FILES
     pieslice.cpp
     pkchateventapi.cpp
     pkinventoryeventapi.cpp
+    pkvoiceeventapi.cpp
     pkloginhandoff.cpp
     pkmirrorflags.cpp
     pkwebsocketserver.cpp
@@ -1723,6 +1724,7 @@ set(viewer_HEADER_FILES
     pieslice.h
     pkchateventapi.h
     pkinventoryeventapi.h
+    pkvoiceeventapi.h
     pkloginhandoff.h
     pkmirrorflags.h
     pkwebsocketserver.h
