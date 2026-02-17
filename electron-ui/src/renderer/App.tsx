@@ -9,7 +9,7 @@ import { Welcome } from './components/Welcome';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { MfaModal } from './components/MfaModal';
 import { ChatWindow } from './components/ChatWindow';
-import { Friend, Group, NearbyAvatar, IPC_CHANNELS } from '../shared/types';
+import { Account, Friend, Group, NearbyAvatar, IPC_CHANNELS } from '../shared/types';
 
 type View = 'account' | 'add-account';
 
@@ -109,13 +109,14 @@ export const App: React.FC = () => {
   };
 
   // Login to metaverse only (no viewer launch)
-  const handleLogin = async (password?: string, startLocation?: string) => {
+  const handleLogin = async (password?: string, startLocation?: string, regionName?: string) => {
     if (!selectedAccountId) return;
 
     try {
-      if (password) {
-        await updateAccount(selectedAccountId, { password });
-      }
+      const updates: Partial<Account> = {};
+      if (password) updates.password = password;
+      if (regionName !== undefined) updates.lastRegion = regionName || undefined;
+      if (Object.keys(updates).length > 0) await updateAccount(selectedAccountId, updates);
 
       // Pass launchViewer: false to only login to metaverse
       await launchViewer(selectedAccountId, password, { launchViewer: false, startLocation });

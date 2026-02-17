@@ -102,6 +102,7 @@ export interface Account {
   lastName: string;
   password?: string; // Only saved if user opted in
   mfaHash?: string; // Saved after successful MFA login to skip future prompts
+  lastRegion?: string; // Last custom start location used
 }
 
 // Running viewer instance
