@@ -1,5 +1,5 @@
 import { ipcMain, BrowserWindow, Menu, shell } from 'electron';
-import { IPC_CHANNELS, AddAccountRequest, LaunchViewerRequest, ChatMessage, SyncStatus } from '../shared/types';
+import { IPC_CHANNELS, AddAccountRequest, LaunchViewerRequest, ChatMessage, SyncStatus, VoiceState } from '../shared/types';
 import { gridManager } from './grid-manager';
 import { accountManager } from './account-manager';
 import { viewerManager } from './viewer-manager';
@@ -8,6 +8,7 @@ import { metaverseConnectionManager } from './metaverse-connection';
 import { chatLogManager } from './chat-log-manager';
 import { InventorySyncManager } from './inventory-sync-manager';
 import { ViewerInventoryAdapter } from './viewer-inventory-adapter';
+import { voiceManager } from './voice-manager';
 
 // Track sync managers per instance
 const syncManagers = new Map<string, InventorySyncManager>();
@@ -499,6 +500,104 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     if (instance && session.name) {
       chatLogManager.saveSessionMeta(instance.accountId, session);
     }
+  });
+
+  // ── Voice controls ──────────────────────────────────
+  const voiceState: VoiceState = {
+    connected: false,
+    connecting: false,
+    micMuted: true, // PTT mode: mic starts muted
+    speakerMuted: false,
+    volume: 1.0,
+    micLevel: 0,
+    participants: [],
+  };
+
+  let savedVolume = 1.0; // For speaker mute/unmute toggle
+
+  function broadcastVoiceState(): void {
+    mainWindow.webContents.send(IPC_CHANNELS.VOICE_STATE_UPDATE, { ...voiceState });
+  }
+
+  // Renderer -> main voice commands
+  ipcMain.handle(IPC_CHANNELS.VOICE_PTT_DOWN, async () => {
+    console.log('[Voice] PTT DOWN');
+    if (voiceState.micMuted) {
+      voiceState.micMuted = false;
+      voiceManager.setMicMute(false);
+      broadcastVoiceState();
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.VOICE_PTT_UP, async () => {
+    console.log('[Voice] PTT UP');
+    if (!voiceState.micMuted) {
+      voiceState.micMuted = true;
+      voiceManager.setMicMute(true);
+      broadcastVoiceState();
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.VOICE_SET_VOLUME, async (_, volume: number) => {
+    voiceState.volume = Math.max(0, Math.min(1, volume));
+    voiceState.speakerMuted = voiceState.volume === 0;
+    savedVolume = voiceState.volume > 0 ? voiceState.volume : savedVolume;
+    voiceManager.setVolume(voiceState.volume);
+    broadcastVoiceState();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.VOICE_TOGGLE_SPEAKER_MUTE, async () => {
+    voiceState.speakerMuted = !voiceState.speakerMuted;
+    if (voiceState.speakerMuted) {
+      savedVolume = voiceState.volume > 0 ? voiceState.volume : savedVolume;
+      voiceState.volume = 0;
+    } else {
+      voiceState.volume = savedVolume || 0.5;
+    }
+    voiceManager.setVolume(voiceState.volume);
+    broadcastVoiceState();
+  });
+
+  // VoiceManager events -> renderer
+  voiceManager.on('connected', () => {
+    voiceState.connected = true;
+    voiceState.connecting = false;
+    // Enforce PTT default: mic starts muted
+    voiceManager.setMicMute(true);
+    voiceState.micMuted = true;
+    broadcastVoiceState();
+  });
+
+  voiceManager.on('disconnected', () => {
+    voiceState.connected = false;
+    voiceState.connecting = false;
+    voiceState.micLevel = 0;
+    voiceState.participants = [];
+    broadcastVoiceState();
+  });
+
+  voiceManager.on('ready', () => {
+    voiceState.connecting = true;
+    broadcastVoiceState();
+  });
+
+  voiceManager.on('participantJoined', (agentId: string) => {
+    if (!voiceState.participants.includes(agentId)) {
+      voiceState.participants.push(agentId);
+      broadcastVoiceState();
+    }
+  });
+
+  voiceManager.on('participantLeft', (agentId: string) => {
+    voiceState.participants = voiceState.participants.filter(id => id !== agentId);
+    broadcastVoiceState();
+  });
+
+  // micLevel events from sidecar (forwarded through voiceManager)
+  voiceManager.on('micLevel', (level: number) => {
+    voiceState.micLevel = level;
+    // Don't broadcast on every micLevel - renderer polls via state update
+    mainWindow.webContents.send(IPC_CHANNELS.VOICE_STATE_UPDATE, { ...voiceState });
   });
 
   // Context menu: right-click on user names

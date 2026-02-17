@@ -6,6 +6,7 @@
  * stderr: human-readable log output
  */
 
+using Microsoft.Extensions.Logging;
 using OpenMetaverse;
 using System;
 using System.Collections.Generic;
@@ -28,11 +29,23 @@ namespace VoiceSidecar
 
         private static readonly object WriteLock = new();
         private static readonly IVoiceLogger Log = new ConsoleVoiceLogger();
+
+        static Program()
+        {
+            // Enable SIPSorcery internal logging so we can see SRTP/RTP errors
+            var factory = LoggerFactory.Create(builder =>
+            {
+                builder.AddProvider(new VoiceLoggerProvider(Log));
+                builder.SetMinimumLevel(LogLevel.Trace);
+            });
+            SIPSorcery.LogFactory.Set(factory);
+        }
         private static readonly JsonIpcContext Context = new();
 
         private static Sdl3Audio _audio;
         private static VoiceSession _session;
         private static CancellationTokenSource _cts;
+        private static Timer _micLevelTimer;
 
         static async Task Main(string[] args)
         {
@@ -52,6 +65,16 @@ namespace VoiceSidecar
             {
                 Log.Error($"Failed to initialize audio: {ex.Message}");
                 _audio = null;
+            }
+
+            // Emit mic level at ~10Hz for UI meter
+            if (_audio != null)
+            {
+                _micLevelTimer = new Timer(_ =>
+                {
+                    if (_audio != null && _audio.RecordingActive && !_audio.MicGated)
+                        Emit("micLevel", new { level = _audio.MicLevel });
+                }, null, 100, 100);
             }
 
             Emit("ready", null);
@@ -169,9 +192,14 @@ namespace VoiceSidecar
 
             _cts = new CancellationTokenSource();
 
+            // Spatial voice always uses LOCAL. MULTIAGENT is only for P2P/Group/AdHoc calls.
+            // ParcelVoiceInfoRequest is a Vivox-era cap — Firestorm's WebRTC code never uses it.
+            var sessionType = VoiceSession.ESessionType.LOCAL;
+            Log.Info($"Using local voice (parcelLocalId={Context.ParcelLocalId})");
+
             try
             {
-                _session = new VoiceSession(_audio, VoiceSession.ESessionType.LOCAL, Context, Log);
+                _session = new VoiceSession(_audio, sessionType, Context, Log);
 
                 _session.OnPeerJoined += id => Emit("participantJoined", new { agentId = id.ToString() });
                 _session.OnPeerLeft += id => Emit("participantLeft", new { agentId = id.ToString() });
@@ -180,7 +208,10 @@ namespace VoiceSidecar
                     if (state.Power.HasValue)
                         Emit("participantSpeaking", new { agentId = id.ToString(), power = state.Power.Value });
                 };
-                _session.OnPeerConnectionReady += () => Emit("connected", new { channel = "spatial" });
+                _session.OnPeerConnectionReady += () =>
+                {
+                    Emit("connected", new { channel = "spatial" });
+                };
                 _session.OnPeerConnectionClosed += () => Emit("disconnected", new { reason = "peerClosed" });
                 _session.OnReprovisionSucceeded += () => Emit("connected", new { channel = "spatial" });
                 _session.OnReprovisionFailed += ex => Emit("disconnected", new { reason = ex?.Message ?? "reprovisionFailed" });
@@ -218,6 +249,7 @@ namespace VoiceSidecar
 
         // ── updatePosition ───────────────────────────────────────
 
+        private static int _posUpdateCount = 0;
         private static void UpdatePosition(JsonElement root)
         {
             if (root.TryGetProperty("position", out var posEl))
@@ -228,6 +260,10 @@ namespace VoiceSidecar
                 Context.RegionName = rn.GetString();
             if (root.TryGetProperty("parcelLocalId", out var plid))
                 Context.ParcelLocalId = plid.GetInt32();
+
+            _posUpdateCount++;
+            if (_posUpdateCount <= 3)
+                Log.Debug($"UpdatePosition #{_posUpdateCount}: pos=({Context.AgentPosition.X:F1},{Context.AgentPosition.Y:F1},{Context.AgentPosition.Z:F1})");
         }
 
         // ── audio controls ──────────────────────────────────────
@@ -235,7 +271,7 @@ namespace VoiceSidecar
         private static void SetMicMute(JsonElement root)
         {
             var muted = root.GetProperty("muted").GetBoolean();
-            if (_audio != null) _audio.MicMute = muted;
+            if (_audio != null) _audio.MicGated = muted;
         }
 
         private static void SetVolume(JsonElement root)

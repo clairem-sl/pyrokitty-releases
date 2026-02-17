@@ -3,9 +3,9 @@
  * Copyright (c) 2025, Sjofn LLC - BSD License
  *
  * Modified for standalone sidecar: namespace changed, logger default updated.
+ * Cleaned up: removed dead raw PCM APIs, reflection hacks, unused wrappers.
  */
 
-using Microsoft.Extensions.Logging;
 using SIPSorceryMedia.Abstractions;
 using SIPSorceryMedia.SDL3;
 using System;
@@ -22,15 +22,32 @@ namespace VoiceSidecar
     {
         public SDL3AudioEndPoint EndPoint { get; private set; }
         public SDL3AudioSource Source { get; private set; }
-        private readonly OpusAudioEncoder _audioEncoder = new OpusAudioEncoder();
+
+        // Separate encoder instances to avoid Concentus internal state corruption:
+        // _audioEncoder: EndPoint construction + RTP decode (playback)
+        // _sourceEncoder: SDL3AudioSource constructor (required by API, but Source never actually encodes)
+        // _micEncoder: manual mic encoding in raw sample handler
+        // File playback creates a fresh instance per-playback in StartFilePlayback
+        private readonly OpusAudioEncoder _audioEncoder = new();
+        private readonly OpusAudioEncoder _sourceEncoder = new();
+        private readonly OpusAudioEncoder _micEncoder = new();
+
         public bool IsAvailable { get; } = false;
 
         public event Action<bool> OnPlaybackActiveChanged;
         public event Action<bool> OnRecordingActiveChanged;
+
+        /// <summary>Encoded audio samples ready to send via RTP. Wired to pc.SendAudio in VoiceSession.</summary>
         public event Action<uint, byte[]> OnAudioSourceEncodedSample;
 
         public bool PlaybackActive { get; private set; } = false;
         public bool RecordingActive { get; private set; } = false;
+
+        /// <summary>Peak mic input level (0.0-1.0), updated from raw sample callback.</summary>
+        public float MicLevel { get; private set; } = 0f;
+
+        /// <summary>When true, encoded mic samples are not forwarded (PTT gate). Recording stays active.</summary>
+        public bool MicGated { get; set; } = true;
 
         public (uint id, string name) PlaybackDevice { get; private set; }
         public (uint id, string name) RecordingDevice { get; private set; }
@@ -39,33 +56,16 @@ namespace VoiceSidecar
         public float SpeakerLevel
         {
             get => _speakerLevel;
-            set
-            {
-                var v = Math.Max(0.0f, Math.Min(1.0f, value));
-                _speakerLevel = v;
-                TrySetEndpointVolume(v);
-            }
+            set => _speakerLevel = Math.Max(0f, Math.Min(1f, value));
         }
 
-        public bool MicMute
-        {
-            get => !RecordingActive;
-            set
-            {
-                try
-                {
-                    if (value) StopRecording(); else StartRecording();
-                }
-                catch { }
-            }
-        }
+        private const int OPUS_FRAME_SIZE = 960; // 20ms at 48kHz
 
         private readonly IVoiceLogger _log;
 
         public Sdl3Audio(IVoiceLogger logger = null)
         {
             _log = logger ?? new ConsoleVoiceLogger();
-            try { var factory = LoggerFactory.Create(builder => { builder.AddProvider(new VoiceLoggerProvider(_log)); }); } catch { }
 
             try
             {
@@ -74,21 +74,17 @@ namespace VoiceSidecar
 
                 var playbackDeviceIndex = DeviceSelection(false);
                 var recordingDeviceIndex = DeviceSelection(true);
-                var playbackDevice = GetDevice(playbackDeviceIndex, false);
-                var recordingDevice = GetDevice(recordingDeviceIndex, true);
+                PlaybackDevice = GetDevice(playbackDeviceIndex, false) ?? (id: 0, name: string.Empty);
+                RecordingDevice = GetDevice(recordingDeviceIndex, true) ?? (id: 0, name: string.Empty);
 
-                PlaybackDevice = playbackDevice ?? (id: 0, name: string.Empty);
-                RecordingDevice = recordingDevice ?? (id: 0, name: string.Empty);
-
-                EndPoint = new SDL3AudioEndPoint(PlaybackDevice.name, _audioEncoder);
-                var fmt = new AudioFormat(AudioCodecsEnum.L16, 96, 48000, 2);
-                EndPoint.SetAudioSinkFormat(fmt);
-                TrySetEndpointVolume(_speakerLevel);
+                // EndPoint is created lazily in EnsureEndpoint() when first RTP arrives.
+                // Creating it here starts the SDL3 stream callback immediately, causing
+                // buffer underrun spam when nobody is talking.
 
                 try
                 {
-                    Source = new SDL3AudioSource(RecordingDevice.name, _audioEncoder);
-                    AttachSourceHandlers();
+                    Source = new SDL3AudioSource(RecordingDevice.name, _sourceEncoder);
+                    Source.OnAudioSourceRawSample += AudioSource_OnAudioSourceRawSample;
                 }
                 catch (Exception ex)
                 {
@@ -102,7 +98,6 @@ namespace VoiceSidecar
             {
                 _log.Error($"SDL3 initialization failed: {ex.Message}");
                 IsAvailable = false;
-                EndPoint = null;
             }
         }
 
@@ -117,221 +112,22 @@ namespace VoiceSidecar
             catch { }
         }
 
-        private int DeviceSelection(bool recordingDevice)
-        {
-            var sdlDevices = recordingDevice ? SDL3Helper.GetAudioRecordingDevices() : SDL3Helper.GetAudioPlaybackDevices();
-            if (sdlDevices.Count < 1) { _log.Warn($"SDL Audio - Could not find an audio {(recordingDevice ? "recording" : "playback")} device."); return -1; }
-            return -1;
-        }
-
-        private (uint id, string name)? GetDevice(int index, bool recordingDevice)
-        {
-            if (index < 0) return recordingDevice ? SDL3Helper.GetAudioRecordingDevice(null) : SDL3Helper.GetAudioPlaybackDevice(null);
-            return recordingDevice ? SDL3Helper.GetAudioRecordingDevice(index) : SDL3Helper.GetAudioPlaybackDevice(index);
-        }
-
-        private void TrySetEndpointVolume(float normalizedVolume)
-        {
-            if (EndPoint == null) return;
-            try
-            {
-                var epType = EndPoint.GetType();
-                var methodNames = new[] { "SetVolume", "SetPlaybackVolume", "SetSinkVolume", "SetAudioVolume" };
-                foreach (var name in methodNames)
-                {
-                    var mi = epType.GetMethod(name, new[] { typeof(float) }) ?? epType.GetMethod(name, new[] { typeof(double) }) ?? epType.GetMethod(name, new[] { typeof(int) });
-                    if (mi != null)
-                    {
-                        var p = mi.GetParameters()[0].ParameterType;
-                        if (p == typeof(float)) mi.Invoke(EndPoint, new object[] { normalizedVolume });
-                        else if (p == typeof(double)) mi.Invoke(EndPoint, new object[] { (double)normalizedVolume });
-                        else if (p == typeof(int)) mi.Invoke(EndPoint, new object[] { (int)Math.Round(normalizedVolume * 100) });
-                        return;
-                    }
-                }
-                var prop = epType.GetProperty("Volume") ?? epType.GetProperty("PlaybackVolume") ?? epType.GetProperty("Level");
-                if (prop != null && prop.CanWrite)
-                {
-                    var pt = prop.PropertyType;
-                    if (pt == typeof(float)) prop.SetValue(EndPoint, normalizedVolume);
-                    else if (pt == typeof(double)) prop.SetValue(EndPoint, (double)normalizedVolume);
-                    else if (pt == typeof(int)) prop.SetValue(EndPoint, (int)Math.Round(normalizedVolume * 100));
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.Error($"Failed to set endpoint volume: {ex.Message}");
-            }
-        }
-
-        private bool _sourceHandlersAttached = false;
-
-        private void AttachSourceHandlers()
-        {
-            if (Source == null) return;
-            try
-            {
-                if (!_sourceHandlersAttached)
-                {
-                    Source.OnAudioSourceEncodedSample += AudioSource_OnAudioSourceEncodedSample;
-                    Source.OnAudioSourceRawSample += AudioSource_OnAudioSourceRawSample;
-                    _sourceHandlersAttached = true;
-                }
-            }
-            catch { }
-        }
-
-        private void DetachSourceHandlers()
-        {
-            if (Source == null) return;
-            try
-            {
-                if (_sourceHandlersAttached)
-                {
-                    try { Source.OnAudioSourceEncodedSample -= AudioSource_OnAudioSourceEncodedSample; } catch { }
-                    try { Source.OnAudioSourceRawSample -= AudioSource_OnAudioSourceRawSample; } catch { }
-                    _sourceHandlersAttached = false;
-                }
-            }
-            catch { }
-        }
-
-        public async Task StartPlaybackAsync()
-        {
-            if (!IsAvailable) return;
-            if (EndPoint == null)
-            {
-                if (!EnsureEndpoint())
-                {
-                    _log.Warn("StartPlaybackAsync: cannot create audio endpoint, playback not started");
-                    return;
-                }
-            }
-
-            bool needsReinit = false;
-            try
-            {
-                var epType = EndPoint.GetType();
-                var closedField = epType.GetField("_isClosed", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (closedField != null)
-                {
-                    var isClosed = closedField.GetValue(EndPoint);
-                    if (isClosed is bool b && b)
-                    {
-                        needsReinit = true;
-                        _log.Debug("Endpoint is closed, reinitializing before starting playback");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.Debug($"Could not check endpoint closed state: {ex.Message}");
-            }
-
-            if (needsReinit)
-            {
-                try
-                {
-                    var fmt = new AudioFormat(AudioCodecsEnum.L16, 96, 48000, 2);
-                    EndPoint.SetAudioSinkFormat(fmt);
-                    TrySetEndpointVolume(_speakerLevel);
-                    _log.Debug("Endpoint reinitialized for playback");
-                }
-                catch (Exception ex)
-                {
-                    _log.Warn($"Failed to reinitialize endpoint: {ex.Message}");
-                    try
-                    {
-                        EndPoint = new SDL3AudioEndPoint(PlaybackDevice.name, _audioEncoder);
-                        var fmt = new AudioFormat(AudioCodecsEnum.L16, 96, 48000, 2);
-                        EndPoint.SetAudioSinkFormat(fmt);
-                        TrySetEndpointVolume(_speakerLevel);
-                        _log.Debug("Endpoint recreated from scratch");
-                    }
-                    catch (Exception ex2)
-                    {
-                        _log.Error($"Failed to recreate endpoint: {ex2.Message}");
-                        return;
-                    }
-                }
-            }
-
-            try
-            {
-                _samplesReceivedCount = 0;
-                await EndPoint.StartAudioSink();
-                PlaybackActive = true;
-                OnPlaybackActiveChanged?.Invoke(true);
-                _log.Debug("Playback started");
-            }
-            catch (Exception ex)
-            {
-                _log.Error($"Failed to start playback: {ex.Message}");
-            }
-        }
-
-        public async Task StopPlaybackAsync()
-        {
-            if (!IsAvailable || EndPoint == null) return;
-            try { await EndPoint.CloseAudioSink(); PlaybackActive = false; OnPlaybackActiveChanged?.Invoke(false); _log.Debug("Playback stopped"); } catch (Exception ex) { _log.Error($"Failed to stop playback: {ex.Message}"); }
-        }
+        // ── Recording (mic capture) ─────────────────────────────────
 
         public void StartRecording()
         {
             if (!IsAvailable || Source == null) return;
             try
             {
-                bool needsReinit = false;
-                try
+                // SetAudioSourceFormat must be called to initialize the SDL3 capture stream.
+                // Without it, StartAudio() is a no-op (no _audioStream exists yet).
+                var formats = Source.GetAudioSourceFormats();
+                if (formats != null && formats.Count > 0)
                 {
-                    var sourceType = Source.GetType();
-                    var streamField = sourceType.GetField("_audioStream", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                    if (streamField != null)
-                    {
-                        var stream = streamField.GetValue(Source);
-                        if (stream == null)
-                        {
-                            needsReinit = true;
-                            _log.Debug("Recording source audio stream is null, reinitializing");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _log.Debug($"Could not check source stream state: {ex.Message}");
+                    Source.SetAudioSourceFormat(formats[0]);
+                    _log.Debug($"Recording source initialized with: {formats[0].FormatName}");
                 }
 
-                if (needsReinit)
-                {
-                    try
-                    {
-                        var formats = Source.GetAudioSourceFormats();
-                        if (formats != null && formats.Count > 0)
-                        {
-                            var fmt = formats[0];
-                            Source.SetAudioSourceFormat(fmt);
-                            _log.Debug("Recording source reinitialized");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _log.Warn($"Failed to reinitialize recording source: {ex.Message}");
-                        try
-                        {
-                            DetachSourceHandlers();
-                            Source = new SDL3AudioSource(RecordingDevice.name, _audioEncoder);
-                            AttachSourceHandlers();
-                            _log.Debug("Recording source recreated from scratch");
-                        }
-                        catch (Exception ex2)
-                        {
-                            _log.Error($"Failed to recreate recording source: {ex2.Message}");
-                            return;
-                        }
-                    }
-                }
-
-                AttachSourceHandlers();
                 Source.StartAudio();
                 RecordingActive = true;
                 OnRecordingActiveChanged?.Invoke(true);
@@ -346,506 +142,94 @@ namespace VoiceSidecar
         public void StopRecording()
         {
             if (!IsAvailable || Source == null) return;
-            try { DetachSourceHandlers(); StopSourceSafely(Source); RecordingActive = false; OnRecordingActiveChanged?.Invoke(false); _log.Debug("Recording stopped"); } catch (Exception ex) { _log.Error($"Failed to stop recording: {ex.Message}"); }
-        }
-
-        private void StopSourceSafely(object source)
-        {
-            if (source == null) return;
-            var t = source.GetType();
-            var mi = t.GetMethod("StopAudio", Type.EmptyTypes) ?? t.GetMethod("Stop", Type.EmptyTypes) ?? t.GetMethod("Close", Type.EmptyTypes);
-            if (mi != null) { mi.Invoke(source, null); return; }
-            if (source is IDisposable d) d.Dispose();
-        }
-
-        // File playback
-        private Task _filePlaybackTask;
-        private CancellationTokenSource _filePlaybackCts;
-        private bool _filePlaybackLoop = false;
-        private bool _filePlaybackActive = false;
-        private bool _filePlaybackWasRecording = false;
-        private string _filePlaybackPath;
-
-        private Task _rawStreamTask;
-        private CancellationTokenSource _rawStreamCts;
-        private bool _rawStreamActive = false;
-
-        public void StartFilePlayback(string path, bool loop = false)
-        {
-            if (!IsAvailable) throw new InvalidOperationException("SDL3 audio not available");
-            if (string.IsNullOrEmpty(path)) throw new ArgumentException("path");
-            if (!File.Exists(path)) throw new FileNotFoundException(path);
-
-            _log.Debug($"StartFilePlayback: Starting playback of {path} (loop={loop})");
-
-            _filePlaybackWasRecording = RecordingActive;
-            if (RecordingActive) { try { StopRecording(); } catch { } }
-
-            _filePlaybackPath = path;
-            _filePlaybackLoop = loop;
-            _filePlaybackCts = new CancellationTokenSource();
-            var token = _filePlaybackCts.Token;
-            _filePlaybackActive = true;
-
-            _filePlaybackTask = Task.Run(async () =>
-            {
-                try
-                {
-                    _log.Debug($"StartFilePlayback: Playback task started");
-                    while (!token.IsCancellationRequested)
-                    {
-                        using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read))
-                        using (var br = new BinaryReader(fs))
-                        {
-                            var riff = new string(br.ReadChars(4));
-                            if (riff != "RIFF") throw new InvalidDataException("Not a WAV file (missing RIFF)");
-                            br.ReadInt32();
-                            var wave = new string(br.ReadChars(4));
-                            if (wave != "WAVE") throw new InvalidDataException("Not a WAV file (missing WAVE)");
-
-                            int channels = 1; int sampleRate = 48000; short bitsPerSample = 16;
-                            long dataChunkPos = -1;
-
-                            while (fs.Position < fs.Length)
-                            {
-                                var chunkId = new string(br.ReadChars(4));
-                                int chunkSize = br.ReadInt32();
-                                if (chunkId == "fmt ")
-                                {
-                                    br.ReadInt16(); channels = br.ReadInt16(); sampleRate = br.ReadInt32(); br.ReadInt32(); br.ReadInt16(); bitsPerSample = br.ReadInt16();
-                                    var remaining = chunkSize - 16; if (remaining > 0) br.ReadBytes(remaining);
-                                }
-                                else if (chunkId == "data") { dataChunkPos = fs.Position; break; }
-                                else { br.ReadBytes(chunkSize); }
-                            }
-
-                            if (dataChunkPos < 0) throw new InvalidDataException("WAV data chunk not found");
-                            if (bitsPerSample != 16) { _log.Warn($"WAV playback only supports 16-bit PCM files (got {bitsPerSample})"); break; }
-
-                            _log.Debug($"StartFilePlayback: WAV format detected - channels={channels}, sampleRate={sampleRate}, bitsPerSample={bitsPerSample}");
-
-                            fs.Position = dataChunkPos;
-                            int frameSize = _audioEncoder.GetFrameSize();
-                            int bytesPerFrame = frameSize * (bitsPerSample / 8) * channels;
-
-                            int framesProcessed = 0;
-                            while (!token.IsCancellationRequested)
-                            {
-                                var bytes = br.ReadBytes(bytesPerFrame);
-                                if (bytes == null || bytes.Length == 0) break;
-                                if (bytes.Length < bytesPerFrame) { var padded = new byte[bytesPerFrame]; Array.Copy(bytes, 0, padded, 0, bytes.Length); bytes = padded; }
-
-                                short[] pcm = new short[bytes.Length / 2];
-                                for (int i = 0, si = 0; i < bytes.Length; i += 2) pcm[si++] = BitConverter.ToInt16(bytes, i);
-
-                                short[] mono = DownmixToMono(pcm, channels);
-                                if (sampleRate != 48000) mono = ResampleTo48k(mono, sampleRate);
-
-                                int idx = 0;
-                                while (idx < mono.Length)
-                                {
-                                    int remaining = mono.Length - idx;
-                                    short[] frame = new short[frameSize];
-                                    if (remaining >= frameSize) Array.Copy(mono, idx, frame, 0, frameSize); else Array.Copy(mono, idx, frame, 0, remaining);
-                                    byte[] encoded = null;
-                                    try { encoded = _audioEncoder.EncodeAudio(frame, OpusAudioEncoder.MEDIA_FORMAT_OPUS); } catch (Exception ex) { _log.Warn($"WAV encode failed: {ex.Message}"); encoded = null; }
-                                    if (encoded != null && encoded.Length > 0)
-                                    {
-                                        try
-                                        {
-                                            OnAudioSourceEncodedSample?.Invoke((uint)frameSize, encoded);
-                                            framesProcessed++;
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            _log.Error($"StartFilePlayback: Error invoking OnAudioSourceEncodedSample: {ex.Message}");
-                                        }
-                                    }
-                                    idx += frameSize; if (token.IsCancellationRequested) break;
-                                }
-
-                                try { int frames = Math.Max(1, mono.Length / frameSize); await Task.Delay(20 * frames, token).ConfigureAwait(false); } catch (OperationCanceledException) { break; }
-                            }
-                            _log.Debug($"StartFilePlayback: Finished reading file, total frames processed: {framesProcessed}");
-                        }
-
-                        if (!_filePlaybackLoop) break;
-                        _log.Debug($"StartFilePlayback: Looping playback...");
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    _log.Debug("StartFilePlayback: Playback cancelled");
-                }
-                catch (Exception ex)
-                {
-                    _log.Warn($"File playback failed: {ex.Message}");
-                    _log.Debug($"File playback stack trace: {ex.StackTrace}");
-                }
-                finally { _filePlaybackActive = false; _log.Debug("StartFilePlayback: Playback task ended"); }
-
-                if (_filePlaybackWasRecording) { try { StartRecording(); } catch { } }
-            }, token);
-        }
-
-        public void StopFilePlayback()
-        {
-            if (!_filePlaybackActive || _filePlaybackCts == null) return;
-            try { _filePlaybackCts.Cancel(); _filePlaybackTask?.Wait(500); } catch { } finally { _filePlaybackCts.Dispose(); _filePlaybackCts = null; _filePlaybackActive = false; }
-        }
-
-        public void PlayFileOnce(string path) { StartFilePlayback(path, false); }
-        public void PlayFileLoop(string path) { StartFilePlayback(path, true); }
-        public void StopFile() { StopFilePlayback(); }
-        public void SetPlaybackVolume(float normalized) { SpeakerLevel = normalized; }
-
-        public void SetCaptureGainPercent(int percent)
-        {
-            if (percent < 0) percent = 0; if (percent > 100) percent = 100;
-            if (Source == null) { _log.Warn("SetCaptureGainPercent called but Source is null"); return; }
             try
             {
-                var t = Source.GetType();
-                var methodNames = new[] { "SetMicLevel", "SetCaptureGain", "SetGain", "SetVolume", "SetLevel", "SetCaptureLevel" };
-                foreach (var name in methodNames)
-                {
-                    var mi = t.GetMethod(name, new[] { typeof(int) }) ?? t.GetMethod(name, new[] { typeof(float) }) ?? t.GetMethod(name, new[] { typeof(double) });
-                    if (mi != null)
-                    {
-                        var p = mi.GetParameters()[0].ParameterType;
-                        if (p == typeof(int)) mi.Invoke(Source, new object[] { percent });
-                        else if (p == typeof(float)) mi.Invoke(Source, new object[] { (float)percent / 100f });
-                        else if (p == typeof(double)) mi.Invoke(Source, new object[] { (double)percent / 100.0 });
-                        return;
-                    }
-                }
-                var prop = t.GetProperty("Level") ?? t.GetProperty("Gain") ?? t.GetProperty("MicLevel") ?? t.GetProperty("CaptureLevel");
-                if (prop != null && prop.CanWrite)
-                {
-                    var pt = prop.PropertyType;
-                    if (pt == typeof(int)) prop.SetValue(Source, percent);
-                    else if (pt == typeof(float)) prop.SetValue(Source, (float)percent / 100f);
-                    else if (pt == typeof(double)) prop.SetValue(Source, (double)percent / 100.0);
-                    return;
-                }
-                _log.Warn("SetCaptureGainPercent: no known setter found on SDL3AudioSource (operation ignored)");
-            }
-            catch (Exception ex) { _log.Warn($"SetCaptureGainPercent failed: {ex.Message}"); }
-        }
-
-        // Raw PCM streaming
-        public void StartRawPcmStream(Stream pcmStream, int channels = 1, int sampleRate = 48000)
-        {
-            if (pcmStream == null) throw new ArgumentNullException(nameof(pcmStream));
-            if (!pcmStream.CanRead) throw new ArgumentException("Stream is not readable", nameof(pcmStream));
-            if (_rawStreamActive) StopRawPcmStream();
-
-            _rawStreamCts = new CancellationTokenSource();
-            _rawStreamActive = true;
-            _rawStreamTask = PlayRawPcmStreamAsync(pcmStream, channels, sampleRate, _rawStreamCts.Token).ContinueWith(t => { _rawStreamActive = false; if (t.IsFaulted) _log.Warn($"Raw PCM stream task faulted: {t.Exception?.GetBaseException().Message}"); }, TaskScheduler.Default);
-        }
-
-        public void StartRawPcmFileLoop(string path, int channels = 1, bool loop = true)
-        {
-            if (string.IsNullOrEmpty(path)) throw new ArgumentNullException(nameof(path));
-            if (!File.Exists(path)) throw new FileNotFoundException(path);
-            if (_rawStreamActive) StopRawPcmStream();
-
-            _rawStreamCts = new CancellationTokenSource();
-            var token = _rawStreamCts.Token;
-            _rawStreamActive = true;
-
-            _rawStreamTask = Task.Run(async () =>
-            {
-                try
-                {
-                    while (!token.IsCancellationRequested)
-                    {
-                        using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-                        using (var br = new BinaryReader(fs, System.Text.Encoding.UTF8, true))
-                        {
-                            var riff = new string(br.ReadChars(4)); fs.Position = 0;
-                            if (riff == "RIFF")
-                            {
-                                int channelsFound = 1; int sampleRateFound = 48000; long dataChunkPos = -1;
-                                br.ReadChars(12);
-                                while (fs.Position < fs.Length)
-                                {
-                                    var chunkId = new string(br.ReadChars(4)); int chunkSize = br.ReadInt32();
-                                    if (chunkId == "fmt ") { br.ReadInt16(); channelsFound = br.ReadInt16(); sampleRateFound = br.ReadInt32(); br.ReadInt32(); br.ReadInt16(); var remaining = chunkSize - 16; if (remaining > 0) br.ReadBytes(remaining); }
-                                    else if (chunkId == "data") { dataChunkPos = fs.Position; break; }
-                                    else { br.ReadBytes(chunkSize); }
-                                }
-
-                                if (dataChunkPos >= 0) { fs.Position = dataChunkPos; await PlayRawPcmStreamAsync(fs, channelsFound, sampleRateFound, token).ConfigureAwait(false); }
-                                else { fs.Position = 0; await PlayRawPcmStreamAsync(fs, channels, 48000, token).ConfigureAwait(false); }
-                            }
-                            else { fs.Position = 0; await PlayRawPcmStreamAsync(fs, channels, 48000, token).ConfigureAwait(false); }
-                        }
-                        if (!loop) break;
-                    }
-                }
-                catch (OperationCanceledException) { }
-                catch (Exception ex) { _log.Warn($"Raw PCM file loop failed: {ex.Message}"); }
-                finally { _rawStreamActive = false; }
-            }, token);
-        }
-
-        public void StopRawPcmStream()
-        {
-            if (!_rawStreamActive || _rawStreamCts == null) return;
-            try { _rawStreamCts.Cancel(); _rawStreamTask?.Wait(500); } catch { } finally { _rawStreamCts.Dispose(); _rawStreamCts = null; _rawStreamActive = false; }
-        }
-
-        public void FeedPcmSamples(short[] pcmInterleaved, int channels = 1, int sampleRate = 48000)
-        {
-            if (pcmInterleaved == null) throw new ArgumentNullException(nameof(pcmInterleaved));
-            if (channels < 1) throw new ArgumentOutOfRangeException(nameof(channels));
-            var frameSize = _audioEncoder.GetFrameSize();
-            short[] monoSamples = DownmixToMono(pcmInterleaved, channels);
-            if (sampleRate != 48000) monoSamples = ResampleTo48k(monoSamples, sampleRate);
-            int idx = 0;
-            while (idx < monoSamples.Length)
-            {
-                int remaining = monoSamples.Length - idx; short[] frame = new short[frameSize];
-                if (remaining >= frameSize) Array.Copy(monoSamples, idx, frame, 0, frameSize); else Array.Copy(monoSamples, idx, frame, 0, remaining);
-                byte[] encoded = null; try { encoded = _audioEncoder.EncodeAudio(frame, OpusAudioEncoder.MEDIA_FORMAT_OPUS); } catch (Exception ex) { _log.Warn($"FeedPcmSamples: encode failed: {ex.Message}"); }
-                if (encoded != null && encoded.Length > 0) { try { OnAudioSourceEncodedSample?.Invoke((uint)frameSize, encoded); } catch { } }
-                idx += frameSize;
-            }
-        }
-
-        public void FeedPcmBytes(byte[] pcmBytes, int channels = 1, int sampleRate = 48000)
-        {
-            if (pcmBytes == null) throw new ArgumentNullException(nameof(pcmBytes));
-            if (pcmBytes.Length % 2 != 0) throw new ArgumentException("PCM byte array length must be even (16-bit samples)", nameof(pcmBytes));
-            int sampleCount = pcmBytes.Length / 2; short[] samples = new short[sampleCount];
-            for (int i = 0, si = 0; i < pcmBytes.Length; i += 2, si++) samples[si] = BitConverter.ToInt16(pcmBytes, i);
-            FeedPcmSamples(samples, channels, sampleRate);
-        }
-
-        public async Task PlayRawPcmStreamAsync(Stream pcmStream, int channels = 1, int sampleRate = 48000, CancellationToken ct = default)
-        {
-            if (pcmStream == null) throw new ArgumentNullException(nameof(pcmStream));
-            if (!pcmStream.CanRead) throw new ArgumentException("Stream is not readable", nameof(pcmStream));
-            if (channels < 1) throw new ArgumentOutOfRangeException(nameof(channels));
-            var frameSize = _audioEncoder.GetFrameSize(); int bytesPerSample = 2; int bytesPerFrame = frameSize * bytesPerSample * channels; var buffer = new byte[bytesPerFrame];
-            try
-            {
-                while (!ct.IsCancellationRequested)
-                {
-                    int read = 0; while (read < bytesPerFrame) { int r = await pcmStream.ReadAsync(buffer, read, bytesPerFrame - read, ct).ConfigureAwait(false); if (r == 0) break; read += r; }
-                    if (read == 0) break;
-                    if (read < bytesPerFrame) for (int i = read; i < bytesPerFrame; i++) buffer[i] = 0;
-                    FeedPcmBytes(buffer, channels, sampleRate);
-                    try { await Task.Delay(20, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; }
-                }
-            }
-            catch (OperationCanceledException) { }
-            catch (Exception ex) { _log.Warn($"PlayRawPcmStreamAsync failed: {ex.Message}"); }
-        }
-
-        // Helpers
-        private short[] ResampleTo48k(short[] src, int srcRate)
-        {
-            if (src == null) return Array.Empty<short>(); if (srcRate == 48000) return src; if (src.Length == 0) return Array.Empty<short>();
-            double ratio = 48000.0 / srcRate; int dstLen = (int)Math.Round(src.Length * ratio); if (dstLen < 1) return Array.Empty<short>();
-            var dst = new short[dstLen]; for (int i = 0; i < dstLen; i++) { double srcPos = i / ratio; int i0 = (int)Math.Floor(srcPos); int i1 = i0 + 1; if (i0 >= src.Length) i0 = src.Length - 1; if (i1 >= src.Length) i1 = src.Length - 1; double frac = srcPos - Math.Floor(srcPos); double s0 = src[i0]; double s1 = src[i1]; var v = (short)Math.Round(s0 * (1.0 - frac) + s1 * frac); dst[i] = v; } return dst;
-        }
-
-        private short[] DownmixToMono(short[] interleaved, int channels)
-        {
-            if (channels <= 1) return interleaved;
-            int monoLen = interleaved.Length / channels; var mono = new short[monoLen]; for (int i = 0; i < monoLen; i++) { int acc = 0; for (int c = 0; c < channels; c++) acc += interleaved[i * channels + c]; mono[i] = (short)(acc / channels); } return mono;
-        }
-
-        // Incoming source callbacks
-        private int _samplesReceivedCount = 0;
-        public void AudioSource_OnAudioSourceEncodedSample(uint durationRtpUnits, byte[] sample)
-        {
-            _samplesReceivedCount++;
-            try { OnAudioSourceEncodedSample?.Invoke(durationRtpUnits, sample); } catch { }
-
-            if (!IsAvailable) return;
-            if (EndPoint == null)
-            {
-                if (!EnsureEndpoint())
-                {
-                    _log.Warn("AudioSource_OnAudioSourceEncodedSample: cannot create audio endpoint");
-                    return;
-                }
-            }
-
-            if (!PlaybackActive)
-            {
-                _log.Debug($"Auto-starting playback (sample #{_samplesReceivedCount})");
-                _ = StartPlaybackAsync();
-                System.Threading.Thread.Sleep(50);
-            }
-
-            if (sample == null || sample.Length == 0) return;
-            try
-            {
-                var pcmSample = _audioEncoder.DecodeAudio(sample, OpusAudioEncoder.MEDIA_FORMAT_OPUS);
-                if (pcmSample == null || pcmSample.Length == 0) return;
-                var pcmBytes = pcmSample.SelectMany(BitConverter.GetBytes).ToArray();
-                EndPoint?.PutAudioSample(pcmBytes);
+                Source.CloseAudio();
+                RecordingActive = false;
+                OnRecordingActiveChanged?.Invoke(false);
+                _log.Debug("Recording stopped");
             }
             catch (Exception ex)
             {
-                _log.Debug($"Failed to decode/play audio sample: {ex.Message}");
+                _log.Error($"Failed to stop recording: {ex.Message}");
             }
         }
+
+        // Manual mic encoding buffer
+        // SDL3AudioSource.OnAudioSourceEncodedSample never fires despite SetAudioSourceFormat(opus).
+        // Only OnAudioSourceRawSample works, so we manually encode in 20ms frames here.
+        private short[] _micBuffer = Array.Empty<short>();
+        private int _micBufferPos = 0;
+        private int _micEncodeCount = 0;
 
         public void AudioSource_OnAudioSourceRawSample(AudioSamplingRatesEnum samplingRate, uint durationMilliseconds, short[] sample)
         {
-            try { byte[] pcmBytes = sample.SelectMany(BitConverter.GetBytes).ToArray(); EndPoint.PutAudioSample(pcmBytes); } catch { }
-        }
+            if (sample == null || sample.Length == 0) return;
 
-        // Device lists
-        public IReadOnlyDictionary<uint, string> GetPlaybackDevices()
-        {
-            return SDL3Helper.GetAudioPlaybackDevices();
-        }
-
-        public IReadOnlyDictionary<uint, string> GetRecordingDevices()
-        {
-            return SDL3Helper.GetAudioRecordingDevices();
-        }
-
-        public void SetPlaybackDevice(string deviceName)
-        {
-            if (!IsAvailable) return;
-            try
+            // Track peak mic level for UI meter
+            int peak = 0;
+            for (int i = 0; i < sample.Length; i++)
             {
-                if (deviceName == "Default Speakers" || deviceName == "Default Microphone") deviceName = null;
+                int abs = Math.Abs((int)sample[i]);
+                if (abs > peak) peak = abs;
+            }
+            MicLevel = Math.Min(1.0f, peak / 32768f);
 
-                bool wasPlaying = PlaybackActive;
+            // Manual Opus encoding: buffer into 960-sample frames, encode.
+            // NOTE: SDL3 captures at 48kHz regardless of what AudioSamplingRatesEnum says.
+            // The Rate8KHz enum is misleading - actual data is 48kHz (488 samples per 10ms callback).
+            // Do NOT resample - feed directly to the Opus encoder.
+            if (MicGated) return;
 
-                try { EndPoint?.CloseAudioSink().Wait(2000); } catch { }
-                EndPoint = new SDL3AudioEndPoint(deviceName, _audioEncoder);
-                var fmt = new AudioFormat(AudioCodecsEnum.L16, 96, 48000, 2);
-                EndPoint.SetAudioSinkFormat(fmt);
-                TrySetEndpointVolume(_speakerLevel);
+            if (_micBuffer.Length == 0)
+                _micBuffer = new short[OPUS_FRAME_SIZE];
 
-                if (wasPlaying)
+            int srcIdx = 0;
+            while (srcIdx < sample.Length)
+            {
+                int toCopy = Math.Min(sample.Length - srcIdx, OPUS_FRAME_SIZE - _micBufferPos);
+                Array.Copy(sample, srcIdx, _micBuffer, _micBufferPos, toCopy);
+                _micBufferPos += toCopy;
+                srcIdx += toCopy;
+
+                if (_micBufferPos >= OPUS_FRAME_SIZE)
                 {
-                    _ = StartPlaybackAsync();
+                    try
+                    {
+                        var encoded = _micEncoder.EncodeAudio(_micBuffer, OpusAudioEncoder.MEDIA_FORMAT_OPUS);
+                        if (encoded != null && encoded.Length > 0)
+                        {
+                            _micEncodeCount++;
+                            if (_micEncodeCount == 1)
+                                _log.Debug($"Mic encoding started (len={encoded.Length})");
+                            try { OnAudioSourceEncodedSample?.Invoke((uint)OPUS_FRAME_SIZE, encoded); } catch { }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        if (_micEncodeCount < 3)
+                            _log.Warn($"Mic encode failed: {ex.Message}");
+                    }
+                    _micBufferPos = 0;
                 }
             }
-            catch (Exception ex)
-            {
-                _log.Warn($"Failed to set playback device: {ex.Message}");
-            }
         }
 
-        public void SetRecordingDevice(string deviceName)
-        {
-            if (!IsAvailable) return;
-            try
-            {
-                bool wasRecording = RecordingActive;
+        // ── Playback (speaker output) ───────────────────────────────
 
-                try { DetachSourceHandlers(); StopSourceSafely(Source); } catch { }
-
-                Exception lastEx = null;
-                try { Source = new SDL3AudioSource(deviceName, _audioEncoder); }
-                catch (Exception ex1) { lastEx = ex1; Source = null; }
-
-                if (Source == null && deviceName != null)
-                {
-                    try { Source = new SDL3AudioSource(null, _audioEncoder); }
-                    catch (Exception ex2) { lastEx = ex2; Source = null; }
-                }
-
-                if (Source == null)
-                {
-                    try { Source = new SDL3AudioSource(string.Empty, _audioEncoder); }
-                    catch (Exception ex3) { lastEx = ex3; Source = null; }
-                }
-
-                if (Source == null)
-                {
-                    _log.Warn($"Failed to create recording source (device='{deviceName}'): {lastEx?.Message}");
-                    throw new InvalidOperationException("Failed to create SDL3 audio source.", lastEx);
-                }
-
-                AttachSourceHandlers();
-                if (wasRecording) StartRecording();
-            }
-            catch (Exception ex)
-            {
-                _log.Warn($"Failed to set recording device: {ex.Message}");
-                throw;
-            }
-        }
+        // Endpoint sink format: mono 48kHz 16-bit PCM to match Opus decoder output (_channels=1)
+        private static readonly AudioFormat ENDPOINT_FORMAT = new(AudioCodecsEnum.L16, 96, 48000, 1);
 
         public bool EnsureEndpoint()
         {
-            if (!IsAvailable) { _log.Warn("Cannot ensure endpoint: SDL3 not available"); return false; }
-            if (EndPoint != null)
-            {
-                try
-                {
-                    var epType = EndPoint.GetType();
-                    var closedField = epType.GetField("_isClosed", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                    if (closedField != null)
-                    {
-                        var isClosed = closedField.GetValue(EndPoint);
-                        if (isClosed is bool b && b)
-                        {
-                            _log.Debug("Endpoint exists but is closed, recreating...");
-                        }
-                        else
-                        {
-                            var streamField = epType.GetField("_audioStream", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                            if (streamField != null)
-                            {
-                                var stream = streamField.GetValue(EndPoint);
-                                if (stream == null)
-                                {
-                                    _log.Debug("Endpoint exists but audio stream is null, reinitializing...");
-                                    try
-                                    {
-                                        var fmt = new AudioFormat(AudioCodecsEnum.L16, 96, 48000, 2);
-                                        EndPoint.SetAudioSinkFormat(fmt);
-                                        TrySetEndpointVolume(_speakerLevel);
-                                        _log.Debug("Endpoint reinitialized successfully");
-                                        return true;
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _log.Debug($"Failed to reinitialize endpoint: {ex.Message}, recreating...");
-                                    }
-                                }
-                                else
-                                {
-                                    return true;
-                                }
-                            }
-                            else
-                            {
-                                return true;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        return true;
-                    }
-                }
-                catch
-                {
-                    return true;
-                }
-            }
+            if (!IsAvailable) return false;
+            if (EndPoint != null) return true;
+
             try
             {
                 EndPoint = new SDL3AudioEndPoint(PlaybackDevice.name, _audioEncoder);
-                var fmt = new AudioFormat(AudioCodecsEnum.L16, 96, 48000, 2);
-                EndPoint.SetAudioSinkFormat(fmt);
-                TrySetEndpointVolume(_speakerLevel);
-                _log.Debug("SDL3AudioEndPoint created");
+                EndPoint.SetAudioSinkFormat(ENDPOINT_FORMAT);
+                _log.Debug("SDL3AudioEndPoint created (mono 48kHz)");
                 return true;
             }
             catch (Exception ex)
@@ -856,61 +240,102 @@ namespace VoiceSidecar
             }
         }
 
-        // per-SSRC controls
-        private readonly ConcurrentDictionary<uint, float> _ssrcGain = new ConcurrentDictionary<uint, float>();
-        private readonly ConcurrentDictionary<uint, bool> _ssrcMuted = new ConcurrentDictionary<uint, bool>();
+        public async Task StartPlaybackAsync()
+        {
+            if (!EnsureEndpoint()) return;
+            try
+            {
+                await EndPoint.StartAudioSink();
+                PlaybackActive = true;
+                OnPlaybackActiveChanged?.Invoke(true);
+                _log.Debug("Playback started");
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"Failed to start playback: {ex.Message}");
+            }
+        }
+
+        public async Task StopPlaybackAsync()
+        {
+            if (!IsAvailable || EndPoint == null) return;
+            try
+            {
+                await EndPoint.CloseAudioSink();
+                PlaybackActive = false;
+                OnPlaybackActiveChanged?.Invoke(false);
+                _log.Debug("Playback stopped");
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"Failed to stop playback: {ex.Message}");
+            }
+        }
+
+        // ── RTP playback (incoming voice from other avatars) ────────
+
+        private readonly ConcurrentDictionary<uint, float> _ssrcGain = new();
+        private readonly ConcurrentDictionary<uint, bool> _ssrcMuted = new();
 
         public void SetSsrcMute(uint ssrc, bool muted)
         {
-            try
-            {
-                if (muted) _ssrcMuted[ssrc] = true; else _ssrcMuted.TryRemove(ssrc, out _);
-                _log.Debug($"SetSsrcMute ssrc={ssrc} muted={muted}");
-            }
-            catch (Exception ex) { _log.Warn($"SetSsrcMute failed: {ex.Message}"); }
+            if (muted) _ssrcMuted[ssrc] = true;
+            else _ssrcMuted.TryRemove(ssrc, out _);
         }
 
         public void SetSsrcGainPercent(uint ssrc, int percent)
         {
-            if (percent < 0) percent = 0; if (percent > 200) percent = 200;
-            try
-            {
-                float g = percent / 100f;
-                _ssrcGain[ssrc] = g;
-                _log.Debug($"SetSsrcGainPercent ssrc={ssrc} gain={g}");
-            }
-            catch (Exception ex) { _log.Warn($"SetSsrcGainPercent failed: {ex.Message}"); }
+            percent = Math.Max(0, Math.Min(200, percent));
+            _ssrcGain[ssrc] = percent / 100f;
         }
+
+        public void ClearSsrc(uint ssrc)
+        {
+            _ssrcGain.TryRemove(ssrc, out _);
+            _ssrcMuted.TryRemove(ssrc, out _);
+        }
+
+        private int _rtpPlayCount = 0;
 
         public void PlayRtpPacket(uint ssrc, byte[] payload)
         {
             if (payload == null || payload.Length == 0) return;
             try
             {
+                _rtpPlayCount++;
+                if (_rtpPlayCount == 1)
+                    _log.Debug($"Receiving voice audio (ssrc={ssrc})");
+
                 if (_ssrcMuted.TryGetValue(ssrc, out var muted) && muted) return;
 
                 var pcmSample = _audioEncoder.DecodeAudio(payload, OpusAudioEncoder.MEDIA_FORMAT_OPUS);
                 if (pcmSample == null || pcmSample.Length == 0) return;
 
-                if (_ssrcGain.TryGetValue(ssrc, out var gain) && Math.Abs(gain - 1.0f) > 0.0001f)
+                // Apply per-SSRC gain and master speaker level
+                float gain = _speakerLevel;
+                if (_ssrcGain.TryGetValue(ssrc, out var ssrcGain))
+                    gain *= ssrcGain;
+
+                if (Math.Abs(gain - 1.0f) > 0.0001f)
                 {
                     for (int i = 0; i < pcmSample.Length; i++)
                     {
                         int v = (int)Math.Round(pcmSample[i] * gain);
-                        if (v > short.MaxValue) v = short.MaxValue;
-                        else if (v < short.MinValue) v = short.MinValue;
-                        pcmSample[i] = (short)v;
+                        pcmSample[i] = (short)Math.Clamp(v, short.MinValue, short.MaxValue);
                     }
                 }
 
                 var pcmBytes = pcmSample.SelectMany(BitConverter.GetBytes).ToArray();
 
-                if (EndPoint == null)
+                // Lazy endpoint + playback start on first RTP packet
+                if (EndPoint == null && !EnsureEndpoint()) return;
+                if (!PlaybackActive)
                 {
-                    if (!EnsureEndpoint()) return;
+                    _log.Debug("PlayRtpPacket: auto-starting playback");
+                    _ = StartPlaybackAsync();
                 }
-                try { EndPoint.PutAudioSample(pcmBytes); }
-                catch (Exception ex) { _log.Debug($"PlayRtpPacket PutAudioSample failed: {ex.Message}"); }
+
+                EndPoint.PutAudioSample(pcmBytes);
             }
             catch (Exception ex)
             {
@@ -918,9 +343,293 @@ namespace VoiceSidecar
             }
         }
 
-        public void ClearSsrc(uint ssrc)
+        // ── File playback (WAV → Opus → RTP) ───────────────────────
+
+        private Task _filePlaybackTask;
+        private CancellationTokenSource _filePlaybackCts;
+        private bool _filePlaybackLoop = false;
+        private bool _filePlaybackActive = false;
+        private bool _filePlaybackWasRecording = false;
+
+        public void StartFilePlayback(string path, bool loop = false)
         {
-            try { _ssrcGain.TryRemove(ssrc, out _); _ssrcMuted.TryRemove(ssrc, out _); } catch { }
+            if (!IsAvailable) throw new InvalidOperationException("SDL3 audio not available");
+            if (string.IsNullOrEmpty(path)) throw new ArgumentException("path");
+            if (!File.Exists(path)) throw new FileNotFoundException(path);
+
+            StopFilePlayback();
+
+            _log.Debug($"StartFilePlayback: {path} (loop={loop})");
+
+            _filePlaybackWasRecording = RecordingActive;
+            if (RecordingActive) { try { StopRecording(); } catch { } }
+
+            _filePlaybackLoop = loop;
+            _filePlaybackCts = new CancellationTokenSource();
+            var token = _filePlaybackCts.Token;
+            _filePlaybackActive = true;
+
+            _filePlaybackTask = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!token.IsCancellationRequested)
+                    {
+                        await PlayWavFileAsync(path, token).ConfigureAwait(false);
+                        if (!_filePlaybackLoop) break;
+                        _log.Debug("StartFilePlayback: looping...");
+                    }
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    _log.Warn($"File playback failed: {ex.Message}");
+                }
+                finally
+                {
+                    _filePlaybackActive = false;
+                    if (_filePlaybackWasRecording) { try { StartRecording(); } catch { } }
+                }
+            }, token);
+        }
+
+        public void StopFilePlayback()
+        {
+            if (!_filePlaybackActive || _filePlaybackCts == null) return;
+            try { _filePlaybackCts.Cancel(); _filePlaybackTask?.Wait(500); }
+            catch { }
+            finally { _filePlaybackCts?.Dispose(); _filePlaybackCts = null; _filePlaybackActive = false; }
+        }
+
+        private async Task PlayWavFileAsync(string path, CancellationToken ct)
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read);
+            using var br = new BinaryReader(fs);
+
+            // Parse WAV header
+            if (new string(br.ReadChars(4)) != "RIFF") throw new InvalidDataException("Not a WAV file (missing RIFF)");
+            br.ReadInt32(); // file size
+            if (new string(br.ReadChars(4)) != "WAVE") throw new InvalidDataException("Not a WAV file (missing WAVE)");
+
+            int channels = 1, sampleRate = 48000;
+            short bitsPerSample = 16;
+            long dataChunkPos = -1;
+
+            while (fs.Position < fs.Length)
+            {
+                var chunkId = new string(br.ReadChars(4));
+                int chunkSize = br.ReadInt32();
+
+                if (chunkId == "fmt ")
+                {
+                    br.ReadInt16(); // audio format
+                    channels = br.ReadInt16();
+                    sampleRate = br.ReadInt32();
+                    br.ReadInt32(); // byte rate
+                    br.ReadInt16(); // block align
+                    bitsPerSample = br.ReadInt16();
+                    int remaining = chunkSize - 16;
+                    if (remaining > 0) br.ReadBytes(remaining);
+                }
+                else if (chunkId == "data")
+                {
+                    dataChunkPos = fs.Position;
+                    break;
+                }
+                else
+                {
+                    br.ReadBytes(chunkSize);
+                }
+            }
+
+            if (dataChunkPos < 0) throw new InvalidDataException("WAV data chunk not found");
+            if (bitsPerSample != 16) throw new InvalidDataException($"Only 16-bit PCM WAV supported (got {bitsPerSample})");
+
+            _log.Debug($"WAV: channels={channels}, sampleRate={sampleRate}");
+
+            // Fresh encoder per-playback to avoid shared state corruption
+            var fileEncoder = new OpusAudioEncoder();
+            int frameSize = fileEncoder.GetFrameSize();
+            int bytesPerFrame = frameSize * (bitsPerSample / 8) * channels;
+
+            fs.Position = dataChunkPos;
+            int framesProcessed = 0;
+
+            while (!ct.IsCancellationRequested)
+            {
+                var bytes = br.ReadBytes(bytesPerFrame);
+                if (bytes == null || bytes.Length == 0) break;
+                if (bytes.Length < bytesPerFrame)
+                {
+                    var padded = new byte[bytesPerFrame];
+                    Array.Copy(bytes, 0, padded, 0, bytes.Length);
+                    bytes = padded;
+                }
+
+                // Convert bytes to shorts
+                short[] pcm = new short[bytes.Length / 2];
+                for (int i = 0, si = 0; i < bytes.Length; i += 2)
+                    pcm[si++] = BitConverter.ToInt16(bytes, i);
+
+                // Downmix to mono, resample if needed
+                short[] mono = DownmixToMono(pcm, channels);
+                if (sampleRate != 48000) mono = ResampleTo48k(mono, sampleRate);
+
+                // Encode in frameSize chunks
+                int idx = 0;
+                while (idx < mono.Length)
+                {
+                    short[] frame = new short[frameSize];
+                    int count = Math.Min(mono.Length - idx, frameSize);
+                    Array.Copy(mono, idx, frame, 0, count);
+
+                    try
+                    {
+                        var encoded = fileEncoder.EncodeAudio(frame, OpusAudioEncoder.MEDIA_FORMAT_OPUS);
+                        if (encoded != null && encoded.Length > 0)
+                        {
+                            OnAudioSourceEncodedSample?.Invoke((uint)frameSize, encoded);
+                            framesProcessed++;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Warn($"WAV encode failed: {ex.Message}");
+                    }
+
+                    idx += frameSize;
+                    if (ct.IsCancellationRequested) break;
+                }
+
+                // Pace output at ~real-time
+                int frames = Math.Max(1, mono.Length / frameSize);
+                try { await Task.Delay(20 * frames, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { break; }
+            }
+
+            _log.Debug($"WAV playback finished: {framesProcessed} frames");
+        }
+
+        // ── Device management ───────────────────────────────────────
+
+        public IReadOnlyDictionary<uint, string> GetPlaybackDevices() => SDL3Helper.GetAudioPlaybackDevices();
+        public IReadOnlyDictionary<uint, string> GetRecordingDevices() => SDL3Helper.GetAudioRecordingDevices();
+
+        public void SetPlaybackDevice(string deviceName)
+        {
+            if (!IsAvailable) return;
+            try
+            {
+                if (deviceName == "Default Speakers" || deviceName == "Default Microphone") deviceName = null;
+                bool wasPlaying = PlaybackActive;
+
+                try { EndPoint?.CloseAudioSink().Wait(2000); } catch { }
+                EndPoint = new SDL3AudioEndPoint(deviceName, _audioEncoder);
+                EndPoint.SetAudioSinkFormat(ENDPOINT_FORMAT);
+
+                if (wasPlaying) _ = StartPlaybackAsync();
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"Failed to set playback device: {ex.Message}");
+            }
+        }
+
+        public void SetRecordingDevice(string deviceName)
+        {
+            if (!IsAvailable) return;
+            bool wasRecording = RecordingActive;
+
+            try
+            {
+                if (Source != null)
+                {
+                    try { Source.OnAudioSourceRawSample -= AudioSource_OnAudioSourceRawSample; } catch { }
+                    try { Source.CloseAudio(); } catch { }
+                }
+
+                Source = new SDL3AudioSource(deviceName, _sourceEncoder);
+                Source.OnAudioSourceRawSample += AudioSource_OnAudioSourceRawSample;
+
+                if (wasRecording) StartRecording();
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"Failed to set recording device '{deviceName}': {ex.Message}");
+
+                // Fallback to default device
+                if (deviceName != null)
+                {
+                    try
+                    {
+                        Source = new SDL3AudioSource(null, _sourceEncoder);
+                        Source.OnAudioSourceRawSample += AudioSource_OnAudioSourceRawSample;
+                        if (wasRecording) StartRecording();
+                    }
+                    catch (Exception ex2)
+                    {
+                        _log.Error($"Failed to fallback to default recording device: {ex2.Message}");
+                        Source = null;
+                        throw;
+                    }
+                }
+                else
+                {
+                    Source = null;
+                    throw;
+                }
+            }
+        }
+
+        // ── Helpers ─────────────────────────────────────────────────
+
+        private int DeviceSelection(bool recordingDevice)
+        {
+            var devices = recordingDevice ? SDL3Helper.GetAudioRecordingDevices() : SDL3Helper.GetAudioPlaybackDevices();
+            if (devices.Count < 1)
+                _log.Warn($"SDL Audio - Could not find an audio {(recordingDevice ? "recording" : "playback")} device.");
+            return -1; // -1 = use default device
+        }
+
+        private (uint id, string name)? GetDevice(int index, bool recordingDevice)
+        {
+            return index < 0
+                ? (recordingDevice ? SDL3Helper.GetAudioRecordingDevice(null) : SDL3Helper.GetAudioPlaybackDevice(null))
+                : (recordingDevice ? SDL3Helper.GetAudioRecordingDevice(index) : SDL3Helper.GetAudioPlaybackDevice(index));
+        }
+
+        private static short[] ResampleTo48k(short[] src, int srcRate)
+        {
+            if (src == null || src.Length == 0 || srcRate == 48000) return src ?? Array.Empty<short>();
+            double ratio = 48000.0 / srcRate;
+            int dstLen = (int)Math.Round(src.Length * ratio);
+            if (dstLen < 1) return Array.Empty<short>();
+
+            var dst = new short[dstLen];
+            for (int i = 0; i < dstLen; i++)
+            {
+                double srcPos = i / ratio;
+                int i0 = Math.Min((int)Math.Floor(srcPos), src.Length - 1);
+                int i1 = Math.Min(i0 + 1, src.Length - 1);
+                double frac = srcPos - Math.Floor(srcPos);
+                dst[i] = (short)Math.Round(src[i0] * (1.0 - frac) + src[i1] * frac);
+            }
+            return dst;
+        }
+
+        private static short[] DownmixToMono(short[] interleaved, int channels)
+        {
+            if (channels <= 1) return interleaved;
+            int monoLen = interleaved.Length / channels;
+            var mono = new short[monoLen];
+            for (int i = 0; i < monoLen; i++)
+            {
+                int acc = 0;
+                for (int c = 0; c < channels; c++)
+                    acc += interleaved[i * channels + c];
+                mono[i] = (short)(acc / channels);
+            }
+            return mono;
         }
     }
 }

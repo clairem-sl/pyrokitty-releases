@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { ipcRenderer } from 'electron';
 import { MantineProvider, Alert } from '@mantine/core';
 import { theme } from './theme';
-import { useGrids, useAccounts, useViewers, useChat, useFriends, useGroups, useNearbyAvatars, useRegionInfo, useInventorySync } from './hooks';
+import { useGrids, useAccounts, useViewers, useChat, useFriends, useGroups, useNearbyAvatars, useRegionInfo, useInventorySync, useVoice } from './hooks';
 import { AccountList } from './components/AccountList';
 import { LoginForm } from './components/LoginForm';
 import { Welcome } from './components/Welcome';
@@ -68,6 +68,7 @@ export const App: React.FC = () => {
   const { nearbyAvatars } = useNearbyAvatars({ instanceId: activeInstanceId });
   const { regionInfo } = useRegionInfo({ instanceId: activeInstanceId });
   const { status: syncStatus, startSync, openFolder: openSyncFolder } = useInventorySync({ instanceId: activeInstanceId });
+  const voice = useVoice();
 
   const handleSelectAccount = (accountId: string) => {
     setSelectedAccountId(accountId);
@@ -250,6 +251,7 @@ export const App: React.FC = () => {
                 syncStatus={syncStatus}
                 onSyncNow={startSync}
                 onOpenSyncFolder={openSyncFolder}
+                voice={voice}
               />
             ) : selectedAccount ? (
               <LoginForm

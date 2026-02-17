@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { ChatPanel } from './ChatPanel';
 import { MiniMap } from './MiniMap';
-import { ChatMessage, ChatSession, Friend, Group, ConnectionState, NearbyAvatar, RegionInfo, SyncStatus, displayName } from '../../shared/types';
+import { VoiceBar } from './VoiceBar';
+import { ChatMessage, ChatSession, Friend, Group, ConnectionState, NearbyAvatar, RegionInfo, SyncStatus, VoiceState, displayName } from '../../shared/types';
 import { useUserContextMenu } from '../hooks/useUserContextMenu';
 import { useGroupContextMenu } from '../hooks/useGroupContextMenu';
 
@@ -39,6 +40,13 @@ interface ChatWindowProps {
   syncStatus: SyncStatus;
   onSyncNow: () => void;
   onOpenSyncFolder: () => void;
+  // Voice
+  voice: VoiceState & {
+    pttDown: () => void;
+    pttUp: () => void;
+    setVolume: (v: number) => void;
+    toggleSpeakerMute: () => void;
+  };
 }
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
@@ -64,6 +72,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   syncStatus,
   onSyncNow,
   onOpenSyncFolder,
+  voice,
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>('nearby');
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
@@ -173,6 +182,20 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           {groupUnread > 0 && <span className="chat-tab-badge">{groupUnread}</span>}
         </button>
       </div>
+
+      {/* Voice bar */}
+      <VoiceBar
+        connected={voice.connected}
+        connecting={voice.connecting}
+        micMuted={voice.micMuted}
+        speakerMuted={voice.speakerMuted}
+        volume={voice.volume}
+        micLevel={voice.micLevel}
+        pttDown={voice.pttDown}
+        pttUp={voice.pttUp}
+        setVolume={voice.setVolume}
+        toggleSpeakerMute={voice.toggleSpeakerMute}
+      />
 
       {/* Inventory sync bar */}
       <div className="sync-bar">

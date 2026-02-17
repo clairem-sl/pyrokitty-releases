@@ -206,6 +206,15 @@ export const IPC_CHANNELS = {
   // Context menus
   SHOW_USER_CONTEXT_MENU: 'context-menu:user',
   SHOW_GROUP_CONTEXT_MENU: 'context-menu:group',
+
+  // Voice controls (renderer -> main)
+  VOICE_PTT_DOWN: 'voice:ptt-down',
+  VOICE_PTT_UP: 'voice:ptt-up',
+  VOICE_SET_VOLUME: 'voice:set-volume',
+  VOICE_TOGGLE_SPEAKER_MUTE: 'voice:toggle-speaker-mute',
+
+  // Voice state (main -> renderer)
+  VOICE_STATE_UPDATE: 'voice:state-update',
 } as const;
 
 // IPC Request/Response types
@@ -253,6 +262,17 @@ export interface ChatEvent {
 export interface ViewerAPI {
   name: string;
   desc: string;
+}
+
+// Voice state broadcast to renderer
+export interface VoiceState {
+  connected: boolean;
+  connecting: boolean;
+  micMuted: boolean;
+  speakerMuted: boolean;
+  volume: number;
+  micLevel: number;
+  participants: string[];
 }
 
 /** Strip " Resident" last name from avatar display names */

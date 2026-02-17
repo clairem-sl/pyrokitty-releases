@@ -1,10 +1,32 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import { setupIpcHandlers } from './ipc-handlers';
 import { gridManager } from './grid-manager';
 import { accountManager } from './account-manager';
 import { viewerManager } from './viewer-manager';
 import { chatLogManager } from './chat-log-manager';
+
+// ── Global file logger ─────────────────────────────────────
+// Tee console.log/warn/error to a log file in userData
+{
+  const logPath = path.join(app.getPath('userData'), 'pyrokitty.log');
+  const logStream = fs.createWriteStream(logPath, { flags: 'w' });
+  logStream.write(`=== PyroKitty started ${new Date().toISOString()} ===\n`);
+
+  const origLog = console.log.bind(console);
+  const origWarn = console.warn.bind(console);
+  const origError = console.error.bind(console);
+
+  const write = (prefix: string, args: unknown[]) => {
+    const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a, null, 2)).join(' ');
+    logStream.write(`${prefix}${msg}\n`);
+  };
+
+  console.log = (...args: unknown[]) => { origLog(...args); write('', args); };
+  console.warn = (...args: unknown[]) => { origWarn(...args); write('[WARN] ', args); };
+  console.error = (...args: unknown[]) => { origError(...args); write('[ERROR] ', args); };
+}
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;

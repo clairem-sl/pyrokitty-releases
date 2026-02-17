@@ -152,17 +152,118 @@ export class VoiceManager extends EventEmitter {
     const sessionId = bot.agent?.sessionID?.toString?.() || '';
     const regionName = region.regionName || '';
 
+    // Get bot position — try agents map first (more reliable), then localPosition
+    const pos = this.getBotPosition(bot, agentId);
+
+    // If position isn't available yet, wait for it (parcel map + position needed for correct parcel ID)
+    if (!pos || (pos.x === 0 && pos.y === 0)) {
+      console.log('[VoiceManager] Position not available yet, waiting...');
+      const resolvedPos = await this.waitForBotPosition(bot, agentId, 10, 500);
+      if (resolvedPos) {
+        await this.doConnectWithBot(bot, caps, agentId, sessionId, regionName, resolvedPos);
+      } else {
+        console.warn('[VoiceManager] Position never became available, connecting with parcelLocalId=-1');
+        await this.doConnectWithBot(bot, caps, agentId, sessionId, regionName, null);
+      }
+    } else {
+      await this.doConnectWithBot(bot, caps, agentId, sessionId, regionName, pos);
+    }
+  }
+
+  private getBotPosition(bot: any, agentId: string): { x: number; y: number; z: number } | null {
+    // Try agents map first (populated by ObjectUpdate packets, available earlier)
+    const self = bot.currentRegion?.agents?.get(agentId);
+    if (self?.position && (self.position.x !== 0 || self.position.y !== 0)) {
+      return self.position;
+    }
+    // Fallback to agent.localPosition
+    const pos = bot.agent?.localPosition;
+    if (pos && (pos.x !== 0 || pos.y !== 0)) {
+      return pos;
+    }
+    return null;
+  }
+
+  private waitForBotPosition(bot: any, agentId: string, maxRetries: number, intervalMs: number): Promise<{ x: number; y: number; z: number } | null> {
+    return new Promise((resolve) => {
+      let attempts = 0;
+      const check = () => {
+        attempts++;
+        const pos = this.getBotPosition(bot, agentId);
+        if (pos) {
+          console.log(`[VoiceManager] Position available after ${attempts} attempts: (${pos.x?.toFixed(0)},${pos.y?.toFixed(0)})`);
+          resolve(pos);
+        } else if (attempts >= maxRetries) {
+          console.warn(`[VoiceManager] Position still unavailable after ${attempts} attempts`);
+          resolve(null);
+        } else {
+          setTimeout(check, intervalMs);
+        }
+      };
+      setTimeout(check, intervalMs);
+    });
+  }
+
+  private async doConnectWithBot(
+    bot: any,
+    caps: VoiceCaps,
+    agentId: string,
+    sessionId: string,
+    regionName: string,
+    pos: { x: number; y: number; z: number } | null,
+  ): Promise<void> {
+    const region = bot.currentRegion;
+
+    // Get parcel local ID from position, checking UseEstateVoiceChan flag
+    let parcelLocalId = -1;
+    try {
+      if (pos && region?.parcelMap) {
+        const px = Math.floor(pos.x / 4);
+        const py = Math.floor(pos.y / 4);
+        if (py >= 0 && py < 64 && px >= 0 && px < 64) {
+          const pid = region.parcelMap[py]?.[px];
+          if (pid !== undefined && pid > 0) {
+            const parcel = region.parcels?.[pid];
+            const flags = parcel?.ParcelFlags ?? 0;
+            const allowVoice = !!(flags & (1 << 29));       // AllowVoiceChat
+            const useEstate  = !!(flags & (1 << 30));        // UseEstateVoiceChan
+            console.log(`[VoiceManager] Parcel "${parcel?.Name}" localID=${pid}, allowVoice=${allowVoice}, useEstate=${useEstate}`);
+            if (!allowVoice) {
+              console.warn('[VoiceManager] Voice disabled on this parcel');
+            }
+            parcelLocalId = useEstate ? -1 : pid;
+          }
+        }
+      }
+      console.log(`[VoiceManager] Parcel local ID: ${parcelLocalId} (pos=${pos?.x?.toFixed(0) ?? 'N/A'},${pos?.y?.toFixed(0) ?? 'N/A'})`);
+    } catch (e) {
+      console.warn('[VoiceManager] Failed to get parcel local ID:', e);
+    }
+
+    // Convert to global coordinates (region grid position * 256 + local offset)
+    // LibreMetaverse uses Client.Self.GlobalPosition; we compute the same from region coords
+    const regionOffsetX = (region?.xCoordinate ?? 0) * 256;
+    const regionOffsetY = (region?.yCoordinate ?? 0) * 256;
+    const globalPos = pos ? [
+      regionOffsetX + (pos.x || 0),
+      regionOffsetY + (pos.y || 0),
+      pos.z || 0,
+    ] : undefined;
+
+    console.log(`[VoiceManager] Region offset: (${regionOffsetX},${regionOffsetY}), global pos: ${globalPos ? `(${globalPos[0].toFixed(0)},${globalPos[1].toFixed(0)},${globalPos[2].toFixed(0)})` : 'N/A'}`);
+
     this.sendCommand({
       cmd: 'connect',
       caps,
       agentId,
       sessionId,
       regionName,
-      parcelLocalId: -1,
+      parcelLocalId,
+      position: globalPos,
     });
 
     // Start position updates from bot
-    this.startBotPositionUpdates(bot);
+    this.startBotPositionUpdates(bot, regionOffsetX, regionOffsetY);
   }
 
   /**
@@ -312,6 +413,9 @@ export class VoiceManager extends EventEmitter {
       case 'participantSpeaking':
         this.emit('participantSpeaking', event.agentId, event.power);
         break;
+      case 'micLevel':
+        this.emit('micLevel', event.level);
+        break;
       case 'audioDevices':
         this.emit('audioDevices', event.inputs, event.outputs);
         break;
@@ -324,23 +428,62 @@ export class VoiceManager extends EventEmitter {
     }
   }
 
-  private startBotPositionUpdates(bot: any): void {
+  private _posLogCount = 0;
+  private startBotPositionUpdates(bot: any, regionOffsetX = 0, regionOffsetY = 0): void {
     this.stopPositionUpdates();
+    this._posLogCount = 0;
 
     this.positionInterval = setInterval(() => {
-      if (!this.process || !bot?.agent) return;
+      if (!this.process || !bot?.currentRegion) return;
 
-      const pos = bot.agent.position;
-      const rot = bot.agent.rotation;
+      const agentId = bot.agentID?.()?.toString?.();
+      if (!agentId) return;
+
+      const self = bot.currentRegion.agents?.get(agentId);
+      if (!self) return;
+
+      const pos = self.position;
+      const rot = self.rotation;
       const regionName = bot.currentRegion?.regionName || '';
 
-      if (pos) {
+      if (this._posLogCount < 3) {
+        const gx = regionOffsetX + (pos?.x || 0);
+        const gy = regionOffsetY + (pos?.y || 0);
+        console.log(`[VoiceManager] Position: local=(${pos?.x?.toFixed(1)},${pos?.y?.toFixed(1)},${pos?.z?.toFixed(1)}), global=(${gx.toFixed(0)},${gy.toFixed(0)}), region=${regionName}`);
+        this._posLogCount++;
+      }
+
+      if (pos && (pos.x !== 0 || pos.y !== 0)) {
+        // Get parcel local ID from position, respecting UseEstateVoiceChan flag
+        let parcelLocalId = -1;
+        try {
+          const region = bot.currentRegion;
+          if (region?.parcelMap) {
+            const px = Math.floor(pos.x / 4);
+            const py = Math.floor(pos.y / 4);
+            if (py >= 0 && py < 64 && px >= 0 && px < 64) {
+              const pid = region.parcelMap[py]?.[px];
+              if (pid !== undefined && pid > 0) {
+                const parcel = region.parcels?.[pid];
+                const flags = parcel?.ParcelFlags ?? 0;
+                const useEstate = !!(flags & (1 << 30));
+                parcelLocalId = useEstate ? -1 : pid;
+              }
+            }
+          }
+        } catch { /* ignore */ }
+
+        // Send global coordinates (region origin + local offset) to match LibreMetaverse behavior
         this.sendCommand({
           cmd: 'updatePosition',
-          position: [pos.x || 0, pos.y || 0, pos.z || 0],
+          position: [
+            regionOffsetX + (pos.x || 0),
+            regionOffsetY + (pos.y || 0),
+            pos.z || 0,
+          ],
           rotation: [rot?.x || 0, rot?.y || 0, rot?.z || 0, rot?.w || 1],
           regionName,
-          parcelLocalId: -1,
+          parcelLocalId,
         });
       }
     }, 100);

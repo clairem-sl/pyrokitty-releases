@@ -7,5 +7,6 @@ export { useGroups } from './useGroups';
 export { useNearbyAvatars } from './useNearbyAvatars';
 export { useRegionInfo } from './useRegionInfo';
 export { useInventorySync } from './useInventorySync';
+export { useVoice } from './useVoice';
 export { useUserContextMenu } from './useUserContextMenu';
 export { useGroupContextMenu } from './useGroupContextMenu';

@@ -69,7 +69,6 @@ namespace VoiceSidecar
             public Int3? ListenerPosition { get; set; }
             public Int4? ListenerHeading { get; set; }
         }
-        public event Action<UUID, AvatarPosition> OnPeerPositionUpdatedTyped;
         public event Action<Dictionary<UUID, bool>> OnMuteMapReceived;
         public event Action<Dictionary<UUID, int>> OnGainMapReceived;
 
@@ -219,35 +218,11 @@ namespace VoiceSidecar
 
             pc.OnRtpPacketReceived += (IPEndPoint remoteEndPoint, SDPMediaTypesEnum mediaType, RTPPacket rtpPacket) =>
             {
-                if (mediaType == SDPMediaTypesEnum.audio && AudioDevice?.EndPoint != null)
+                if (mediaType == SDPMediaTypesEnum.audio && AudioDevice != null)
                 {
                     try
                     {
-                        uint ssrcVal = 0;
-                        try
-                        {
-                            var hdr = rtpPacket.Header;
-                            var hdrType = hdr.GetType();
-                            var candidateNames = new[] { "SynchronizationSourceIdentifier", "SSRC", "Ssrc", "ssrc" };
-                            foreach (var name in candidateNames)
-                            {
-                                try
-                                {
-                                    var pi = hdrType.GetProperty(name);
-                                    if (pi != null) { var v = pi.GetValue(hdr); if (v != null) { ssrcVal = Convert.ToUInt32(v); break; } }
-                                }
-                                catch { }
-                                try
-                                {
-                                    var fi = hdrType.GetField(name);
-                                    if (fi != null) { var v = fi.GetValue(hdr); if (v != null) { ssrcVal = Convert.ToUInt32(v); break; } }
-                                }
-                                catch { }
-                            }
-                        }
-                        catch { }
-
-                        AudioDevice.PlayRtpPacket(ssrcVal, rtpPacket.Payload);
+                        AudioDevice.PlayRtpPacket(rtpPacket.Header.SyncSource, rtpPacket.Payload);
                     }
                     catch (Exception ex) { _log.Warn($"Failed to play RTP packet: {ex.Message}"); }
                 }
@@ -268,7 +243,8 @@ namespace VoiceSidecar
             dc.onopen += () =>
             {
                 _log.Debug("Data channel opened");
-                TrySendDataChannelString("{\"j\":{\"p\":true}}");
+                var joinSent = TrySendDataChannelString("{\"j\":{\"p\":true}}");
+                _log.Debug($"Join message sent: {joinSent}");
                 Task.Delay(100, ct).ContinueWith(_ => StartPositionLoop(), TaskScheduler.Default);
                 StartKeepAliveLoop();
                 OnDataChannelReady?.Invoke();
@@ -284,7 +260,6 @@ namespace VoiceSidecar
             dc.onmessage += (channel, type, data) =>
             {
                 var msg = data != null ? Encoding.UTF8.GetString(data) : string.Empty;
-                _log.Debug($"Data channel message received: {msg}");
                 Task.Run(() => HandleDataChannelMessage(msg), ct);
             };
 
@@ -304,7 +279,8 @@ namespace VoiceSidecar
                 }
             }
 
-            var audioTrack = new MediaStreamTrack(AudioDevice?.Source?.GetAudioSourceFormats());
+            var formats = AudioDevice?.Source?.GetAudioSourceFormats();
+            var audioTrack = new MediaStreamTrack(formats);
             pc.addTrack(audioTrack);
             var offer = pc.createOffer();
             var rawSdp = offer.sdp.ToString();
@@ -351,23 +327,8 @@ namespace VoiceSidecar
                 _log.Debug($"Peer connection state: {state}");
                 if (state == RTCPeerConnectionState.connected)
                 {
-                    if (AudioDevice?.EndPoint != null)
-                    {
-                        try { await AudioDevice.StartPlaybackAsync().ConfigureAwait(false); }
-                        catch (Exception ex)
-                        {
-                            _log.Debug($"Failed to start playback: {ex.Message}");
-                            try { await AudioDevice.EndPoint.StartAudioSink().ConfigureAwait(false); } catch { }
-                        }
-                    }
-                    else
-                    {
-                        var got = AudioDevice?.EnsureEndpoint() ?? false;
-                        if (got)
-                        {
-                            try { await AudioDevice.StartPlaybackAsync().ConfigureAwait(false); } catch { }
-                        }
-                    }
+                    // Playback starts on-demand in PlayRtpPacket when first RTP arrives.
+                    // Starting it eagerly causes buffer underrun spam when nobody else is talking.
                     try
                     {
                         if (AudioDevice?.Source != null)
@@ -377,6 +338,14 @@ namespace VoiceSidecar
                         }
                     }
                     catch (Exception ex) { _log.Warn($"Failed to start recording: {ex.Message}"); }
+
+                    try
+                    {
+                        var audioStream = pc.AudioStream;
+                        _log.Debug($"AudioStream: localTrack={audioStream?.LocalTrack != null}, remoteTrack={audioStream?.RemoteTrack != null}, localStatus={audioStream?.LocalTrack?.StreamStatus}");
+                    }
+                    catch { }
+
                     OnPeerConnectionReady?.Invoke();
                 }
                 else if (state == RTCPeerConnectionState.failed || state == RTCPeerConnectionState.disconnected || state == RTCPeerConnectionState.closed)
@@ -393,17 +362,14 @@ namespace VoiceSidecar
                 }
             };
 
-            if (AudioDevice?.Source != null)
-            {
-                try { AudioDevice.Source.OnAudioSourceEncodedSample -= pc.SendAudio; } catch { }
-            }
-
-            AudioDevice.Source.OnAudioSourceEncodedSample += (duration, sample) => { pc.SendAudio(duration, sample); };
-
+            // Wire audio to WebRTC through Sdl3Audio's class-level event only.
+            // Mic path: Source raw samples → manual Opus encode (MicGated/PTT check)
+            //   → Sdl3Audio.OnAudioSourceEncodedSample (class event) → pc.SendAudio
+            // File path: WAV → Opus encode → Sdl3Audio.OnAudioSourceEncodedSample → pc.SendAudio
             if (AudioDevice != null)
             {
                 try { AudioDevice.OnAudioSourceEncodedSample -= pc.SendAudio; } catch { }
-                AudioDevice.OnAudioSourceEncodedSample += (duration, sample) => { pc.SendAudio(duration, sample); };
+                AudioDevice.OnAudioSourceEncodedSample += pc.SendAudio;
             }
 
             return pc;
@@ -748,7 +714,6 @@ namespace VoiceSidecar
 
                 if (PeerConnection != null)
                 {
-                    if (AudioDevice?.Source != null) try { AudioDevice.Source.OnAudioSourceEncodedSample -= PeerConnection.SendAudio; } catch { }
                     if (AudioDevice != null) try { AudioDevice.OnAudioSourceEncodedSample -= PeerConnection.SendAudio; } catch { }
                     try { PeerConnection.Close("Reprovision"); } catch { }
                 }
@@ -822,6 +787,7 @@ namespace VoiceSidecar
                 }
 
                 answerReceived = true;
+
                 await SendVoiceSignalingRequest().ConfigureAwait(false);
 
                 _ = Task.Run(async () =>
@@ -841,7 +807,8 @@ namespace VoiceSidecar
                 if (osdMap.ContainsKey("channel")) ChannelId = osdMap["channel"].AsString();
                 if (osdMap.ContainsKey("credentials")) ChannelCredentials = osdMap["credentials"].AsString();
 
-                _log.Debug($"Local voice provisioned: session={sessionId}");
+                _log.Info($"Local voice provisioned: session={sessionId}");
+                if (!sdpString.Contains("m=audio")) _log.Warn("Remote SDP has no audio track");
             }
         }
 
@@ -885,14 +852,18 @@ namespace VoiceSidecar
                 if (osdMap.ContainsKey("channel")) ChannelId = osdMap["channel"].AsString();
                 if (osdMap.ContainsKey("credentials")) ChannelCredentials = osdMap["credentials"].AsString();
 
-                _log.Debug($"Multi-agent voice provisioned: session={sessionId}");
+                _log.Info($"Multi-agent voice provisioned: session={sessionId}");
             }
         }
 
+        private int _positionUpdateCount = 0;
         private void SendPositionUpdate(RTCDataChannel dc, Vector3 pos, Quaternion heading)
         {
             if (!mSpatialCoordsDirty) return;
             if (pos == lastSentPos && heading == lastSentHeading) { mSpatialCoordsDirty = false; return; }
+            _positionUpdateCount++;
+            if (_positionUpdateCount == 1)
+                _log.Debug($"Position update: pos=({pos.X:F1},{pos.Y:F1},{pos.Z:F1})");
 
             try
             {
@@ -994,7 +965,6 @@ namespace VoiceSidecar
                 try { StopPositionLoop(); } catch { }
                 try { StopKeepAliveLoop(); } catch { }
                 try { iceTrickleCts?.Cancel(); try { iceTrickleTask?.Wait(250); } catch { } iceTrickleCts?.Dispose(); } catch { }
-                try { if (AudioDevice?.Source != null) AudioDevice.Source.OnAudioSourceEncodedSample -= PeerConnection.SendAudio; } catch { }
                 try { if (AudioDevice != null) AudioDevice.OnAudioSourceEncodedSample -= PeerConnection.SendAudio; } catch { }
                 try { AudioDevice?.StopRecording(); } catch { }
                 try { AudioDevice?.StopPlaybackAsync().Wait(250); } catch { }

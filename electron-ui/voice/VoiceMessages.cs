@@ -21,11 +21,11 @@ namespace VoiceSidecar
                 { "type", "offer" },
                 { "sdp", Sdp },
             };
+            map.Add("jsep", jsep);
             if (ParcelId > -1)
             {
-                jsep["parcel_location_id"] = ParcelId;
+                map["parcel_local_id"] = ParcelId;
             }
-            map.Add("jsep", jsep);
             map.Add("channel_type", "local");
             map.Add("voice_server_type", "webrtc");
 
