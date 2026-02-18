@@ -1,30 +1,20 @@
 import React from 'react';
+import { useVoice } from '../hooks/useVoice';
 
-interface VoiceBarProps {
-  connected: boolean;
-  connecting: boolean;
-  micMuted: boolean;
-  speakerMuted: boolean;
-  volume: number;
-  micLevel: number;
-  pttDown: () => void;
-  pttUp: () => void;
-  setVolume: (v: number) => void;
-  toggleSpeakerMute: () => void;
-}
+export const VoiceBar: React.FC = () => {
+  const {
+    connected,
+    connecting,
+    micMuted,
+    speakerMuted,
+    volume,
+    micLevel,
+    pttDown,
+    pttUp,
+    setVolume,
+    toggleSpeakerMute,
+  } = useVoice();
 
-export const VoiceBar: React.FC<VoiceBarProps> = ({
-  connected,
-  connecting,
-  micMuted,
-  speakerMuted,
-  volume,
-  micLevel,
-  pttDown,
-  pttUp,
-  setVolume,
-  toggleSpeakerMute,
-}) => {
   const statusText = connected ? 'Voice' : connecting ? 'Connecting...' : 'No voice';
   const dotClass = connected ? 'connected' : connecting ? 'connecting' : 'disconnected';
 
@@ -51,13 +41,6 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({
         title={`Volume: ${Math.round(volume * 100)}%`}
       />
 
-      <div className="voice-mic-level" title={`Mic level: ${Math.round(micLevel * 100)}%`}>
-        <div
-          className="voice-mic-level-fill"
-          style={{ width: `${micMuted ? 0 : Math.round(micLevel * 100)}%` }}
-        />
-      </div>
-
       <button
         className={`voice-ptt-btn ${!micMuted ? 'active' : ''}`}
         onMouseDown={pttDown}
@@ -67,6 +50,15 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({
       >
         TALK
       </button>
+
+      {!micMuted && (
+        <div className="voice-mic-level" title={`Mic level: ${Math.round(micLevel * 100)}%`}>
+          <div
+            className="voice-mic-level-fill"
+            style={{ width: `${Math.round(micLevel * 100)}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 };

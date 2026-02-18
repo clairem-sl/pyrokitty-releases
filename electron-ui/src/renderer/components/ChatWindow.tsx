@@ -1,81 +1,55 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
+import { ipcRenderer } from 'electron';
 import { ChatPanel } from './ChatPanel';
 import { MiniMap } from './MiniMap';
 import { VoiceBar } from './VoiceBar';
-import { ChatMessage, ChatSession, Friend, Group, ConnectionState, NearbyAvatar, RegionInfo, SyncStatus, VoiceState, displayName } from '../../shared/types';
+import { ConnectionState, IPC_CHANNELS, displayName } from '../../shared/types';
+import { useChat } from '../hooks/useChat';
+import { useFriends } from '../hooks/useFriends';
+import { useGroups } from '../hooks/useGroups';
+import { useNearbyAvatars } from '../hooks/useNearbyAvatars';
+import { useRegionInfo } from '../hooks/useRegionInfo';
+import { useInventorySync } from '../hooks/useInventorySync';
 import { useUserContextMenu } from '../hooks/useUserContextMenu';
 import { useGroupContextMenu } from '../hooks/useGroupContextMenu';
 
 type Tab = 'nearby' | 'messages' | 'groups';
 
 interface ChatWindowProps {
+  instanceId: string | null;
   connectionState: ConnectionState;
-  // Nearby chat
-  nearbyMessages: ChatMessage[];
-  onSendNearbyChat: (message: string, type?: 'whisper' | 'normal' | 'shout') => void;
-  // Nearby avatars
-  nearbyAvatars: NearbyAvatar[];
-  // IM/Group sessions
-  sessions: ChatSession[];
-  activeSessionId: string | null;
-  onSelectSession: (sessionId: string) => void;
-  getSessionMessages: (sessionId: string) => ChatMessage[];
-  onSendIM: (participantId: string, message: string) => void;
-  onSendGroupMessage: (groupId: string, message: string) => void;
-  // Friends
-  onlineFriends: Friend[];
-  offlineFriends: Friend[];
-  onStartIMWithFriend: (friend: Friend) => void;
-  // Nearby avatar IM
-  onStartIMWithAvatar: (avatar: NearbyAvatar) => void;
-  // Session management
-  onDismissSession: (sessionId: string) => void;
-  onClearSessionHistory: (sessionId: string) => void;
-  // Groups
-  groups: Group[];
-  onOpenGroupChat: (group: Group) => void;
-  // Region info for mini-map
-  regionInfo: RegionInfo | null;
-  // Inventory sync
-  syncStatus: SyncStatus;
-  onSyncNow: () => void;
-  onOpenSyncFolder: () => void;
-  // Voice
-  voice: VoiceState & {
-    pttDown: () => void;
-    pttUp: () => void;
-    setVolume: (v: number) => void;
-    toggleSpeakerMute: () => void;
-  };
 }
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
+  instanceId,
   connectionState,
-  nearbyMessages,
-  onSendNearbyChat,
-  nearbyAvatars,
-  sessions,
-  activeSessionId,
-  onSelectSession,
-  getSessionMessages,
-  onSendIM,
-  onSendGroupMessage,
-  onlineFriends,
-  offlineFriends,
-  onStartIMWithFriend,
-  onStartIMWithAvatar,
-  onDismissSession,
-  onClearSessionHistory,
-  groups,
-  onOpenGroupChat,
-  regionInfo,
-  syncStatus,
-  onSyncNow,
-  onOpenSyncFolder,
-  voice,
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>('nearby');
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+
+  const {
+    nearbyMessages,
+    sessions,
+    activeSessionId,
+    sendNearbyChat,
+    sendIM,
+    sendGroupMessage,
+    startIMSession,
+    startGroupChat,
+    selectSession,
+    getSessionMessages,
+    dismissSession,
+    clearSessionHistory,
+  } = useChat({ instanceId });
+
+  const { onlineFriends, offlineFriends } = useFriends({ instanceId });
+  const { groups } = useGroups({ instanceId });
+  const { nearbyAvatars } = useNearbyAvatars({ instanceId });
+  const { regionInfo } = useRegionInfo({ instanceId });
+  const { status: syncStatus, startSync, openFolder: openSyncFolder } = useInventorySync({ instanceId });
+
+  const handleUserContextMenu = useUserContextMenu();
+  const handleGroupContextMenu = useGroupContextMenu();
 
   const toggleSection = (section: string) => {
     setCollapsedSections((prev) => {
@@ -86,8 +60,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     });
   };
 
-  const handleUserContextMenu = useUserContextMenu();
-  const handleGroupContextMenu = useGroupContextMenu();
+  const handleTeleport = useCallback((x: number, y: number) => {
+    if (instanceId) {
+      ipcRenderer.invoke(IPC_CHANNELS.TELEPORT_LOCAL, instanceId, x, y);
+    }
+  }, [instanceId]);
+
   const isConnected = connectionState === 'metaverse_connected' || connectionState === 'viewer_connected';
 
   if (!isConnected) {
@@ -111,26 +89,26 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const handleSendSessionMessage = (message: string) => {
     if (!activeSession) return;
     if (activeSession.type === 'im' && activeSession.participantId) {
-      onSendIM(activeSession.participantId, message);
+      sendIM(activeSession.participantId, message);
     } else if (activeSession.type === 'group' && activeSession.groupId) {
-      onSendGroupMessage(activeSession.groupId, message);
+      sendGroupMessage(activeSession.groupId, message);
     }
   };
 
   // Get IM session for a friend
-  const getIMSessionForFriend = (friendId: string): ChatSession | undefined => {
+  const getIMSessionForFriend = (friendId: string) => {
     return imSessions.find((s) => s.participantId === friendId);
   };
 
   // Get group session
-  const getGroupSession = (groupId: string): ChatSession | undefined => {
+  const getGroupSession = (groupId: string) => {
     return groupSessions.find((s) => s.groupId === groupId);
   };
 
   // Resolve session display name: prefer friend name by UUID, then session name
   const allFriends = [...onlineFriends, ...offlineFriends];
   const friendById = new Map(allFriends.map((f) => [f.id, f]));
-  const sessionDisplayName = (s: ChatSession): string => {
+  const sessionDisplayName = (s: { participantId?: string; name: string }): string => {
     const friend = s.participantId ? friendById.get(s.participantId) : undefined;
     return displayName(friend?.name || s.name);
   };
@@ -161,7 +139,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             setActiveTab('messages');
             // Mark active session as read when switching to Messages tab
             if (activeSessionId && activeSession?.type === 'im') {
-              onSelectSession(activeSessionId);
+              selectSession(activeSessionId);
             }
           }}
         >
@@ -174,7 +152,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             setActiveTab('groups');
             // Mark active session as read when switching to Groups tab
             if (activeSessionId && activeSession?.type === 'group') {
-              onSelectSession(activeSessionId);
+              selectSession(activeSessionId);
             }
           }}
         >
@@ -184,18 +162,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       </div>
 
       {/* Voice bar */}
-      <VoiceBar
-        connected={voice.connected}
-        connecting={voice.connecting}
-        micMuted={voice.micMuted}
-        speakerMuted={voice.speakerMuted}
-        volume={voice.volume}
-        micLevel={voice.micLevel}
-        pttDown={voice.pttDown}
-        pttUp={voice.pttUp}
-        setVolume={voice.setVolume}
-        toggleSpeakerMute={voice.toggleSpeakerMute}
-      />
+      <VoiceBar />
 
       {/* Inventory sync bar */}
       <div className="sync-bar">
@@ -211,12 +178,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         {syncStatus.uploadCost > 0 && <span className="sync-uploads-paid">uploads L${syncStatus.uploadCost}</span>}
         <button
           className="sync-btn"
-          onClick={onSyncNow}
+          onClick={startSync}
           disabled={syncStatus.phase === 'downloading' || syncStatus.phase === 'uploading' || syncStatus.phase === 'preparing'}
         >
           Sync Now
         </button>
-        <button className="sync-btn" onClick={onOpenSyncFolder}>
+        <button className="sync-btn" onClick={openSyncFolder}>
           Open Folder
         </button>
       </div>
@@ -238,7 +205,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       className="split-sidebar-item"
                       title={avatar.title || undefined}
                       onClick={() => {
-                        onStartIMWithAvatar(avatar);
+                        startIMSession(avatar.id, avatar.name);
                         setActiveTab('messages');
                       }}
                     >
@@ -253,9 +220,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   regionInfo={regionInfo}
                   nearbyAvatars={nearbyAvatars}
                   onAvatarClick={(avatar) => {
-                    onStartIMWithAvatar(avatar);
+                    startIMSession(avatar.id, avatar.name);
                     setActiveTab('messages');
                   }}
+                  onTeleport={handleTeleport}
                 />
               </div>
             </div>
@@ -264,11 +232,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             <div className="split-main">
               <ChatPanel
                 messages={nearbyMessages}
-                onSendMessage={onSendNearbyChat}
+                onSendMessage={(msg, type) => sendNearbyChat(msg, type || 'normal')}
                 title="Nearby Chat"
                 placeholder="Say something..."
                 showChatTypes={true}
-                onClear={() => onClearSessionHistory('nearby')}
+                onClear={() => clearSessionHistory('nearby')}
               />
             </div>
           </div>
@@ -296,9 +264,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                           className={`split-sidebar-item ${isActive ? 'active' : ''} ${session ? 'has-session' : ''}`}
                           onClick={() => {
                             if (session) {
-                              onSelectSession(session.id);
+                              selectSession(session.id);
                             } else {
-                              onStartIMWithFriend(friend);
+                              startIMSession(friend.id, friend.name);
                             }
                           }}
                         >
@@ -328,9 +296,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                         className={`split-sidebar-item ${isActive ? 'active' : ''} ${session ? 'has-session' : ''}`}
                         onClick={() => {
                           if (session) {
-                            onSelectSession(session.id);
+                            selectSession(session.id);
                           } else {
-                            onStartIMWithFriend(friend);
+                            startIMSession(friend.id, friend.name);
                           }
                         }}
                       >
@@ -353,7 +321,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       <div
                         key={s.id}
                         className={`split-sidebar-item ${isActive ? 'active' : ''} has-session`}
-                        onClick={() => onSelectSession(s.id)}
+                        onClick={() => selectSession(s.id)}
                       >
                         <span className="avatar-status-dot" />
                         <span className="split-sidebar-name" onContextMenu={(e) => s.participantId && handleUserContextMenu(e, s.participantId, s.name)}>{sessionDisplayName(s)}</span>
@@ -364,7 +332,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                           className="split-sidebar-dismiss"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onDismissSession(s.id);
+                            dismissSession(s.id);
                           }}
                         >
                           &times;
@@ -377,14 +345,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
 
             {/* Chat area */}
-            <div className="split-main" onClick={() => activeSessionId && onSelectSession(activeSessionId)}>
+            <div className="split-main" onClick={() => activeSessionId && selectSession(activeSessionId)}>
               {activeSession && activeSession.type === 'im' ? (
                 <ChatPanel
                   messages={activeSessionMessages}
                   onSendMessage={handleSendSessionMessage}
                   title={sessionDisplayName(activeSession)}
                   placeholder={`Message ${sessionDisplayName(activeSession)}...`}
-                  onClear={() => onClearSessionHistory(activeSession.id)}
+                  onClear={() => clearSessionHistory(activeSession.id)}
                 />
               ) : (
                 <div className="split-main-empty">
@@ -413,9 +381,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                         className={`split-sidebar-item ${isActive ? 'active' : ''} ${session ? 'has-session' : ''}`}
                         onClick={() => {
                           if (session) {
-                            onSelectSession(session.id);
+                            selectSession(session.id);
                           } else {
-                            onOpenGroupChat(group);
+                            startGroupChat(group.id);
                           }
                         }}
                       >
@@ -431,14 +399,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
 
             {/* Chat area */}
-            <div className="split-main" onClick={() => activeSessionId && onSelectSession(activeSessionId)}>
+            <div className="split-main" onClick={() => activeSessionId && selectSession(activeSessionId)}>
               {activeSession && activeSession.type === 'group' ? (
                 <ChatPanel
                   messages={activeSessionMessages}
                   onSendMessage={handleSendSessionMessage}
                   title={sessionDisplayName(activeSession)}
                   placeholder={`Message ${sessionDisplayName(activeSession)}...`}
-                  onClear={() => onClearSessionHistory(activeSession.id)}
+                  onClear={() => clearSessionHistory(activeSession.id)}
                 />
               ) : (
                 <div className="split-main-empty">

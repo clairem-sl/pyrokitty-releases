@@ -11,6 +11,7 @@
 
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs';
 import { app } from 'electron';
 import { EventEmitter } from 'events';
 import { ViewerConnection } from './viewer-connection';
@@ -35,7 +36,7 @@ function getSidecarPath(): string {
     const releasePath = path.join(appRoot, 'voice', 'bin', 'Release', 'net8.0', 'VoiceSidecar.exe');
     const debugPath = path.join(appRoot, 'voice', 'bin', 'Debug', 'net8.0', 'VoiceSidecar.exe');
     try {
-      require('fs').accessSync(releasePath);
+      fs.accessSync(releasePath);
       return releasePath;
     } catch {
       return debugPath;

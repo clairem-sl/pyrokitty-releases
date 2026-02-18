@@ -5,12 +5,14 @@ interface MiniMapProps {
   regionInfo: RegionInfo | null;
   nearbyAvatars: NearbyAvatar[];
   onAvatarClick?: (avatar: NearbyAvatar) => void;
+  onTeleport?: (x: number, y: number) => void;
 }
 
 export const MiniMap: React.FC<MiniMapProps> = ({
   regionInfo,
   nearbyAvatars,
   onAvatarClick,
+  onTeleport,
 }) => {
   const [selectedAvatarId, setSelectedAvatarId] = useState<string | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
@@ -46,7 +48,18 @@ export const MiniMap: React.FC<MiniMapProps> = ({
   }
 
   return (
-    <div className="mini-map" ref={mapRef} onClick={() => setSelectedAvatarId(null)}>
+    <div
+      className="mini-map"
+      ref={mapRef}
+      onClick={() => setSelectedAvatarId(null)}
+      onDoubleClick={(e) => {
+        if (!onTeleport || !mapRef.current) return;
+        const rect = mapRef.current.getBoundingClientRect();
+        const x = ((e.clientX - rect.left) / rect.width) * 256;
+        const y = (1 - (e.clientY - rect.top) / rect.height) * 256;
+        onTeleport(Math.round(x), Math.round(y));
+      }}
+    >
       <img
         src={regionInfo.mapImageUrl}
         alt={regionInfo.name}

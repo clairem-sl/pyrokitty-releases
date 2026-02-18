@@ -36,7 +36,10 @@ namespace VoiceSidecar
             var factory = LoggerFactory.Create(builder =>
             {
                 builder.AddProvider(new VoiceLoggerProvider(Log));
-                builder.SetMinimumLevel(LogLevel.Trace);
+                builder.SetMinimumLevel(LogLevel.Debug);
+                // Suppress extremely verbose SCTP data channel chatter
+                builder.AddFilter("SIPSorcery.Net.SctpDataSender", LogLevel.Warning);
+                builder.AddFilter("SIPSorcery.Net.SctpDataReceiver", LogLevel.Warning);
             });
             SIPSorcery.LogFactory.Set(factory);
         }

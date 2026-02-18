@@ -2,8 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@mantine/core';
 import { ChatMessage, displayName } from '../../shared/types';
 import { useUserContextMenu } from '../hooks/useUserContextMenu';
-
-const { shell } = window.require('electron');
+import { shell } from 'electron';
 
 // Parse message text into spans and clickable links.
 // Handles SL-style [url label] and bare URLs.

@@ -5,6 +5,7 @@ import { accountManager } from './account-manager';
 import { viewerManager } from './viewer-manager';
 import { connectionManager } from './viewer-connection';
 import { metaverseConnectionManager } from './metaverse-connection';
+import { Vector3 } from '../../node-metaverse/dist/lib';
 import { chatLogManager } from './chat-log-manager';
 import { InventorySyncManager } from './inventory-sync-manager';
 import { ViewerInventoryAdapter } from './viewer-inventory-adapter';
@@ -271,6 +272,25 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     } catch {
       // Bot may be disconnected (viewer took over)
       return null;
+    }
+  });
+
+  // Teleport to local coordinates
+  ipcMain.handle(IPC_CHANNELS.TELEPORT_LOCAL, async (_, instanceId: string, x: number, y: number) => {
+    const metaverse = metaverseConnectionManager.get(instanceId);
+    if (!metaverse) return { error: 'Not connected' };
+    const bot = metaverse.getBot();
+    if (!bot) return { error: 'Not connected' };
+    try {
+      const regionName = bot.currentRegion?.regionName;
+      if (!regionName) return { error: 'No region' };
+      const pos = new Vector3([x, y, 0]);
+      const lookAt = new Vector3([0, 1, 0]);
+      await bot.clientCommands.teleport.teleportTo(regionName, pos, lookAt);
+      return { ok: true };
+    } catch (err: any) {
+      console.error('[Teleport] Failed:', err.message);
+      return { error: err.message };
     }
   });
 

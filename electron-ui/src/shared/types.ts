@@ -208,6 +208,9 @@ export const IPC_CHANNELS = {
   SHOW_USER_CONTEXT_MENU: 'context-menu:user',
   SHOW_GROUP_CONTEXT_MENU: 'context-menu:group',
 
+  // Navigation
+  TELEPORT_LOCAL: 'nav:teleport-local',
+
   // Voice controls (renderer -> main)
   VOICE_PTT_DOWN: 'voice:ptt-down',
   VOICE_PTT_UP: 'voice:ptt-up',

@@ -1,15 +1,15 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ipcRenderer } from 'electron';
 import { MantineProvider, Alert } from '@mantine/core';
 import { theme } from './theme';
-import { useGrids, useAccounts, useViewers, useChat, useFriends, useGroups, useNearbyAvatars, useRegionInfo, useInventorySync, useVoice } from './hooks';
+import { useGrids, useAccounts, useViewers } from './hooks';
 import { AccountList } from './components/AccountList';
 import { LoginForm } from './components/LoginForm';
 import { Welcome } from './components/Welcome';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { MfaModal } from './components/MfaModal';
 import { ChatWindow } from './components/ChatWindow';
-import { Account, Friend, Group, NearbyAvatar, IPC_CHANNELS } from '../shared/types';
+import { Account, IPC_CHANNELS } from '../shared/types';
 
 type View = 'account' | 'add-account';
 
@@ -43,32 +43,8 @@ export const App: React.FC = () => {
   };
 
   const selectedAccount = getAccount(selectedAccountId || '') || null;
-  const selectedGrid = selectedAccount ? getGrid(selectedAccount.gridId) || null : null;
   const selectedInstance = getInstanceForAccount(selectedAccountId || '') || null;
   const activeInstanceId = selectedInstance?.id || null;
-
-  // Chat, friends, and groups hooks
-  const {
-    nearbyMessages,
-    sessions,
-    activeSessionId,
-    sendNearbyChat,
-    sendIM,
-    sendGroupMessage,
-    startIMSession,
-    startGroupChat,
-    selectSession,
-    getSessionMessages,
-    dismissSession,
-    clearSessionHistory,
-  } = useChat({ instanceId: activeInstanceId });
-
-  const { onlineFriends, offlineFriends } = useFriends({ instanceId: activeInstanceId });
-  const { groups } = useGroups({ instanceId: activeInstanceId });
-  const { nearbyAvatars } = useNearbyAvatars({ instanceId: activeInstanceId });
-  const { regionInfo } = useRegionInfo({ instanceId: activeInstanceId });
-  const { status: syncStatus, startSync, openFolder: openSyncFolder } = useInventorySync({ instanceId: activeInstanceId });
-  const voice = useVoice();
 
   const handleSelectAccount = (accountId: string) => {
     setSelectedAccountId(accountId);
@@ -137,47 +113,6 @@ export const App: React.FC = () => {
     }
   };
 
-  // Launch viewer when already logged into metaverse
-  const handleLaunchViewerFromMetaverse = async () => {
-    if (!selectedInstance?.id) return;
-
-    try {
-      // Tell the backend to launch the viewer with handoff from the existing metaverse connection
-      await launchViewerForInstance(selectedInstance.id);
-      setError(null);
-    } catch (err: any) {
-      setError(err.message || 'Failed to launch viewer');
-    }
-  };
-
-  // Chat handlers
-  const handleStartIMWithFriend = useCallback(async (friend: Friend) => {
-    if (!activeInstanceId) return;
-    await startIMSession(friend.id, friend.name);
-  }, [activeInstanceId, startIMSession]);
-
-  const handleStartIMWithAvatar = useCallback(async (avatar: NearbyAvatar) => {
-    if (!activeInstanceId) return;
-    await startIMSession(avatar.id, avatar.name);
-  }, [activeInstanceId, startIMSession]);
-
-  const handleOpenGroupChat = useCallback(async (group: Group) => {
-    if (!activeInstanceId) return;
-    await startGroupChat(group.id);
-  }, [activeInstanceId, startGroupChat]);
-
-  const handleSendNearbyChat = useCallback(async (message: string, type?: 'whisper' | 'normal' | 'shout') => {
-    await sendNearbyChat(message, type || 'normal');
-  }, [sendNearbyChat]);
-
-  const handleSendIM = useCallback(async (participantId: string, message: string) => {
-    await sendIM(participantId, message);
-  }, [sendIM]);
-
-  const handleSendGroupMessage = useCallback(async (groupId: string, message: string) => {
-    await sendGroupMessage(groupId, message);
-  }, [sendGroupMessage]);
-
   // Determine if we should show chat panel
   const connectionState = selectedInstance?.connectionState || 'disconnected';
   const canShowChat = selectedInstance && ['metaverse_connected', 'viewer_connected', 'logging_in', 'handoff_in_progress', 'mfa_pending'].includes(connectionState);
@@ -230,29 +165,8 @@ export const App: React.FC = () => {
               />
             ) : selectedAccount && canShowChat ? (
               <ChatWindow
+                instanceId={activeInstanceId}
                 connectionState={connectionState}
-                nearbyMessages={nearbyMessages}
-                onSendNearbyChat={handleSendNearbyChat}
-                sessions={sessions}
-                activeSessionId={activeSessionId}
-                onSelectSession={selectSession}
-                getSessionMessages={getSessionMessages}
-                onSendIM={handleSendIM}
-                onSendGroupMessage={handleSendGroupMessage}
-                onlineFriends={onlineFriends}
-                offlineFriends={offlineFriends}
-                onStartIMWithFriend={handleStartIMWithFriend}
-                onStartIMWithAvatar={handleStartIMWithAvatar}
-                groups={groups}
-                onOpenGroupChat={handleOpenGroupChat}
-                onDismissSession={dismissSession}
-                onClearSessionHistory={clearSessionHistory}
-                nearbyAvatars={nearbyAvatars}
-                regionInfo={regionInfo}
-                syncStatus={syncStatus}
-                onSyncNow={startSync}
-                onOpenSyncFolder={openSyncFolder}
-                voice={voice}
               />
             ) : selectedAccount ? (
               <LoginForm
