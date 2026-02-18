@@ -219,6 +219,11 @@ export const IPC_CHANNELS = {
 
   // Voice state (main -> renderer)
   VOICE_STATE_UPDATE: 'voice:state-update',
+
+  // World map
+  MAP_OPEN: 'map:open',
+  MAP_POSITION_UPDATE: 'map:position-update',
+  MAP_GET_POSITIONS: 'map:get-positions',
 } as const;
 
 // IPC Request/Response types

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { setupIpcHandlers } from './ipc-handlers';
@@ -6,6 +6,8 @@ import { gridManager } from './grid-manager';
 import { accountManager } from './account-manager';
 import { viewerManager } from './viewer-manager';
 import { chatLogManager } from './chat-log-manager';
+import { IPC_CHANNELS } from '../shared/types';
+import { setMapWindow, getMapWindow } from './map-window';
 
 // ── Global file logger ─────────────────────────────────────
 // Tee console.log/warn/error to a log file in userData
@@ -32,6 +34,36 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let cleanupDone = false;
+
+function createMapWindow(): void {
+  const existing = getMapWindow();
+  if (existing) {
+    existing.focus();
+    return;
+  }
+
+  const win = new BrowserWindow({
+    width: 900,
+    height: 700,
+    minWidth: 400,
+    minHeight: 300,
+    title: 'PyroKitty - World Map',
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+    backgroundColor: '#1a1a2e',
+  });
+
+  const htmlPath = path.join(__dirname, '../map-renderer/map.html');
+  win.loadFile(htmlPath);
+
+  win.on('closed', () => {
+    setMapWindow(null);
+  });
+
+  setMapWindow(win);
+}
 
 async function performCleanup(): Promise<void> {
   if (cleanupDone) return;
@@ -68,6 +100,11 @@ async function createWindow(): Promise<void> {
 
   // Setup IPC handlers
   setupIpcHandlers(mainWindow);
+
+  // Map window IPC
+  ipcMain.handle(IPC_CHANNELS.MAP_OPEN, async () => {
+    createMapWindow();
+  });
 
   // Load the renderer
   // __dirname is dist/main/, renderer is at dist/renderer/

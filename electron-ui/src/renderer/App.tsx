@@ -123,6 +123,13 @@ export const App: React.FC = () => {
         <header className="header">
           <h1>PyroKitty</h1>
           <div className="header-actions">
+            <button
+              className="header-btn"
+              onClick={() => ipcRenderer.invoke(IPC_CHANNELS.MAP_OPEN)}
+              title="Open World Map"
+            >
+              Map
+            </button>
             <span className="header-info">
               {instances.filter(isRunning).length} account(s) connected
             </span>

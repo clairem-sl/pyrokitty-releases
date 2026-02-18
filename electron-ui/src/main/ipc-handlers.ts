@@ -10,6 +10,7 @@ import { chatLogManager } from './chat-log-manager';
 import { InventorySyncManager } from './inventory-sync-manager';
 import { ViewerInventoryAdapter } from './viewer-inventory-adapter';
 import { voiceManager } from './voice-manager';
+import { getMapWindow } from './map-window';
 
 // Track sync managers per instance
 const syncManagers = new Map<string, InventorySyncManager>();
@@ -645,4 +646,62 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     ]);
     menu.popup({ window: mainWindow, x, y });
   });
+
+  // ── World map position updates ───────────────────────────
+  function gatherMapPositions(): Array<{
+    accountName: string;
+    regionName: string;
+    gridX: number;
+    gridY: number;
+    localX: number;
+    localY: number;
+    localZ: number;
+  }> {
+    const positions: Array<{
+      accountName: string;
+      regionName: string;
+      gridX: number;
+      gridY: number;
+      localX: number;
+      localY: number;
+      localZ: number;
+    }> = [];
+
+    for (const instance of viewerManager.getInstances()) {
+      if (instance.connectionState === 'disconnected') continue;
+      const metaverse = metaverseConnectionManager.get(instance.id);
+      if (!metaverse) continue;
+      const regionInfo = metaverse.getRegionInfo();
+      if (!regionInfo) continue;
+
+      const account = accountManager.getAccount(instance.accountId);
+      const accountName = account ? `${account.firstName} ${account.lastName}` : instance.accountId;
+
+      positions.push({
+        accountName,
+        regionName: regionInfo.name,
+        gridX: regionInfo.x,
+        gridY: regionInfo.y,
+        localX: regionInfo.agentPosition?.x ?? 128,
+        localY: regionInfo.agentPosition?.y ?? 128,
+        localZ: regionInfo.agentPosition?.z ?? 0,
+      });
+    }
+    return positions;
+  }
+
+  function broadcastMapPositions(): void {
+    const mw = getMapWindow();
+    if (!mw || mw.isDestroyed()) return;
+    const positions = gatherMapPositions();
+    mw.webContents.send(IPC_CHANNELS.MAP_POSITION_UPDATE, positions);
+  }
+
+  // Respond to explicit position request from map window
+  ipcMain.handle(IPC_CHANNELS.MAP_GET_POSITIONS, async () => {
+    return gatherMapPositions();
+  });
+
+  // Periodically send positions to map window (every 3 seconds)
+  setInterval(broadcastMapPositions, 3000);
 }

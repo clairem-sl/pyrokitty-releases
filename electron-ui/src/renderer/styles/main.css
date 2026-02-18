@@ -63,6 +63,19 @@ body {
   gap: 16px;
 }
 
+.header-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.header-btn:hover {
+  background: var(--accent);
+}
+
 /* Main content */
 .main-content {
   display: flex;
