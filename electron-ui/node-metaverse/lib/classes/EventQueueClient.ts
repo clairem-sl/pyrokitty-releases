@@ -55,11 +55,18 @@ export class EventQueueClient
             this.currentRequest.cancel();
             delete this.currentRequest;
         }
-        const req = {
-            'ack': this.ack,
-            'done': true
-        };
-        await this.capsPostXML('EventQueueGet', req);
+        try
+        {
+            const req = {
+                'ack': this.ack,
+                'done': true
+            };
+            await this.capsPostXML('EventQueueGet', req);
+        }
+        catch (_e: unknown)
+        {
+            // Ignore errors during shutdown (e.g. 404 when region already disconnected)
+        }
         const state = new EventQueueStateChangeEvent();
         state.active = false;
         this.clientEvents.onEventQueueStateChange.next(state);
@@ -97,23 +104,49 @@ export class EventQueueClient
                                 switch (event.message)
                                 {
                                     case 'EnableSimulator':
-
-                                        /*
+                                    {
+                                        const simInfoList = event.body.SimulatorInfo;
+                                        if (simInfoList)
+                                        {
+                                            for (const simInfo of simInfoList)
                                             {
-                                                "body": {
-                                                    "SimulatorInfo": [
-                                                        {
-                                                            "Handle": "AALoAAAECwA=",
-                                                            "IP": "2FIqRA==",
-                                                            "Port": 13029
-                                                        }
-                                                    ]
-                                                },
-                                                "message": "EnableSimulator"
-                                            }
-                                        */
+                                                try
+                                                {
+                                                    // Decode Handle: base64 → 8-byte buffer → Long (same pattern as TeleportFinish)
+                                                    const handleBuf = Buffer.from(simInfo.Handle.toArray());
+                                                    const regionHandle = new Long(handleBuf.readUInt32BE(4), handleBuf.readUInt32BE(0), true);
 
+                                                    // Decode IP: base64 → 4-byte buffer → dotted string
+                                                    const ipAddress = new IPAddress(Buffer.from(simInfo.IP.toArray()), 0).toString();
+
+                                                    const port = simInfo.Port;
+
+                                                    this.clientEvents.onEnableSimulator.next({
+                                                        regionHandle,
+                                                        ipAddress,
+                                                        port,
+                                                    });
+                                                }
+                                                catch (e)
+                                                {
+                                                    console.warn('[EventQueue] Error decoding EnableSimulator:', e);
+                                                }
+                                            }
+                                        }
                                         break;
+                                    }
+                                    case 'EstablishAgentCommunication':
+                                    {
+                                        const body = event.body;
+                                        if (body['agent-id'] && body['sim-ip-and-port'] && body['seed-capability'])
+                                        {
+                                            this.clientEvents.onEstablishAgentCommunication.next({
+                                                simIpAndPort: body['sim-ip-and-port'],
+                                                seedCapability: body['seed-capability'],
+                                            });
+                                        }
+                                        break;
+                                    }
                                     case 'BulkUpdateInventory':
                                     {
                                         const body = event.body;

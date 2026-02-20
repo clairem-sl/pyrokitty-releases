@@ -38,6 +38,11 @@
 #include "fsnearbychathub.h"
 #include "llchat.h"
 #include "llviewercontrol.h"
+#include "llworld.h"
+#include "llviewerregion.h"
+#include "llavatarnamecache.h"
+#include "llavatarname.h"
+#include "llregionhandle.h"
 
 static const F64 CHAT_THROTTLE_PERIOD = 1.0;
 
@@ -81,6 +86,12 @@ PKChatEventAPI::PKChatEventAPI()
         "Request the viewer to quit gracefully.\n"
         "The viewer will save settings and log out before exiting.",
         &PKChatEventAPI::requestQuit);
+
+    add("getMapData",
+        "Get current region info and nearby avatar positions for the world map.\n"
+        "Returns region name, grid coordinates, agent position, and nearby avatars.\n"
+        "[\"reply\"] pump name to receive response on [required]",
+        &PKChatEventAPI::getMapData);
 }
 
 PKChatEventAPI::~PKChatEventAPI()
@@ -378,6 +389,87 @@ void PKChatEventAPI::onIMMessage(const LLSD& msg)
     event["num_unread"] = msg["num_unread"];
 
     LLEventPumps::instance().obtain(mReplyPump).post(event);
+}
+
+void PKChatEventAPI::getMapData(const LLSD& request)
+{
+    Response response(LLSD(), request);
+
+    LLViewerRegion* region = gAgent.getRegion();
+    if (!region)
+    {
+        return response.error("Not in a region");
+    }
+
+    // Region info
+    U32 grid_x, grid_y;
+    grid_from_region_handle(region->getHandle(), &grid_x, &grid_y);
+
+    response["region_name"] = region->getName();
+    response["grid_x"] = (S32)grid_x;
+    response["grid_y"] = (S32)grid_y;
+
+    // Agent position (local to region)
+    LLVector3 agent_pos = gAgent.getPositionAgent();
+    response["agent_x"] = (F64)agent_pos.mV[VX];
+    response["agent_y"] = (F64)agent_pos.mV[VY];
+    response["agent_z"] = (F64)agent_pos.mV[VZ];
+
+    // Nearby avatars
+    uuid_vec_t avatar_ids;
+    std::vector<LLVector3d> positions;
+    LLWorld::getInstance()->getAvatars(&avatar_ids, &positions);
+
+    LLSD nearby = LLSD::emptyArray();
+    auto pos_it = positions.begin();
+    for (auto id_it = avatar_ids.begin();
+         id_it != avatar_ids.end() && pos_it != positions.end();
+         ++id_it, ++pos_it)
+    {
+        if (*id_it == gAgentID) continue; // skip self
+
+        LLVector3d global_pos = *pos_it;
+
+        // Convert global position to grid coords + local position
+        S32 av_grid_x = (S32)(global_pos.mdV[VX] / REGION_WIDTH_METERS);
+        S32 av_grid_y = (S32)(global_pos.mdV[VY] / REGION_WIDTH_METERS);
+        F64 av_local_x = global_pos.mdV[VX] - (F64)av_grid_x * REGION_WIDTH_METERS;
+        F64 av_local_y = global_pos.mdV[VY] - (F64)av_grid_y * REGION_WIDTH_METERS;
+        F64 av_local_z = global_pos.mdV[VZ];
+
+        // Get display name (cached, non-blocking)
+        std::string name;
+        LLAvatarName av_name;
+        if (LLAvatarNameCache::get(*id_it, &av_name))
+        {
+            name = av_name.getCompleteName();
+        }
+        else
+        {
+            name = id_it->asString(); // fallback to UUID
+        }
+
+        // Get region name for this avatar
+        std::string av_region_name;
+        LLViewerRegion* av_region = LLWorld::getInstance()->getRegionFromPosGlobal(global_pos);
+        if (av_region)
+        {
+            av_region_name = av_region->getName();
+        }
+
+        LLSD av;
+        av["id"] = *id_it;
+        av["name"] = name;
+        av["region_name"] = av_region_name;
+        av["grid_x"] = av_grid_x;
+        av["grid_y"] = av_grid_y;
+        av["local_x"] = av_local_x;
+        av["local_y"] = av_local_y;
+        av["local_z"] = av_local_z;
+        nearby.append(av);
+    }
+
+    response["nearby"] = nearby;
 }
 
 void PKChatEventAPI::requestQuit(const LLSD& request)

@@ -31,6 +31,8 @@ import { Vector3 } from './classes/Vector3';
 import type { RegionHandshakeMessage } from './classes/messages/RegionHandshake';
 import type { AgentMovementCompleteMessage } from './classes/messages/AgentMovementComplete';
 import type { Subscription } from 'rxjs';
+import { ChildAgentManager } from './classes/ChildAgentManager';
+import type { EnableSimulatorEvent } from './events/EnableSimulatorEvent';
 
 export class Bot
 {
@@ -43,6 +45,8 @@ export class Bot
     private pingNumber = 0;
     private lastSuccessfulPing = 0;
     private circuitSubscription: Subscription | null = null;
+    private enableSimSubscription: Subscription | null = null;
+    private _childAgentManager?: ChildAgentManager;
     private readonly options: BotOptionFlags;
     private eventQueueRunning = false;
     private readonly eventQueueWaits = new Map<string,  {
@@ -92,6 +96,11 @@ export class Bot
     public get loginParameters(): LoginParameters
     {
         return this.loginParams;
+    }
+
+    public get childAgentManager(): ChildAgentManager | undefined
+    {
+        return this._childAgentManager;
     }
 
     public constructor(login: LoginParameters, options: BotOptionFlags)
@@ -254,6 +263,18 @@ export class Bot
         {
             clearInterval(this.ping);
             this.ping = null;
+        }
+
+        // Shut down child agents
+        if (this.enableSimSubscription !== null)
+        {
+            this.enableSimSubscription.unsubscribe();
+            this.enableSimSubscription = null;
+        }
+        if (this._childAgentManager)
+        {
+            this._childAgentManager.shutdown();
+            this._childAgentManager = undefined;
         }
 
         // Unsubscribe from circuit events
@@ -531,10 +552,42 @@ export class Bot
                         break;
                 }
             });
+
+        // Set up child agent manager for neighboring region awareness
+        this._childAgentManager = new ChildAgentManager({
+            agentID: this.agent.agentID,
+            sessionID: circuit.sessionID,
+            secureSessionID: circuit.secureSessionID,
+            circuitCode: circuit.circuitCode,
+            nameResolver: (uuid) => this.clientCommands.grid.avatarKey2Name(uuid),
+            clientEvents: this.clientEvents,
+            agent: this.agent,
+        });
+        this._childAgentManager.setMainRegion(circuit.ipAddress, circuit.port);
+
+        this.enableSimSubscription = this.clientEvents.onEnableSimulator.subscribe(
+            (evt: EnableSimulatorEvent) =>
+            {
+                this._childAgentManager?.enableSimulator(evt.regionHandle, evt.ipAddress, evt.port)
+                    .catch((e) => console.warn('[ChildAgent] enableSimulator error:', e));
+            }
+        );
     }
 
     private closeCircuit(): void
     {
+        // Shut down child agents first
+        if (this.enableSimSubscription !== null)
+        {
+            this.enableSimSubscription.unsubscribe();
+            this.enableSimSubscription = null;
+        }
+        if (this._childAgentManager)
+        {
+            this._childAgentManager.shutdown();
+            this._childAgentManager = undefined;
+        }
+
         this.currentRegion.shutdown();
         if (this.circuitSubscription !== null)
         {

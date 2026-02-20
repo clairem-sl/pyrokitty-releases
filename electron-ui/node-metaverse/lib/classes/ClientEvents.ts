@@ -32,6 +32,8 @@ import type { LandStatsEvent } from '../events/LandStatsEvent';
 import type { SimStatsEvent } from '../events/SimStatsEvent';
 import type { BalanceUpdatedEvent } from '../events/BalanceUpdatedEvent';
 import type { AgentGroupDataUpdateEvent } from '../events/AgentGroupDataUpdateEvent';
+import type { EnableSimulatorEvent } from '../events/EnableSimulatorEvent';
+import type { EstablishAgentCommunicationEvent } from '../events/EstablishAgentCommunicationEvent';
 import { TimeoutError } from './TimeoutError';
 import { FilterResponse } from '../enums/FilterResponse';
 import type { UUID } from './UUID';
@@ -80,6 +82,8 @@ export class ClientEvents
         ObjectID: UUID,
         Running: boolean
     }>();
+    public onEnableSimulator: Subject<EnableSimulatorEvent> = new Subject<EnableSimulatorEvent>();
+    public onEstablishAgentCommunication: Subject<EstablishAgentCommunicationEvent> = new Subject<EstablishAgentCommunicationEvent>();
 
     public async waitForEvent<T>(subj: Subject<T>, messageFilter?: (message: T) => FilterResponse, timeout = 10000): Promise<T>
     {

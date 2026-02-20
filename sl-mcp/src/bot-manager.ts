@@ -163,7 +163,7 @@ export class BotManager {
       // Set draw distance and camera BEFORE connectToSim so the sim streams nearby objects.
       // The default cameraCenter is hardcoded to (199,203,24) which is wrong — use region center
       // as initial guess, then update to actual avatar position after connecting.
-      this.bot.agent.cameraFar = 256;
+      this.bot.agent.cameraFar = 1024;
       this.bot.agent.cameraCenter = new Vector3([128, 128, 30]);
       this.setupEventSubscriptions();
       this.populateFriendsFromLogin();

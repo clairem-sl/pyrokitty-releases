@@ -1,5 +1,5 @@
 import { ipcMain, BrowserWindow, Menu, shell } from 'electron';
-import { IPC_CHANNELS, AddAccountRequest, LaunchViewerRequest, ChatMessage, SyncStatus, VoiceState } from '../shared/types';
+import { IPC_CHANNELS, AddAccountRequest, LaunchViewerRequest, ChatMessage, SyncStatus, VoiceState, MapMarker } from '../shared/types';
 import { gridManager } from './grid-manager';
 import { accountManager } from './account-manager';
 import { viewerManager } from './viewer-manager';
@@ -648,58 +648,100 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
   });
 
   // ── World map position updates ───────────────────────────
-  function gatherMapPositions(): Array<{
-    accountName: string;
-    regionName: string;
-    gridX: number;
-    gridY: number;
-    localX: number;
-    localY: number;
-    localZ: number;
-  }> {
-    const positions: Array<{
-      accountName: string;
-      regionName: string;
-      gridX: number;
-      gridY: number;
-      localX: number;
-      localY: number;
-      localZ: number;
-    }> = [];
+
+  function pushNearbyMarkers(
+    markers: MapMarker[],
+    seen: Set<string>,
+    avatars: { id: string; name: string; regionName: string; gridX: number; gridY: number; x: number; y: number; z: number }[],
+  ) {
+    for (const av of avatars) {
+      if (seen.has(av.id)) continue;
+      seen.add(av.id);
+      markers.push({
+        type: 'nearby', name: av.name, regionName: av.regionName,
+        gridX: av.gridX, gridY: av.gridY, localX: av.x, localY: av.y, localZ: av.z,
+      });
+    }
+  }
+
+  async function gatherMapPositions(): Promise<MapMarker[]> {
+    const markers: MapMarker[] = [];
+    const seenAvatarIds = new Set<string>();
 
     for (const instance of viewerManager.getInstances()) {
-      if (instance.connectionState === 'disconnected') continue;
-      const metaverse = metaverseConnectionManager.get(instance.id);
-      if (!metaverse) continue;
-      const regionInfo = metaverse.getRegionInfo();
-      if (!regionInfo) continue;
+      if (instance.connectionState !== 'metaverse_connected' && instance.connectionState !== 'viewer_connected') continue;
 
       const account = accountManager.getAccount(instance.accountId);
       const accountName = account ? `${account.firstName} ${account.lastName}` : instance.accountId;
 
-      positions.push({
-        accountName,
-        regionName: regionInfo.name,
-        gridX: regionInfo.x,
-        gridY: regionInfo.y,
-        localX: regionInfo.agentPosition?.x ?? 128,
-        localY: regionInfo.agentPosition?.y ?? 128,
-        localZ: regionInfo.agentPosition?.z ?? 0,
+      // Try viewer connection first (live data from the running viewer)
+      if (instance.connectionState === 'viewer_connected') {
+        const viewerConn = viewerManager.getConnection(instance.id);
+        if (viewerConn?.isConnected) {
+          try {
+            const mapData = await viewerConn.getMapData();
+            if (mapData.grid_x === 0 && mapData.grid_y === 0) continue;
+
+            markers.push({
+              type: 'account', name: accountName, regionName: mapData.region_name,
+              gridX: mapData.grid_x, gridY: mapData.grid_y,
+              localX: mapData.agent_x, localY: mapData.agent_y, localZ: mapData.agent_z,
+            });
+
+            pushNearbyMarkers(markers, seenAvatarIds, (mapData.nearby || []).map((av: any) => ({
+              id: av.id, name: av.name, regionName: av.region_name || mapData.region_name,
+              gridX: av.grid_x, gridY: av.grid_y, x: av.local_x, y: av.local_y, z: av.local_z,
+            })));
+            continue;
+          } catch {
+            // Viewer didn't respond, fall through to metaverse cache
+          }
+        }
+      }
+
+      // Fall back to metaverse (bot) data
+      const metaverse = metaverseConnectionManager.get(instance.id);
+      if (!metaverse) continue;
+      const regionInfo = metaverse.getRegionInfo();
+      if (!regionInfo || (regionInfo.x === 0 && regionInfo.y === 0)) continue;
+
+      markers.push({
+        type: 'account', name: accountName, regionName: regionInfo.name,
+        gridX: regionInfo.x, gridY: regionInfo.y,
+        localX: regionInfo.agentPosition?.x ?? 128, localY: regionInfo.agentPosition?.y ?? 128, localZ: regionInfo.agentPosition?.z ?? 0,
       });
+
+      try {
+        const nearby = metaverse.getNearbyAvatars();
+        pushNearbyMarkers(markers, seenAvatarIds, nearby.filter((av: any) => av.position).map((av: any) => ({
+          id: av.id, name: av.name, regionName: regionInfo.name,
+          gridX: regionInfo.x, gridY: regionInfo.y, x: av.position.x, y: av.position.y, z: av.position.z,
+        })));
+      } catch { /* bot may be disconnected */ }
+
+      // Add avatars from child agent connections (neighboring regions)
+      try {
+        const childAvatars = metaverse.getChildAvatars();
+        pushNearbyMarkers(markers, seenAvatarIds, childAvatars.map((av: any) => ({
+          id: av.id, name: av.name, regionName: av.regionName,
+          gridX: av.gridX, gridY: av.gridY, x: av.position.x, y: av.position.y, z: av.position.z,
+        })));
+      } catch { /* child agents may not be connected */ }
     }
-    return positions;
+
+    return markers;
   }
 
-  function broadcastMapPositions(): void {
+  async function broadcastMapPositions(): Promise<void> {
     const mw = getMapWindow();
     if (!mw || mw.isDestroyed()) return;
-    const positions = gatherMapPositions();
+    const positions = await gatherMapPositions();
     mw.webContents.send(IPC_CHANNELS.MAP_POSITION_UPDATE, positions);
   }
 
   // Respond to explicit position request from map window
   ipcMain.handle(IPC_CHANNELS.MAP_GET_POSITIONS, async () => {
-    return gatherMapPositions();
+    return await gatherMapPositions();
   });
 
   // Periodically send positions to map window (every 3 seconds)

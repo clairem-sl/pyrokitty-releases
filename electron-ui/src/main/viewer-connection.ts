@@ -184,6 +184,30 @@ export class ViewerConnection extends EventEmitter {
   }
 
   /**
+   * Get map data (region info, agent position, nearby avatars) from the viewer.
+   */
+  async getMapData(): Promise<{
+    region_name: string;
+    grid_x: number;
+    grid_y: number;
+    agent_x: number;
+    agent_y: number;
+    agent_z: number;
+    nearby: Array<{
+      id: string;
+      name: string;
+      region_name: string;
+      grid_x: number;
+      grid_y: number;
+      local_x: number;
+      local_y: number;
+      local_z: number;
+    }>;
+  }> {
+    return this.request('ChatAPI', { op: 'getMapData' }, 5000);
+  }
+
+  /**
    * Send a request and wait for a response matched by reqid.
    */
   request(pump: string, data: Record<string, unknown>, timeoutMs = 30000): Promise<any> {

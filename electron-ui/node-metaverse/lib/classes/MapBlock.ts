@@ -10,4 +10,5 @@ export class MapBlock
     public y: number;
     public waterHeight: number;
     public regionFlags: RegionFlags;
+    public agents: number;
 }

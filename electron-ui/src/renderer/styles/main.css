@@ -827,6 +827,29 @@ body {
   cursor: pointer;
 }
 
+.mini-map-avatar-dot.self.teleporting {
+  animation: tp-pulse 0.8s ease-in-out infinite;
+  z-index: 3;
+}
+
+@keyframes tp-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(76, 255, 76, 0.6); }
+  50% { box-shadow: 0 0 0 6px rgba(76, 255, 76, 0); }
+}
+
+.mini-map.teleporting {
+  cursor: wait;
+}
+
+.mini-map.teleporting::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.15);
+  z-index: 2;
+  pointer-events: none;
+}
+
 .mini-map-avatar-tooltip.self-tooltip {
   color: #4cff4c;
   cursor: default;

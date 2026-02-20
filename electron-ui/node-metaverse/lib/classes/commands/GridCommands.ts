@@ -224,6 +224,7 @@ export class GridCommands extends CommandsBase
                         mapBlock.y = data.Y
                         mapBlock.waterHeight = data.WaterHeight;
                         mapBlock.regionFlags = data.RegionFlags;
+                        mapBlock.agents = data.Agents;
                         response.regions.push(mapBlock);
                     }
                 }

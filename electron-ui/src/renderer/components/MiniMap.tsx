@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { NearbyAvatar, RegionInfo, displayName } from '../../shared/types';
 
 interface MiniMapProps {
@@ -15,7 +15,24 @@ export const MiniMap: React.FC<MiniMapProps> = ({
   onTeleport,
 }) => {
   const [selectedAvatarId, setSelectedAvatarId] = useState<string | null>(null);
+  const [teleportTarget, setTeleportTarget] = useState<{ x: number; y: number } | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
+
+  // Safety timeout: clear teleporting state after 15s
+  useEffect(() => {
+    if (!teleportTarget) return;
+    const timer = setTimeout(() => setTeleportTarget(null), 15000);
+    return () => clearTimeout(timer);
+  }, [teleportTarget]);
+
+  // Clear teleport target once agent position is close to it
+  if (teleportTarget && regionInfo?.agentPosition) {
+    const dx = regionInfo.agentPosition.x - teleportTarget.x;
+    const dy = regionInfo.agentPosition.y - teleportTarget.y;
+    if (Math.sqrt(dx * dx + dy * dy) < 5) {
+      setTeleportTarget(null);
+    }
+  }
 
   // Position tooltip to avoid edge clipping
   const tooltipStyle = (xPct: number, yPct: number): React.CSSProperties => {
@@ -49,15 +66,16 @@ export const MiniMap: React.FC<MiniMapProps> = ({
 
   return (
     <div
-      className="mini-map"
+      className={`mini-map ${teleportTarget ? 'teleporting' : ''}`}
       ref={mapRef}
       onClick={() => setSelectedAvatarId(null)}
       onDoubleClick={(e) => {
-        if (!onTeleport || !mapRef.current) return;
+        if (!onTeleport || !mapRef.current || teleportTarget) return;
         const rect = mapRef.current.getBoundingClientRect();
-        const x = ((e.clientX - rect.left) / rect.width) * 256;
-        const y = (1 - (e.clientY - rect.top) / rect.height) * 256;
-        onTeleport(Math.round(x), Math.round(y));
+        const x = Math.round(((e.clientX - rect.left) / rect.width) * 256);
+        const y = Math.round((1 - (e.clientY - rect.top) / rect.height) * 256);
+        setTeleportTarget({ x, y });
+        onTeleport(x, y);
       }}
     >
       <img
@@ -66,12 +84,12 @@ export const MiniMap: React.FC<MiniMapProps> = ({
         className="mini-map-image"
       />
       <div className="mini-map-avatars">
-        {regionInfo.agentPosition && (
+        {(regionInfo.agentPosition || teleportTarget) && (
           <div
-            className={`mini-map-avatar-dot self ${selectedAvatarId === 'self' ? 'selected' : ''}`}
+            className={`mini-map-avatar-dot self ${selectedAvatarId === 'self' ? 'selected' : ''} ${teleportTarget ? 'teleporting' : ''}`}
             style={{
-              left: `${(regionInfo.agentPosition.x / 256) * 100}%`,
-              top: `${((256 - regionInfo.agentPosition.y) / 256) * 100}%`,
+              left: `${((teleportTarget?.x ?? regionInfo.agentPosition!.x) / 256) * 100}%`,
+              top: `${((256 - (teleportTarget?.y ?? regionInfo.agentPosition!.y)) / 256) * 100}%`,
             }}
             onClick={(e) => {
               e.stopPropagation();

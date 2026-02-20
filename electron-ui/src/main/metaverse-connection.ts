@@ -99,6 +99,7 @@ export class MetaverseConnection extends EventEmitter {
   private accountId: string | null = null;
   private lastLoginParams: LoginParams | null = null;
   private lastMfaHash?: string;
+  private cachedRegionInfo: RegionInfo | null = null;
 
   constructor(public readonly instanceId: string) {
     super();
@@ -176,6 +177,8 @@ export class MetaverseConnection extends EventEmitter {
       this.populateFriendsFromLogin();
 
       this.emit('login-progress', 'Connecting to simulator...');
+      // Set draw distance so the server sends EnableSimulator for neighboring regions
+      this.bot!.agent.cameraFar = 1024;
       await this.bot!.connectToSim();
 
       // Groups will be populated from AgentGroupDataUpdate event
@@ -774,8 +777,35 @@ export class MetaverseConnection extends EventEmitter {
     return Array.from(this.nearbyAvatars.values());
   }
 
+  getChildAvatars(): Array<{
+    id: string;
+    name: string;
+    regionName: string;
+    gridX: number;
+    gridY: number;
+    position: { x: number; y: number; z: number };
+  }> {
+    if (!this.bot?.childAgentManager) return [];
+    try {
+      return this.bot.childAgentManager.getAllChildAvatars().map((entry) => ({
+        id: entry.avatar.id,
+        name: `${entry.avatar.firstName} ${entry.avatar.lastName}`,
+        regionName: entry.regionName,
+        gridX: entry.gridX,
+        gridY: entry.gridY,
+        position: {
+          x: entry.avatar.position.x,
+          y: entry.avatar.position.y,
+          z: entry.avatar.position.z,
+        },
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   getRegionInfo(): RegionInfo | null {
-    if (!this.bot?.currentRegion) return null;
+    if (!this.bot?.currentRegion) return this.cachedRegionInfo;
     const region = this.bot.currentRegion;
     const x = region.xCoordinate;
     const y = region.yCoordinate;
@@ -786,13 +816,15 @@ export class MetaverseConnection extends EventEmitter {
       const pos = selfAvatar.position;
       agentPosition = { x: pos.x, y: pos.y, z: pos.z };
     }
-    return {
+    const info: RegionInfo = {
       name: region.regionName,
       x,
       y,
       mapImageUrl: `https://secondlife-maps-cdn.akamaized.net/map-1-${x}-${y}-objects.jpg`,
       agentPosition,
     };
+    this.cachedRegionInfo = info;
+    return info;
   }
 
   getChatSessions(): ChatSession[] {

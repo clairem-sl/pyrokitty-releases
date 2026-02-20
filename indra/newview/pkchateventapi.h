@@ -59,6 +59,7 @@ private:
     void sendIM(const LLSD& request);
     void setVisible(const LLSD& request);
     void requestQuit(const LLSD& request);
+    void getMapData(const LLSD& request);
 
     // Internal handlers for chat signals
     void onNearbyChat(const LLSD& chat);

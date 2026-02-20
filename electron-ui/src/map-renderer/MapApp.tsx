@@ -3,23 +3,9 @@ import { ipcRenderer } from 'electron';
 import L from 'leaflet';
 import { MapContainer, useMap } from 'react-leaflet';
 import { createLayerComponent } from '@react-leaflet/core';
-import { IPC_CHANNELS } from '../shared/types';
-
-// ── Types ──────────────────────────────────────────────────
-
-interface AvatarPosition {
-  accountName: string;
-  regionName: string;
-  gridX: number;
-  gridY: number;
-  localX: number;
-  localY: number;
-  localZ: number;
-}
+import { IPC_CHANNELS, MapMarker } from '../shared/types';
 
 // ── SL Tile Layer ──────────────────────────────────────────
-// Tile URL: https://map.secondlife.com/map-{z}-{regionX}-{regionY}-objects.jpg
-// Coordinate mapping from LindenHomeMap.tsx reference (mapbot-website).
 
 class LTileLayerSL extends L.TileLayer {
   getTileUrl(coords: L.Coords) {
@@ -39,78 +25,63 @@ const TileLayerSL = createLayerComponent(
   function updateTileLayer() {},
 );
 
-// ── Avatar Markers Layer ───────────────────────────────────
+// ── Colors ───────────────────────────────────────────────
 
-interface AvatarMarkersProps {
-  positions: AvatarPosition[];
-}
-
-const MARKER_COLORS = [
-  '#ff6b6b', // red
-  '#51cf66', // green
-  '#339af0', // blue
-  '#fcc419', // yellow
-  '#cc5de8', // purple
-  '#20c997', // teal
+const ACCOUNT_COLORS = [
+  '#ff6b6b', '#51cf66', '#339af0', '#fcc419', '#cc5de8', '#20c997',
 ];
+const NEARBY_COLOR = '#51cf66';
+
+// ── Avatar Markers Layer ──────────────────────────────────
 
 const AvatarMarkersLayer = createLayerComponent(
-  function createMarkers(props: { positions: AvatarPosition[] }, context: any) {
+  function createMarkers(props: { markers: MapMarker[] }, context: any) {
     const group = L.layerGroup();
-    updateMarkerGroup(group, props.positions);
+    updateMarkerGroup(group, props.markers);
     return { instance: group, context: { ...context, layerContainer: group } };
   },
-  function updateMarkers(instance: L.LayerGroup, props: { positions: AvatarPosition[] }, _prevProps: any) {
-    updateMarkerGroup(instance, props.positions);
+  function updateMarkers(instance: L.LayerGroup, props: { markers: MapMarker[] }, _prevProps: any) {
+    updateMarkerGroup(instance, props.markers);
   },
 );
 
-function updateMarkerGroup(group: L.LayerGroup, positions: AvatarPosition[]) {
+function updateMarkerGroup(group: L.LayerGroup, markers: MapMarker[]) {
   group.clearLayers();
-  positions.forEach((pos, i) => {
-    // Map position: gridX + localX/256 gives fractional grid coordinate
+
+  let accountIdx = 0;
+  for (const pos of markers) {
     const mapX = pos.gridX + pos.localX / 256;
     const mapY = pos.gridY + pos.localY / 256;
-
-    const color = MARKER_COLORS[i % MARKER_COLORS.length];
-
+    const isAccount = pos.type === 'account';
+    const color = isAccount ? ACCOUNT_COLORS[accountIdx++ % ACCOUNT_COLORS.length] : NEARBY_COLOR;
     const marker = L.circleMarker([mapY, mapX], {
-      radius: 7,
-      color: color,
-      fillColor: color,
-      fillOpacity: 0.85,
-      weight: 2,
+      radius: isAccount ? 7 : 4, color, fillColor: color, fillOpacity: 0.85, weight: isAccount ? 2 : 1,
     });
-
+    const nameTag = isAccount ? `<strong>${pos.name}</strong>` : `<span>${pos.name}</span>`;
     marker.bindTooltip(
-      `<strong>${pos.accountName}</strong><br><span class="region-name">${pos.regionName} (${Math.round(pos.localX)}, ${Math.round(pos.localY)}, ${Math.round(pos.localZ)})</span>`,
-      {
-        className: 'avatar-tooltip',
-        direction: 'top',
-        offset: [0, -8],
-        permanent: false,
-      }
+      `${nameTag}<br><span class="region-name">${pos.regionName} (${Math.round(pos.localX)}, ${Math.round(pos.localY)}, ${Math.round(pos.localZ)})</span>`,
+      { className: 'avatar-tooltip', direction: 'top', offset: [0, isAccount ? -8 : -6] }
     );
-
     group.addLayer(marker);
-  });
+  }
 }
 
 // ── Auto-center on first position ──────────────────────────
 
-function AutoCenter({ positions }: { positions: AvatarPosition[] }) {
+function AutoCenter({ markers }: { markers: MapMarker[] }) {
   const map = useMap();
   const hasCentered = useRef(false);
 
   useEffect(() => {
-    if (!hasCentered.current && positions.length > 0) {
-      const pos = positions[0];
-      const mapX = pos.gridX + pos.localX / 256;
-      const mapY = pos.gridY + pos.localY / 256;
-      map.setView([mapY, mapX], 6);
-      hasCentered.current = true;
-    }
-  }, [positions, map]);
+    if (hasCentered.current) return;
+    const accountPos = markers.find(m => m.type === 'account');
+    if (!accountPos) return;
+    if (accountPos.gridX === 0 && accountPos.gridY === 0) return;
+    const mapX = accountPos.gridX + accountPos.localX / 256;
+    const mapY = accountPos.gridY + accountPos.localY / 256;
+    map.setView([mapY, mapX], 6);
+    hasCentered.current = true;
+  }, [markers, map]);
 
   return null;
 }
@@ -118,23 +89,23 @@ function AutoCenter({ positions }: { positions: AvatarPosition[] }) {
 // ── MapApp ─────────────────────────────────────────────────
 
 export const MapApp: React.FC = () => {
-  const [positions, setPositions] = useState<AvatarPosition[]>([]);
+  const [markers, setMarkers] = useState<MapMarker[]>([]);
 
   useEffect(() => {
-    const handler = (_event: any, data: AvatarPosition[]) => {
-      setPositions(data);
+    const handler = (_event: any, data: MapMarker[]) => {
+      setMarkers(data);
     };
     ipcRenderer.on(IPC_CHANNELS.MAP_POSITION_UPDATE, handler);
 
-    // Request initial positions
-    ipcRenderer.invoke(IPC_CHANNELS.MAP_GET_POSITIONS).catch(() => {});
+    ipcRenderer.invoke(IPC_CHANNELS.MAP_GET_POSITIONS).then((data: MapMarker[]) => {
+      if (data?.length) setMarkers(data);
+    }).catch(() => {});
 
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.MAP_POSITION_UPDATE, handler);
     };
   }, []);
 
-  // SL grid center is roughly (1000, 1000) — mainland is around there
   const center = useMemo<L.LatLngExpression>(() => [1000, 1000], []);
 
   return (
@@ -151,8 +122,8 @@ export const MapApp: React.FC = () => {
       attributionControl={false}
     >
       <TileLayerSL minZoom={-1} maxZoom={10} maxNativeZoom={8} minNativeZoom={1} />
-      <AvatarMarkersLayer positions={positions} />
-      <AutoCenter positions={positions} />
+      <AvatarMarkersLayer markers={markers} />
+      <AutoCenter markers={markers} />
     </MapContainer>
   );
 };

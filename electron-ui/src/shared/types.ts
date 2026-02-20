@@ -284,6 +284,18 @@ export interface VoiceState {
   participants: string[];
 }
 
+// Map marker for world map
+export interface MapMarker {
+  type: 'account' | 'nearby';
+  name: string;
+  regionName: string;
+  gridX: number;
+  gridY: number;
+  localX: number;
+  localY: number;
+  localZ: number;
+}
+
 /** Strip " Resident" last name from avatar display names */
 export function displayName(name: string): string {
   if (!name) return name;
