@@ -2393,7 +2393,20 @@ bool LLToolPie::handleRightClickPick()
     {
         gMenuHolder->setObjectSelection(LLSelectMgr::getInstance()->getSelection());
 
-        bool is_other_attachment = (object->isAttachment() && !object->isHUDAttachment() && !object->permYouOwner());
+        // <FS:Pyrokitty> Use avatar parent check instead of permYouOwner() which is
+        // broken by HACKED_GODLIKE_VIEWER (always returns true, making all attachments
+        // appear as "mine" and preventing the avatar context menu from showing)
+        bool is_other_attachment = false;
+        if (object->isAttachment() && !object->isHUDAttachment())
+        {
+            LLViewerObject* avatar_parent = object;
+            while (avatar_parent && !avatar_parent->isAvatar())
+            {
+                avatar_parent = (LLViewerObject*)avatar_parent->getParent();
+            }
+            is_other_attachment = avatar_parent && avatar_parent->getID() != gAgentID;
+        }
+        // </FS:Pyrokitty>
         if (object->isAvatar() || is_other_attachment)
         {
             // Find the attachment's avatar

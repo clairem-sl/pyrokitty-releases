@@ -113,6 +113,49 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     return displayName(friend?.name || s.name);
   };
 
+  // Shared friend list renderer
+  const renderFriendList = (friends: typeof onlineFriends, statusClass: 'online' | 'offline') =>
+    friends.map((friend) => {
+      const session = getIMSessionForFriend(friend.id);
+      const isActive = session?.id === activeSessionId;
+      return (
+        <div
+          key={friend.id}
+          className={`split-sidebar-item ${isActive ? 'active' : ''} ${session ? 'has-session' : ''}`}
+          onClick={() => {
+            if (session) {
+              selectSession(session.id);
+            } else {
+              startIMSession(friend.id, friend.name);
+            }
+          }}
+        >
+          <span className={`friend-status-dot ${statusClass}`} />
+          <span className="split-sidebar-name" onContextMenu={(e) => handleUserContextMenu(e, friend.id, friend.name)}>{displayName(friend.name) || friend.id}</span>
+          {session && session.unreadCount > 0 && (
+            <span className="split-sidebar-badge">{session.unreadCount}</span>
+          )}
+        </div>
+      );
+    });
+
+  // Shared session chat area renderer
+  const renderSessionChat = (sessionType: 'im' | 'group', emptyText: string) => (
+    <div className="split-main" onClick={() => activeSessionId && selectSession(activeSessionId)}>
+      {activeSession && activeSession.type === sessionType ? (
+        <ChatPanel
+          messages={activeSessionMessages}
+          onSendMessage={handleSendSessionMessage}
+          title={sessionDisplayName(activeSession)}
+          placeholder={`Message ${sessionDisplayName(activeSession)}...`}
+          onClear={() => clearSessionHistory(activeSession.id)}
+        />
+      ) : (
+        <div className="split-main-empty">{emptyText}</div>
+      )}
+    </div>
+  );
+
   // IM sessions with non-friends (recent chats from nearby avatars, etc.)
   const friendIds = new Set(allFriends.map((f) => f.id));
   const nonFriendSessions = imSessions
@@ -254,31 +297,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 {!collapsedSections.has('friends-online') && (
                   onlineFriends.length === 0 ? (
                     <div className="split-sidebar-empty">No friends online</div>
-                  ) : (
-                    onlineFriends.map((friend) => {
-                      const session = getIMSessionForFriend(friend.id);
-                      const isActive = session?.id === activeSessionId;
-                      return (
-                        <div
-                          key={friend.id}
-                          className={`split-sidebar-item ${isActive ? 'active' : ''} ${session ? 'has-session' : ''}`}
-                          onClick={() => {
-                            if (session) {
-                              selectSession(session.id);
-                            } else {
-                              startIMSession(friend.id, friend.name);
-                            }
-                          }}
-                        >
-                          <span className="friend-status-dot online" />
-                          <span className="split-sidebar-name" onContextMenu={(e) => handleUserContextMenu(e, friend.id, friend.name)}>{displayName(friend.name) || friend.id}</span>
-                          {session && session.unreadCount > 0 && (
-                            <span className="split-sidebar-badge">{session.unreadCount}</span>
-                          )}
-                        </div>
-                      );
-                    })
-                  )
+                  ) : renderFriendList(onlineFriends, 'online')
                 )}
               </div>
               <div className="split-sidebar-section">
@@ -286,31 +305,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   <span className={`collapse-arrow ${collapsedSections.has('friends-offline') ? 'collapsed' : ''}`}>{'\u25BE'}</span>
                   Friends Offline ({offlineFriends.length})
                 </div>
-                {!collapsedSections.has('friends-offline') && (
-                  offlineFriends.map((friend) => {
-                    const session = getIMSessionForFriend(friend.id);
-                    const isActive = session?.id === activeSessionId;
-                    return (
-                      <div
-                        key={friend.id}
-                        className={`split-sidebar-item ${isActive ? 'active' : ''} ${session ? 'has-session' : ''}`}
-                        onClick={() => {
-                          if (session) {
-                            selectSession(session.id);
-                          } else {
-                            startIMSession(friend.id, friend.name);
-                          }
-                        }}
-                      >
-                        <span className="friend-status-dot offline" />
-                        <span className="split-sidebar-name" onContextMenu={(e) => handleUserContextMenu(e, friend.id, friend.name)}>{displayName(friend.name) || friend.id}</span>
-                        {session && session.unreadCount > 0 && (
-                          <span className="split-sidebar-badge">{session.unreadCount}</span>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
+                {!collapsedSections.has('friends-offline') && renderFriendList(offlineFriends, 'offline')}
               </div>
               {nonFriendSessions.length > 0 && (
                 <div className="split-sidebar-section">
@@ -345,21 +340,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
 
             {/* Chat area */}
-            <div className="split-main" onClick={() => activeSessionId && selectSession(activeSessionId)}>
-              {activeSession && activeSession.type === 'im' ? (
-                <ChatPanel
-                  messages={activeSessionMessages}
-                  onSendMessage={handleSendSessionMessage}
-                  title={sessionDisplayName(activeSession)}
-                  placeholder={`Message ${sessionDisplayName(activeSession)}...`}
-                  onClear={() => clearSessionHistory(activeSession.id)}
-                />
-              ) : (
-                <div className="split-main-empty">
-                  Select a conversation to start chatting
-                </div>
-              )}
-            </div>
+            {renderSessionChat('im', 'Select a conversation to start chatting')}
           </div>
         )}
 
@@ -399,21 +380,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
 
             {/* Chat area */}
-            <div className="split-main" onClick={() => activeSessionId && selectSession(activeSessionId)}>
-              {activeSession && activeSession.type === 'group' ? (
-                <ChatPanel
-                  messages={activeSessionMessages}
-                  onSendMessage={handleSendSessionMessage}
-                  title={sessionDisplayName(activeSession)}
-                  placeholder={`Message ${sessionDisplayName(activeSession)}...`}
-                  onClear={() => clearSessionHistory(activeSession.id)}
-                />
-              ) : (
-                <div className="split-main-empty">
-                  Select a group to start chatting
-                </div>
-              )}
-            </div>
+            {renderSessionChat('group', 'Select a group to start chatting')}
           </div>
         )}
       </div>

@@ -4529,8 +4529,14 @@ void LLViewerObject::updatePositionCaches() const
     {
         if (!isRoot())
         {
-            mPositionRegion = ((LLViewerObject *)getParent())->getPositionRegion() + getPosition() * getParent()->getRotation();
-            mPositionAgent = mRegionp->getPosAgentFromRegion(mPositionRegion);
+            LLVector3 pos = ((LLViewerObject *)getParent())->getPositionRegion() + getPosition() * getParent()->getRotation();
+            // <FS:PK> Guard against NaN in cached positions
+            if (pos.isFinite())
+            {
+                mPositionRegion = pos;
+                mPositionAgent = mRegionp->getPosAgentFromRegion(mPositionRegion);
+            }
+            // </FS:PK>
         }
         else
         {
@@ -4570,11 +4576,23 @@ const LLVector3 &LLViewerObject::getPositionAgent() const
             // Don't return cached position if you have a parent, recalc (until all dirtying is done correctly.
             LLVector3 position_region;
             position_region = ((LLViewerObject *)getParent())->getPositionRegion() + getPosition() * getParent()->getRotation();
-            mPositionAgent = mRegionp->getPosAgentFromRegion(position_region);
+            // <FS:PK> Guard against NaN from parent position computation
+            LLVector3 new_pos = mRegionp->getPosAgentFromRegion(position_region);
+            if (new_pos.isFinite())
+            {
+                mPositionAgent = new_pos;
+            }
+            // </FS:PK>
         }
         else
         {
-            mPositionAgent = mRegionp->getPosAgentFromRegion(getPosition());
+            // <FS:PK> Guard against NaN
+            LLVector3 new_pos = mRegionp->getPosAgentFromRegion(getPosition());
+            if (new_pos.isFinite())
+            {
+                mPositionAgent = new_pos;
+            }
+            // </FS:PK>
         }
     }
     return mPositionAgent;
@@ -4764,7 +4782,13 @@ const LLVector3 &LLViewerObject::getPositionRegion() const
     if (!isRoot())
     {
         LLViewerObject *parent = (LLViewerObject *)getParent();
-        mPositionRegion = parent->getPositionRegion() + (getPosition() * parent->getRotation());
+        // <FS:PK> Guard against NaN from parent position computation
+        LLVector3 new_pos = parent->getPositionRegion() + (getPosition() * parent->getRotation());
+        if (new_pos.isFinite())
+        {
+            mPositionRegion = new_pos;
+        }
+        // </FS:PK>
     }
     else
     {
@@ -5031,6 +5055,13 @@ void LLViewerObject::setPositionParent(const LLVector3 &pos_parent, bool damped)
 
 void LLViewerObject::setPositionRegion(const LLVector3 &pos_region, bool damped)
 {
+    // <FS:PK> Guard against NaN positions propagating to cached values
+    if (!pos_region.isFinite())
+    {
+        LL_WARNS_ONCE() << "Non-finite position rejected in setPositionRegion for " << getID() << LL_ENDL;
+        return;
+    }
+    // </FS:PK>
     if (!isRootEdit())
     {
         LLViewerObject* parent = (LLViewerObject*) getParent();
@@ -5062,6 +5093,13 @@ void LLViewerObject::setPositionAgent(const LLVector3 &pos_agent, bool damped)
 // their joint-children
 void LLViewerObject::setPositionEdit(const LLVector3 &pos_edit, bool damped)
 {
+    // <FS:PK> Guard against NaN positions
+    if (!pos_edit.isFinite())
+    {
+        LL_WARNS_ONCE() << "Non-finite position rejected in setPositionEdit for " << getID() << LL_ENDL;
+        return;
+    }
+    // </FS:PK>
     if (!isRootEdit())
     {
         // the relative position with the parent is constant, but the parent's position needs to be changed

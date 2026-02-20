@@ -11301,6 +11301,21 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
 
                 bfm = (sy*sx-wpf.size()*sxy)/(sx*sx-wpf.size()*sx2);
                 bfb = (sx*sxy-sy*sx2)/(sx*sx-bfm*sx2);
+
+                // <FS:Pyrokitty> Guard against degenerate best-fit line.
+                // bfm is used as a divisor below; if it's NaN, Inf, or ~0,
+                // clamp to epsilon so divisions produce large finite values
+                // which naturally trigger the ortho projection fallback.
+                if (!llfinite(bfm) || !llfinite(bfb))
+                {
+                    bfm = F_APPROXIMATELY_ZERO;
+                    bfb = 0.f;
+                }
+                else if (fabsf(bfm) < F_APPROXIMATELY_ZERO)
+                {
+                    bfm = (bfm >= 0.f) ? F_APPROXIMATELY_ZERO : -F_APPROXIMATELY_ZERO;
+                }
+                // </FS:Pyrokitty>
             }
 
             {
@@ -11472,6 +11487,13 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
             }
 
             //shadow_cam.setFar(128.f);
+            // <FS:Pyrokitty> Safety net: if eye is NaN from degenerate
+            // shadow math, fall back to camera origin
+            if (!eye.isFinite())
+            {
+                eye = camera.getOrigin();
+            }
+            // </FS:Pyrokitty>
             shadow_cam.setOriginAndLookAt(eye, up, center);
 
             shadow_cam.setOrigin(0,0,0);

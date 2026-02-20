@@ -18,7 +18,7 @@ using System.Threading.Tasks;
 
 namespace VoiceSidecar
 {
-    internal class Program
+    internal static class Program
     {
         private static readonly JsonSerializerOptions JsonOpts = new()
         {

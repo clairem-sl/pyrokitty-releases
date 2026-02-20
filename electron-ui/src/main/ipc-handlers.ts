@@ -117,110 +117,59 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
   });
 
   // Chat handlers - route based on connection state
-  ipcMain.handle(IPC_CHANNELS.SEND_NEARBY_CHAT, async (_, instanceId: string, message: string, type?: string, channel?: number) => {
+  async function routeChatSend(
+    instanceId: string,
+    label: string,
+    viewerAction: (conn: any) => void,
+    metaverseAction: (meta: any) => Promise<void>,
+    echoFields: Partial<ChatMessage>,
+    message: string,
+  ) {
     const instance = viewerManager.getInstance(instanceId);
-    const chatType = (type as 'whisper' | 'normal' | 'shout') || 'normal';
-
-    // Route based on connection state
     if (instance?.connectionState === 'viewer_connected') {
       const connection = viewerManager.getConnection(instanceId);
-      if (!connection?.isConnected) {
-        throw new Error('Viewer not connected');
-      }
-      connection.sendNearbyChat(message, chatType, channel || 0);
-      // Local echo for Electron UI
+      if (!connection?.isConnected) throw new Error('Viewer not connected');
+      viewerAction(connection);
       const outMessage: ChatMessage = {
         id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        type: 'nearby',
-        message,
-        fromName: 'You',
-        fromId: '',
-        timestamp: Date.now(),
-        chatType,
-        isOutgoing: true,
-      };
+        message, fromName: 'You', fromId: '', timestamp: Date.now(), isOutgoing: true,
+        ...echoFields,
+      } as ChatMessage;
       mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...outMessage });
       saveChatMessage(instanceId, outMessage);
     } else if (instance?.connectionState === 'metaverse_connected') {
       const metaverse = metaverseConnectionManager.get(instanceId);
-      if (!metaverse) {
-        throw new Error('Metaverse connection not found');
-      }
-      await metaverse.sendNearbyChat(message, chatType, channel || 0);
+      if (!metaverse) throw new Error('Metaverse connection not found');
+      await metaverseAction(metaverse);
     } else {
-      throw new Error(`Cannot send chat: connection state is ${instance?.connectionState || 'unknown'}`);
+      throw new Error(`Cannot send ${label}: connection state is ${instance?.connectionState || 'unknown'}`);
     }
     return true;
+  }
+
+  ipcMain.handle(IPC_CHANNELS.SEND_NEARBY_CHAT, async (_, instanceId: string, message: string, type?: string, channel?: number) => {
+    const chatType = (type as 'whisper' | 'normal' | 'shout') || 'normal';
+    return routeChatSend(instanceId, 'chat',
+      (conn) => conn.sendNearbyChat(message, chatType, channel || 0),
+      (meta) => meta.sendNearbyChat(message, chatType, channel || 0),
+      { type: 'nearby', chatType }, message,
+    );
   });
 
   ipcMain.handle(IPC_CHANNELS.SEND_IM, async (_, instanceId: string, participantId: string, message: string) => {
-    const instance = viewerManager.getInstance(instanceId);
-
-    // Route based on connection state
-    if (instance?.connectionState === 'viewer_connected') {
-      const connection = viewerManager.getConnection(instanceId);
-      if (!connection?.isConnected) {
-        throw new Error('Viewer not connected');
-      }
-      connection.sendIM(participantId, message);
-      // Local echo for Electron UI
-      const outMessage: ChatMessage = {
-        id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        type: 'im',
-        message,
-        fromName: 'You',
-        fromId: '',
-        timestamp: Date.now(),
-        sessionId: participantId,
-        isOutgoing: true,
-      };
-      mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...outMessage });
-      saveChatMessage(instanceId, outMessage);
-    } else if (instance?.connectionState === 'metaverse_connected') {
-      const metaverse = metaverseConnectionManager.get(instanceId);
-      if (!metaverse) {
-        throw new Error('Metaverse connection not found');
-      }
-      await metaverse.sendIM(participantId, message);
-    } else {
-      throw new Error(`Cannot send IM: connection state is ${instance?.connectionState || 'unknown'}`);
-    }
-    return true;
+    return routeChatSend(instanceId, 'IM',
+      (conn) => conn.sendIM(participantId, message),
+      (meta) => meta.sendIM(participantId, message),
+      { type: 'im', sessionId: participantId }, message,
+    );
   });
 
   ipcMain.handle(IPC_CHANNELS.SEND_GROUP_IM, async (_, instanceId: string, groupId: string, message: string) => {
-    const instance = viewerManager.getInstance(instanceId);
-
-    // Route based on connection state
-    if (instance?.connectionState === 'viewer_connected') {
-      const connection = viewerManager.getConnection(instanceId);
-      if (!connection?.isConnected) {
-        throw new Error('Viewer not connected');
-      }
-      connection.sendGroupIM(groupId, message);
-      // Local echo for Electron UI
-      const outMessage: ChatMessage = {
-        id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        type: 'group',
-        message,
-        fromName: 'You',
-        fromId: '',
-        timestamp: Date.now(),
-        sessionId: groupId,
-        isOutgoing: true,
-      };
-      mainWindow.webContents.send(IPC_CHANNELS.CHAT_MESSAGE, { instanceId, ...outMessage });
-      saveChatMessage(instanceId, outMessage);
-    } else if (instance?.connectionState === 'metaverse_connected') {
-      const metaverse = metaverseConnectionManager.get(instanceId);
-      if (!metaverse) {
-        throw new Error('Metaverse connection not found');
-      }
-      await metaverse.sendGroupMessage(groupId, message);
-    } else {
-      throw new Error(`Cannot send group message: connection state is ${instance?.connectionState || 'unknown'}`);
-    }
-    return true;
+    return routeChatSend(instanceId, 'group message',
+      (conn) => conn.sendGroupIM(groupId, message),
+      (meta) => meta.sendGroupMessage(groupId, message),
+      { type: 'group', sessionId: groupId }, message,
+    );
   });
 
   // Friends handlers

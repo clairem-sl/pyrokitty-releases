@@ -374,7 +374,7 @@ void PKInventoryEventAPI::uploadAsset(const LLSD& request)
         };
 
     LLNewBufferedResourceUploadInfo::uploadFailure_f failure =
-        [reply_pump, reqid](LLUUID assetId, LLSD upload_response, std::string reason) -> bool
+        [reply_pump, reqid](LLUUID assetId, LLSD upload_response, const std::string& reason) -> bool
         {
             LLSD response;
             response["reqid"] = reqid;
@@ -550,7 +550,7 @@ void PKInventoryEventAPI::updateAsset(const LLSD& request)
             };
 
         LLBufferedAssetUploadInfo::uploadFailed_f failure =
-            [reply_pump, reqid](LLUUID itemId, LLUUID taskId, LLSD upload_response, std::string reason) -> bool
+            [reply_pump, reqid](LLUUID itemId, LLUUID taskId, LLSD upload_response, const std::string& reason) -> bool
             {
                 LLSD response;
                 response["reqid"] = reqid;
@@ -597,7 +597,7 @@ void PKInventoryEventAPI::updateAsset(const LLSD& request)
             };
 
         LLBufferedAssetUploadInfo::uploadFailed_f failure =
-            [reply_pump, reqid](LLUUID itemId, LLUUID taskId, LLSD upload_response, std::string reason) -> bool
+            [reply_pump, reqid](LLUUID itemId, LLUUID taskId, LLSD upload_response, const std::string& reason) -> bool
             {
                 LLSD response;
                 response["reqid"] = reqid;

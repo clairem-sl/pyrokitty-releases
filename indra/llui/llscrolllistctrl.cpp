@@ -3625,7 +3625,13 @@ LLScrollListItem* LLScrollListCtrl::addRow(const LLScrollListItem::Params& item_
 LLScrollListItem* LLScrollListCtrl::addRow(LLScrollListItem *new_item, const LLScrollListItem::Params& item_p, EAddPosition pos)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_UI;
-    if (!item_p.validateBlock() || !new_item) return NULL;
+    // <FS:Pyrokitty> Delete new_item if we can't use it (prevents memory leak)
+    if (!item_p.validateBlock() || !new_item)
+    {
+        delete new_item;
+        return NULL;
+    }
+    // </FS:Pyrokitty>
     new_item->setNumColumns(static_cast<S32>(mColumns.size()));
 
     // Add any columns we don't already have

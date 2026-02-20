@@ -1422,7 +1422,10 @@ void LLAgent::setPositionAgent(const LLVector3 &pos_agent)
 {
     if (!pos_agent.isFinite())
     {
-        LL_ERRS() << "setPositionAgent is not a number" << LL_ENDL;
+        // <FS:PK> Downgrade from fatal crash to warning - NaN positions shouldn't kill the viewer
+        LL_WARNS_ONCE() << "Non-finite position rejected in LLAgent::setPositionAgent" << LL_ENDL;
+        return;
+        // </FS:PK>
     }
 
     if (isAgentAvatarValid() && gAgentAvatarp->getParent())
@@ -1432,6 +1435,12 @@ void LLAgent::setPositionAgent(const LLVector3 &pos_agent)
         LLViewerObject *parent = (LLViewerObject*)gAgentAvatarp->getParent();
 
         pos_agent_sitting = gAgentAvatarp->getPosition() * parent->getRotation() + parent->getPositionAgent();
+        // <FS:PK> Guard against NaN from parent position
+        if (!pos_agent_sitting.isFinite())
+        {
+            return;
+        }
+        // </FS:PK>
         pos_agent_d.setVec(pos_agent_sitting);
 
         mFrameAgent.setOrigin(pos_agent_sitting);
@@ -1480,12 +1489,24 @@ const LLVector3 &LLAgent::getPositionAgent()
     {
         if(gAgentAvatarp->mDrawable.isNull())
         {
-            mFrameAgent.setOrigin(gAgentAvatarp->getPositionAgent());
+            // <FS:PK> Guard against NaN from avatar cached position
+            const LLVector3& avatar_pos = gAgentAvatarp->getPositionAgent();
+            if (avatar_pos.isFinite())
+            {
+                mFrameAgent.setOrigin(avatar_pos);
+            }
+            // </FS:PK>
         }
         else
-    {
-        mFrameAgent.setOrigin(gAgentAvatarp->getRenderPosition());
-    }
+        {
+            // <FS:PK> Guard against NaN from avatar render position
+            const LLVector3& render_pos = gAgentAvatarp->getRenderPosition();
+            if (render_pos.isFinite())
+            {
+                mFrameAgent.setOrigin(render_pos);
+            }
+            // </FS:PK>
+        }
     }
 
     return mFrameAgent.getOrigin();

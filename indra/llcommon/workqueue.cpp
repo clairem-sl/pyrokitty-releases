@@ -184,8 +184,10 @@ namespace
         __except (exception_filter(GetExceptionCode(), GetExceptionInformation()))
         {
             // convert to C++ styled exception
+            // <FS:Pyrokitty> Format SEH code as hex for readability
             char integer_string[512];
-            sprintf(integer_string, "SEH, code: %lu\n", GetExceptionCode());
+            sprintf(integer_string, "SEH, code: 0x%08lX", GetExceptionCode());
+            // </FS:Pyrokitty>
             throw std::exception(integer_string);
         }
     }
@@ -198,7 +200,24 @@ void LL::WorkQueueBase::callWork(const Work& work)
 
 #ifdef LL_WINDOWS
     // can not use __try directly, toplevel requires unwinding, thus use of a wrapper
-    sehandle(work);
+    // <FS:Pyrokitty> Catch SEH-converted exceptions so they don't kill the worker thread
+    try
+    {
+        sehandle(work);
+    }
+    catch (const std::exception& e)
+    {
+        LL_WARNS("WorkQueue") << "WorkQueue '" << getKey()
+                              << "' caught unhandled exception: " << e.what()
+                              << " -- worker thread continuing" << LL_ENDL;
+    }
+    catch (...)
+    {
+        LL_WARNS("WorkQueue") << "WorkQueue '" << getKey()
+                              << "' caught unknown exception"
+                              << " -- worker thread continuing" << LL_ENDL;
+    }
+    // </FS:Pyrokitty>
 #else // LL_WINDOWS
     try
     {

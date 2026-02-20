@@ -428,7 +428,10 @@ void LLPanelGroupRoles::setGroupID(const LLUUID& id)
     // [/FS:CR]
     if(mSubTabContainer)
         mSubTabContainer->selectTab(1);
-    group_roles_tab->mFirstOpen = true;
+    // <FS:Pyrokitty> Null check — group_roles_tab can be null if findChild fails
+    if(group_roles_tab)
+        group_roles_tab->mFirstOpen = true;
+    // </FS:Pyrokitty>
     activate();
 }
 

@@ -1460,6 +1460,7 @@ bool FSFloaterPoser::havePermissionToAnimateAvatar(LLVOAvatar* avatar) const
     if (avatar->isControlAvatar())
     {
         LLControlAvatar*      control_av     = dynamic_cast<LLControlAvatar*>(avatar);
+        if (!control_av) return false; // <FS:Pyrokitty> Guard against failed dynamic_cast
         const LLVOVolume*     rootVolume     = control_av->mRootVolp;
         const LLViewerObject* rootEditObject = (rootVolume) ? rootVolume->getRootEdit() : NULL;
         if (!rootEditObject)

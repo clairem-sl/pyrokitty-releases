@@ -33,17 +33,38 @@
 #include "llquaternion.h"
 #include "llcoordframe.h"
 
+#include <boost/stacktrace.hpp>
+
 #define CHECK_FINITE(var)                                            \
     if (!var.isFinite())                                             \
     {                                                                \
-        LL_WARNS() << "Non Finite " << std::string(#var) << LL_ENDL; \
+        static int sLogCount = 0;                                    \
+        if (sLogCount++ < 10)                                        \
+        {                                                            \
+            LL_WARNS() << "Non Finite " << std::string(#var)         \
+                       << " value=(" << var.mV[0] << ", "            \
+                       << var.mV[1] << ", " << var.mV[2] << ")"      \
+                       << "\nStacktrace:\n"                          \
+                       << boost::stacktrace::stacktrace()            \
+                       << LL_ENDL;                                   \
+        }                                                            \
         reset();                                                     \
     }
 
 #define CHECK_FINITE_OBJ()                                       \
     if (!isFinite())                                             \
     {                                                            \
-        LL_WARNS() << "Non Finite in LLCoordFrame " << LL_ENDL;  \
+        static int sLogCount = 0;                                \
+        if (sLogCount++ < 10)                                    \
+        {                                                        \
+            LL_WARNS() << "Non Finite in LLCoordFrame"           \
+                       << " origin=(" << mOrigin.mV[0] << ", "   \
+                       << mOrigin.mV[1] << ", "                  \
+                       << mOrigin.mV[2] << ")"                   \
+                       << "\nStacktrace:\n"                      \
+                       << boost::stacktrace::stacktrace()        \
+                       << LL_ENDL;                               \
+        }                                                        \
         reset();                                                 \
     }
 

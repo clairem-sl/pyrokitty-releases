@@ -429,7 +429,11 @@ public:
                     const T& default_value,
                     const std::string& comment = "Declared In Code")
     {
-        mCachedControlPtr = LLControlCache<T>::getInstance(name).get();
+        // <FS:Pyrokitty> Keep shared_ptr alive during LLPointer assignment to
+        // prevent use-after-free (shared_ptr and LLPointer are independent refcounts)
+        auto inst = LLControlCache<T>::getInstance(name);
+        mCachedControlPtr = inst.get();
+        // </FS:Pyrokitty>
         if (! mCachedControlPtr)
         {
             mCachedControlPtr = new LLControlCache<T>(group, name, default_value, comment);
@@ -439,7 +443,10 @@ public:
     LLCachedControl(LLControlGroup& group,
                     const std::string& name)
     {
-        mCachedControlPtr = LLControlCache<T>::getInstance(name).get();
+        // <FS:Pyrokitty> Keep shared_ptr alive during LLPointer assignment
+        auto inst = LLControlCache<T>::getInstance(name);
+        mCachedControlPtr = inst.get();
+        // </FS:Pyrokitty>
         if (! mCachedControlPtr)
         {
             mCachedControlPtr = new LLControlCache<T>(group, name);

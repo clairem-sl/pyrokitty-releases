@@ -356,13 +356,14 @@ bool LLPresetsManager::savePreset(const std::string& subdirectory, std::string n
     if (IS_GRAPHIC && createDefault && name == PRESETS_DEFAULT)
     {
         paramsData = LLFeatureManager::getInstance()->getRecommendedSettingsMap();
-        if (gSavedSettings.getU32("RenderAvatarMaxComplexity") == 0)
-        {
-            mIsLoadingPreset = true; // <FS:Ansariel> Graphic preset controls independent from XUI
-            // use the recommended setting as an initial one (MAINT-6435)
-            gSavedSettings.setU32("RenderAvatarMaxComplexity", paramsData["RenderAvatarMaxComplexity"]["Value"].asInteger());
-            mIsLoadingPreset = false; // <FS:Ansariel> Graphic preset controls independent from XUI
-        }
+        // <FS:Pyrokitty> Don't override 0 (no limit) with recommended complexity cap
+        // if (gSavedSettings.getU32("RenderAvatarMaxComplexity") == 0)
+        // {
+        //     mIsLoadingPreset = true;
+        //     gSavedSettings.setU32("RenderAvatarMaxComplexity", paramsData["RenderAvatarMaxComplexity"]["Value"].asInteger());
+        //     mIsLoadingPreset = false;
+        // }
+        // </FS:Pyrokitty>
 
         // <FS:Ansariel> Graphic preset controls independent from XUI
         // Add the controls not in feature table to the default preset with their current value

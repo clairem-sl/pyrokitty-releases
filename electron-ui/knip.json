@@ -1,0 +1,11 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "entry": ["scripts/*.ts"],
+  "project": ["src/**/*.{ts,tsx}", "scripts/*.ts"],
+  "ignoreDependencies": [
+    "leaflet.markercluster",
+    "react-leaflet-markercluster",
+    "@types/leaflet.markercluster"
+  ],
+  "ignoreBinaries": ["dotnet"]
+}
