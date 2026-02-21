@@ -2037,6 +2037,9 @@ void LLAppViewer::flushLFSIO()
 
 bool LLAppViewer::cleanup()
 {
+    LL_INFOS("Shutdown") << "cleanup() starting" << LL_ENDL;
+    LLTimer cleanup_timer;
+
     LLAtmosphere::cleanupClass();
 
     //ditch LLVOAvatarSelf instance
@@ -2093,11 +2096,12 @@ bool LLAppViewer::cleanup()
 
     // Give any remaining SLPlugin instances a chance to exit cleanly.
     LLPluginProcessParent::shutdown();
+    LL_INFOS("Shutdown") << "cleanup: plugins shutdown (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     disconnectViewer();
     LLViewerCamera::deleteSingleton();
 
-    LL_INFOS() << "Viewer disconnected" << LL_ENDL;
+    LL_INFOS("Shutdown") << "cleanup: viewer disconnected (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     if (gKeyboard)
     {
@@ -2146,6 +2150,7 @@ bool LLAppViewer::cleanup()
     // </FS:Zi>
 
     // shut down mesh streamer
+    LL_INFOS("Shutdown") << "cleanup: shutting down mesh repo (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
     gMeshRepo.shutdown();
 
     // <FS:ND> FIRE-8385 Crash on exit in Havok. It is hard to say why it happens, as we only have the binary Havok blob. This is a hack around it.
@@ -2173,6 +2178,7 @@ bool LLAppViewer::cleanup()
     }
 
     LLKeyframeDataCache::clear();
+    LL_INFOS("Shutdown") << "cleanup: HUD + keyframes done (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     // End TransferManager before deleting systems it depends on (Audio, AssetStorage)
 #if 0 // this seems to get us stuck in an infinite loop...
@@ -2262,9 +2268,10 @@ bool LLAppViewer::cleanup()
     // (Deleted observers should have already removed themselves)
     gInventory.cleanupInventory();
 
+    LL_INFOS("Shutdown") << "cleanup: printing active coroutines (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
     LLCoros::getInstance()->printActiveCoroutines();
 
-    LL_INFOS() << "Cleaning up Selections" << LL_ENDL;
+    LL_INFOS("Shutdown") << "cleanup: cleaning up selections (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     // Clean up selection managers after UI is destroyed, as UI may be observing them.
     // Clean up before GL is shut down because we might be holding on to objects with texture references
@@ -2422,7 +2429,7 @@ bool LLAppViewer::cleanup()
     // Stop the plugin read thread if it's running.
     LLPluginProcessParent::setUseReadThread(false);
 
-    LL_INFOS() << "Shutting down Threads" << LL_ENDL;
+    LL_INFOS("Shutdown") << "cleanup: shutting down threads (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     // Let threads finish
     LLTimer idleTimer;
@@ -2442,10 +2449,11 @@ bool LLAppViewer::cleanup()
         }
         else if(idle_time >= max_idle_time)
         {
-            LL_WARNS() << "Quitting with pending background tasks." << LL_ENDL;
+            LL_WARNS("Shutdown") << "Quitting with " << pending << " pending background tasks." << LL_ENDL;
             break;
         }
     }
+    LL_INFOS("Shutdown") << "cleanup: thread idle drain done (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     if (mPurgeUserDataOnExit)
     {
@@ -2457,8 +2465,11 @@ bool LLAppViewer::cleanup()
 
     // Delete workers first
     // shotdown all worker threads before deleting them in case of co-dependencies
+    LL_INFOS("Shutdown") << "cleanup: requesting HTTP stop (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
     mAppCoreHttp.requestStop();
+    LL_INFOS("Shutdown") << "cleanup: shutting down texture fetch (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
     sTextureFetch->shutdown();
+    LL_INFOS("Shutdown") << "cleanup: shutting down texture cache (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
     sTextureCache->shutdown();
     sImageDecodeThread->shutdown();
     sPurgeDiskCacheThread->shutdown();
@@ -2466,11 +2477,12 @@ bool LLAppViewer::cleanup()
     {
         mGeneralThreadPool->close();
     }
+    LL_INFOS("Shutdown") << "cleanup: worker threads shutdown (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     sTextureFetch->shutDownTextureCacheThread() ;
     LLLFSThread::sLocal->shutdown();
 
-    LL_INFOS() << "Shutting down OpenGL" << LL_ENDL;
+    LL_INFOS("Shutdown") << "cleanup: shutting down OpenGL (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     // Shut down OpenGL
     if (gViewerWindow)
@@ -2500,11 +2512,14 @@ bool LLAppViewer::cleanup()
         LLViewerJoystick::getInstance()->terminate();
     }
 
-    LL_INFOS() << "Shutting down message system" << LL_ENDL;
+    LL_INFOS("Shutdown") << "cleanup: shutting down message system (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
     end_messaging_system();
+    LL_INFOS("Shutdown") << "cleanup: message system done (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     // Non-LLCurl libcurl library
+    LL_INFOS("Shutdown") << "cleanup: HTTP cleanup starting (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
     mAppCoreHttp.cleanup();
+    LL_INFOS("Shutdown") << "cleanup: HTTP cleanup done (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     SUBSYSTEM_CLEANUP(LLFilePickerThread);
     SUBSYSTEM_CLEANUP(LLDirPickerThread);
@@ -2606,11 +2621,13 @@ bool LLAppViewer::cleanup()
 
     // This calls every remaining LLSingleton's cleanupSingleton() and
     // deleteSingleton() methods.
+    LL_INFOS("Shutdown") << "cleanup: deleting all singletons (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
     LLSingletonBase::deleteAll();
+    LL_INFOS("Shutdown") << "cleanup: singletons deleted (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     LLSplashScreen::hide();
 
-    LL_INFOS() << "Goodbye!" << LL_ENDL;
+    LL_INFOS("Shutdown") << "cleanup() complete (" << cleanup_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     removeDumpDir();
 
@@ -6598,7 +6615,8 @@ void LLAppViewer::disconnectViewer()
     //
     // Save snapshot for next time, if we made it through initialization
 
-    LL_INFOS() << "Disconnecting viewer!" << LL_ENDL;
+    LL_INFOS("Shutdown") << "Disconnecting viewer!" << LL_ENDL;
+    LLTimer shutdown_timer;
 
     // Dump our frame statistics
 
@@ -6650,6 +6668,37 @@ void LLAppViewer::disconnectViewer()
     // close inventory interface, close all windows
     LLSidepanelInventory::cleanup();
 
+    // <FS:Pyrokitty> Hard exit after saving essential data.
+    // Everything below (RlvHandler, agent cleanup, world reset, object
+    // destruction, HUD cleanup, GL teardown) takes 30-60+ seconds for no
+    // reason — the OS reclaims all memory and closes all handles on exit.
+    // We've already saved: inventory cache, name cache, experience cache.
+    // Save settings and bail.
+    {
+        std::string per_account_file = gSavedSettings.getString("PerAccountSettingsFile");
+        if (!per_account_file.empty() && mSavePerAccountSettings)
+        {
+            gSavedPerAccountSettings.saveToFile(per_account_file, true);
+        }
+        gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+        gCrashSettings.saveToFile(gSavedSettings.getString("CrashSettingsFile"), false);
+    }
+
+    LL_INFOS("Shutdown") << "disconnectViewer: essential saves done ("
+        << shutdown_timer.getElapsedTimeF32() << "s) — hard exit" << LL_ENDL;
+
+    // remove marker files so next launch doesn't think we crashed
+    if (!mSecondInstance)
+    {
+        mLogoutMarkerFile.close();
+        LLFile::remove(mLogoutMarkerFileName);
+    }
+    removeMarkerFiles();
+
+    LL_INFOS("Shutdown") << "Calling TerminateProcess" << LL_ENDL;
+    TerminateProcess(GetCurrentProcess(), 0);
+    // </FS:Pyrokitty>
+
 // [SL:KB] - Patch: Appearance-Misc | Checked: 2013-02-12 (Catznip-3.4)
     // Destroying all objects below will trigger attachment detaching code and attempt to remove the COF links for them
     LLAppearanceMgr::instance().setAttachmentInvLinkEnable(false);
@@ -6658,11 +6707,14 @@ void LLAppViewer::disconnectViewer()
 // [RLVa:KB] - Checked: RLVa-2.3 (Housekeeping)
     SUBSYSTEM_CLEANUP(RlvHandler);
 // [/RLVa:KB]
+    LL_INFOS("Shutdown") << "disconnectViewer: RlvHandler done (" << shutdown_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     gAgentWearables.cleanup();
+    LL_INFOS("Shutdown") << "disconnectViewer: gAgentWearables done (" << shutdown_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
     gAgentCamera.cleanup();
     // Also writes cached agent settings to gSavedSettings
     gAgent.cleanup();
+    LL_INFOS("Shutdown") << "disconnectViewer: gAgent done (" << shutdown_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     // This is where we used to call gObjectList.destroy() and then delete gWorldp.
     // Now we just ask the LLWorld singleton to cleanly shut down.
@@ -6670,10 +6722,12 @@ void LLAppViewer::disconnectViewer()
     {
         LLWorld::getInstance()->resetClass();
     }
+    LL_INFOS("Shutdown") << "disconnectViewer: LLWorld::resetClass done (" << shutdown_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
     LLVOCache::deleteSingleton();
 
     // call all self-registered classes
     LLDestroyClassList::instance().fireCallbacks();
+    LL_INFOS("Shutdown") << "disconnectViewer: LLDestroyClassList done (" << shutdown_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
 
     cleanup_xfer_manager();
     gDisconnected = true;

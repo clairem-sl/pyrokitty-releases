@@ -131,19 +131,27 @@ LLWorld::LLWorld() :
 
 void LLWorld::resetClass()
 {
+    LLTimer reset_timer;
+    LL_INFOS("Shutdown") << "LLWorld::resetClass starting with " << mRegionList.size() << " regions" << LL_ENDL;
+
     mHoleWaterObjects.clear();
     gObjectList.destroy();
+    LL_INFOS("Shutdown") << "resetClass: gObjectList.destroy done (" << reset_timer.getElapsedTimeF32() << "s)" << LL_ENDL;
     gSky.cleanup(); // references an object
 
     // <FS:Pyrokitty> Fast bulk region cleanup for shutdown.
-    // gObjectList.destroy() already killed all objects, so per-region
-    // killObjects/clearAllMapObjects/updateWaterObjects are redundant.
-    // Drain any deferred removals first.
+    // We're shutting down — don't bother deleting regions.  Each region
+    // destructor tears down event polls, saves object cache, kills objects,
+    // etc.  All of that is pointless: the OS reclaims memory and closes
+    // sockets when the process exits.  Deleting regions was causing 30+
+    // second hangs waiting for HTTP event poll timeouts.
     mPendingRegionRemovals.clear();
+    LL_INFOS("Shutdown") << "resetClass: abandoning " << mRegionList.size()
+        << " regions (skip delete)" << LL_ENDL;
+    // Fire signals so observers detach, but don't delete.
     for (LLViewerRegion* regionp : mRegionList)
     {
         mRegionRemovedSignal(regionp);
-        delete regionp;
     }
     mRegionList.clear();
     mActiveRegionList.clear();

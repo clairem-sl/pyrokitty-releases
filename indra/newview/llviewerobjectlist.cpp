@@ -127,7 +127,15 @@ LLViewerObjectList::~LLViewerObjectList()
 
 void LLViewerObjectList::destroy()
 {
-    killAllObjects();
+    // <FS:Pyrokitty> Skip per-object markDead() during shutdown.
+    // killAllObjects() calls markDead() on every object individually, which
+    // takes 29+ seconds with many regions.  We're exiting — just drop
+    // everything and let the OS reclaim memory.
+    LL_INFOS("Shutdown") << "LLViewerObjectList::destroy() — clearing " << mObjects.size()
+        << " objects (fast path)" << LL_ENDL;
+    mIndexAndLocalIDToUUID.clear();
+    mObjects.clear();
+    // </FS:Pyrokitty>
 
     resetObjectBeacons();
     mActiveObjects.clear();
