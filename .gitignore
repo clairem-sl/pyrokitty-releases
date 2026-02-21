@@ -144,3 +144,6 @@ accounts.json
 /electron-ui/data/display-names/
 .mcp.json
 clang-tidy-results
+docs/claude-conversations
+clang-tidy-results.txt
+generate_compile_commands.py
