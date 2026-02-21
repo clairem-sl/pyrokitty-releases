@@ -470,8 +470,9 @@ LLAgent::LLAgent() :
     mIsRejectAllGroupInvites(false), // <FS:PP> Option to block/reject all group invites
     mAfkSitting(false), // <FS:Ansariel> FIRE-1568: Fix sit on AFK issues (standing up when sitting before)
 
-    // <FS> Ignore prejump and always fly
-    mIgnorePrejump(false),
+    // <FS> Pre-jump delay and always fly
+    mPreJumpDelayMs(500.f),
+    mPreJumpTimerActive(false),
     mAlwaysFly(false),
     // </FS>
 
@@ -527,10 +528,10 @@ LLAgent::LLAgent() :
     mMoveTimer.stop();
 }
 
-// <FS> Ignore prejump and always fly
-void LLAgent::updateIgnorePrejump(const LLSD &data)
+// <FS> Pre-jump delay and always fly
+void LLAgent::updatePreJumpDelay(const LLSD &data)
 {
-    mIgnorePrejump = data.asBoolean();
+    mPreJumpDelayMs = static_cast<F32>(data.asReal());
 }
 
 void LLAgent::updateFSAlwaysFly(const LLSD &data)
@@ -574,8 +575,8 @@ void LLAgent::init()
     mLastKnownResponseMaturity = static_cast<U8>(gSavedSettings.getU32("PreferredMaturity"));
     mLastKnownRequestMaturity = mLastKnownResponseMaturity;
     mIsDoSendMaturityPreferenceToServer = true;
-    mIgnorePrejump = gSavedSettings.getBOOL("FSIgnoreFinishAnimation");
-    gSavedSettings.getControl("FSIgnoreFinishAnimation")->getSignal()->connect(boost::bind(&LLAgent::updateIgnorePrejump, this, _2));
+    mPreJumpDelayMs = gSavedSettings.getF32("FSPreJumpDelayMs");
+    gSavedSettings.getControl("FSPreJumpDelayMs")->getSignal()->connect(boost::bind(&LLAgent::updatePreJumpDelay, this, _2));
     mAlwaysFly = gSavedSettings.getBOOL("FSAlwaysFly");
     gSavedSettings.getControl("FSAlwaysFly")->getSignal()->connect(boost::bind(&LLAgent::updateFSAlwaysFly, this, _2));
     selectAutorespond(gSavedPerAccountSettings.getBOOL("FSAutorespondMode"));
@@ -1735,17 +1736,101 @@ LLQuaternion LLAgent::getQuat() const
 //-----------------------------------------------------------------------------
 U32 LLAgent::getControlFlags()
 {
-    // <FS> Ignore prejump and always fly
-    //return mControlFlags;
-    if (LLAgent::mIgnorePrejump)
+    // <FS:Pyrokitty> Pre-jump delay slider (1-500ms)
+    U32 flags = mControlFlags;
+
+    if (mPreJumpDelayMs >= 500.f)
     {
-        return mControlFlags | AGENT_CONTROL_FINISH_ANIM;
+        // Full delay: let the server control the animation timing
+        return flags;
     }
-    else
+
+    if (isAgentAvatarValid())
     {
-        return mControlFlags;
+        const auto& anims = gAgentAvatarp->mSignaledAnimations;
+
+        bool has_prejump = anims.find(ANIM_AGENT_PRE_JUMP) != anims.end();
+        bool has_jump = anims.find(ANIM_AGENT_JUMP) != anims.end();
+        bool has_land = anims.find(ANIM_AGENT_LAND) != anims.end();
+        bool has_medium_land = anims.find(ANIM_AGENT_MEDIUM_LAND) != anims.end();
+        bool has_standup = anims.find(ANIM_AGENT_STANDUP) != anims.end();
+        bool has_falldown = anims.find(ANIM_AGENT_FALLDOWN) != anims.end();
+        bool has_up_pos = (flags & AGENT_CONTROL_UP_POS) != 0;
+
+        // Check for transition animations the slider controls
+        // FALLDOWN is the on-ground knockdown after a hard impact, not midair
+        bool in_transition = has_prejump || has_land || has_medium_land || has_standup || has_falldown;
+
+        // Log all active animations on state changes
+        static bool s_was_in_transition = false;
+        static bool s_was_airborne = false;
+        bool is_airborne = has_jump;
+
+        auto logAllAnims = [&](const char* event) {
+            std::ostringstream oss;
+            oss << event << " AllAnims:";
+            for (const auto& pair : anims)
+            {
+                oss << " " << pair.first.asString().substr(0, 8);
+            }
+            oss << " UP_POS=" << has_up_pos << " delay=" << mPreJumpDelayMs << "ms";
+            LL_INFOS("PreJump") << oss.str() << LL_ENDL;
+        };
+
+        if (in_transition)
+        {
+            if (!mPreJumpTimerActive)
+            {
+                // Animation just started — begin timing
+                mPreJumpTimer.reset();
+                mPreJumpTimerActive = true;
+                logAllAnims("Timer started.");
+            }
+            else if (mPreJumpTimer.getElapsedTimeF32() * 1000.f >= mPreJumpDelayMs)
+            {
+                // Timer expired — send FINISH_ANIM
+                flags |= AGENT_CONTROL_FINISH_ANIM;
+                static F32 s_last_log = 0.f;
+                F32 now = mPreJumpTimer.getElapsedTimeF32() * 1000.f;
+                if (now - s_last_log > 200.f || s_last_log == 0.f)
+                {
+                    LL_INFOS("PreJump") << "FINISH_ANIM at " << now << "ms" << LL_ENDL;
+                    s_last_log = now;
+                }
+            }
+        }
+        else
+        {
+            if (mPreJumpTimerActive)
+            {
+                logAllAnims("Timer reset.");
+            }
+            // Animations cleared — reset timer
+            mPreJumpTimerActive = false;
+        }
+
+        // Log airborne/grounded transitions
+        if (is_airborne && !s_was_airborne)
+        {
+            logAllAnims("Airborne.");
+        }
+        else if (!is_airborne && s_was_airborne)
+        {
+            logAllAnims("Grounded.");
+        }
+        s_was_airborne = is_airborne;
+
+        // Suppress UP_POS while airborne/landing/recovering to prevent double-jump
+        // when the slider shortens landing enough that held spacebar re-triggers
+        bool suppress = has_jump || has_land || has_medium_land || has_falldown || has_standup;
+        if (suppress && has_up_pos)
+        {
+            flags &= ~AGENT_CONTROL_UP_POS;
+        }
     }
-    // </FS>
+
+    return flags;
+    // </FS:Pyrokitty>
 }
 
 //-----------------------------------------------------------------------------
@@ -3267,6 +3352,7 @@ void LLAgent::onAnimStop(const LLUUID& id)
     }
     else if (id == ANIM_AGENT_STANDUP)
     {
+        mPreJumpTimerActive = false; // <FS:Pyrokitty> Reset timer when anim stops
         // send stand up command
         setControlFlags(AGENT_CONTROL_FINISH_ANIM);
 
@@ -3274,8 +3360,9 @@ void LLAgent::onAnimStop(const LLUUID& id)
         if (isAgentAvatarValid() && !gAgentAvatarp->mBelowWater && rand() % 3 == 0)
             sendAnimationRequest( ANIM_AGENT_BRUSH, ANIM_REQUEST_START );
     }
-    else if (id == ANIM_AGENT_PRE_JUMP || id == ANIM_AGENT_LAND || id == ANIM_AGENT_MEDIUM_LAND)
+    else if (id == ANIM_AGENT_PRE_JUMP || id == ANIM_AGENT_LAND || id == ANIM_AGENT_MEDIUM_LAND || id == ANIM_AGENT_FALLDOWN)
     {
+        mPreJumpTimerActive = false; // <FS:Pyrokitty> Reset timer when anim stops
         setControlFlags(AGENT_CONTROL_FINISH_ANIM);
     }
 }

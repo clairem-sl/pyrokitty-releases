@@ -12955,7 +12955,7 @@
       <key>Type</key>
       <string>U32</string>
       <key>Value</key>
-      <integer>2</integer>
+      <integer>1</integer>
       <key>Backup</key>
       <integer>0</integer>
     </map>
@@ -19314,6 +19314,17 @@
       <string>Boolean</string>
       <key>Value</key>
       <integer>0</integer>
+    </map>
+    <key>FSPreJumpDelayMs</key>
+    <map>
+      <key>Comment</key>
+      <string>How long (ms) to wait before sending FINISH_ANIM during jump, landing, and hard fall recovery animations. 0 = instant (quickjump), 500 = full server animation.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>500.0</real>
     </map>
     <key>ShowMenuBarLocation</key>
     <map>

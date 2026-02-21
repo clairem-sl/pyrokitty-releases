@@ -51,7 +51,7 @@
 			<check_box label="Doppio clic e tenere premuto per correre" name="tap_tap_hold_to_run"/>
 			<check_box label="Volare/atterrare tenendo premuto salta (PagSu)/chinati (PagGiù)" name="automatic_fly"/>
 			<check_box label="Blocca azione chinarsi (PagGiù)" name="crouch_toggle_mode"/>
-			<check_box label="Disabilita pausa per animazioni pre-salto e atterraggio" name="FSIgnoreFinishAnimation"/>
+
 			<check_box label="Quando si cammina all'indietro, l'avatar non si gira verso la camera nella vista locale" name="FSDisableTurningAroundWhenWalkingBackwards" tool_tip="Questa opzione ha effetto solo sulla tua vista locale e non funziona con gli AO."/>
 			<check_box label="Gira avatar verso un oggetto selezionato" name="FSTurnAvatarToSelectedObject" tool_tip="Ruota il tuo avatar verso l'oggetto che stai attualmente selezionando."/>
 			<slider label_width="175" label="Velocità di rotazione dell'avatar:" name="av_turn_spd" tool_tip="Imposta la velocità con cui il tuo avatar si gira: da 0 a 100 come percentuale stimata della velocità di rotazione massima (0 = predefinito). Con valori alti i movimenti saranno a scatti." />

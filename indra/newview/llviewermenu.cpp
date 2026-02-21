@@ -5247,23 +5247,23 @@ bool enable_script_info()
 }
 // </FS:CR>
 
-// [SJ - Adding IgnorePrejump in Menu ]
+// [SJ - Adding IgnorePrejump in Menu ] — toggles FSPreJumpDelayMs between 0 and 500 (affects jump, landing, and hard fall animations)
 class FSSelfToggleIgnorePreJump : public view_listener_t
 {
     bool handleEvent(const LLSD& userdata)
     {
-        gSavedSettings.setBOOL("FSIgnoreFinishAnimation", !gSavedSettings.getBOOL("FSIgnoreFinishAnimation"));
+        F32 cur = gSavedSettings.getF32("FSPreJumpDelayMs");
+        gSavedSettings.setF32("FSPreJumpDelayMs", cur <= 0.f ? 500.f : 0.f);
         return true;
     }
 };
 
-// [SJ - Adding IgnorePrejump in Menu ]
+// [SJ - Adding IgnorePrejump in Menu ] — quickjump is "on" when delay <= 0
 class FSSelfCheckIgnorePreJump : public view_listener_t
 {
     bool handleEvent(const LLSD& userdata)
     {
-        bool new_value = gSavedSettings.getBOOL("FSIgnoreFinishAnimation");
-        return new_value;
+        return gSavedSettings.getF32("FSPreJumpDelayMs") <= 0.f;
     }
 };
 

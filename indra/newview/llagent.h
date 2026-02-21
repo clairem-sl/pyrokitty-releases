@@ -577,12 +577,14 @@ private:
     S32             mControlsTakenPassedOnCount[TOTAL_CONTROLS];
     U32             mControlFlags;                  // Replacement for the mFooKey's
 
-    // <FS> Ignore prejump and always fly
-    bool            mIgnorePrejump;
+    // <FS> Pre-jump delay and always fly
+    F32             mPreJumpDelayMs;
+    LLFrameTimer    mPreJumpTimer;
+    bool            mPreJumpTimerActive;
     bool            mAlwaysFly;
-    void            updateIgnorePrejump(const LLSD &data);
+    void            updatePreJumpDelay(const LLSD &data);
     void            updateFSAlwaysFly(const LLSD &data);
-    // </FS> Ignore prejump and always fly
+    // </FS> Pre-jump delay and always fly
 
     //--------------------------------------------------------------------
     // Animations
