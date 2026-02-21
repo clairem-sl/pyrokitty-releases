@@ -1573,8 +1573,12 @@ void LLViewerObjectList::killObjects(LLViewerRegion *regionp)
         }
     }
 
-    // Have to clean right away because the region is becoming invalid.
-    cleanDeadObjects(false);
+    // <FS:Pyrokitty> Use timer-enabled cleanup to spread across frames.
+    // markDead() already nulls mRegionp, so the region can be safely
+    // deleted after this. Remaining dead objects cleaned by per-frame
+    // cleanDeadObjects(true) in idle().
+    cleanDeadObjects(true);
+    // </FS:Pyrokitty>
 }
 
 void LLViewerObjectList::killAllObjects()

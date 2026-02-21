@@ -731,10 +731,28 @@ bool LLTemplateMessageReader::decodeData(const U8* buffer, const LLHost& sender 
             decode_timer.reset();
         }
 
+        // <FS:Pyrokitty> Always time message handlers to catch slow ones
+        decode_timer.reset();
+        // </FS:Pyrokitty>
+
         if( !mCurrentRMessageTemplate->callHandlerFunc(gMessageSystem) )
         {
             LL_WARNS() << "Message from " << sender << " with no handler function received: " << mCurrentRMessageTemplate->mName << LL_ENDL;
         }
+
+        // <FS:Pyrokitty> Warn when a single message handler takes too long
+        {
+            F32 handler_time = decode_timer.getElapsedTimeF32();
+            if (handler_time > 0.05f) // 50ms
+            {
+                LL_WARNS("Messaging") << "Slow message handler: "
+                    << mCurrentRMessageTemplate->mName
+                    << " from " << sender
+                    << " took " << (handler_time * 1000.f) << "ms"
+                    << LL_ENDL;
+            }
+        }
+        // </FS:Pyrokitty>
 
         if(LLMessageReader::getTimeDecodes() || gMessageSystem->getTimingCallback())
         {

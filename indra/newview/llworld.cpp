@@ -134,11 +134,22 @@ void LLWorld::resetClass()
     mHoleWaterObjects.clear();
     gObjectList.destroy();
     gSky.cleanup(); // references an object
-    for(region_list_t::iterator region_it = mRegionList.begin(); region_it != mRegionList.end(); )
+
+    // <FS:Pyrokitty> Fast bulk region cleanup for shutdown.
+    // gObjectList.destroy() already killed all objects, so per-region
+    // killObjects/clearAllMapObjects/updateWaterObjects are redundant.
+    // Drain any deferred removals first.
+    mPendingRegionRemovals.clear();
+    for (LLViewerRegion* regionp : mRegionList)
     {
-        LLViewerRegion* region_to_delete = *region_it++;
-        removeRegion(region_to_delete->getHost());
+        mRegionRemovedSignal(regionp);
+        delete regionp;
     }
+    mRegionList.clear();
+    mActiveRegionList.clear();
+    mCulledRegionList.clear();
+    mVisibleRegionList.clear();
+    // </FS:Pyrokitty>
 
     LLViewerPartSim::getInstance()->destroyClass();
 
@@ -731,6 +742,46 @@ void LLWorld::removeRegion(const LLHost &host)
     delete regionp; // Delete last to prevent use after free
 }
 
+// <FS:Pyrokitty> Deferred region teardown
+void LLWorld::queueRegionRemoval(const LLHost& host)
+{
+    // Immediately deactivate the region so the render pipeline stops
+    // paying for it (idleUpdate, visibility, terrain, etc.) while it
+    // waits in the queue for full teardown.
+    LLViewerRegion* regionp = getRegion(host);
+    if (regionp)
+    {
+        mActiveRegionList.remove(regionp);
+        mVisibleRegionList.remove(regionp);
+        mCulledRegionList.remove(regionp);
+    }
+    mPendingRegionRemovals.push_back(host);
+}
+
+void LLWorld::processPendingRegionRemovals()
+{
+    if (mPendingRegionRemovals.empty()) return;
+
+    // Process multiple removals per frame with a time budget.
+    // At low fps (e.g. 5fps = 200ms/frame), 50ms budget lets us
+    // clear several regions per frame instead of just one.
+    LLTimer timer;
+    const F32 MAX_TIME = 0.05f; // 50ms budget
+    while (!mPendingRegionRemovals.empty() && timer.getElapsedTimeF32() < MAX_TIME)
+    {
+        LLHost host = mPendingRegionRemovals.front();
+        mPendingRegionRemovals.erase(mPendingRegionRemovals.begin());
+        removeRegion(host);
+
+        // Clean up blacklist now that teardown is complete
+        if (gMessageSystem)
+        {
+            gMessageSystem->unblacklistHost(host);
+        }
+    }
+}
+// </FS:Pyrokitty>
+
 
 LLViewerRegion* LLWorld::getRegion(const LLHost &host)
 {
@@ -1121,6 +1172,9 @@ static LLTrace::SampleStatHandle<> sNumActiveCachedObjects("numactivecachedobjec
 void LLWorld::updateRegions(F32 max_update_time)
 {
     LL_PROFILE_ZONE_SCOPED;
+    // <FS:Pyrokitty> Process one queued region teardown per frame
+    processPendingRegionRemovals();
+    // </FS:Pyrokitty>
     LLTimer update_timer;
     mNumOfActiveCachedObjects = 0;
 
@@ -1718,10 +1772,11 @@ void process_disable_simulator(LLMessageSystem *mesgsys, void **user_data)
 
     LLHost host = mesgsys->getSender();
 
-    //LL_INFOS() << "Disabling simulator with message from " << host << LL_ENDL;
-    LLWorld::getInstance()->removeRegion(host);
-
-    mesgsys->disableCircuit(host);
+    // <FS:Pyrokitty> Blacklist + defer teardown to spread across frames
+    mesgsys->blacklistHost(host);       // Drop future packets immediately
+    mesgsys->disableCircuit(host);      // Kill circuit (no more pings/ACKs)
+    LLWorld::getInstance()->queueRegionRemoval(host);  // Defer heavy cleanup
+    // </FS:Pyrokitty>
 }
 
 

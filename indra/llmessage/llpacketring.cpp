@@ -274,11 +274,22 @@ S32 LLPacketRing::bufferInboundPacket(S32 socket)
     }
     else
     {
-        packet->init(socket);
-        packet_size = packet->getSize();
+        // <FS:Pyrokitty> Read into temp buffer first to avoid corrupting the
+        // oldest ring entry when the socket is empty and the ring is full.
+        // The original code called packet->init(socket) directly, which
+        // unconditionally overwrites mSize — so when drainSocket makes its
+        // final empty read (receive_packet returns 0), it zeroes the oldest
+        // buffered packet.  On the next frame checkMessages sees size=0 on
+        // the first receivePacket, thinks the ring is empty, and exits
+        // without decoding anything.
+        char temp_buffer[NET_BUFFER_SIZE];
+        packet_size = receive_packet(socket, temp_buffer);
         if (packet_size > 0)
         {
             mActualBytesIn += packet_size;
+
+            LLHost sender = ::get_sender();
+            packet->init(temp_buffer, packet_size, sender);
 
             mHeadIndex = (mHeadIndex + 1) % (S16)(mPacketRing.size());
             if (mNumBufferedPackets < MAX_BUFFER_RING_SIZE)
@@ -292,6 +303,7 @@ S32 LLPacketRing::bufferInboundPacket(S32 socket)
                 mNumBufferedBytes += packet_size - old_packet_size;
             }
         }
+        // </FS:Pyrokitty>
     }
     return packet_size;
 }

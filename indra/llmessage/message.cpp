@@ -539,6 +539,15 @@ bool LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
         }
         else
         {
+            // <FS:Pyrokitty> Skip packets from blacklisted (dying) circuits.
+            // Must be after the receive_size check — when receivePacket()
+            // returns 0, mLastSender is stale and we'd infinite-loop.
+            if (isHostBlacklisted(mLastSender))
+            {
+                continue;
+            }
+            // </FS:Pyrokitty>
+
             LLHost host;
             LLCircuitData* cdp;
 
@@ -1590,6 +1599,24 @@ void LLMessageSystem::disableCircuit(const LLHost &host)
     }
 
 }
+
+// <FS:Pyrokitty> Dead circuit blacklist
+void LLMessageSystem::blacklistHost(const LLHost& host)
+{
+    mBlacklistedHosts.insert(host);
+    LL_INFOS("Messaging") << "Blacklisted host " << host << LL_ENDL;
+}
+
+void LLMessageSystem::unblacklistHost(const LLHost& host)
+{
+    mBlacklistedHosts.erase(host);
+}
+
+bool LLMessageSystem::isHostBlacklisted(const LLHost& host) const
+{
+    return mBlacklistedHosts.count(host) > 0;
+}
+// </FS:Pyrokitty>
 
 
 void LLMessageSystem::setCircuitAllowTimeout(const LLHost &host, bool allow)

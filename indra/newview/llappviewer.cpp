@@ -6452,7 +6452,9 @@ void LLAppViewer::idleNameCache()
 
 
 constexpr F32 CHECK_MESSAGES_DEFAULT_MAX_TIME = 0.020f; // 50 ms = 50 fps (just for messages!)
-#define CHECK_MESSAGES_MAX_TIME_LIMIT 1.0f // 1 second, a long time but still able to stay connected
+// <FS:Pyrokitty> Lowered from 1.0s to 0.1s to keep movement/input alive during packet floods
+#define CHECK_MESSAGES_MAX_TIME_LIMIT 0.1f // 100ms cap on message processing growth
+// </FS:Pyrokitty>
 static F32 CheckMessagesMaxTime = CHECK_MESSAGES_DEFAULT_MAX_TIME;
 
 static LLTrace::BlockTimerStatHandle FTM_IDLE_NETWORK("Idle Network");
@@ -6521,12 +6523,29 @@ void LLAppViewer::idleNetwork()
                 {
                     // Increase CheckMessagesMaxTime so that we will eventually catch up
                     CheckMessagesMaxTime *= 1.035f; // 3.5% ~= 2x in 20 frames, ~8x in 60 frames
+                    // <FS:Pyrokitty> Enforce the cap that was defined but never wired in
+                    CheckMessagesMaxTime = llmin(CheckMessagesMaxTime, (F32)CHECK_MESSAGES_MAX_TIME_LIMIT);
+                    // </FS:Pyrokitty>
+
+                    // <FS:Pyrokitty> Log when buffer is backed up
+                    LL_WARNS("Messaging") << "Message buffer backed up: "
+                        << num_buffered_packets << " buffered, "
+                        << total_decoded << " decoded this frame, "
+                        << llformat("%.1fms elapsed, %.1fms budget", total_time * 1000.f, CheckMessagesMaxTime * 1000.f)
+                        << LL_ENDL;
+                    // </FS:Pyrokitty>
                 }
+                // <FS:Pyrokitty> Record stats for floater
+                sample(LLStatViewer::MSG_BUFFERED_PACKETS, num_buffered_packets);
+                // </FS:Pyrokitty>
             }
             else
             {
                 // Reset CheckMessagesMaxTime to default value
                 CheckMessagesMaxTime = CHECK_MESSAGES_DEFAULT_MAX_TIME;
+                // <FS:Pyrokitty> No backlog
+                sample(LLStatViewer::MSG_BUFFERED_PACKETS, 0);
+                // </FS:Pyrokitty>
             }
 
             // Handle per-frame message system processing.
@@ -6536,6 +6555,11 @@ void LLAppViewer::idleNetwork()
         }
     }
     add(LLStatViewer::NUM_NEW_OBJECTS, gObjectList.mNumNewObjects);
+
+    // <FS:Pyrokitty> Message processing stats for statistics floater
+    sample(LLStatViewer::MSG_DECODED_PER_FRAME, total_decoded);
+    sample(LLStatViewer::MSG_CHECK_MAX_TIME, F64Milliseconds(CheckMessagesMaxTime * 1000.0));
+    // </FS:Pyrokitty>
 
     // Retransmit unacknowledged packets.
     if (gXferManager)

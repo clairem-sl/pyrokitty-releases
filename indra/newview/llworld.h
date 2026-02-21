@@ -41,6 +41,7 @@
 #include "llviewerpartsim.h"
 #include "llviewertexture.h"
 #include "llvowater.h"
+#include "llhost.h"
 
 class LLViewerRegion;
 class LLVector3d;
@@ -78,6 +79,11 @@ public:
         // safe to call if already present, does the "right thing" if
         // hosts are same, or if hosts are different, etc...
     void            removeRegion(const LLHost &host);
+
+    // <FS:Pyrokitty> Deferred region teardown — process at most 1 per frame
+    void            queueRegionRemoval(const LLHost& host);
+    void            processPendingRegionRemovals();
+    // </FS:Pyrokitty>
 
     void    disconnectRegions(); // Send quit messages to all child regions
 
@@ -254,6 +260,10 @@ private:
     region_list_t   mRegionList;
     region_list_t   mVisibleRegionList;
     region_list_t   mCulledRegionList;
+
+    // <FS:Pyrokitty> Queued region removals for deferred teardown
+    std::vector<LLHost> mPendingRegionRemovals;
+    // </FS:Pyrokitty>
 
     region_remove_signal_t mRegionRemovedSignal;
 

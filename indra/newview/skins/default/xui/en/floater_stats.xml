@@ -274,6 +274,25 @@
                     decimal_digits="1"
                     show_history="false"
                     setting="DebugStatModeActualOut"/>
+          <!-- FS:Pyrokitty - Message buffer stats -->
+          <stat_bar name="msgbufferedpackets"
+                    label="Buffered Packets"
+                    stat="msgbufferedpackets"
+                    decimal_digits="0"
+                    show_history="true"
+                    setting="DebugStatModeMsgBuffered"/>
+          <stat_bar name="msgdecodedperframe"
+                    label="Msgs Decoded/Frame"
+                    stat="msgdecodedperframe"
+                    decimal_digits="0"
+                    show_history="true"
+                    setting="DebugStatModeMsgDecoded"/>
+          <stat_bar name="msgcheckmaxtime"
+                    label="Msg Check Budget"
+                    stat="msgcheckmaxtime"
+                    decimal_digits="1"
+                    show_history="true"
+                    setting="DebugStatModeMsgCheckTime"/>
         </stat_view>
       </stat_view>
 

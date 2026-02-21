@@ -29,6 +29,7 @@
 
 #include <cstring>
 #include <set>
+#include <unordered_set>
 
 #if LL_LINUX
 #include <endian.h>
@@ -664,6 +665,12 @@ public:
     void    enableCircuit(const LLHost &host, bool trusted);
     void    disableCircuit(const LLHost &host);
 
+    // <FS:Pyrokitty> Dead circuit blacklist — drop packets from dying circuits
+    void    blacklistHost(const LLHost& host);
+    void    unblacklistHost(const LLHost& host);
+    bool    isHostBlacklisted(const LLHost& host) const;
+    // </FS:Pyrokitty>
+
     // Use this to establish trust on startup and in response to
     // DenyTrustedCircuit.
     void sendCreateTrustedCircuit(const LLHost& host, const LLUUID & id1, const LLUUID & id2);
@@ -920,6 +927,10 @@ private:
 
     // <FS:Ansariel> Restore original LLMessageSystem HTTP options for OpenSim
     bool mIsInSecondLife;
+
+    // <FS:Pyrokitty> Dead circuit blacklist — hosts whose packets should be silently dropped
+    std::unordered_set<LLHost, LLHostHash> mBlacklistedHosts;
+    // </FS:Pyrokitty>
 };
 
 

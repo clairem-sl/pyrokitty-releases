@@ -192,6 +192,12 @@ extern LLTrace::SampleStatHandle<>      FPS_SAMPLE,
                                         GL_THREAD_QUEUE_DEPTH,
                                         DECODE_THREAD_QUEUE_DEPTH;
 
+// <FS:Pyrokitty> Message buffer stats
+extern LLTrace::SampleStatHandle<>      MSG_BUFFERED_PACKETS,
+                                        MSG_DECODED_PER_FRAME;
+extern LLTrace::SampleStatHandle<F64Milliseconds> MSG_CHECK_MAX_TIME;
+// </FS:Pyrokitty>
+
 extern LLTrace::SampleStatHandle<LLUnit<F32, LLUnits::Percent> > PACKETS_LOST_PERCENT;
 
 extern LLTrace::SampleStatHandle<F64Megabytes > FORMATTED_MEM;

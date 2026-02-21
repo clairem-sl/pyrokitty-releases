@@ -199,6 +199,13 @@ LLTrace::SampleStatHandle<> FPS_SAMPLE("fpssample"),
                             GL_THREAD_QUEUE_DEPTH("glthreadqdepth"),
                             DECODE_THREAD_QUEUE_DEPTH("decodethreadqdepth");
 
+// <FS:Pyrokitty> Message buffer stats
+LLTrace::SampleStatHandle<> MSG_BUFFERED_PACKETS("msgbufferedpackets", "Buffered UDP packets"),
+                            MSG_DECODED_PER_FRAME("msgdecodedperframe", "Messages decoded this frame");
+LLTrace::SampleStatHandle<F64Milliseconds>
+                            MSG_CHECK_MAX_TIME("msgcheckmaxtime", "Current message check time budget");
+// </FS:Pyrokitty>
+
 LLTrace::SampleStatHandle<LLUnit<F32, LLUnits::Percent> >
                             PACKETS_LOST_PERCENT("packetslostpercentstat");
 
