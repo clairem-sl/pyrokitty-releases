@@ -9,7 +9,7 @@
         "build": "npm run build:metaverse && npm run build:main && npm run build:renderer && npm run build:map",
         "build:metaverse": "cd node-metaverse && npm run build",
         "build:voice": "cd voice && dotnet publish -c Release -r win-x64 --self-contained -o ../dist/voice",
-        "build:main": "esbuild src/main/index.ts --bundle --outfile=dist/main/index.js --platform=node --target=node18 --format=cjs --external:electron",
+        "build:main": "esbuild src/main/index.ts --bundle --outfile=dist/main/index.js --platform=node --target=node18 --format=cjs --external:electron && esbuild src/main/texture-decode-worker.ts --bundle --outfile=dist/main/texture-decode-worker.js --platform=node --target=node18 --format=cjs",
         "build:renderer": "esbuild src/renderer/index.tsx --bundle --outfile=dist/renderer/index.js --platform=browser --target=chrome114 --external:electron && esbuild src/renderer/styles/index.css --bundle --outfile=dist/renderer/styles/index.css && npm run copy:assets",
         "build:map": "esbuild src/map-renderer/index.tsx --bundle --outfile=dist/map-renderer/index.js --platform=browser --target=chrome114 --external:electron && esbuild src/map-renderer/styles/index.css --bundle --outfile=dist/map-renderer/styles/index.css --loader:.png=file --asset-names=[name] && npm run copy:map-assets",
         "copy:assets": "node -e \"const fs=require('fs');fs.copyFileSync('src/renderer/index.html','dist/renderer/index.html');\"",
@@ -40,6 +40,7 @@
         "typescript": "^5.3.0"
     },
     "dependencies": {
+        "@abasb75/jpeg2000-decoder": "file:../../pyrokitty-openjpeg/packages/2.5.4-decoder",
         "@mantine/core": "^8.3.14",
         "@mantine/hooks": "^8.3.14",
         "@react-leaflet/core": "^2.1.0",
@@ -49,6 +50,7 @@
         "react-dom": "^18.2.0",
         "react-leaflet": "^4.2.1",
         "react-leaflet-markercluster": "^3.0.0-rc1",
+        "sharp": "^0.34.5",
         "ws": "^8.16.0"
     },
     "build": {

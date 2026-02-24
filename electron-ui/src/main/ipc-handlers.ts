@@ -102,6 +102,10 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     return viewerManager.launchViewerForInstance(instanceId);
   });
 
+  ipcMain.handle(IPC_CHANNELS.LAUNCH_GODOT_VIEWER_FOR_INSTANCE, async (_, instanceId: string) => {
+    return viewerManager.launchGodotViewerForInstance(instanceId);
+  });
+
   // MFA handlers
   ipcMain.handle(IPC_CHANNELS.MFA_SUBMIT, async (_, instanceId: string, token: string) => {
     return viewerManager.submitMfaToken(instanceId, token);

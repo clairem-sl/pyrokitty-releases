@@ -226,10 +226,15 @@ body {
   text-overflow: ellipsis;
 }
 
-.account-launch-btn {
-  width: 100%;
-  padding: 6px 12px;
+.account-viewer-buttons {
+  display: flex;
+  gap: 6px;
   margin-top: 8px;
+}
+
+.account-launch-btn {
+  flex: 1;
+  padding: 6px 12px;
   border: 1px solid var(--accent);
   border-radius: 4px;
   background: rgba(233, 69, 96, 0.1);
@@ -248,6 +253,23 @@ body {
 .account-launch-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.account-launch-godot {
+  border-color: #9b59b6;
+  color: #9b59b6;
+  background: rgba(155, 89, 182, 0.1);
+}
+
+.account-launch-godot:hover {
+  background: #9b59b6;
+  color: white;
+}
+
+.account-launch-godot:disabled {
   border-color: var(--border);
   background: transparent;
   color: var(--text-secondary);

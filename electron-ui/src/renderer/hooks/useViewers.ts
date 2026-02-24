@@ -91,6 +91,10 @@ export function useViewers() {
     await ipcRenderer.invoke(IPC_CHANNELS.LAUNCH_VIEWER_FOR_INSTANCE, instanceId);
   };
 
+  const launchGodotViewerForInstance = async (instanceId: string): Promise<void> => {
+    await ipcRenderer.invoke(IPC_CHANNELS.LAUNCH_GODOT_VIEWER_FOR_INSTANCE, instanceId);
+  };
+
   const getInstanceForAccount = (accountId: string) =>
     instances.find((i) => i.accountId === accountId);
 
@@ -98,6 +102,7 @@ export function useViewers() {
     instances,
     launchViewer,
     launchViewerForInstance,
+    launchGodotViewerForInstance,
     stopViewer,
     getInstanceForAccount,
     isRunning: isInstanceRunning,

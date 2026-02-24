@@ -12,6 +12,7 @@ interface AccountListProps {
   onAddAccount: () => void;
   onStopInstance: (instanceId: string) => void;
   onLaunchViewer: (instanceId: string) => void;
+  onLaunchGodotViewer: (instanceId: string) => void;
 }
 
 export const AccountList: React.FC<AccountListProps> = ({
@@ -23,6 +24,7 @@ export const AccountList: React.FC<AccountListProps> = ({
   onAddAccount,
   onStopInstance,
   onLaunchViewer,
+  onLaunchGodotViewer,
 }) => {
   const getInstanceForAccount = (accountId: string): ViewerInstance | undefined => {
     return instances.find((i) => i.accountId === accountId);
@@ -81,16 +83,28 @@ export const AccountList: React.FC<AccountListProps> = ({
                   </div>
                 )}
                 {isMetaverseOnly && instance && (
-                  <button
-                    className="account-launch-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onLaunchViewer(instance.id);
-                    }}
-                    disabled={!canLaunchViewer}
-                  >
-                    Launch Viewer
-                  </button>
+                  <div className="account-viewer-buttons">
+                    <button
+                      className="account-launch-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onLaunchViewer(instance.id);
+                      }}
+                      disabled={!canLaunchViewer}
+                    >
+                      Firestorm
+                    </button>
+                    <button
+                      className="account-launch-btn account-launch-godot"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onLaunchGodotViewer(instance.id);
+                      }}
+                      disabled={!canLaunchViewer}
+                    >
+                      {instance.godotBridgeActive ? 'Stop Godot' : 'Godot'}
+                    </button>
+                  </div>
                 )}
               </div>
             );

@@ -1,0 +1,35 @@
+[gd_scene load_steps=6 format=3 uid="uid://main_scene"]
+
+[ext_resource type="Script" path="res://src/main.gd" id="1"]
+[ext_resource type="Script" path="res://src/scene_manager.gd" id="2"]
+[ext_resource type="Script" path="res://src/camera_controller.gd" id="3"]
+
+[sub_resource type="Environment" id="Environment_1"]
+background_mode = 1
+background_color = Color(0.15, 0.17, 0.21, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.3, 0.3, 0.35, 1)
+ambient_light_energy = 0.5
+tonemap_mode = 2
+
+[sub_resource type="Sky" id="Sky_1"]
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1")
+
+[node name="SceneManager" type="Node3D" parent="."]
+script = ExtResource("2")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.866, 0.5, 0, -0.5, 0.866, 128, 80, -78)
+fov = 60.0
+far = 2048.0
+script = ExtResource("3")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866, -0.25, 0.433, 0, 0.866, 0.5, -0.5, -0.433, 0.75, 0, 100, 0)
+light_energy = 0.8
+shadow_enabled = true
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_1")

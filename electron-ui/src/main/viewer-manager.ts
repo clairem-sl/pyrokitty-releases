@@ -8,6 +8,7 @@ import { gridManager } from './grid-manager';
 import { connectionManager, ViewerConnection } from './viewer-connection';
 import { metaverseConnectionManager, MetaverseConnection } from './metaverse-connection';
 import { voiceManager } from './voice-manager';
+import { GodotBridge } from './godot-bridge';
 
 function getViewerPath(): string {
   if (app.isPackaged) {
@@ -30,6 +31,8 @@ export class ViewerManager extends EventEmitter {
   private shouldRelogin: Set<string> = new Set();
   // Store password in memory for re-login (needed if not saved to disk)
   private sessionPasswords: Map<string, string> = new Map();
+  // Godot bridge instances
+  private godotBridges: Map<string, GodotBridge> = new Map();
 
   getInstances(): ViewerInstance[] {
     return Array.from(this.instances.values());
@@ -222,6 +225,62 @@ export class ViewerManager extends EventEmitter {
       grid.nick,
       instance.wsPort
     );
+  }
+
+  /**
+   * Launch the Godot 3D viewer sidecar for an existing metaverse session.
+   * Node-metaverse stays connected and streams object data to Godot.
+   */
+  async launchGodotViewerForInstance(instanceId: string): Promise<void> {
+    const instance = this.instances.get(instanceId);
+    if (!instance) {
+      throw new Error('Instance not found');
+    }
+
+    if (instance.connectionState !== 'metaverse_connected') {
+      throw new Error(`Cannot launch Godot: instance is ${instance.connectionState}, expected metaverse_connected`);
+    }
+
+    // Check if already running
+    const existing = this.godotBridges.get(instanceId);
+    if (existing?.isActive) {
+      // Stop the existing one
+      existing.stop();
+      this.godotBridges.delete(instanceId);
+      instance.godotBridgeActive = false;
+      this.emit('status-update', instance);
+      return;
+    }
+
+    const metaverse = metaverseConnectionManager.get(instanceId);
+    if (!metaverse) {
+      throw new Error('Metaverse connection not found');
+    }
+
+    const bot = metaverse.getBot();
+    if (!bot) {
+      throw new Error('Bot not available');
+    }
+
+    console.log(`[ViewerManager] Launching Godot viewer for ${instanceId}`);
+
+    const bridge = new GodotBridge(bot);
+    this.godotBridges.set(instanceId, bridge);
+
+    bridge.on('exit', () => {
+      console.log(`[ViewerManager] Godot bridge exited for ${instanceId}`);
+      this.godotBridges.delete(instanceId);
+      const inst = this.instances.get(instanceId);
+      if (inst) {
+        inst.godotBridgeActive = false;
+        this.emit('status-update', inst);
+      }
+    });
+
+    await bridge.start();
+
+    instance.godotBridgeActive = true;
+    this.emit('status-update', instance);
   }
 
   /**
@@ -602,6 +661,13 @@ export class ViewerManager extends EventEmitter {
   }
 
   private async cleanup(instanceId: string): Promise<void> {
+    // Stop Godot bridge if running
+    const bridge = this.godotBridges.get(instanceId);
+    if (bridge) {
+      bridge.stop();
+      this.godotBridges.delete(instanceId);
+    }
+
     // Disconnect voice
     voiceManager.disconnect();
 
@@ -656,6 +722,12 @@ export class ViewerManager extends EventEmitter {
   }
 
   async stopAll(): Promise<void> {
+    // Stop all Godot bridges
+    for (const [, bridge] of this.godotBridges) {
+      bridge.stop();
+    }
+    this.godotBridges.clear();
+
     // Stop voice sidecar
     voiceManager.stop();
 

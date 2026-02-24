@@ -116,6 +116,7 @@ export interface ViewerInstance {
   status: ViewerStatus;
   connectionState: ConnectionState;
   regionName?: string; // Set when fully arrived in a region
+  godotBridgeActive?: boolean; // True when Godot sidecar is running
 }
 
 export type ViewerStatus = 'starting' | 'running' | 'connected' | 'disconnected' | 'crashed';
@@ -146,6 +147,7 @@ export const IPC_CHANNELS = {
   // Viewer operations
   LAUNCH_VIEWER: 'viewer:launch',
   LAUNCH_VIEWER_FOR_INSTANCE: 'viewer:launch-for-instance',
+  LAUNCH_GODOT_VIEWER_FOR_INSTANCE: 'viewer:launch-godot-for-instance',
   STOP_VIEWER: 'viewer:stop',
   GET_INSTANCES: 'viewer:instances',
   VIEWER_STATUS_UPDATE: 'viewer:status-update',
