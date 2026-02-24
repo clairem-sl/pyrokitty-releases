@@ -100,7 +100,7 @@ export class GodotBridge extends EventEmitter {
         }
       }
       // Fallback doubleSided from any face
-      let defaultDS = false;
+      let defaultDS: boolean | undefined = false;
       if (gltfDS.size > 0) defaultDS = gltfDS.values().next().value;
 
       const faces: any[] = [];
@@ -286,7 +286,7 @@ export class GodotBridge extends EventEmitter {
   private queueAssetReady(msg: object): void {
     this.assetReadyBuffer.push(msg);
     if (!this.assetReadyTimer) {
-      this.assetReadyTimer = setTimeout(() => this.flushAssetReady(), 200);
+      this.assetReadyTimer = setTimeout(() => this.flushAssetReady(), 50);
     }
   }
 
@@ -295,7 +295,7 @@ export class GodotBridge extends EventEmitter {
     if (this.assetReadyBuffer.length === 0) return;
 
     // Send a batch per tick so Godot can process between frames
-    const BATCH_SIZE = 50;
+    const BATCH_SIZE = 200;
     const batch = this.assetReadyBuffer.splice(0, BATCH_SIZE);
     let meshCount = 0, texCount = 0;
     for (const msg of batch) {
@@ -309,7 +309,7 @@ export class GodotBridge extends EventEmitter {
 
     // Schedule next batch if more remain
     if (this.assetReadyBuffer.length > 0) {
-      this.assetReadyTimer = setTimeout(() => this.flushAssetReady(), 100);
+      this.assetReadyTimer = setTimeout(() => this.flushAssetReady(), 50);
     }
   }
 

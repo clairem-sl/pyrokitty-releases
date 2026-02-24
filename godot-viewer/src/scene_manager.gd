@@ -7,6 +7,10 @@ extends Node3D
 
 signal self_avatar_moved(pos: Vector3)
 
+class AsyncResult extends RefCounted:
+	var data: Image    # Worker writes decoded/compressed Image here
+	var error: bool = false
+
 var objects: Dictionary = {}   # localId (int) -> MeshInstance3D
 var avatars: Dictionary = {}   # avatarId (String) -> MeshInstance3D
 var self_avatar_id: String = ""
@@ -37,6 +41,11 @@ var material_cache: Dictionary = {}       # "uuid_colorhex_fb_ds_uv" (String) ->
 var object_faces: Dictionary = {}         # localId (int) -> Array[face_info dicts] (persists for mesh swaps)
 var pending_textures: Dictionary = {}     # localId (int) -> Array[{ faceIndex, textureId, color, ... }]
 var texture_load_failed: Dictionary = {}  # textureId (String) -> bool
+
+# Async texture loading (WorkerThreadPool)
+var _texture_tasks: Dictionary = {}      # task_id (int) -> { textureId: String, result: AsyncResult, path: String }
+var _texture_in_flight: Dictionary = {}  # textureId (String) -> true (dedup)
+const TEXTURE_FINALIZE_PER_FRAME: int = 4
 
 func _ready() -> void:
 	# Create shared meshes
@@ -317,16 +326,29 @@ func handle_texture_ready(msg: Dictionary) -> void:
 	if texture_id.is_empty() or tex_path.is_empty():
 		return
 
-	# Load image into ImageTexture
-	var tex: ImageTexture = _load_texture(tex_path)
-	if tex == null:
-		print("[SceneManager] Texture load failed: %s" % tex_path)
-		texture_load_failed[texture_id] = true
+	# Skip if already cached, in-flight, or previously failed
+	if texture_cache.has(texture_id) or _texture_in_flight.has(texture_id) or texture_load_failed.has(texture_id):
 		return
 
-	texture_cache[texture_id] = tex
+	_texture_in_flight[texture_id] = true
 
-	# Sweep pending objects waiting for this texture and apply per-face materials
+	# Spawn worker thread for heavy CPU work (Image.load + mipmaps + S3TC compress)
+	var result := AsyncResult.new()
+	var task_id: int = WorkerThreadPool.add_task(func() -> void:
+		var img := Image.new()
+		var err := img.load(tex_path)
+		if err != OK:
+			result.error = true
+			return
+		img.generate_mipmaps()
+		img.compress(Image.COMPRESS_S3TC)
+		result.data = img
+	)
+	_texture_tasks[task_id] = { "textureId": texture_id, "result": result, "path": tex_path }
+
+
+## Apply a cached texture to all pending objects waiting for it
+func _apply_texture_to_pending(texture_id: String) -> void:
 	var to_remove: Array = []
 	for local_id: int in pending_textures:
 		var face_list: Array = pending_textures[local_id]
@@ -352,15 +374,40 @@ func handle_texture_ready(msg: Dictionary) -> void:
 		pending_textures.erase(local_id)
 
 
-func _load_texture(file_path: String) -> ImageTexture:
-	var img := Image.new()
-	var err := img.load(file_path)
-	if err != OK:
-		push_warning("[SceneManager] Image.load error %s: %s" % [error_string(err), file_path])
-		return null
-	img.generate_mipmaps()
-	img.compress(Image.COMPRESS_S3TC)
-	return ImageTexture.create_from_image(img)
+func _process(_delta: float) -> void:
+	if _texture_tasks.is_empty():
+		return
+
+	var finalized: int = 0
+	var done_ids: Array = []
+
+	for task_id: int in _texture_tasks:
+		if finalized >= TEXTURE_FINALIZE_PER_FRAME:
+			break
+		if not WorkerThreadPool.is_task_completed(task_id):
+			continue
+
+		WorkerThreadPool.wait_for_task_completion(task_id)
+		done_ids.append(task_id)
+
+		var info: Dictionary = _texture_tasks[task_id]
+		var texture_id: String = info["textureId"]
+		var result: AsyncResult = info["result"]
+
+		_texture_in_flight.erase(texture_id)
+
+		if result.error or result.data == null:
+			print("[SceneManager] Texture load failed: %s" % info["path"])
+			texture_load_failed[texture_id] = true
+		else:
+			# Finalize on main thread: create GPU texture from worker-prepared Image
+			texture_cache[texture_id] = ImageTexture.create_from_image(result.data)
+			_apply_texture_to_pending(texture_id)
+
+		finalized += 1
+
+	for task_id: int in done_ids:
+		_texture_tasks.erase(task_id)
 
 
 ## Apply per-face materials to a mesh instance.
