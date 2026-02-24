@@ -166,13 +166,14 @@ export class ViewerManager extends EventEmitter {
 
     } catch (error) {
       // If MFA is pending, keep the instance alive for token submission
-      if (metaverse.connectionState === 'mfa_pending') {
+      const mc = metaverseConnectionManager.get(instanceId);
+      if (mc?.connectionState === 'mfa_pending') {
         console.log(`[ViewerManager] MFA required for ${account.firstName} ${account.lastName}`);
         (instance as any)._pendingViewerLaunch = shouldLaunchViewer;
         return instance;
       }
       console.error(`[ViewerManager] Launch failed:`, error);
-      this.cleanup(instanceId);
+      await this.cleanup(instanceId);
       throw error;
     }
   }
@@ -428,7 +429,8 @@ export class ViewerManager extends EventEmitter {
 
     } catch (error) {
       // If MFA is pending, keep instance alive for token submission
-      if (metaverse.connectionState === 'mfa_pending') {
+      const mc = metaverseConnectionManager.get(instanceId);
+      if (mc?.connectionState === 'mfa_pending') {
         console.log(`[ViewerManager] MFA required on re-login for ${account.firstName} ${account.lastName}`);
         return;
       }

@@ -8,6 +8,10 @@ import { viewerManager } from './viewer-manager';
 import { chatLogManager } from './chat-log-manager';
 import { IPC_CHANNELS } from '../shared/types';
 import { setMapWindow, getMapWindow } from './map-window';
+import { InventoryFolder } from '../../node-metaverse/dist/lib/classes/InventoryFolder';
+
+// Set node-metaverse inventory cache to writable location (not inside app.asar)
+InventoryFolder.cacheBasePath = path.join(app.getPath('userData'), 'cache', 'inventory');
 
 // ── Global file logger ─────────────────────────────────────
 // Tee console.log/warn/error to a log file in userData

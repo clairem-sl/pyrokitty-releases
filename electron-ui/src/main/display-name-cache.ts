@@ -7,6 +7,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { app } from 'electron';
 
 export interface DisplayNameEntry {
   displayName: string;    // Custom display name, or legacy name if default
@@ -25,7 +26,7 @@ export class DisplayNameCache {
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(accountId: string) {
-    const dataDir = path.join(__dirname, '..', '..', 'data', 'display-names');
+    const dataDir = path.join(app.getPath('userData'), 'data', 'display-names');
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }

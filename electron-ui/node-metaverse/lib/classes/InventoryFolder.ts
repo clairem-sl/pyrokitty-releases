@@ -30,6 +30,9 @@ import { InventoryTypeRegistry } from './InventoryTypeRegistry';
 
 export class InventoryFolder
 {
+    /** Override the base cache directory (set before login for packaged Electron apps) */
+    public static cacheBasePath: string | null = null;
+
     public typeDefault: FolderType;
     public version: number;
     public name: string;
@@ -59,10 +62,12 @@ export class InventoryFolder
         this.agent = agent;
         this.library = lib;
         this.inventoryBase = invBase;
-        const cacheLocation = path.resolve(__dirname + '/cache');
+        const cacheLocation = InventoryFolder.cacheBasePath
+            ? path.resolve(InventoryFolder.cacheBasePath)
+            : path.resolve(__dirname + '/cache');
         if (!fsSync.existsSync(cacheLocation))
         {
-            fsSync.mkdirSync(cacheLocation, 0o777);
+            fsSync.mkdirSync(cacheLocation, { recursive: true });
         }
         this.cacheDir = path.resolve(cacheLocation + '/' + this.agent.agentID.toString());
         if (!fsSync.existsSync(this.cacheDir))

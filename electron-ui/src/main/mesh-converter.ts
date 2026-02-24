@@ -12,8 +12,7 @@ import type { LLSubMesh } from '../../node-metaverse/dist/lib/classes/public/int
 const LOD_PREFERENCE = ['high_lod', 'medium_lod', 'low_lod', 'lowest_lod'];
 
 function getCacheDir(): string {
-  const appRoot = app.getAppPath();
-  return path.join(appRoot, '..', 'godot-viewer', 'cache', 'meshes');
+  return path.join(app.getPath('userData'), 'cache', 'meshes');
 }
 
 export function meshCachePath(meshUuid: string): string {

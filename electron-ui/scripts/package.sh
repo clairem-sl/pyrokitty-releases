@@ -214,9 +214,67 @@ else
     echo "  Viewer staging up to date, skipping..."
 fi
 
-# Step 3: Package with electron-builder
+# Step 3: Stage Godot viewer
 echo ""
-echo "Step 3: Packaging with electron-builder..."
+echo "Step 3: Staging Godot viewer..."
+
+GODOT_SRC="$ROOT_DIR/godot-viewer"
+GODOT_STAGING="$ELECTRON_DIR/godot-viewer-staging"
+
+if [ -d "$GODOT_SRC" ]; then
+    NEEDS_GODOT=false
+    if [ "$FORCE_REBUILD" = true ]; then
+        NEEDS_GODOT=true
+    elif [ ! -d "$GODOT_STAGING" ]; then
+        NEEDS_GODOT=true
+    fi
+
+    if [ "$NEEDS_GODOT" = true ]; then
+        rm -rf "$GODOT_STAGING"
+        mkdir -p "$GODOT_STAGING"
+
+        # Copy Godot engine
+        echo "  Copying Godot engine..."
+        cp -r "$GODOT_SRC/Godot_v4.6.1-stable_mono_win64" "$GODOT_STAGING/"
+
+        # Copy project files (not cache — cache lives in userData at runtime)
+        echo "  Copying Godot project files..."
+        cp "$GODOT_SRC/project.godot" "$GODOT_STAGING/"
+        cp "$GODOT_SRC/main.tscn" "$GODOT_STAGING/"
+        cp -r "$GODOT_SRC/src" "$GODOT_STAGING/"
+
+        echo "  Godot staging complete: $(du -sh "$GODOT_STAGING" | cut -f1)"
+    else
+        echo "  Godot staging up to date, skipping..."
+    fi
+else
+    echo "  WARNING: Godot viewer not found at $GODOT_SRC, skipping..."
+fi
+
+# Step 4: Stage voice sidecar
+echo ""
+echo "Step 4: Staging voice sidecar..."
+
+VOICE_STAGING="$ELECTRON_DIR/voice-staging"
+
+# Build voice sidecar (self-contained publish)
+if needs_rebuild "$ELECTRON_DIR/voice" "$VOICE_STAGING/VoiceSidecar.exe" "*.cs"; then
+    echo "  Building voice sidecar..."
+    cd "$ELECTRON_DIR"
+    npm run build:voice
+
+    rm -rf "$VOICE_STAGING"
+    mkdir -p "$VOICE_STAGING"
+    cp -r "$ELECTRON_DIR/dist/voice/"* "$VOICE_STAGING/"
+    echo "  Voice staging complete: $(du -sh "$VOICE_STAGING" | cut -f1)"
+else
+    echo "  Voice staging up to date, skipping..."
+fi
+
+# Step 5: Package with electron-builder
+echo ""
+echo "Step 5: Packaging with electron-builder..."
+cd "$ELECTRON_DIR"
 npm run dist
 
 echo ""

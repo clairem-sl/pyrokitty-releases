@@ -2,7 +2,7 @@
  * texture-decode-worker.ts — Runs in a worker thread.
  * On Windows: native opj_decompress (no 50MB WASM heap per worker).
  * Elsewhere: WASM OpenJPEG decoder (no native binary needed).
- * Both paths convert to WebP via sharp.
+ * Both paths output WebP via sharp for compact disk cache.
  */
 import { parentPort, workerData } from 'worker_threads';
 import { execFileSync } from 'child_process';
@@ -22,11 +22,17 @@ function tmpPath(ext: string): string {
 
 function findOpjDecompress(): string | null {
   if (process.platform !== 'win32') return null;
-  const binDir = path.resolve(__dirname, '..', 'bin');
-  const binPath = path.join(binDir, 'opj_decompress.exe');
-  if (fs.existsSync(binPath)) return binPath;
-  const altPath = path.join(__dirname, 'opj_decompress.exe');
-  if (fs.existsSync(altPath)) return altPath;
+  const candidates = [
+    // Packaged: extraResources puts bin/ at resources/bin/
+    ...((process as any).resourcesPath ? [path.join((process as any).resourcesPath, 'bin', 'opj_decompress.exe')] : []),
+    // Dev: __dirname = dist/main/, bin is at ../../bin (electron-ui/bin/)
+    path.resolve(__dirname, '..', '..', 'bin', 'opj_decompress.exe'),
+    path.resolve(__dirname, '..', 'bin', 'opj_decompress.exe'),
+    path.join(__dirname, 'opj_decompress.exe'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
   return null;
 }
 

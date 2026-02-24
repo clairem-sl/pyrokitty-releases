@@ -4,7 +4,7 @@
 import { Worker } from 'worker_threads';
 import * as path from 'path';
 
-const POOL_SIZE = 8;
+const POOL_SIZE = 16;
 
 interface PendingJob {
   id: number;

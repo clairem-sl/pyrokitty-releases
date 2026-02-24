@@ -19,13 +19,25 @@ const GODOT_WS_PORT_BASE = 9100;
 let nextPort = GODOT_WS_PORT_BASE;
 
 function getGodotPath(): string {
-  const appRoot = app.getAppPath();
-  return path.join(appRoot, '..', 'godot-viewer', 'Godot_v4.6.1-stable_mono_win64', 'Godot_v4.6.1-stable_mono_win64.exe');
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'godot-viewer', 'Godot_v4.6.1-stable_mono_win64', 'Godot_v4.6.1-stable_mono_win64.exe');
+  } else {
+    const appRoot = app.getAppPath();
+    return path.join(appRoot, '..', 'godot-viewer', 'Godot_v4.6.1-stable_mono_win64', 'Godot_v4.6.1-stable_mono_win64.exe');
+  }
 }
 
 function getProjectPath(): string {
-  const appRoot = app.getAppPath();
-  return path.join(appRoot, '..', 'godot-viewer');
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'godot-viewer');
+  } else {
+    const appRoot = app.getAppPath();
+    return path.join(appRoot, '..', 'godot-viewer');
+  }
+}
+
+function getCacheDirBase(): string {
+  return path.join(app.getPath('userData'), 'cache');
 }
 
 export class GodotBridge extends EventEmitter {
@@ -147,10 +159,11 @@ export class GodotBridge extends EventEmitter {
     const godotPath = getGodotPath();
     const projectPath = getProjectPath();
 
-    // Ensure cache directories exist
-    fs.mkdirSync(path.join(projectPath, 'cache', 'meshes'), { recursive: true });
-    fs.mkdirSync(path.join(projectPath, 'cache', 'textures'), { recursive: true });
-    fs.mkdirSync(path.join(projectPath, 'cache', 'terrain'), { recursive: true });
+    // Ensure cache directories exist (writable location outside asar)
+    const cacheBase = getCacheDirBase();
+    fs.mkdirSync(path.join(cacheBase, 'meshes'), { recursive: true });
+    fs.mkdirSync(path.join(cacheBase, 'textures'), { recursive: true });
+    fs.mkdirSync(path.join(cacheBase, 'terrain'), { recursive: true });
 
     console.log(`[GodotBridge] Spawning Godot on port ${this.port}`);
     console.log(`[GodotBridge] Path: ${godotPath}`);
@@ -445,9 +458,8 @@ export class GodotBridge extends EventEmitter {
       }
     }
 
-    const projectPath = getProjectPath();
     const safeName = region.regionName.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const cachePath = path.join(projectPath, 'cache', 'terrain', `${safeName}.bin`);
+    const cachePath = path.join(getCacheDirBase(), 'terrain', `${safeName}.bin`);
     fs.writeFileSync(cachePath, buf);
     const fwdPath = cachePath.replace(/\\/g, '/');
 

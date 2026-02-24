@@ -4,7 +4,7 @@ import { app } from 'electron';
 import { Account } from '../shared/types';
 
 function getAccountsFilePath(): string {
-  return path.join(app.getAppPath(), 'data', 'accounts.json');
+  return path.join(app.getPath('userData'), 'data', 'accounts.json');
 }
 
 export class AccountManager {

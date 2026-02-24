@@ -6,3 +6,5 @@ release/
 accounts.json
 voice/obj/
 voice/bin/
+godot-viewer-staging/
+voice-staging/

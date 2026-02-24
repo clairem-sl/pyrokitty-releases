@@ -36,6 +36,17 @@ let binDir: string | null = null;
 function findBinDir(): string {
   if (binDir) return binDir;
 
+  // Packaged: binaries in resources/bin/
+  if (app.isPackaged) {
+    const resBin = path.join(process.resourcesPath, 'bin');
+    if (fs.existsSync(path.join(resBin, 'opj_decompress.exe')) ||
+        fs.existsSync(path.join(resBin, 'opj_decompress'))) {
+      binDir = resBin;
+      return binDir;
+    }
+  }
+
+  // Dev: binaries in electron-ui/bin/
   const appBin = path.join(app.getAppPath(), 'bin');
   if (fs.existsSync(path.join(appBin, 'opj_decompress.exe')) ||
       fs.existsSync(path.join(appBin, 'opj_decompress'))) {

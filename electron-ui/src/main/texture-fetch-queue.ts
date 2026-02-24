@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
 
-const MAX_CONCURRENT_DOWNLOADS = 8;
+const MAX_CONCURRENT_DOWNLOADS = 16;
 
 // Zero UUID — skip these
 const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
@@ -18,8 +18,7 @@ const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
 export type TextureReadyCallback = (textureUuid: string, cachePath: string) => void;
 
 function getCacheDir(): string {
-  const appRoot = app.getAppPath();
-  return path.join(appRoot, '..', 'godot-viewer', 'cache', 'textures');
+  return path.join(app.getPath('userData'), 'cache', 'textures');
 }
 
 export function textureCachePath(textureUuid: string): string {

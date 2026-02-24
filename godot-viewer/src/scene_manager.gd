@@ -45,7 +45,11 @@ var texture_load_failed: Dictionary = {}  # textureId (String) -> bool
 # Async texture loading (WorkerThreadPool)
 var _texture_tasks: Dictionary = {}      # task_id (int) -> { textureId: String, result: AsyncResult, path: String }
 var _texture_in_flight: Dictionary = {}  # textureId (String) -> true (dedup)
-const TEXTURE_FINALIZE_PER_FRAME: int = 4
+var _shutting_down: bool = false
+const TEXTURE_FINALIZE_PER_FRAME: int = 16
+
+func _exit_tree() -> void:
+	_shutting_down = true
 
 func _ready() -> void:
 	# Create shared meshes
@@ -326,8 +330,8 @@ func handle_texture_ready(msg: Dictionary) -> void:
 	if texture_id.is_empty() or tex_path.is_empty():
 		return
 
-	# Skip if already cached, in-flight, or previously failed
-	if texture_cache.has(texture_id) or _texture_in_flight.has(texture_id) or texture_load_failed.has(texture_id):
+	# Skip if shutting down, already cached, in-flight, or previously failed
+	if _shutting_down or texture_cache.has(texture_id) or _texture_in_flight.has(texture_id) or texture_load_failed.has(texture_id):
 		return
 
 	_texture_in_flight[texture_id] = true
@@ -335,9 +339,15 @@ func handle_texture_ready(msg: Dictionary) -> void:
 	# Spawn worker thread for heavy CPU work (Image.load + mipmaps + S3TC compress)
 	var result := AsyncResult.new()
 	var task_id: int = WorkerThreadPool.add_task(func() -> void:
+		if _shutting_down:
+			result.error = true
+			return
 		var img := Image.new()
 		var err := img.load(tex_path)
 		if err != OK:
+			result.error = true
+			return
+		if _shutting_down:
 			result.error = true
 			return
 		img.generate_mipmaps()

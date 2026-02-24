@@ -99,7 +99,7 @@ export class InventorySyncManager {
       this.adapter = null;
     }
     this.accountId = accountId;
-    this.localDir = path.join(app.getAppPath(), 'data', 'inventory-sync', accountId);
+    this.localDir = path.join(app.getPath('userData'), 'data', 'inventory-sync', accountId);
     this.onProgress = onProgress;
     this.manifest = this.loadManifest();
   }

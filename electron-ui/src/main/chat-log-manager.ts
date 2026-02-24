@@ -6,7 +6,7 @@ import { ChatMessage, ChatSession, SessionMeta } from '../shared/types';
 const DEBOUNCE_MS = 1000;
 
 function getBaseDir(): string {
-  return path.join(app.getAppPath(), 'data', 'chat-logs');
+  return path.join(app.getPath('userData'), 'data', 'chat-logs');
 }
 
 export class ChatLogManager {

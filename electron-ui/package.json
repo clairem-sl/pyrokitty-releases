@@ -1,6 +1,6 @@
 {
     "name": "pyrokitty-ui",
-    "version": "0.1.14",
+    "version": "0.1.20",
     "description": "PyroKitty Viewer Manager - Multi-account Second Life/OpenSim launcher",
     "main": "dist/main/index.js",
     "scripts": {
@@ -67,6 +67,27 @@
             {
                 "from": "viewer",
                 "to": "viewer",
+                "filter": [
+                    "**/*"
+                ]
+            },
+            {
+                "from": "godot-viewer-staging",
+                "to": "godot-viewer",
+                "filter": [
+                    "**/*"
+                ]
+            },
+            {
+                "from": "voice-staging",
+                "to": "voice",
+                "filter": [
+                    "**/*"
+                ]
+            },
+            {
+                "from": "bin",
+                "to": "bin",
                 "filter": [
                     "**/*"
                 ]
