@@ -26,6 +26,11 @@ export class MeshFetchQueue {
     this.onReady = onReady;
   }
 
+  get queueDepth(): number { return this.queue.length; }
+  get activeCount(): number { return this.active; }
+  get failedCount(): number { return this.failed.size; }
+  get notifiedCount(): number { return this.notified.size; }
+
   request(meshUuid: string, localId: number): void {
     if (this.destroyed || this.failed.has(meshUuid)) return;
 

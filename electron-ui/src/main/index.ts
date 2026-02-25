@@ -9,9 +9,11 @@ import { chatLogManager } from './chat-log-manager';
 import { IPC_CHANNELS } from '../shared/types';
 import { setMapWindow, getMapWindow } from './map-window';
 import { InventoryFolder } from '../../node-metaverse/dist/lib/classes/InventoryFolder';
+import { initGpuCompressWindow, destroyGpuCompressWindow } from './gpu-compress-window';
+import { getSavedBounds, trackWindow } from './window-state-manager';
 
 // Set node-metaverse inventory cache to writable location (not inside app.asar)
-InventoryFolder.cacheBasePath = path.join(app.getPath('userData'), 'cache', 'inventory');
+InventoryFolder.cacheBasePath = path.join(app.getPath('userData'), 'asset-cache', 'inventory');
 
 // ── Global file logger ─────────────────────────────────────
 // Tee console.log/warn/error to a log file in userData
@@ -46,9 +48,11 @@ function createMapWindow(): void {
     return;
   }
 
+  const saved = getSavedBounds('map');
   const win = new BrowserWindow({
-    width: 900,
-    height: 700,
+    width: saved?.width ?? 900,
+    height: saved?.height ?? 700,
+    ...(saved?.x != null && saved?.y != null ? { x: saved.x, y: saved.y } : {}),
     minWidth: 400,
     minHeight: 300,
     title: 'PyroKitty - World Map',
@@ -58,6 +62,7 @@ function createMapWindow(): void {
     },
     backgroundColor: '#1a1a2e',
   });
+  trackWindow(win, 'map');
 
   const htmlPath = path.join(__dirname, '../map-renderer/map.html');
   win.loadFile(htmlPath);
@@ -74,6 +79,7 @@ async function performCleanup(): Promise<void> {
   cleanupDone = true;
   console.log('[App] Logging out from SL and cleaning up...');
   chatLogManager.flushAll();
+  destroyGpuCompressWindow();
   await viewerManager.stopAll();
   console.log('[App] Cleanup complete');
 }
@@ -84,9 +90,11 @@ async function createWindow(): Promise<void> {
     : path.join(__dirname, '..', '..', '..', 'indra', 'newview', 'icons', 'release');
   const iconPath = path.join(iconsDir, 'firestorm_icon.ico');
 
+  const saved = getSavedBounds('main');
   mainWindow = new BrowserWindow({
-    width: 920,
-    height: 700,
+    width: saved?.width ?? 920,
+    height: saved?.height ?? 700,
+    ...(saved?.x != null && saved?.y != null ? { x: saved.x, y: saved.y } : {}),
     minWidth: 600,
     minHeight: 500,
     title: 'PyroKitty',
@@ -96,6 +104,13 @@ async function createWindow(): Promise<void> {
       contextIsolation: false,
     },
     backgroundColor: '#1a1a2e',
+  });
+  trackWindow(mainWindow, 'main');
+  if (saved?.isMaximized) mainWindow.maximize();
+
+  // Initialize GPU compression (hidden BrowserWindow for WebGPU)
+  initGpuCompressWindow().catch((err) => {
+    console.warn('[App] GPU compression init failed (will use CPU fallback):', err.message);
   });
 
   // Initialize managers

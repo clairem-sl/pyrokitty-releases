@@ -12,7 +12,7 @@ import type { LLSubMesh } from '../../node-metaverse/dist/lib/classes/public/int
 const LOD_PREFERENCE = ['high_lod', 'medium_lod', 'low_lod', 'lowest_lod'];
 
 function getCacheDir(): string {
-  return path.join(app.getPath('userData'), 'cache', 'meshes');
+  return path.join(app.getPath('userData'), 'asset-cache', 'meshes');
 }
 
 export function meshCachePath(meshUuid: string): string {

@@ -377,7 +377,7 @@ export class Bot
 
         if (this._clientCommands)
         {
-            await this._clientCommands.network.setBandwidth(1536000);
+            await this._clientCommands.network.setBandwidth(10000000);
         }
 
         const agentRequest = new AgentDataUpdateRequestMessage();

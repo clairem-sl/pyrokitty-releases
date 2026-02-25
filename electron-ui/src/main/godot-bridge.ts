@@ -14,6 +14,8 @@ import { ControlFlags, SculptType } from '../../node-metaverse/dist/lib';
 import type { Subscription } from 'rxjs';
 import { MeshFetchQueue } from './mesh-fetch-queue';
 import { TextureFetchQueue } from './texture-fetch-queue';
+import { SculptFetchQueue } from './sculpt-fetch-queue';
+import { sculptMeshId } from './sculpt-converter';
 
 const GODOT_WS_PORT_BASE = 9100;
 let nextPort = GODOT_WS_PORT_BASE;
@@ -37,7 +39,7 @@ function getProjectPath(): string {
 }
 
 function getCacheDirBase(): string {
-  return path.join(app.getPath('userData'), 'cache');
+  return path.join(app.getPath('userData'), 'asset-cache');
 }
 
 export class GodotBridge extends EventEmitter {
@@ -50,13 +52,16 @@ export class GodotBridge extends EventEmitter {
   private trackedAvatars = new Set<string>(); // avatar UUIDs we've sent
   private updateBuffer: Map<number, any> = new Map(); // coalesced terse updates
   private updateTimer: ReturnType<typeof setTimeout> | null = null;
-  private avatarTimer: ReturnType<typeof setInterval> | null = null;
+  private avatarUpdateBuffer: Map<string, any> = new Map(); // coalesced avatar terse updates
+  private avatarUpdateTimer: ReturnType<typeof setTimeout> | null = null;
   private killSweepTimer: ReturnType<typeof setInterval> | null = null;
   private meshFetchQueue: MeshFetchQueue | null = null;
   private textureFetchQueue: TextureFetchQueue | null = null;
+  private sculptFetchQueue: SculptFetchQueue | null = null;
   private connected = false;
   private assetReadyBuffer: object[] = [];
   private assetReadyTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastGodotStats: any = null;
 
   constructor(bot: Bot) {
     super();
@@ -73,13 +78,15 @@ export class GodotBridge extends EventEmitter {
     return undefined;
   }
 
-  /** Returns true if obj is a sculpted prim (not a mesh) */
-  private isSculpt(obj: any): boolean {
+  /** Returns sculpt texture UUID and type flags if obj is a sculpted prim, else undefined */
+  private getSculptInfo(obj: any): { textureUuid: string; sculptType: number } | undefined {
     const sd = obj.extraParams?.sculptData;
-    if (!sd) return false;
-    // Mask out Invert (64) and Mirror (128) flags to get the base type
+    if (!sd) return undefined;
     const baseType = sd.type & 0x07;
-    return baseType >= SculptType.Sphere && baseType <= SculptType.Cylinder;
+    if (baseType < SculptType.Sphere || baseType > SculptType.Cylinder) return undefined;
+    const textureUuid = sd.texture?.toString();
+    if (!textureUuid || textureUuid === '00000000-0000-0000-0000-000000000000') return undefined;
+    return { textureUuid, sculptType: sd.type };
   }
 
   /** Extract per-face texture info from a GameObject (up to 8 faces) */
@@ -233,6 +240,9 @@ export class GodotBridge extends EventEmitter {
                   case 'input_move':
                     this.handleInputMove(msg);
                     break;
+                  case 'pipeline_stats':
+                    this.lastGodotStats = msg;
+                    break;
                 }
               } catch { /* ignore bad messages */ }
             });
@@ -277,6 +287,12 @@ export class GodotBridge extends EventEmitter {
     this.textureFetchQueue = new TextureFetchQueue(this.bot, (textureUuid, cachePath) => {
       const fwdPath = cachePath.replace(/\\/g, '/');
       this.queueAssetReady({ type: 'texture_ready', textureId: textureUuid, path: fwdPath });
+    });
+
+    // Init sculpt fetch queue (sculpt textures → GLB meshes)
+    this.sculptFetchQueue = new SculptFetchQueue(this.bot, (meshId, cachePath) => {
+      const fwdPath = cachePath.replace(/\\/g, '/');
+      this.queueAssetReady({ type: 'mesh_ready', meshId, path: fwdPath });
     });
 
     // Send initial snapshot and subscribe to events
@@ -331,12 +347,11 @@ export class GodotBridge extends EventEmitter {
     const pos = obj.Position;
     if (!pos) return;
 
-    // TODO: convert sculpt texture to mesh geometry
-    if (this.isSculpt(obj)) return;
-
     const rot = obj.Rotation;
     const scl = obj.Scale;
     const meshId = this.getMeshId(obj);
+    const sculptInfo = this.getSculptInfo(obj);
+    const sculpt_meshId = sculptInfo ? sculptMeshId(sculptInfo.textureUuid, sculptInfo.sculptType) : undefined;
     const texInfo = this.getTextureInfo(obj);
 
     this.send({
@@ -347,13 +362,16 @@ export class GodotBridge extends EventEmitter {
       position: [pos.x, pos.y, pos.z],
       rotation: rot ? [rot.x, rot.y, rot.z, rot.w] : [0, 0, 0, 1],
       scale: scl ? [scl.x, scl.y, scl.z] : [0.5, 0.5, 0.5],
-      ...(meshId ? { meshId } : {}),
+      ...(meshId ? { meshId } : sculpt_meshId ? { meshId: sculpt_meshId } : {}),
       ...(texInfo ? { faces: texInfo.faces } : {}),
     });
     this.trackedObjects.add(obj.ID);
 
     if (meshId && this.meshFetchQueue) {
       this.meshFetchQueue.request(meshId, obj.ID);
+    }
+    if (sculptInfo && this.sculptFetchQueue) {
+      this.sculptFetchQueue.request(sculptInfo.textureUuid, sculptInfo.sculptType, obj.ID);
     }
     if (texInfo && this.textureFetchQueue) {
       for (const tid of texInfo.textureIds) {
@@ -579,6 +597,31 @@ export class GodotBridge extends EventEmitter {
     // Terse updates (position/rotation) — coalesced into batches
     const terseSub = events.onObjectUpdatedTerseEvent.subscribe((event) => {
       const obj = event.object;
+
+      // Avatar terse updates — event-driven instead of polling
+      if (obj.PCode === 47) {
+        const avatarId = obj.FullID?.toString();
+        if (avatarId && this.trackedAvatars.has(avatarId)) {
+          const pos = obj.Position;
+          const rot = obj.Rotation;
+          const vel = obj.Velocity;
+          this.avatarUpdateBuffer.set(avatarId, {
+            id: avatarId,
+            ...(pos ? { position: [pos.x, pos.y, pos.z] } : {}),
+            ...(rot ? { rotation: [rot.x, rot.y, rot.z, rot.w] } : {}),
+            ...(vel ? { velocity: [vel.x, vel.y, vel.z] } : {}),
+          });
+          if (!this.avatarUpdateTimer) {
+            this.avatarUpdateTimer = setTimeout(() => {
+              this.flushAvatarUpdateBuffer();
+              this.avatarUpdateTimer = null;
+            }, 50);
+          }
+        }
+        return;
+      }
+
+      // Object terse updates
       if (!this.trackedObjects.has(obj.ID)) return;
 
       const pos = obj.Position;
@@ -627,16 +670,31 @@ export class GodotBridge extends EventEmitter {
     });
     this.subscriptions.push(fullUpdateSub);
 
-    // Avatar position polling (every 500ms)
-    this.avatarTimer = setInterval(() => {
-      this.updateAvatars();
-    }, 500);
+    // Avatar enter — event-driven (replaces 500ms polling)
+    const avatarEnterSub = events.onAvatarEnteredRegion.subscribe((avatar) => {
+      try {
+        const id = avatar.getKey().toString();
+        if (!id || this.trackedAvatars.has(id)) return;
+        const pos = avatar.position;
+        const rot = avatar.getRotation();
+        this.send({
+          type: 'avatar_create',
+          id,
+          name: avatar.getName(),
+          position: [pos.x, pos.y, pos.z],
+          rotation: [rot.x, rot.y, rot.z, rot.w],
+        });
+        this.trackedAvatars.add(id);
+      } catch { /* avatar may not be fully initialized yet */ }
+    });
+    this.subscriptions.push(avatarEnterSub);
 
     // Kill sweep + child rescan: every 2s
     // (onObjectKilledEvent and child onNewObjectEvent are not fired in node-metaverse)
     let memLogCounter = 0;
     this.killSweepTimer = setInterval(() => {
       this.sweepDeletedObjects();
+      this.sweepAvatarDepartures();
       this.rescanChildren();
 
       // Log memory stats every 30s (15 ticks × 2s)
@@ -644,9 +702,14 @@ export class GodotBridge extends EventEmitter {
         const mem = process.memoryUsage();
         const mb = (b: number) => (b / 1024 / 1024).toFixed(0);
         const objStoreSize = this.bot.currentRegion?.objects?.getNumberOfObjects?.() ?? '?';
-        const decodeQ = this.textureFetchQueue?.decodePool?.queueDepth ?? '?';
-        const decodeActive = this.textureFetchQueue?.decodePool?.activeCount ?? '?';
-        console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB external=${mb(mem.external)}MB arrayBuf=${mb(mem.arrayBuffers)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} decodeQ=${decodeQ} decodeActive=${decodeActive}`);
+        const tq = this.textureFetchQueue;
+        const mq = this.meshFetchQueue;
+        const sq = this.sculptFetchQueue;
+        const gs = this.lastGodotStats;
+        const godotStr = gs
+          ? ` | godot(${gs.fps?.toFixed(0) ?? '?'}fps budget:${gs.budgetElapsed?.toFixed(1) ?? '?'}/${gs.budgetAvail?.toFixed(1) ?? '?'}/${gs.budgetUsed?.toFixed(1) ?? '?'}ms el/av/us): tex: w=${gs.texWorkers}(${gs.texReady ?? '?'}rdy) q=${gs.texQueue} done=${gs.texDone} cached=${gs.texCached} fail=${gs.texFailed} pending=${gs.texPending} [${gs.texTiming ?? '?'}] | mesh: w=${gs.meshWorkers}(${gs.meshReady ?? '?'}rdy) q=${gs.meshQueue} done=${gs.meshDone} cached=${gs.meshCached} fail=${gs.meshFailed} pending=${gs.meshPending} | mats=${gs.materials}(${gs.materialReuse ?? '?'}reuse) opaque=${gs.texOpaque ?? '?'}`
+          : '';
+        console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | mesh: q=${mq?.queueDepth ?? '?'} active=${mq?.activeCount ?? '?'} done=${mq?.notifiedCount ?? '?'} fail=${mq?.failedCount ?? '?'} | sculpt: q=${sq?.queueDepth ?? '?'} active=${sq?.activeCount ?? '?'} done=${sq?.notifiedCount ?? '?'} fail=${sq?.failedCount ?? '?'}${godotStr}`);
       }
     }, 2000);
   }
@@ -663,39 +726,24 @@ export class GodotBridge extends EventEmitter {
     });
   }
 
-  private updateAvatars(): void {
+  private flushAvatarUpdateBuffer(): void {
+    if (this.avatarUpdateBuffer.size === 0) return;
+
+    const avatars = Array.from(this.avatarUpdateBuffer.values());
+    this.avatarUpdateBuffer.clear();
+
+    this.send({
+      type: 'avatar_update_batch',
+      avatars,
+    });
+  }
+
+  /** Sweep for avatars that left the region (called from killSweep timer) */
+  private sweepAvatarDepartures(): void {
     try {
-      const region = this.bot.currentRegion;
-      const agents = region.agents;
-      const currentIds = new Set<string>();
-
-      for (const [id, avatar] of agents) {
-        currentIds.add(id);
-        const pos = avatar.position;
-        const rot = avatar.getRotation();
-
-        if (this.trackedAvatars.has(id)) {
-          this.send({
-            type: 'avatar_update',
-            id,
-            position: [pos.x, pos.y, pos.z],
-            rotation: [rot.x, rot.y, rot.z, rot.w],
-          });
-        } else {
-          this.send({
-            type: 'avatar_create',
-            id,
-            name: avatar.getName(),
-            position: [pos.x, pos.y, pos.z],
-            rotation: [rot.x, rot.y, rot.z, rot.w],
-          });
-          this.trackedAvatars.add(id);
-        }
-      }
-
-      // Kill avatars that left
+      const agents = this.bot.currentRegion.agents;
       for (const id of this.trackedAvatars) {
-        if (!currentIds.has(id)) {
+        if (!agents.has(id)) {
           this.send({ type: 'avatar_kill', id });
           this.trackedAvatars.delete(id);
         }
@@ -748,6 +796,34 @@ export class GodotBridge extends EventEmitter {
       agent.clearControlFlag(ControlFlags.AGENT_CONTROL_UP_NEG);
     }
 
+    // Strafe
+    if (msg.strafe_left) {
+      agent.setControlFlag(ControlFlags.AGENT_CONTROL_LEFT_POS);
+    } else {
+      agent.clearControlFlag(ControlFlags.AGENT_CONTROL_LEFT_POS);
+    }
+    if (msg.strafe_right) {
+      agent.setControlFlag(ControlFlags.AGENT_CONTROL_LEFT_NEG);
+    } else {
+      agent.clearControlFlag(ControlFlags.AGENT_CONTROL_LEFT_NEG);
+    }
+
+    // Run (double-tap W or Ctrl+R always-run)
+    if (msg.running) {
+      agent.setControlFlag(ControlFlags.AGENT_CONTROL_FAST_AT);
+    } else {
+      agent.clearControlFlag(ControlFlags.AGENT_CONTROL_FAST_AT);
+    }
+
+    // Fly toggle
+    if (typeof msg.fly === 'boolean') {
+      if (msg.fly) {
+        agent.setControlFlag(ControlFlags.AGENT_CONTROL_FLY);
+      } else {
+        agent.clearControlFlag(ControlFlags.AGENT_CONTROL_FLY);
+      }
+    }
+
     // Set body rotation from camera yaw
     // Godot yaw=0 means facing -Z (Godot) = +Y (SL North)
     // SL body rotation is around Z-up axis. Heading 0 = +X (East).
@@ -793,9 +869,9 @@ export class GodotBridge extends EventEmitter {
       clearTimeout(this.updateTimer);
       this.updateTimer = null;
     }
-    if (this.avatarTimer) {
-      clearInterval(this.avatarTimer);
-      this.avatarTimer = null;
+    if (this.avatarUpdateTimer) {
+      clearTimeout(this.avatarUpdateTimer);
+      this.avatarUpdateTimer = null;
     }
     if (this.killSweepTimer) {
       clearInterval(this.killSweepTimer);
@@ -811,6 +887,10 @@ export class GodotBridge extends EventEmitter {
       this.textureFetchQueue.destroy();
       this.textureFetchQueue = null;
     }
+    if (this.sculptFetchQueue) {
+      this.sculptFetchQueue.destroy();
+      this.sculptFetchQueue = null;
+    }
 
     // Close WebSocket
     if (this.ws) {
@@ -821,6 +901,7 @@ export class GodotBridge extends EventEmitter {
     this.trackedObjects.clear();
     this.trackedAvatars.clear();
     this.updateBuffer.clear();
+    this.avatarUpdateBuffer.clear();
     this.assetReadyBuffer = [];
     if (this.assetReadyTimer) {
       clearTimeout(this.assetReadyTimer);

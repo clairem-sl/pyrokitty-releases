@@ -10,6 +10,18 @@ var ws_port: int = 9100
 
 @onready var scene_manager: Node3D = $SceneManager
 var fps_timer: float = 0.0
+var stats_timer: float = 0.0
+const STATS_INTERVAL: float = 5.0  # send pipeline stats every 5s
+
+func _exit_tree() -> void:
+	if ws_peer:
+		ws_peer.close()
+		ws_peer = null
+	tcp_peer = null
+	if tcp_server:
+		tcp_server.stop()
+		tcp_server = null
+
 
 func _ready() -> void:
 	# Parse --ws-port from command line
@@ -41,6 +53,15 @@ func _process(_delta: float) -> void:
 	if fps_timer >= 15.0:
 		fps_timer = 0.0
 		print("[Main] FPS: %.1f" % Engine.get_frames_per_second())
+	# Send pipeline stats to Electron for logging
+	stats_timer += _delta
+	if stats_timer >= STATS_INTERVAL:
+		stats_timer = 0.0
+		if ws_peer and ws_peer.get_ready_state() == WebSocketPeer.STATE_OPEN:
+			var stats: Dictionary = scene_manager.get_pipeline_stats()
+			stats["type"] = "pipeline_stats"
+			stats["fps"] = Engine.get_frames_per_second()
+			send_message(stats)
 	# Accept new TCP connection and upgrade to WebSocket
 	if ws_peer == null and tcp_server and tcp_server.is_connection_available():
 		tcp_peer = tcp_server.take_connection()
@@ -101,6 +122,8 @@ func _handle_message(text: String) -> void:
 			scene_manager.handle_avatar_create(msg)
 		"avatar_update":
 			scene_manager.handle_avatar_update(msg)
+		"avatar_update_batch":
+			scene_manager.handle_avatar_update_batch(msg)
 		"avatar_kill":
 			scene_manager.handle_avatar_kill(msg)
 		"mesh_ready":

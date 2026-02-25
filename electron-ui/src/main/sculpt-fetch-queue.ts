@@ -1,0 +1,102 @@
+/**
+ * sculpt-fetch-queue.ts — Concurrent sculpt texture download and mesh conversion queue.
+ * Downloads sculpt texture as J2K, decodes to raw pixels, builds mesh, writes GLB.
+ * Dedup key is textureUuid_type since same texture with different sculpt flags = different geometry.
+ */
+
+import { AssetType } from '../../node-metaverse/dist/lib';
+import type { Bot } from '../../node-metaverse/dist/lib';
+import { isSculptCached, sculptCachePath, ensureSculptCached, sculptMeshId } from './sculpt-converter';
+
+const MAX_CONCURRENT = 4;
+
+export type SculptReadyCallback = (sculptMeshId: string, cachePath: string) => void;
+
+export class SculptFetchQueue {
+  private bot: Bot;
+  private onReady: SculptReadyCallback;
+  private pending = new Map<string, Set<number>>(); // dedupKey → localIds waiting
+  private active = 0;
+  private queue: { textureUuid: string; sculptType: number; dedupKey: string }[] = [];
+  private failed = new Set<string>();
+  private notified = new Set<string>(); // dedupKeys already sent to Godot
+  private destroyed = false;
+
+  constructor(bot: Bot, onReady: SculptReadyCallback) {
+    this.bot = bot;
+    this.onReady = onReady;
+  }
+
+  get queueDepth(): number { return this.queue.length; }
+  get activeCount(): number { return this.active; }
+  get failedCount(): number { return this.failed.size; }
+  get notifiedCount(): number { return this.notified.size; }
+
+  request(textureUuid: string, sculptType: number, localId: number): void {
+    if (this.destroyed) return;
+
+    const dedupKey = sculptMeshId(textureUuid, sculptType);
+    if (this.failed.has(dedupKey)) return;
+
+    // Already cached and Godot notified
+    if (this.notified.has(dedupKey)) return;
+
+    // On disk but Godot doesn't know yet — notify once
+    if (isSculptCached(textureUuid, sculptType)) {
+      this.notified.add(dedupKey);
+      this.onReady(dedupKey, sculptCachePath(textureUuid, sculptType));
+      return;
+    }
+
+    // Already queued or in-flight — just track the localId
+    if (this.pending.has(dedupKey)) {
+      this.pending.get(dedupKey)!.add(localId);
+      return;
+    }
+
+    this.pending.set(dedupKey, new Set([localId]));
+    this.queue.push({ textureUuid, sculptType, dedupKey });
+    this.drain();
+  }
+
+  private drain(): void {
+    while (this.active < MAX_CONCURRENT && this.queue.length > 0 && !this.destroyed) {
+      const item = this.queue.shift()!;
+      this.active++;
+      this.fetchAndConvert(item.textureUuid, item.sculptType, item.dedupKey).finally(() => {
+        this.active--;
+        this.pending.delete(item.dedupKey);
+        this.drain();
+      });
+    }
+  }
+
+  private async fetchAndConvert(textureUuid: string, sculptType: number, dedupKey: string): Promise<void> {
+    try {
+      const j2cBuf = await this.bot.clientCommands.asset.downloadAsset(
+        AssetType.Texture, textureUuid
+      );
+      if (!j2cBuf || j2cBuf.length < 12) {
+        console.warn(`[SculptFetchQueue] Skipping ${textureUuid}: empty or too small (${j2cBuf?.length ?? 0} bytes)`);
+        this.failed.add(dedupKey);
+        return;
+      }
+
+      const cachePath = await ensureSculptCached(textureUuid, sculptType, j2cBuf);
+      if (!this.destroyed) {
+        this.notified.add(dedupKey);
+        console.log(`[SculptFetchQueue] Ready: ${dedupKey}`);
+        this.onReady(dedupKey, cachePath);
+      }
+    } catch (err) {
+      console.error(`[SculptFetchQueue] Failed ${dedupKey}:`, (err as Error).message || err);
+      this.failed.add(dedupKey);
+    }
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    this.queue = [];
+    this.pending.clear();
+  }
+}

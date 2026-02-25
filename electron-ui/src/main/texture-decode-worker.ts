@@ -11,6 +11,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+/** Set to true to always use WASM decoder (cross-platform, no process spawn overhead) */
+const USE_WASM = true;
+
 const workerId = workerData?.workerId ?? process.pid;
 let jobCounter = 0;
 
@@ -56,33 +59,99 @@ async function decodeNative(j2cBuffer: Buffer): Promise<Buffer> {
 
 // ─── WASM path (other platforms) ────────────────────────────────────
 
-let j2kDecode: ((ab: ArrayBuffer) => Promise<any>) | null = null;
+let wasmModule: any = null;
 
 async function loadWasmDecoder() {
-  if (j2kDecode) return;
+  if (wasmModule) return;
   // @ts-ignore — CJS default export
-  const decoderModule = (await import('@abasb75/jpeg2000-decoder')).default;
-  j2kDecode = decoderModule.decode;
+  const mod = (await import('@abasb75/jpeg2000-decoder')).default;
+  wasmModule = await mod.OpenJPEGWASM();
 }
 
 async function decodeWasm(j2cBuffer: Buffer): Promise<Buffer> {
   await loadWasmDecoder();
-  const ab = j2cBuffer.buffer.slice(j2cBuffer.byteOffset, j2cBuffer.byteOffset + j2cBuffer.byteLength);
-  const result = await j2kDecode!(ab);
-  const { width, height, componentCount } = result.frameInfo;
-  const pixels = new Uint8Array(result.decodedBuffer);
-  return await sharp(Buffer.from(pixels.buffer), {
-    raw: { width, height, channels: componentCount as 1 | 2 | 3 | 4 },
-  }).webp({ quality: 80 }).toBuffer();
+  const decoder = new wasmModule.J2KDecoder();
+  try {
+    const encoded = j2cBuffer.buffer.slice(j2cBuffer.byteOffset, j2cBuffer.byteOffset + j2cBuffer.byteLength);
+    const encodedBuffer = decoder.getEncodedBuffer(encoded.byteLength);
+    encodedBuffer.set(new Uint8Array(encoded));
+
+    decoder.decode();
+
+    const frameInfo = decoder.getFrameInfo();
+    const { width, height, componentCount } = frameInfo;
+    const decodedView = decoder.getDecodedBuffer(); // view into WASM memory
+    const pixels = Buffer.from(decodedView);         // copy OUT of WASM heap
+
+    return await sharp(pixels, {
+      raw: { width, height, channels: componentCount as 1 | 2 | 3 | 4 },
+    }).webp({ quality: 80 }).toBuffer();
+  } finally {
+    decoder.delete(); // free WASM memory
+  }
+}
+
+// ─── Raw RGBA decode (for GPU compression pipeline) ─────────────────
+
+async function decodeWasmRaw(j2cBuffer: Buffer): Promise<{ rgbaPixels: Buffer; width: number; height: number }> {
+  await loadWasmDecoder();
+  const decoder = new wasmModule.J2KDecoder();
+  try {
+    const encoded = j2cBuffer.buffer.slice(j2cBuffer.byteOffset, j2cBuffer.byteOffset + j2cBuffer.byteLength);
+    const encodedBuffer = decoder.getEncodedBuffer(encoded.byteLength);
+    encodedBuffer.set(new Uint8Array(encoded));
+
+    decoder.decode();
+
+    const frameInfo = decoder.getFrameInfo();
+    const { width, height, componentCount } = frameInfo;
+    const decodedView = decoder.getDecodedBuffer();
+    const pixels = Buffer.from(decodedView);
+
+    // Fast path: pad RGB→RGBA or pass through RGBA without sharp overhead
+    let rgbaPixels: Buffer;
+    if (componentCount === 4) {
+      rgbaPixels = pixels;
+    } else if (componentCount === 3) {
+      const pixelCount = width * height;
+      rgbaPixels = Buffer.allocUnsafe(pixelCount * 4);
+      for (let i = 0, j = 0; i < pixelCount; i++, j += 3) {
+        rgbaPixels[i * 4]     = pixels[j];
+        rgbaPixels[i * 4 + 1] = pixels[j + 1];
+        rgbaPixels[i * 4 + 2] = pixels[j + 2];
+        rgbaPixels[i * 4 + 3] = 255;
+      }
+    } else {
+      // Grayscale or exotic channel counts — fall back to sharp
+      rgbaPixels = await sharp(pixels, {
+        raw: { width, height, channels: componentCount as 1 | 2 | 3 | 4 },
+      }).ensureAlpha().raw().toBuffer();
+    }
+
+    return { rgbaPixels, width, height };
+  } finally {
+    decoder.delete();
+  }
 }
 
 // ─── Message handler ────────────────────────────────────────────────
 
-parentPort!.on('message', async (msg: { id: number; j2cBuffer: Buffer }) => {
+parentPort!.on('message', async (msg: { id: number; j2cBuffer: Buffer; mode?: 'webp' | 'raw' }) => {
   try {
     const buf = Buffer.from(msg.j2cBuffer);
-    const webpBuf = opjPath ? await decodeNative(buf) : await decodeWasm(buf);
-    parentPort!.postMessage({ id: msg.id, webpBuf }, [webpBuf.buffer]);
+
+    if (msg.mode === 'raw') {
+      // Raw RGBA output for GPU compression pipeline
+      const { rgbaPixels, width, height } = await decodeWasmRaw(buf);
+      parentPort!.postMessage(
+        { id: msg.id, rgbaPixels, width, height },
+        [rgbaPixels.buffer],
+      );
+    } else {
+      // Default: WebP output for disk cache / Godot fallback
+      const webpBuf = (!USE_WASM && opjPath) ? await decodeNative(buf) : await decodeWasm(buf);
+      parentPort!.postMessage({ id: msg.id, webpBuf }, [webpBuf.buffer]);
+    }
   } catch (err) {
     parentPort!.postMessage({ id: msg.id, error: (err as Error).message || String(err) });
   }

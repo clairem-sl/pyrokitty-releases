@@ -8,12 +8,21 @@ extends Node3D
 signal self_avatar_moved(pos: Vector3)
 
 class AsyncResult extends RefCounted:
-	var data: Image    # Worker writes decoded/compressed Image here
+	var data       # Worker writes Image (texture) here
+	var gltf_doc: GLTFDocument   # Worker writes parsed GLTF doc here (mesh pipeline)
+	var gltf_state: GLTFState    # Worker writes parsed GLTF state here (mesh pipeline)
 	var error: bool = false
 
 var objects: Dictionary = {}   # localId (int) -> MeshInstance3D
 var avatars: Dictionary = {}   # avatarId (String) -> MeshInstance3D
 var self_avatar_id: String = ""
+
+# Avatar interpolation state
+var avatar_targets: Dictionary = {}   # avatarId -> { pos: Vector3, rot: Quaternion, vel: Vector3 }
+const AVATAR_LERP_SPEED: float = 15.0       # position lerp rate (per second)
+const AVATAR_SLERP_SPEED: float = 15.0      # rotation slerp rate (per second)
+const AVATAR_MAX_INTERP_DIST: float = 10.0  # snap if further than this (meters)
+const AVATAR_MAX_EXTRAP_TIME: float = 0.25  # max seconds to extrapolate with velocity
 
 # Linkset tracking (flat hierarchy — no Godot node parenting to avoid scale inheritance)
 var pending_children: Dictionary = {}   # parentLocalId -> Array[childLocalId] (children arrived before parent)
@@ -42,16 +51,70 @@ var object_faces: Dictionary = {}         # localId (int) -> Array[face_info dic
 var pending_textures: Dictionary = {}     # localId (int) -> Array[{ faceIndex, textureId, color, ... }]
 var texture_load_failed: Dictionary = {}  # textureId (String) -> bool
 
-# Async texture loading (WorkerThreadPool)
-var _texture_tasks: Dictionary = {}      # task_id (int) -> { textureId: String, result: AsyncResult, path: String }
-var _texture_in_flight: Dictionary = {}  # textureId (String) -> true (dedup)
+# Async texture loading (own Thread pool — bypasses WorkerThreadPool low-priority cap)
+const TEXTURE_THREAD_COUNT: int = 16          # dedicated OS threads for texture loading
+var _texture_threads: Array[Thread] = []      # running Thread objects
+var _texture_queue: Array = []                # shared queue: { textureId, path } (main thread pushes, workers pop)
+var _texture_queue_lock: Mutex = Mutex.new()
+var _texture_results: Array = []              # completed: { textureId, image } (workers push, main thread pops)
+var _texture_results_lock: Mutex = Mutex.new()
+var _texture_in_flight: Dictionary = {}       # textureId (String) -> true (dedup)
+# Per-step timing accumulators (all threads write, stats reads + resets)
+var _timing_lock: Mutex = Mutex.new()
+var _timing_load_ms: float = 0.0
+var _timing_mipmap_ms: float = 0.0
+var _timing_compress_ms: float = 0.0
+var _timing_count: int = 0
 var _shutting_down: bool = false
-const TEXTURE_FINALIZE_PER_FRAME: int = 16
+var _tex_finalized_count: int = 0   # total textures uploaded to GPU
+var _mesh_finalized_count: int = 0  # total meshes assigned to objects
+# Budget tracking (accumulated between stats reports, then reset)
+var _budget_samples: int = 0
+var _budget_total_ms: float = 0.0
+var _budget_used_ms: float = 0.0
+var _budget_elapsed_ms: float = 0.0
+const TARGET_FRAME_MS: float = 33.3          # 30fps floor — finalize uses whatever is left
+const MIN_FINALIZE_MS: float = 2.0            # always do at least this much work per frame
+
+# Async mesh loading (WorkerThreadPool)
+var _mesh_tasks: Dictionary = {}         # task_id (int) -> { meshId: String, result: AsyncResult, path: String }
+var _mesh_in_flight: Dictionary = {}     # meshId (String) -> true (dedup)
+var _mesh_queue: Array = []              # queued { meshId, path } waiting to be submitted
+const MESH_MAX_IN_FLIGHT: int = 6              # max concurrent worker tasks
+
+# Reverse texture index: textureId -> Array[{ localId, faceInfo }]
+var _pending_by_texture: Dictionary = {}
+
+# Reverse mesh index: meshId -> Array[localId] (O(1) lookup in _apply_mesh_to_pending)
+var _pending_by_mesh: Dictionary = {}
+
+# Texture alpha tracking: textureId -> true if fully opaque (DXT1/BC1, no alpha channel)
+var _texture_opaque: Dictionary = {}
+var _material_lookups: int = 0   # total calls to _get_or_create_material (lifetime)
+
+# Placeholder material cache: "colorhex_fb_ds" -> StandardMaterial3D
+var _placeholder_cache: Dictionary = {}
 
 func _exit_tree() -> void:
 	_shutting_down = true
 
+	# Wait for all dedicated texture threads to finish
+	for t: Thread in _texture_threads:
+		t.wait_to_finish()
+	_texture_threads.clear()
+	_texture_queue.clear()
+	_texture_in_flight.clear()
+
+	# Drain mesh WorkerThreadPool tasks
+	for task_id: int in _mesh_tasks:
+		WorkerThreadPool.wait_for_task_completion(task_id)
+	_mesh_tasks.clear()
+	_mesh_queue.clear()
+	_mesh_in_flight.clear()
+
 func _ready() -> void:
+	print("[SceneManager] CPU threads: %d, texture threads: %d" % [OS.get_processor_count(), TEXTURE_THREAD_COUNT])
+	_start_texture_threads()
 	# Create shared meshes
 	object_mesh = BoxMesh.new()
 	object_mesh.size = Vector3(0.5, 0.5, 0.5)
@@ -107,6 +170,9 @@ func handle_object_create(msg: Dictionary) -> void:
 		mesh_instance.mesh = object_mesh
 		if not mesh_id.is_empty() and not mesh_load_failed.has(mesh_id):
 			pending_meshes[local_id] = mesh_id
+			if not _pending_by_mesh.has(mesh_id):
+				_pending_by_mesh[mesh_id] = []
+			_pending_by_mesh[mesh_id].append(local_id)
 
 	# Apply per-face texture materials
 	var faces: Array = msg.get("faces", [])
@@ -247,8 +313,23 @@ func _cleanup_object(local_id: int) -> void:
 		objects.erase(local_id)
 
 	# Clean up all tracking dicts
-	pending_meshes.erase(local_id)
-	pending_textures.erase(local_id)
+	if pending_meshes.has(local_id):
+		var mid: String = pending_meshes[local_id]
+		pending_meshes.erase(local_id)
+		if _pending_by_mesh.has(mid):
+			_pending_by_mesh[mid].erase(local_id)
+			if _pending_by_mesh[mid].size() == 0:
+				_pending_by_mesh.erase(mid)
+	# Remove from reverse texture index when cleaning up pending_textures
+	if pending_textures.has(local_id):
+		for fi: Dictionary in pending_textures[local_id]:
+			var tid: String = fi["textureId"]
+			if _pending_by_texture.has(tid):
+				_pending_by_texture[tid] = _pending_by_texture[tid].filter(
+					func(e: Dictionary) -> bool: return e["localId"] != local_id)
+				if _pending_by_texture[tid].size() == 0:
+					_pending_by_texture.erase(tid)
+		pending_textures.erase(local_id)
 	object_faces.erase(local_id)
 	child_offset_pos.erase(local_id)
 	child_offset_rot.erase(local_id)
@@ -263,53 +344,57 @@ func handle_mesh_ready(msg: Dictionary) -> void:
 	if mesh_id.is_empty() or glb_path.is_empty():
 		return
 
-	# Load the GLB into a Mesh resource
-	var loaded_mesh: Mesh = _load_glb(glb_path)
-	if loaded_mesh == null:
-		print("[SceneManager] GLB load failed: %s" % glb_path)
-		mesh_load_failed[mesh_id] = true
+	# Skip if already cached, in-flight, or previously failed
+	if _shutting_down or mesh_cache.has(mesh_id) or _mesh_in_flight.has(mesh_id) or mesh_load_failed.has(mesh_id):
 		return
 
-	mesh_cache[mesh_id] = loaded_mesh
-	#print("[SceneManager] Loaded GLB for %s" % mesh_id)
+	_mesh_in_flight[mesh_id] = true
+	_mesh_queue.append({ "meshId": mesh_id, "path": glb_path })
 
-	# Replace all pending boxes waiting for this mesh
-	var to_remove: Array = []
-	for local_id: int in pending_meshes:
-		if pending_meshes[local_id] == mesh_id:
-			var mi: MeshInstance3D = objects.get(local_id)
-			if mi != null:
-				mi.mesh = loaded_mesh
-				# Reapply per-face materials now that we have real mesh with proper surfaces
-				if object_faces.has(local_id):
-					mi.material_override = null
-					_apply_face_materials(mi, local_id, object_faces[local_id])
-				elif mi.material_override == object_material:
-					mi.material_override = null
-			to_remove.append(local_id)
 
-	for local_id: int in to_remove:
+## Apply a loaded mesh to all pending objects waiting for it
+func _apply_mesh_to_pending(mesh_id: String) -> void:
+	if not _pending_by_mesh.has(mesh_id):
+		return
+	var loaded_mesh: Mesh = mesh_cache[mesh_id]
+	var local_ids: Array = _pending_by_mesh[mesh_id]
+	_pending_by_mesh.erase(mesh_id)
+	for local_id: int in local_ids:
 		pending_meshes.erase(local_id)
+		var mi: MeshInstance3D = objects.get(local_id)
+		if mi != null:
+			mi.mesh = loaded_mesh
+			# Reapply per-face materials now that we have real mesh with proper surfaces
+			if object_faces.has(local_id):
+				mi.material_override = null
+				_apply_face_materials(mi, local_id, object_faces[local_id])
+			elif mi.material_override == object_material:
+				mi.material_override = null
 
 
-func _load_glb(file_path: String) -> Mesh:
-	var doc := GLTFDocument.new()
-	var state := GLTFState.new()
+## Submit queued meshes to WorkerThreadPool (throttled)
+func _submit_mesh_tasks() -> void:
+	while _mesh_queue.size() > 0 and _mesh_tasks.size() < MESH_MAX_IN_FLIGHT:
+		var entry: Dictionary = _mesh_queue.pop_front()
+		var mesh_id: String = entry["meshId"]
+		var glb_path: String = entry["path"]
 
-	var err := doc.append_from_file(file_path, state)
-	if err != OK:
-		push_warning("[SceneManager] GLTFDocument.append_from_file error %s: %s" % [error_string(err), file_path])
-		return null
-
-	var scene: Node = doc.generate_scene(state)
-	if scene == null:
-		push_warning("[SceneManager] GLTFDocument.generate_scene returned null")
-		return null
-
-	# Find the first MeshInstance3D in the generated scene tree
-	var mesh: Mesh = _find_mesh_in_tree(scene)
-	scene.queue_free()
-	return mesh
+		var result := AsyncResult.new()
+		var task_id: int = WorkerThreadPool.add_task(func() -> void:
+			if _shutting_down:
+				result.error = true
+				return
+			var doc := GLTFDocument.new()
+			var state := GLTFState.new()
+			var err := doc.append_from_file(glb_path, state)
+			if err != OK or _shutting_down:
+				result.error = true
+				return
+			# Store parsed doc+state; generate_scene must run on main thread (creates Nodes)
+			result.gltf_doc = doc
+			result.gltf_state = state
+		)
+		_mesh_tasks[task_id] = { "meshId": mesh_id, "result": result, "path": glb_path }
 
 
 func _find_mesh_in_tree(node: Node) -> Mesh:
@@ -335,89 +420,264 @@ func handle_texture_ready(msg: Dictionary) -> void:
 		return
 
 	_texture_in_flight[texture_id] = true
+	_texture_queue_lock.lock()
+	_texture_queue.append({ "textureId": texture_id, "path": tex_path })
+	_texture_queue_lock.unlock()
 
-	# Spawn worker thread for heavy CPU work (Image.load + mipmaps + S3TC compress)
-	var result := AsyncResult.new()
-	var task_id: int = WorkerThreadPool.add_task(func() -> void:
-		if _shutting_down:
-			result.error = true
-			return
+
+## Start dedicated texture worker threads (called once from _ready)
+func _start_texture_threads() -> void:
+	for i in range(TEXTURE_THREAD_COUNT):
+		var t := Thread.new()
+		t.start(_texture_worker_loop)
+		_texture_threads.append(t)
+	print("[SceneManager] Started %d texture threads" % TEXTURE_THREAD_COUNT)
+
+
+## Worker loop: runs on each dedicated texture thread
+func _texture_worker_loop() -> void:
+	while not _shutting_down:
+		# Backpressure: if results queue is deep, let main thread catch up
+		_texture_results_lock.lock()
+		var results_depth := _texture_results.size()
+		_texture_results_lock.unlock()
+		if results_depth > 24:
+			OS.delay_msec(50)
+			continue
+
+		# Pop next job from queue
+		_texture_queue_lock.lock()
+		var job: Dictionary = {}
+		if _texture_queue.size() > 0:
+			job = _texture_queue.pop_front()
+		_texture_queue_lock.unlock()
+
+		if job.is_empty():
+			# No work — sleep briefly and retry
+			OS.delay_msec(5)
+			continue
+
+		var texture_id: String = job["textureId"]
+		var tex_path: String = job["path"]
+
+		# Pre-compressed .bctex — load directly, skip generate_mipmaps + compress
+		if tex_path.ends_with(".bctex"):
+			var t0 := Time.get_ticks_usec()
+			var img := _load_bctex(tex_path)
+			var t1 := Time.get_ticks_usec()
+
+			_timing_lock.lock()
+			_timing_load_ms += (t1 - t0) / 1000.0
+			# No mipmap or compress time — already done on GPU
+			_timing_count += 1
+			_timing_lock.unlock()
+
+			_texture_results_lock.lock()
+			_texture_results.append({ "textureId": texture_id, "image": img })
+			_texture_results_lock.unlock()
+			continue
+
+		var t0 := Time.get_ticks_usec()
 		var img := Image.new()
 		var err := img.load(tex_path)
-		if err != OK:
-			result.error = true
-			return
-		if _shutting_down:
-			result.error = true
-			return
+		var t1 := Time.get_ticks_usec()
+		if err != OK or _shutting_down:
+			_texture_results_lock.lock()
+			_texture_results.append({ "textureId": texture_id, "image": null })
+			_texture_results_lock.unlock()
+			continue
+
 		img.generate_mipmaps()
+		var t2 := Time.get_ticks_usec()
+		if _shutting_down:
+			_texture_results_lock.lock()
+			_texture_results.append({ "textureId": texture_id, "image": null })
+			_texture_results_lock.unlock()
+			continue
+
 		img.compress(Image.COMPRESS_S3TC)
-		result.data = img
-	)
-	_texture_tasks[task_id] = { "textureId": texture_id, "result": result, "path": tex_path }
+		var t3 := Time.get_ticks_usec()
+
+		_timing_lock.lock()
+		_timing_load_ms += (t1 - t0) / 1000.0
+		_timing_mipmap_ms += (t2 - t1) / 1000.0
+		_timing_compress_ms += (t3 - t2) / 1000.0
+		_timing_count += 1
+		_timing_lock.unlock()
+
+		_texture_results_lock.lock()
+		_texture_results.append({ "textureId": texture_id, "image": img })
+		_texture_results_lock.unlock()
 
 
-## Apply a cached texture to all pending objects waiting for it
+## Load a pre-compressed .bctex file (BC1/BC3 with mipmaps).
+## Header: 32 bytes (magic, version, width, height, format, mipCount, flags, dataSize)
+## Body: concatenated mip levels, largest first
+func _load_bctex(bctex_path: String) -> Image:
+	var f := FileAccess.open(bctex_path, FileAccess.READ)
+	if f == null:
+		push_warning("[SceneManager] _load_bctex: can't open %s" % bctex_path)
+		return null
+
+	# Read 32-byte header
+	var magic := f.get_32()
+	var version := f.get_32()
+	if magic != 0x42435458 or version != 1:
+		push_warning("[SceneManager] _load_bctex: invalid header in %s" % bctex_path)
+		f.close()
+		return null
+
+	var width := int(f.get_32())
+	var height := int(f.get_32())
+	var fmt := int(f.get_32())     # 0=BC1, 1=BC3
+	var mip_count := int(f.get_32())
+	var _flags := f.get_32()        # bit 0 = has_alpha (informational)
+	var data_size := int(f.get_32())
+
+	# Read compressed data blob
+	var data := f.get_buffer(data_size)
+	f.close()
+
+	if data.size() != data_size:
+		push_warning("[SceneManager] _load_bctex: short read %d/%d in %s" % [data.size(), data_size, bctex_path])
+		return null
+
+	# Map format: BC1 → FORMAT_DXT1, BC3 → FORMAT_DXT5
+	var godot_format: Image.Format
+	if fmt == 0:
+		godot_format = Image.FORMAT_DXT1
+	else:
+		godot_format = Image.FORMAT_DXT5
+
+	var has_mipmaps := mip_count > 1
+	return Image.create_from_data(width, height, has_mipmaps, godot_format, data)
+
+
+## Apply a cached texture to all pending objects waiting for it (O(1) via reverse index)
 func _apply_texture_to_pending(texture_id: String) -> void:
-	var to_remove: Array = []
-	for local_id: int in pending_textures:
-		var face_list: Array = pending_textures[local_id]
-		var remaining: Array = []
-		for face_info: Dictionary in face_list:
-			if face_info["textureId"] == texture_id:
-				var mi: MeshInstance3D = objects.get(local_id)
-				if mi != null:
-					var face_idx: int = face_info["faceIndex"]
-					var uv: Dictionary = face_info.get("uv", {})
-					var am: int = int(face_info.get("alphaMode", -1))
-					var ac: float = float(face_info.get("alphaCutoff", 0.5))
-					mi.set_surface_override_material(face_idx, _get_or_create_material(
-						texture_id, face_info["color"], face_info["fullBright"], face_info["doubleSided"], uv, am, ac))
-			else:
-				remaining.append(face_info)
-		if remaining.size() == 0:
-			to_remove.append(local_id)
-		else:
-			pending_textures[local_id] = remaining
+	if not _pending_by_texture.has(texture_id):
+		return
 
-	for local_id: int in to_remove:
-		pending_textures.erase(local_id)
+	var entries: Array = _pending_by_texture[texture_id]
+	_pending_by_texture.erase(texture_id)
+
+	for entry: Dictionary in entries:
+		var local_id: int = entry["localId"]
+		var face_info: Dictionary = entry["faceInfo"]
+		var mi: MeshInstance3D = objects.get(local_id)
+		if mi != null:
+			var face_idx: int = face_info["faceIndex"]
+			var uv: Dictionary = face_info.get("uv", {})
+			var am: int = int(face_info.get("alphaMode", -1))
+			var ac: float = float(face_info.get("alphaCutoff", 0.5))
+			mi.set_surface_override_material(face_idx, _get_or_create_material(
+				texture_id, face_info["color"], face_info["fullBright"], face_info["doubleSided"], uv, am, ac))
+
+		# Remove from per-object pending list
+		if pending_textures.has(local_id):
+			var face_list: Array = pending_textures[local_id]
+			face_list = face_list.filter(func(fi: Dictionary) -> bool: return fi["textureId"] != texture_id)
+			if face_list.size() == 0:
+				pending_textures.erase(local_id)
+			else:
+				pending_textures[local_id] = face_list
 
 
 func _process(_delta: float) -> void:
-	if _texture_tasks.is_empty():
+	# Interpolate avatar positions/rotations toward their targets
+	_interpolate_avatars(_delta)
+
+	# Submit queued mesh work to WorkerThreadPool
+	if _mesh_queue.size() > 0:
+		_submit_mesh_tasks()
+
+	# Grab completed texture results from worker threads
+	var tex_batch: Array = []
+	_texture_results_lock.lock()
+	if _texture_results.size() > 0:
+		tex_batch = _texture_results.duplicate()
+		_texture_results.clear()
+	_texture_results_lock.unlock()
+
+	var has_textures := tex_batch.size() > 0
+	var has_meshes := not _mesh_tasks.is_empty()
+	if not has_textures and not has_meshes:
 		return
 
-	var finalized: int = 0
-	var done_ids: Array = []
+	# Adaptive budget: use whatever time remains to hit 30fps target
+	var frame_start_ms := (Time.get_ticks_usec() / 1000.0) - (_delta * 1000.0)
+	var now_ms := Time.get_ticks_usec() / 1000.0
+	var elapsed_ms := now_ms - frame_start_ms
+	var budget_ms := maxf(TARGET_FRAME_MS - elapsed_ms, MIN_FINALIZE_MS)
+	# Split: 60% textures, 40% meshes (textures are cheaper per-item)
+	var tex_budget_ms := budget_ms * 0.6 if has_meshes else budget_ms
+	var mesh_budget_ms := budget_ms * 0.4 if has_textures else budget_ms
 
-	for task_id: int in _texture_tasks:
-		if finalized >= TEXTURE_FINALIZE_PER_FRAME:
-			break
-		if not WorkerThreadPool.is_task_completed(task_id):
-			continue
+	var start_ms := now_ms
 
-		WorkerThreadPool.wait_for_task_completion(task_id)
-		done_ids.append(task_id)
+	# Finalize completed textures (time-budgeted)
+	if has_textures:
+		var processed := 0
+		for entry: Dictionary in tex_batch:
+			if (Time.get_ticks_usec() / 1000.0) - start_ms >= tex_budget_ms:
+				# Put unprocessed results back for next frame
+				_texture_results_lock.lock()
+				for j in range(processed, tex_batch.size()):
+					_texture_results.append(tex_batch[j])
+				_texture_results_lock.unlock()
+				break
+			var texture_id: String = entry["textureId"]
+			var img: Image = entry["image"]
+			_texture_in_flight.erase(texture_id)
+			if img == null:
+				texture_load_failed[texture_id] = true
+			else:
+				# DXT1 = opaque (no alpha), DXT5 = has alpha channel
+				_texture_opaque[texture_id] = (img.get_format() == Image.FORMAT_DXT1)
+				texture_cache[texture_id] = ImageTexture.create_from_image(img)
+				_apply_texture_to_pending(texture_id)
+				_tex_finalized_count += 1
+			processed += 1
 
-		var info: Dictionary = _texture_tasks[task_id]
-		var texture_id: String = info["textureId"]
-		var result: AsyncResult = info["result"]
+	# Finalize completed mesh tasks (time-budgeted, uses remaining budget)
+	if has_meshes:
+		var mesh_start_ms := Time.get_ticks_usec() / 1000.0
+		var done_ids: Array = []
+		for task_id: int in _mesh_tasks:
+			if (Time.get_ticks_usec() / 1000.0) - mesh_start_ms >= mesh_budget_ms:
+				break
+			if not WorkerThreadPool.is_task_completed(task_id):
+				continue
+			WorkerThreadPool.wait_for_task_completion(task_id)
+			done_ids.append(task_id)
+			var info: Dictionary = _mesh_tasks[task_id]
+			var mesh_id: String = info["meshId"]
+			var result: AsyncResult = info["result"]
+			_mesh_in_flight.erase(mesh_id)
+			if result.error or result.gltf_doc == null:
+				mesh_load_failed[mesh_id] = true
+			else:
+				# generate_scene + mesh extraction must run on main thread (Node ops)
+				var scene: Node = result.gltf_doc.generate_scene(result.gltf_state)
+				if scene == null:
+					mesh_load_failed[mesh_id] = true
+				else:
+					var mesh: Mesh = _find_mesh_in_tree(scene)
+					scene.queue_free()
+					if mesh == null:
+						mesh_load_failed[mesh_id] = true
+					else:
+						mesh_cache[mesh_id] = mesh
+						_apply_mesh_to_pending(mesh_id)
+						_mesh_finalized_count += 1
+		for task_id: int in done_ids:
+			_mesh_tasks.erase(task_id)
 
-		_texture_in_flight.erase(texture_id)
-
-		if result.error or result.data == null:
-			print("[SceneManager] Texture load failed: %s" % info["path"])
-			texture_load_failed[texture_id] = true
-		else:
-			# Finalize on main thread: create GPU texture from worker-prepared Image
-			texture_cache[texture_id] = ImageTexture.create_from_image(result.data)
-			_apply_texture_to_pending(texture_id)
-
-		finalized += 1
-
-	for task_id: int in done_ids:
-		_texture_tasks.erase(task_id)
+	# Track budget stats
+	_budget_samples += 1
+	_budget_elapsed_ms += elapsed_ms
+	_budget_total_ms += budget_ms
+	_budget_used_ms += (Time.get_ticks_usec() / 1000.0) - start_ms
 
 
 ## Apply per-face materials to a mesh instance.
@@ -427,20 +687,20 @@ func _apply_face_materials(mi: MeshInstance3D, local_id: int, faces: Array) -> v
 	var surface_count: int = mi.mesh.get_surface_count() if mi.mesh else 0
 	var pending: Array = []
 
-	for face_info: Dictionary in faces:
-		var face_idx: int = int(face_info.get("index", 0))
-		var texture_id: String = str(face_info.get("textureId", ""))
-		var color: Array = face_info.get("color", [1, 1, 1, 1])
-		var full_bright: bool = face_info.get("fullBright", false)
-		var double_sided: bool = face_info.get("doubleSided", false)
-		var alpha_mode: int = int(face_info.get("alphaMode", -1))
-		var alpha_cutoff: float = float(face_info.get("alphaCutoff", 0.5))
+	for fi: Dictionary in faces:
+		var face_idx: int = int(fi.get("index", 0))
+		var texture_id: String = str(fi.get("textureId", ""))
+		var color: Array = fi.get("color", [1, 1, 1, 1])
+		var full_bright: bool = fi.get("fullBright", false)
+		var double_sided: bool = fi.get("doubleSided", false)
+		var alpha_mode: int = int(fi.get("alphaMode", -1))
+		var alpha_cutoff: float = float(fi.get("alphaCutoff", 0.5))
 		var uv_info: Dictionary = {
-			"repeatU": face_info.get("repeatU", 1.0),
-			"repeatV": face_info.get("repeatV", 1.0),
-			"offsetU": face_info.get("offsetU", 0.0),
-			"offsetV": face_info.get("offsetV", 0.0),
-			"texRotation": face_info.get("rotation", 0.0)
+			"repeatU": fi.get("repeatU", 1.0),
+			"repeatV": fi.get("repeatV", 1.0),
+			"offsetU": fi.get("offsetU", 0.0),
+			"offsetV": fi.get("offsetV", 0.0),
+			"texRotation": fi.get("rotation", 0.0)
 		}
 
 		if texture_id.is_empty():
@@ -456,7 +716,7 @@ func _apply_face_materials(mi: MeshInstance3D, local_id: int, faces: Array) -> v
 		else:
 			mi.set_surface_override_material(face_idx, _make_placeholder_material(color, full_bright, double_sided))
 			if not texture_load_failed.has(texture_id):
-				pending.append({
+				var pending_info := {
 					"faceIndex": face_idx,
 					"textureId": texture_id,
 					"color": color,
@@ -465,13 +725,26 @@ func _apply_face_materials(mi: MeshInstance3D, local_id: int, faces: Array) -> v
 					"alphaMode": alpha_mode,
 					"alphaCutoff": alpha_cutoff,
 					"uv": uv_info
-				})
+				}
+				pending.append(pending_info)
+				# Populate reverse index
+				if not _pending_by_texture.has(texture_id):
+					_pending_by_texture[texture_id] = []
+				_pending_by_texture[texture_id].append({ "localId": local_id, "faceInfo": pending_info })
 
 	if pending.size() > 0:
 		pending_textures[local_id] = pending
 
 
 func _get_or_create_material(texture_id: String, color: Array, full_bright: bool, double_sided: bool, uv_info: Dictionary = {}, alpha_mode: int = -1, alpha_cutoff: float = 0.5) -> StandardMaterial3D:
+	_material_lookups += 1
+
+	# Resolve effective alpha: promote known-opaque textures to mode 0 (fully opaque)
+	# so they skip the transparency pipeline entirely
+	var resolved_mode := alpha_mode
+	if alpha_mode == -1 and color[3] >= 1.0 and _texture_opaque.get(texture_id, false):
+		resolved_mode = 0
+
 	# Build cache key from texture + color + fullbright + doubleSided + UV + alpha params
 	var color_hex := Color(color[0], color[1], color[2], color[3]).to_html()
 	var fb_str := "1" if full_bright else "0"
@@ -487,7 +760,7 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 	var tr_val = uv_info.get("texRotation", 0.0)
 	var tr: float = tr_val if tr_val != null else 0.0
 	var uv_key := "%.3f_%.3f_%.3f_%.3f_%.3f" % [ru, rv, ou, ov, tr]
-	var alpha_key := "%d_%.2f" % [alpha_mode, alpha_cutoff]
+	var alpha_key := "%d_%.2f" % [resolved_mode, alpha_cutoff]
 	var key := "%s_%s_%s_%s_%s_%s" % [texture_id, color_hex, fb_str, ds_str, uv_key, alpha_key]
 
 	if material_cache.has(key):
@@ -508,26 +781,23 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 	if double_sided:
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 
-	# Alpha handling
-	# alphaMode: -1=default (SL standard), 0=OPAQUE, 1=BLEND, 2=MASK
-	if alpha_mode == 0:
-		# GLTF OPAQUE — no transparency
+	# Alpha handling (uses resolved_mode — opaque textures promoted to mode 0)
+	if resolved_mode == 0:
+		# Fully opaque — no transparency pipeline overhead
 		pass
-	elif alpha_mode == 1:
+	elif resolved_mode == 1:
 		# GLTF BLEND — smooth alpha blending
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	elif alpha_mode == 2:
+	elif resolved_mode == 2:
 		# GLTF MASK — alpha scissor with explicit cutoff
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 		mat.alpha_scissor_threshold = alpha_cutoff
 	else:
-		# Standard SL: no explicit alpha mode
+		# Standard SL (alpha_mode == -1), texture has alpha or color is semi-transparent
 		if color[3] < 1.0:
-			# Tinted transparency — smooth blend
 			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		else:
-			# Enable scissor so texture alpha channels work (trees, fences, etc.)
-			# Opaque textures have alpha=1.0 everywhere so this is safe
+			# Texture has actual alpha channel — scissor for trees, fences, etc.
 			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 			mat.alpha_scissor_threshold = 0.5
 
@@ -540,7 +810,15 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 
 
 func _make_placeholder_material(color: Array, full_bright: bool, double_sided: bool) -> StandardMaterial3D:
-	# Solid-color placeholder shown while texture downloads
+	# Cached solid-color placeholder shown while texture downloads
+	var color_hex := Color(color[0], color[1], color[2], color[3]).to_html()
+	var fb_str := "1" if full_bright else "0"
+	var ds_str := "1" if double_sided else "0"
+	var key := "%s_%s_%s" % [color_hex, fb_str, ds_str]
+
+	if _placeholder_cache.has(key):
+		return _placeholder_cache[key]
+
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(color[0], color[1], color[2], color[3])
 
@@ -554,6 +832,7 @@ func _make_placeholder_material(color: Array, full_bright: bool, double_sided: b
 	if full_bright:
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
+	_placeholder_cache[key] = mat
 	return mat
 
 
@@ -588,21 +867,27 @@ func handle_avatar_create(msg: Dictionary) -> void:
 	# Remove existing if duplicate
 	if avatars.has(avatar_id):
 		avatars[avatar_id].queue_free()
+		avatar_targets.erase(avatar_id)
 
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.mesh = avatar_mesh
 	mesh_instance.material_override = avatar_material
 
 	var pos: Array = msg.get("position", [128, 128, 25])
-	mesh_instance.position = sl_to_godot_pos(pos)
-	# Offset Y by half height so avatar stands on ground
-	mesh_instance.position.y += 0.9
+	var godot_pos := sl_to_godot_pos(pos)
+	godot_pos.y += 0.9
+	mesh_instance.position = godot_pos
 
+	var godot_rot := Quaternion.IDENTITY
 	if msg.has("rotation"):
-		mesh_instance.quaternion = sl_to_godot_quat(msg["rotation"])
+		godot_rot = sl_to_godot_quat(msg["rotation"])
+		mesh_instance.quaternion = godot_rot
 
 	add_child(mesh_instance)
 	avatars[avatar_id] = mesh_instance
+
+	# Initialize interpolation target at current position (no lerp on first frame)
+	avatar_targets[avatar_id] = { "pos": godot_pos, "rot": godot_rot, "vel": Vector3.ZERO }
 
 	if avatar_id == self_avatar_id:
 		self_avatar_moved.emit(mesh_instance.position)
@@ -610,19 +895,40 @@ func handle_avatar_create(msg: Dictionary) -> void:
 
 func handle_avatar_update(msg: Dictionary) -> void:
 	var avatar_id: String = msg.get("id", "")
-	var mesh_instance: MeshInstance3D = avatars.get(avatar_id)
-	if mesh_instance == null:
+	if not avatars.has(avatar_id):
 		return
+	_apply_avatar_target(avatar_id, msg)
 
-	if msg.has("position"):
-		mesh_instance.position = sl_to_godot_pos(msg["position"])
-		mesh_instance.position.y += 0.9
 
-		if avatar_id == self_avatar_id:
-			self_avatar_moved.emit(mesh_instance.position)
+func handle_avatar_update_batch(msg: Dictionary) -> void:
+	var avatar_list: Array = msg.get("avatars", [])
+	for entry: Dictionary in avatar_list:
+		var avatar_id: String = entry.get("id", "")
+		if avatar_id.is_empty() or not avatars.has(avatar_id):
+			continue
+		_apply_avatar_target(avatar_id, entry)
 
-	if msg.has("rotation"):
-		mesh_instance.quaternion = sl_to_godot_quat(msg["rotation"])
+
+## Set interpolation target for an avatar from an update message
+func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
+	var target: Dictionary = avatar_targets.get(avatar_id, {})
+
+	if data.has("position"):
+		var godot_pos := sl_to_godot_pos(data["position"])
+		godot_pos.y += 0.9
+		target["pos"] = godot_pos
+
+	if data.has("rotation"):
+		target["rot"] = sl_to_godot_quat(data["rotation"])
+
+	if data.has("velocity"):
+		# Convert SL velocity to Godot coords (same transform as position axes)
+		var sl_vel: Array = data["velocity"]
+		target["vel"] = Vector3(sl_vel[0], sl_vel[2], -sl_vel[1])
+	else:
+		target["vel"] = Vector3.ZERO
+
+	avatar_targets[avatar_id] = target
 
 
 func handle_avatar_kill(msg: Dictionary) -> void:
@@ -630,6 +936,48 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 	if avatars.has(avatar_id):
 		avatars[avatar_id].queue_free()
 		avatars.erase(avatar_id)
+		avatar_targets.erase(avatar_id)
+
+
+# ─── Avatar Interpolation ────────────────────────────
+
+## Smoothly move all avatars toward their targets each frame
+func _interpolate_avatars(delta: float) -> void:
+	for avatar_id: String in avatar_targets:
+		var mi: MeshInstance3D = avatars.get(avatar_id)
+		if mi == null:
+			continue
+
+		var target: Dictionary = avatar_targets[avatar_id]
+		var target_pos: Vector3 = target.get("pos", mi.position)
+		var target_rot: Quaternion = target.get("rot", mi.quaternion)
+		var vel: Vector3 = target.get("vel", Vector3.ZERO)
+
+		# Predict slightly ahead using velocity (clamped to avoid runaway)
+		var predicted_pos := target_pos
+		if vel.length_squared() > 0.001:
+			# Extrapolate up to AVATAR_MAX_EXTRAP_TIME seconds ahead
+			var extrap := vel * minf(delta, AVATAR_MAX_EXTRAP_TIME)
+			predicted_pos = target_pos + extrap
+
+		var dist := mi.position.distance_to(predicted_pos)
+
+		if dist > AVATAR_MAX_INTERP_DIST:
+			# Too far — snap immediately (don't lag off into the sunset)
+			mi.position = target_pos
+			mi.quaternion = target_rot
+		elif dist > 0.001:
+			# Smooth lerp toward predicted position
+			var t := clampf(AVATAR_LERP_SPEED * delta, 0.0, 1.0)
+			mi.position = mi.position.lerp(predicted_pos, t)
+			mi.quaternion = mi.quaternion.slerp(target_rot, clampf(AVATAR_SLERP_SPEED * delta, 0.0, 1.0))
+		else:
+			# Close enough — just slerp rotation
+			mi.quaternion = mi.quaternion.slerp(target_rot, clampf(AVATAR_SLERP_SPEED * delta, 0.0, 1.0))
+
+		# Emit camera follow signal for self avatar
+		if avatar_id == self_avatar_id:
+			self_avatar_moved.emit(mi.position)
 
 
 # ─── Terrain + Water + Sky ───────────────────────────
@@ -819,3 +1167,70 @@ func handle_environment_data(msg: Dictionary) -> void:
 		env.ambient_light_energy = 0.6
 
 	print("[SceneManager] Environment updated (sunDir=%s)" % str(godot_sun_dir))
+
+
+## Return stats dictionary for the Godot-side asset pipeline
+func get_pipeline_stats() -> Dictionary:
+	# Texture stats from our own thread pool
+	_texture_queue_lock.lock()
+	var tex_q := _texture_queue.size()
+	_texture_queue_lock.unlock()
+	_texture_results_lock.lock()
+	var tex_ready := _texture_results.size()
+	_texture_results_lock.unlock()
+
+	# Mesh stats from WorkerThreadPool
+	var mesh_ready := 0
+	for task_id: int in _mesh_tasks:
+		if WorkerThreadPool.is_task_completed(task_id):
+			mesh_ready += 1
+
+	# Compute budget averages and reset
+	var n := maxf(_budget_samples, 1)
+	var avg_elapsed := _budget_elapsed_ms / n
+	var avg_budget := _budget_total_ms / n
+	var avg_used := _budget_used_ms / n
+	_budget_samples = 0
+	_budget_elapsed_ms = 0.0
+	_budget_total_ms = 0.0
+	_budget_used_ms = 0.0
+
+	# Per-step timing averages and reset
+	_timing_lock.lock()
+	var tc := maxi(_timing_count, 1)
+	var avg_load := _timing_load_ms / tc
+	var avg_mipmap := _timing_mipmap_ms / tc
+	var avg_compress := _timing_compress_ms / tc
+	var timing_n := _timing_count
+	_timing_load_ms = 0.0
+	_timing_mipmap_ms = 0.0
+	_timing_compress_ms = 0.0
+	_timing_count = 0
+	_timing_lock.unlock()
+
+	return {
+		"texWorkers": TEXTURE_THREAD_COUNT,
+		"texReady": tex_ready,
+		"texQueue": tex_q,
+		"texTiming": "%.0f/%.0f/%.0fms load/mip/s3tc (n=%d)" % [avg_load, avg_mipmap, avg_compress, timing_n],
+		"texDone": _tex_finalized_count,
+		"texCached": texture_cache.size(),
+		"texFailed": texture_load_failed.size(),
+		"texPending": pending_textures.size(),
+		"meshWorkers": _mesh_tasks.size(),
+		"meshReady": mesh_ready,
+		"meshQueue": _mesh_queue.size(),
+		"meshDone": _mesh_finalized_count,
+		"meshCached": mesh_cache.size(),
+		"meshFailed": mesh_load_failed.size(),
+		"meshPending": pending_meshes.size(),
+		"budgetElapsed": avg_elapsed,
+		"budgetAvail": avg_budget,
+		"budgetUsed": avg_used,
+		"objects": objects.size(),
+		"avatars": avatars.size(),
+		"materials": material_cache.size(),
+		"materialLookups": _material_lookups,
+		"materialReuse": _material_lookups - material_cache.size(),
+		"texOpaque": _texture_opaque.values().count(true),
+	}
