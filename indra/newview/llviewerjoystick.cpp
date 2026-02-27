@@ -766,13 +766,7 @@ void LLViewerJoystick::agentFly(F32 inc)
 {
     if (inc < 0.f)
     {
-        if (! (gAgent.getFlying() ||
-               !gAgent.canFly() ||
-               gAgent.upGrabbed() ||
-               !gSavedSettings.getBOOL("AutomaticFly")) )
-        {
-            gAgent.setFlying(true);
-        }
+        // <FS:Pyrokitty> No AutomaticFly — joystick up axis just jumps
         gAgent.moveUp(1);
     }
     else if (inc > 0.f)
@@ -1001,23 +995,8 @@ void LLViewerJoystick::moveAvatar(bool reset)
 
     if (mBtn[1] == 1)
     {
-        // If AutomaticFly is enabled, then button1 merely causes a
-        // jump (as the up/down axis already controls flying) if on the
-        // ground, or cease flight if already flying.
-        // If AutomaticFly is disabled, then button1 toggles flying.
-        if (gSavedSettings.getBOOL("AutomaticFly"))
-        {
-            if (!gAgent.getFlying())
-            {
-                gAgent.moveUp(1);
-            }
-            else if (!button_held)
-            {
-                button_held = true;
-                gAgent.setFlying(false);
-            }
-        }
-        else if (!button_held)
+        // <FS:Pyrokitty> AutomaticFly removed — button1 always toggles fly
+        if (!button_held)
         {
             button_held = true;
             gAgent.setFlying(!gAgent.getFlying());

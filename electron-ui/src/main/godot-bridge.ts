@@ -16,6 +16,7 @@ import { MeshFetchQueue } from './mesh-fetch-queue';
 import { TextureFetchQueue } from './texture-fetch-queue';
 import { SculptFetchQueue } from './sculpt-fetch-queue';
 import { sculptMeshId } from './sculpt-converter';
+import { MaterialFetchQueue, MaterialOverrideData, TextureTransform } from './material-fetch-queue';
 
 const GODOT_WS_PORT_BASE = 9100;
 let nextPort = GODOT_WS_PORT_BASE;
@@ -58,10 +59,13 @@ export class GodotBridge extends EventEmitter {
   private meshFetchQueue: MeshFetchQueue | null = null;
   private textureFetchQueue: TextureFetchQueue | null = null;
   private sculptFetchQueue: SculptFetchQueue | null = null;
+  private materialFetchQueue: MaterialFetchQueue | null = null;
+  private materialToFaces = new Map<string, { localId: number; faceIndex: number; face: any; inlineOverride: any }[]>();
   private connected = false;
   private assetReadyBuffer: object[] = [];
   private assetReadyTimer: ReturnType<typeof setTimeout> | null = null;
   private lastGodotStats: any = null;
+  private pbrFaceCount = 0; // count of faces with PBR overrides
 
   constructor(bot: Bot) {
     super();
@@ -101,9 +105,21 @@ export class GodotBridge extends EventEmitter {
       const te = obj.TextureEntry;
       if (!te || !te.defaultTexture) return undefined;
 
-      // GLTF material overrides per face
+      const ZERO = '00000000-0000-0000-0000-000000000000';
+
+      // GLTF material overrides per face — extract all PBR data
       const gltfDS = new Map<number, boolean>();
       const gltfAlpha = new Map<number, { mode: number; cutoff: number }>();
+      const gltfPBR = new Map<number, {
+        baseColorTextureId?: string;
+        normalTextureId?: string;
+        ormTextureId?: string;
+        emissiveTextureId?: string;
+        baseColor?: number[];
+        metallicFactor?: number;
+        roughnessFactor?: number;
+        emissiveFactor?: number[];
+      }>();
       const overrides = te.gltfMaterialOverrides;
       if (overrides && overrides.size > 0) {
         for (const [idx, override] of overrides) {
@@ -116,6 +132,27 @@ export class GodotBridge extends EventEmitter {
               cutoff: override.alphaCutoff ?? 0.5,
             });
           }
+          // Extract PBR texture UUIDs and factors
+          const pbr: any = {};
+          let hasPBR = false;
+          if (override.textures && Array.isArray(override.textures)) {
+            const texIds = override.textures;
+            const t0 = texIds[0]?.toString();
+            const t1 = texIds[1]?.toString();
+            const t2 = texIds[2]?.toString();
+            const t3 = texIds[3]?.toString();
+            if (t0 && t0 !== ZERO) { pbr.baseColorTextureId = t0; hasPBR = true; }
+            if (t1 && t1 !== ZERO) { pbr.normalTextureId = t1; hasPBR = true; }
+            if (t2 && t2 !== ZERO) { pbr.ormTextureId = t2; hasPBR = true; }
+            if (t3 && t3 !== ZERO) { pbr.emissiveTextureId = t3; hasPBR = true; }
+          }
+          if (override.baseColor) { pbr.baseColor = override.baseColor; hasPBR = true; }
+          if (override.metallicFactor !== undefined) { pbr.metallicFactor = override.metallicFactor; hasPBR = true; }
+          if (override.roughnessFactor !== undefined) { pbr.roughnessFactor = override.roughnessFactor; hasPBR = true; }
+          if (override.emissiveFactor) { pbr.emissiveFactor = override.emissiveFactor; hasPBR = true; }
+          if (hasPBR) {
+            gltfPBR.set(idx, pbr);
+          }
         }
       }
       // Fallback doubleSided from any face
@@ -124,12 +161,19 @@ export class GodotBridge extends EventEmitter {
 
       const faces: any[] = [];
       const textureIdSet = new Set<string>();
-      const ZERO = '00000000-0000-0000-0000-000000000000';
 
       // Resolve all 8 potential faces; each inherits from defaultTexture for unset fields
       for (let i = 0; i < 8; i++) {
         const face = te.faces[i] ?? te.defaultTexture;
-        const textureId = face.textureID?.toString() || '';
+        const pbr = gltfPBR.get(i);
+
+        // PBR base color texture overrides legacy textureId when present
+        let textureId: string;
+        if (pbr?.baseColorTextureId) {
+          textureId = pbr.baseColorTextureId;
+        } else {
+          textureId = face.textureID?.toString() || '';
+        }
         if (!textureId || textureId === ZERO) continue;
 
         const rgba = face.rgba;
@@ -137,7 +181,7 @@ export class GodotBridge extends EventEmitter {
           ? [rgba.getRed(), rgba.getGreen(), rgba.getBlue(), rgba.getAlpha()]
           : [1, 1, 1, 1];
 
-        faces.push({
+        const faceData: any = {
           index: i,
           textureId,
           color,
@@ -150,8 +194,32 @@ export class GodotBridge extends EventEmitter {
           offsetU: face.offsetU ?? 0,
           offsetV: face.offsetV ?? 0,
           rotation: face.rotation ?? 0,
-        });
+        };
         textureIdSet.add(textureId);
+
+        // Add PBR fields when present
+        if (pbr) {
+          faceData.isPBR = true;
+          this.pbrFaceCount++;
+          if (pbr.normalTextureId) {
+            faceData.normalTextureId = pbr.normalTextureId;
+            textureIdSet.add(pbr.normalTextureId);
+          }
+          if (pbr.ormTextureId) {
+            faceData.ormTextureId = pbr.ormTextureId;
+            textureIdSet.add(pbr.ormTextureId);
+          }
+          if (pbr.emissiveTextureId) {
+            faceData.emissiveTextureId = pbr.emissiveTextureId;
+            textureIdSet.add(pbr.emissiveTextureId);
+          }
+          if (pbr.metallicFactor !== undefined) faceData.metallicFactor = pbr.metallicFactor;
+          if (pbr.roughnessFactor !== undefined) faceData.roughnessFactor = pbr.roughnessFactor;
+          if (pbr.emissiveFactor) faceData.emissiveFactor = pbr.emissiveFactor;
+          if (pbr.baseColor) faceData.pbrBaseColor = pbr.baseColor;
+        }
+
+        faces.push(faceData);
       }
 
       if (faces.length === 0) return undefined;
@@ -295,6 +363,11 @@ export class GodotBridge extends EventEmitter {
       this.queueAssetReady({ type: 'mesh_ready', meshId, path: fwdPath });
     });
 
+    // Init material fetch queue (PBR material assets → texture UUIDs + factors)
+    this.materialFetchQueue = new MaterialFetchQueue(this.bot, (materialUuid, data) => {
+      this.handleMaterialReady(materialUuid, data);
+    });
+
     // Send initial snapshot and subscribe to events
     this.sendInitialSnapshot();
     this.subscribeToEvents();
@@ -373,11 +446,176 @@ export class GodotBridge extends EventEmitter {
     if (sculptInfo && this.sculptFetchQueue) {
       this.sculptFetchQueue.request(sculptInfo.textureUuid, sculptInfo.sculptType, obj.ID);
     }
-    if (texInfo && this.textureFetchQueue) {
-      for (const tid of texInfo.textureIds) {
-        this.textureFetchQueue.request(tid, obj.ID);
+    // Collect face indices covered by renderMaterialData — skip legacy textures for these
+    const rmd = obj.extraParams?.renderMaterialData;
+    const materialFaceIndices = new Set<number>();
+    if (rmd && rmd.params && rmd.params.length > 0) {
+      for (const param of rmd.params) {
+        const matUuid = param.textureUUID?.toString();
+        if (matUuid && matUuid !== '00000000-0000-0000-0000-000000000000') {
+          materialFaceIndices.add(param.textureIndex);
+        }
       }
     }
+
+    if (texInfo && this.textureFetchQueue) {
+      // Only queue legacy textures for faces NOT covered by material assets
+      for (const face of texInfo.faces) {
+        if (materialFaceIndices.has(face.index)) continue;
+        if (face.textureId) {
+          this.textureFetchQueue.request(face.textureId, obj.ID);
+        }
+        // Also queue PBR textures from inline overrides (not from renderMaterialData)
+        if (face.normalTextureId) this.textureFetchQueue.request(face.normalTextureId, obj.ID);
+        if (face.ormTextureId) this.textureFetchQueue.request(face.ormTextureId, obj.ID);
+        if (face.emissiveTextureId) this.textureFetchQueue.request(face.emissiveTextureId, obj.ID);
+      }
+    }
+
+    // Queue material asset fetches for PBR faces via renderMaterialData
+    if (materialFaceIndices.size > 0 && this.materialFetchQueue) {
+      const te = obj.TextureEntry;
+      const overrides = te?.gltfMaterialOverrides;
+      for (const param of rmd!.params) {
+        const matUuid = param.textureUUID?.toString();
+        if (!matUuid || matUuid === '00000000-0000-0000-0000-000000000000') continue;
+        const faceIndex = param.textureIndex;
+
+        // Get legacy face data for this face (used as fallback color/UV)
+        const face = te?.faces?.[faceIndex] ?? te?.defaultTexture;
+
+        // Get inline gltfMaterialOverride for this face (layered on top of material asset)
+        const inlineOverride = overrides?.get(faceIndex) ?? null;
+
+        // Record which faces need this material
+        let list = this.materialToFaces.get(matUuid);
+        if (!list) {
+          list = [];
+          this.materialToFaces.set(matUuid, list);
+        }
+        list.push({ localId: obj.ID, faceIndex, face, inlineOverride });
+
+        this.materialFetchQueue.request(matUuid);
+      }
+    }
+  }
+
+  /** Handle a material asset being fetched and parsed — send face updates to Godot */
+  private handleMaterialReady(materialUuid: string, data: MaterialOverrideData): void {
+    const entries = this.materialToFaces.get(materialUuid);
+    if (!entries || entries.length === 0) return;
+
+    // Group face updates by localId so we send one message per object
+    const byObject = new Map<number, any[]>();
+    const ZERO = '00000000-0000-0000-0000-000000000000';
+
+    for (const { localId, faceIndex, face, inlineOverride } of entries) {
+      if (!this.trackedObjects.has(localId)) continue;
+
+      // Layer: material asset (base) → inline gltfMaterialOverride (on top)
+      // Start with material asset data, then override with inline fields
+      let baseColorTextureId = data.baseColorTextureId;
+      let normalTextureId = data.normalTextureId;
+      let metallicFactor = data.metallicFactor;
+      let roughnessFactor = data.roughnessFactor;
+      let emissiveFactor = data.emissiveFactor;
+      let baseColor = data.baseColor;
+      let alphaMode = data.alphaMode;
+      let alphaCutoff = data.alphaCutoff;
+      let doubleSided = data.doubleSided;
+
+      // Texture transforms: material asset base, then inline override on top
+      let baseColorTransform: TextureTransform | null = data.textureTransforms?.[0] ?? null;
+
+      if (inlineOverride) {
+        // Inline override replaces specific fields from the material asset
+        if (inlineOverride.textures && Array.isArray(inlineOverride.textures)) {
+          const t0 = inlineOverride.textures[0]?.toString();
+          const t1 = inlineOverride.textures[1]?.toString();
+          if (t0 && t0 !== ZERO) baseColorTextureId = t0;
+          if (t1 && t1 !== ZERO) normalTextureId = t1;
+        }
+        if (inlineOverride.baseColor) baseColor = inlineOverride.baseColor;
+        if (inlineOverride.metallicFactor !== undefined) metallicFactor = inlineOverride.metallicFactor;
+        if (inlineOverride.roughnessFactor !== undefined) roughnessFactor = inlineOverride.roughnessFactor;
+        if (inlineOverride.emissiveFactor) emissiveFactor = inlineOverride.emissiveFactor;
+        if (inlineOverride.alphaMode !== undefined) alphaMode = inlineOverride.alphaMode;
+        if (inlineOverride.alphaCutoff !== undefined) alphaCutoff = inlineOverride.alphaCutoff;
+        if (inlineOverride.doubleSided !== undefined) doubleSided = inlineOverride.doubleSided;
+        // Inline override texture transforms replace material asset transforms
+        if (inlineOverride.textureTransforms && Array.isArray(inlineOverride.textureTransforms)) {
+          if (inlineOverride.textureTransforms[0]) {
+            baseColorTransform = inlineOverride.textureTransforms[0];
+          }
+        }
+      }
+
+      // Use PBR texture transform if available, else fall back to legacy UV params
+      // glTF KHR_texture_transform: scale = repeat, offset = offset, rotation = rotation
+      const repeatU = baseColorTransform?.scale?.[0] ?? face?.repeatU ?? 1;
+      const repeatV = baseColorTransform?.scale?.[1] ?? face?.repeatV ?? 1;
+      const offsetU = baseColorTransform?.offset?.[0] ?? face?.offsetU ?? 0;
+      const offsetV = baseColorTransform?.offset?.[1] ?? face?.offsetV ?? 0;
+      const rotation = baseColorTransform?.rotation ?? face?.rotation ?? 0;
+
+      // Build face data from merged result + legacy face fallback
+      const rgba = face?.rgba;
+      const legacyColor = rgba
+        ? [rgba.getRed(), rgba.getGreen(), rgba.getBlue(), rgba.getAlpha()]
+        : [1, 1, 1, 1];
+
+      const faceData: any = {
+        index: faceIndex,
+        textureId: baseColorTextureId || face?.textureID?.toString() || '',
+        color: legacyColor,
+        fullBright: face ? (face.material & 0x20) !== 0 : false,
+        doubleSided: doubleSided ?? false,
+        alphaMode: alphaMode ?? -1,
+        alphaCutoff: alphaCutoff ?? 0.5,
+        repeatU,
+        repeatV,
+        offsetU,
+        offsetV,
+        rotation,
+        isPBR: true,
+      };
+
+      // PBR-specific fields
+      if (normalTextureId) faceData.normalTextureId = normalTextureId;
+      if (metallicFactor !== undefined) faceData.metallicFactor = metallicFactor;
+      if (roughnessFactor !== undefined) faceData.roughnessFactor = roughnessFactor;
+      if (emissiveFactor) faceData.emissiveFactor = emissiveFactor;
+      if (baseColor) faceData.pbrBaseColor = baseColor;
+
+      this.pbrFaceCount++;
+
+      // Queue textures for fetching (base color + normal only, per plan)
+      if (baseColorTextureId && this.textureFetchQueue) {
+        this.textureFetchQueue.request(baseColorTextureId, localId);
+      }
+      if (normalTextureId && this.textureFetchQueue) {
+        this.textureFetchQueue.request(normalTextureId, localId);
+      }
+
+      let faces = byObject.get(localId);
+      if (!faces) {
+        faces = [];
+        byObject.set(localId, faces);
+      }
+      faces.push(faceData);
+    }
+
+    // Send face updates to Godot
+    for (const [localId, faces] of byObject) {
+      this.send({
+        type: 'object_update_faces',
+        localId,
+        faces,
+      });
+    }
+
+    // Clean up — this material is fully processed
+    this.materialToFaces.delete(materialUuid);
   }
 
   /** Recursively send children of a root/parent object */
@@ -705,11 +943,12 @@ export class GodotBridge extends EventEmitter {
         const tq = this.textureFetchQueue;
         const mq = this.meshFetchQueue;
         const sq = this.sculptFetchQueue;
+        const matq = this.materialFetchQueue;
         const gs = this.lastGodotStats;
         const godotStr = gs
           ? ` | godot(${gs.fps?.toFixed(0) ?? '?'}fps budget:${gs.budgetElapsed?.toFixed(1) ?? '?'}/${gs.budgetAvail?.toFixed(1) ?? '?'}/${gs.budgetUsed?.toFixed(1) ?? '?'}ms el/av/us): tex: w=${gs.texWorkers}(${gs.texReady ?? '?'}rdy) q=${gs.texQueue} done=${gs.texDone} cached=${gs.texCached} fail=${gs.texFailed} pending=${gs.texPending} [${gs.texTiming ?? '?'}] | mesh: w=${gs.meshWorkers}(${gs.meshReady ?? '?'}rdy) q=${gs.meshQueue} done=${gs.meshDone} cached=${gs.meshCached} fail=${gs.meshFailed} pending=${gs.meshPending} | mats=${gs.materials}(${gs.materialReuse ?? '?'}reuse) opaque=${gs.texOpaque ?? '?'}`
           : '';
-        console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | mesh: q=${mq?.queueDepth ?? '?'} active=${mq?.activeCount ?? '?'} done=${mq?.notifiedCount ?? '?'} fail=${mq?.failedCount ?? '?'} | sculpt: q=${sq?.queueDepth ?? '?'} active=${sq?.activeCount ?? '?'} done=${sq?.notifiedCount ?? '?'} fail=${sq?.failedCount ?? '?'}${godotStr}`);
+        console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | mesh: q=${mq?.queueDepth ?? '?'} active=${mq?.activeCount ?? '?'} done=${mq?.notifiedCount ?? '?'} fail=${mq?.failedCount ?? '?'} | sculpt: q=${sq?.queueDepth ?? '?'} active=${sq?.activeCount ?? '?'} done=${sq?.notifiedCount ?? '?'} fail=${sq?.failedCount ?? '?'} | mat: q=${matq?.queueDepth ?? '?'} active=${matq?.activeCount ?? '?'} done=${matq?.cachedCount ?? '?'} fail=${matq?.failedCount ?? '?'} | pbr: ${this.pbrFaceCount} faces${godotStr}`);
       }
     }, 2000);
   }
@@ -891,6 +1130,11 @@ export class GodotBridge extends EventEmitter {
       this.sculptFetchQueue.destroy();
       this.sculptFetchQueue = null;
     }
+    if (this.materialFetchQueue) {
+      this.materialFetchQueue.destroy();
+      this.materialFetchQueue = null;
+    }
+    this.materialToFaces.clear();
 
     // Close WebSocket
     if (this.ws) {

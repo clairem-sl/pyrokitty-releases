@@ -59,9 +59,6 @@
 // Constants
 //
 
-const F32 FLY_TIME = 0.5f;
-const F32 FLY_FRAMES = 4;
-
 const F32 NUDGE_TIME = 0.25f;  // in seconds
 const S32 NUDGE_FRAMES = 2;
 const F32 ORBIT_NUDGE_RATE = 0.05f;  // fraction of normal speed
@@ -91,14 +88,10 @@ LLViewerInput gViewerInput;
 
 bool agent_jump( EKeystate s )
 {
-    static bool first_fly_attempt(true);
     if (KEYSTATE_UP == s)
     {
-        first_fly_attempt = true;
         return true;
     }
-    F32 time = gKeyboard->getCurKeyElapsedTime();
-    S32 frame_count = ll_round(gKeyboard->getCurKeyElapsedFrameCount());
 
     // <FS:Ansariel> Chalice Yao's crouch toggle
     if (gSavedPerAccountSettings.getBOOL("FSCrouchToggleStatus"))
@@ -107,19 +100,8 @@ bool agent_jump( EKeystate s )
     }
     // </FS:Ansariel>
 
-    if( time < FLY_TIME
-        || frame_count <= FLY_FRAMES
-        || gAgent.upGrabbed()
-        || !gSavedSettings.getBOOL("AutomaticFly"))
-    {
-        gAgent.moveUp(1);
-    }
-    else
-    {
-        gAgent.setFlying(true, first_fly_attempt);
-        first_fly_attempt = false;
-        gAgent.moveUp(1);
-    }
+    // <FS:Pyrokitty> No AutomaticFly — jump never triggers flight
+    gAgent.moveUp(1);
     return true;
 }
 

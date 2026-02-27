@@ -202,20 +202,20 @@ func _update_camera() -> void:
 
 ## Check if a screen-space click hits the self avatar's mesh AABB
 func _is_click_on_self_avatar(screen_pos: Vector2) -> bool:
-	if scene_manager == null or scene_manager.self_avatar_id.is_empty():
+	if scene_manager == null:
 		return false
-	var mi: MeshInstance3D = scene_manager.avatars.get(scene_manager.self_avatar_id)
-	if mi == null or mi.mesh == null:
+	var data: Dictionary = scene_manager.get_self_avatar_click_data()
+	if data.is_empty():
 		return false
-	if is_position_behind(mi.global_position):
+	if is_position_behind(data["position"]):
 		return false
 	# Ray from camera through click position, tested against mesh AABB in local space
 	var ray_from := project_ray_origin(screen_pos)
 	var ray_dir := project_ray_normal(screen_pos)
-	var inv := mi.global_transform.affine_inverse()
+	var inv: Transform3D = (data["transform"] as Transform3D).affine_inverse()
 	var local_from := inv * ray_from
 	var local_dir := (inv.basis * ray_dir).normalized()
-	var aabb := mi.mesh.get_aabb().grow(0.3)  # slightly larger for easier clicking
+	var aabb: AABB = (data["aabb"] as AABB).grow(0.3)  # slightly larger for easier clicking
 	return aabb.intersects_ray(local_from, local_dir) != null
 
 

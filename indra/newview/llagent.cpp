@@ -2580,22 +2580,7 @@ void LLAgent::propagate(const F32 dt)
         }
     }
 
-    // handle auto-land behavior
-    if (isAgentAvatarValid())
-    {
-        bool in_air = gAgentAvatarp->mInAir;
-        LLVector3 land_vel = getVelocity();
-        land_vel.mV[VZ] = 0.f;
-
-        if (!in_air
-            && gAgentCamera.getUpKey() < 0
-            && land_vel.magVecSquared() < MAX_VELOCITY_AUTO_LAND_SQUARED
-            && gSavedSettings.getBOOL("AutomaticFly"))
-        {
-            // land automatically
-            setFlying(false);
-        }
-    }
+    // <FS:Pyrokitty> AutomaticFly auto-land removed — fly toggled explicitly via F key
 
     gAgentCamera.clearGeneralKeys();
 }

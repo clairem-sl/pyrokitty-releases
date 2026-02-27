@@ -7,7 +7,7 @@
 //
 
 // Bridge platform
-string BRIDGE_VERSION = "2.29"; // This should match fslslbridge.cpp
+string BRIDGE_VERSION = "2.30"; // This should match fslslbridge.cpp
 string gLatestURL;
 integer gViewerIsFirestorm;
 integer gTryHandshakeOnce = TRUE;
@@ -291,6 +291,16 @@ default
             else if (~level & edge & (CONTROL_FWD | CONTROL_BACK | CONTROL_LEFT | CONTROL_RIGHT | CONTROL_UP | CONTROL_DOWN))
             {
                 flightHover(TRUE);
+            }
+        }
+
+        // Jump cancel: kill vertical velocity when crouching while airborne
+        if ((level & edge & CONTROL_DOWN) && (llGetAgentInfo(gOwner) & AGENT_IN_AIR))
+        {
+            vector vel = llGetVel();
+            if (vel.z > 0.5)
+            {
+                llSetVelocity(<vel.x, vel.y, 0.0>, FALSE);
             }
         }
 

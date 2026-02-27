@@ -1,20 +1,53 @@
 extends Node3D
 
-## Manages in-world objects and avatars as MeshInstance3D boxes.
+## Manages in-world objects and avatars as lightweight RenderingServer RIDs.
 ## Coordinate conversion: SL (X=East, Y=North, Z=Up) -> Godot (X=Right, Y=Up, Z=-Forward)
 ##   Position: (sl.x, sl.z, -sl.y)
 ##   Quaternion: (sl.x, sl.z, -sl.y, sl.w)
 
 signal self_avatar_moved(pos: Vector3)
 
+## Lightweight RefCounted wrapper around a RenderingServer instance RID.
+## Replaces MeshInstance3D nodes to eliminate scene tree overhead.
+class RSInstance extends RefCounted:
+	var rid: RID
+	var pos: Vector3 = Vector3.ZERO
+	var rot: Quaternion = Quaternion.IDENTITY
+	var scl: Vector3 = Vector3.ONE
+	var mesh: Mesh = null
+
+	func _init(scenario: RID) -> void:
+		rid = RenderingServer.instance_create()
+		RenderingServer.instance_set_scenario(rid, scenario)
+		# Fade out 96-128m, invisible beyond 128m
+		RenderingServer.instance_geometry_set_visibility_range(rid, 0.0, 128.0, 0.0, 32.0, RenderingServer.VISIBILITY_RANGE_FADE_SELF)
+
+	func set_mesh(m: Mesh) -> void:
+		mesh = m
+		RenderingServer.instance_set_base(rid, m.get_rid())
+
+	func push_transform() -> void:
+		RenderingServer.instance_set_transform(rid, Transform3D(Basis(rot) * Basis.from_scale(scl), pos))
+
+	func set_material_override(mat: Material) -> void:
+		if mat == null:
+			RenderingServer.instance_geometry_set_material_override(rid, RID())
+		else:
+			RenderingServer.instance_geometry_set_material_override(rid, mat.get_rid())
+
+	func set_surface_material(idx: int, mat: Material) -> void:
+		RenderingServer.instance_set_surface_override_material(rid, idx, mat.get_rid())
+
+	func destroy() -> void:
+		RenderingServer.free_rid(rid)
+
 class AsyncResult extends RefCounted:
 	var data       # Worker writes Image (texture) here
-	var gltf_doc: GLTFDocument   # Worker writes parsed GLTF doc here (mesh pipeline)
 	var gltf_state: GLTFState    # Worker writes parsed GLTF state here (mesh pipeline)
 	var error: bool = false
 
-var objects: Dictionary = {}   # localId (int) -> MeshInstance3D
-var avatars: Dictionary = {}   # avatarId (String) -> MeshInstance3D
+var objects: Dictionary = {}   # localId (int) -> RSInstance
+var avatars: Dictionary = {}   # avatarId (String) -> RSInstance
 var self_avatar_id: String = ""
 
 # Avatar interpolation state
@@ -73,14 +106,22 @@ var _budget_samples: int = 0
 var _budget_total_ms: float = 0.0
 var _budget_used_ms: float = 0.0
 var _budget_elapsed_ms: float = 0.0
+# Per-operation main-thread timing (accumulated between stats reports)
+var _fin_tex_create_ms: float = 0.0    # ImageTexture.create_from_image
+var _fin_tex_apply_ms: float = 0.0     # _apply_texture_to_pending
+var _fin_tex_count: int = 0
+var _fin_mesh_extract_ms: float = 0.0  # ImporterMesh.get_mesh
+var _fin_mesh_apply_ms: float = 0.0    # _apply_mesh_to_pending
+var _fin_mesh_count: int = 0
 const TARGET_FRAME_MS: float = 33.3          # 30fps floor — finalize uses whatever is left
-const MIN_FINALIZE_MS: float = 2.0            # always do at least this much work per frame
+const MIN_FINALIZE_MS: float = 2.0            # minimum finalize budget when on-target
+const OVERBUDGET_FINALIZE_MS: float = 8.0     # more aggressive when already over budget
 
 # Async mesh loading (WorkerThreadPool)
 var _mesh_tasks: Dictionary = {}         # task_id (int) -> { meshId: String, result: AsyncResult, path: String }
 var _mesh_in_flight: Dictionary = {}     # meshId (String) -> true (dedup)
 var _mesh_queue: Array = []              # queued { meshId, path } waiting to be submitted
-const MESH_MAX_IN_FLIGHT: int = 6              # max concurrent worker tasks
+const MESH_MAX_IN_FLIGHT: int = 16             # max concurrent worker tasks
 
 # Reverse texture index: textureId -> Array[{ localId, faceInfo }]
 var _pending_by_texture: Dictionary = {}
@@ -95,8 +136,19 @@ var _material_lookups: int = 0   # total calls to _get_or_create_material (lifet
 # Placeholder material cache: "colorhex_fb_ds" -> StandardMaterial3D
 var _placeholder_cache: Dictionary = {}
 
+# Cached scenario RID for RSInstance creation
+var _scenario: RID
+
 func _exit_tree() -> void:
 	_shutting_down = true
+
+	# Destroy all RSInstance RIDs (objects + avatars)
+	for local_id: int in objects:
+		objects[local_id].destroy()
+	objects.clear()
+	for avatar_id: String in avatars:
+		avatars[avatar_id].destroy()
+	avatars.clear()
 
 	# Wait for all dedicated texture threads to finish
 	for t: Thread in _texture_threads:
@@ -113,6 +165,7 @@ func _exit_tree() -> void:
 	_mesh_in_flight.clear()
 
 func _ready() -> void:
+	_scenario = get_world_3d().scenario
 	print("[SceneManager] CPU threads: %d, texture threads: %d" % [OS.get_processor_count(), TEXTURE_THREAD_COUNT])
 	_start_texture_threads()
 	# Create shared meshes
@@ -160,14 +213,14 @@ func handle_object_create(msg: Dictionary) -> void:
 		_cleanup_object(local_id)
 
 	var mesh_id: String = msg.get("meshId", "")
-	var mesh_instance := MeshInstance3D.new()
+	var rsi := RSInstance.new(_scenario)
 
 	if not mesh_id.is_empty() and mesh_cache.has(mesh_id):
 		# Real mesh already loaded — use it
-		mesh_instance.mesh = mesh_cache[mesh_id]
+		rsi.set_mesh(mesh_cache[mesh_id])
 	else:
 		# Box placeholder
-		mesh_instance.mesh = object_mesh
+		rsi.set_mesh(object_mesh)
 		if not mesh_id.is_empty() and not mesh_load_failed.has(mesh_id):
 			pending_meshes[local_id] = mesh_id
 			if not _pending_by_mesh.has(mesh_id):
@@ -178,10 +231,10 @@ func handle_object_create(msg: Dictionary) -> void:
 	var faces: Array = msg.get("faces", [])
 	if faces.size() > 0:
 		object_faces[local_id] = faces
-		_apply_face_materials(mesh_instance, local_id, faces)
+		_apply_face_materials(rsi, local_id, faces)
 	else:
 		# No texture info — use default gray
-		mesh_instance.material_override = object_material
+		rsi.set_material_override(object_material)
 
 	# Apply transform
 	var pos: Array = msg.get("position", [0, 0, 0])
@@ -192,7 +245,7 @@ func handle_object_create(msg: Dictionary) -> void:
 	var godot_rot := sl_to_godot_quat(rot)
 	var godot_scale := sl_to_godot_scale(scl)
 
-	mesh_instance.scale = godot_scale  # SL prims have independent scale — no compensation
+	rsi.scl = godot_scale  # SL prims have independent scale — no compensation
 
 	if parent_id > 0:
 		# Child prim — store relative offset for linkset movement
@@ -206,31 +259,32 @@ func handle_object_create(msg: Dictionary) -> void:
 
 		if objects.has(parent_id):
 			# Parent exists — compute world position from parent + offset
-			var parent_node: MeshInstance3D = objects[parent_id]
-			mesh_instance.position = parent_node.position + parent_node.quaternion * godot_pos
-			mesh_instance.quaternion = parent_node.quaternion * godot_rot
+			var parent_rsi: RSInstance = objects[parent_id]
+			rsi.pos = parent_rsi.pos + parent_rsi.rot * godot_pos
+			rsi.rot = parent_rsi.rot * godot_rot
 		else:
 			# Parent hasn't arrived — use offset as-is (will be corrected when parent arrives)
-			mesh_instance.position = godot_pos
-			mesh_instance.quaternion = godot_rot
+			rsi.pos = godot_pos
+			rsi.rot = godot_rot
 			if not pending_children.has(parent_id):
 				pending_children[parent_id] = []
 			pending_children[parent_id].append(local_id)
 	else:
 		# Root prim — position is world absolute
-		mesh_instance.position = godot_pos
-		mesh_instance.quaternion = godot_rot
+		rsi.pos = godot_pos
+		rsi.rot = godot_rot
 
-	add_child(mesh_instance)
-	objects[local_id] = mesh_instance
+	rsi.push_transform()
+	objects[local_id] = rsi
 
 	# If this is a root and we have pending children, fix their world positions
 	if parent_id == 0 and pending_children.has(local_id):
 		for child_id: int in pending_children[local_id]:
 			if objects.has(child_id) and child_offset_pos.has(child_id):
-				var child_node: MeshInstance3D = objects[child_id]
-				child_node.position = mesh_instance.position + mesh_instance.quaternion * child_offset_pos[child_id]
-				child_node.quaternion = mesh_instance.quaternion * child_offset_rot[child_id]
+				var child_rsi: RSInstance = objects[child_id]
+				child_rsi.pos = rsi.pos + rsi.rot * child_offset_pos[child_id]
+				child_rsi.rot = rsi.rot * child_offset_rot[child_id]
+				child_rsi.push_transform()
 		pending_children.erase(local_id)
 
 
@@ -241,8 +295,8 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 		if local_id == 0:
 			continue
 
-		var mesh_instance: MeshInstance3D = objects.get(local_id)
-		if mesh_instance == null:
+		var rsi: RSInstance = objects.get(local_id)
+		if rsi == null:
 			continue
 
 		if object_parent.has(local_id):
@@ -250,25 +304,27 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 			if obj.has("position"):
 				var new_offset := sl_to_godot_pos(obj["position"])
 				child_offset_pos[local_id] = new_offset
-				var parent_node: MeshInstance3D = objects.get(object_parent[local_id])
-				if parent_node:
-					mesh_instance.position = parent_node.position + parent_node.quaternion * new_offset
+				var parent_rsi: RSInstance = objects.get(object_parent[local_id])
+				if parent_rsi:
+					rsi.pos = parent_rsi.pos + parent_rsi.rot * new_offset
 			if obj.has("rotation"):
 				var new_rot := sl_to_godot_quat(obj["rotation"])
 				child_offset_rot[local_id] = new_rot
-				var parent_node: MeshInstance3D = objects.get(object_parent[local_id])
-				if parent_node:
-					mesh_instance.quaternion = parent_node.quaternion * new_rot
+				var parent_rsi: RSInstance = objects.get(object_parent[local_id])
+				if parent_rsi:
+					rsi.rot = parent_rsi.rot * new_rot
 			if obj.has("scale"):
-				mesh_instance.scale = sl_to_godot_scale(obj["scale"])
+				rsi.scl = sl_to_godot_scale(obj["scale"])
+			rsi.push_transform()
 		else:
 			# Root prim — positions are world absolute
 			if obj.has("position"):
-				mesh_instance.position = sl_to_godot_pos(obj["position"])
+				rsi.pos = sl_to_godot_pos(obj["position"])
 			if obj.has("rotation"):
-				mesh_instance.quaternion = sl_to_godot_quat(obj["rotation"])
+				rsi.rot = sl_to_godot_quat(obj["rotation"])
 			if obj.has("scale"):
-				mesh_instance.scale = sl_to_godot_scale(obj["scale"])
+				rsi.scl = sl_to_godot_scale(obj["scale"])
+			rsi.push_transform()
 
 			# Propagate root movement to all children
 			if object_children.has(local_id):
@@ -277,14 +333,71 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 
 ## Recompute world positions of all children from parent's current transform
 func _update_children_transforms(parent_id: int) -> void:
-	var parent_node: MeshInstance3D = objects.get(parent_id)
-	if parent_node == null:
+	var parent_rsi: RSInstance = objects.get(parent_id)
+	if parent_rsi == null:
 		return
 	for child_id: int in object_children[parent_id]:
 		if objects.has(child_id) and child_offset_pos.has(child_id):
-			var child_node: MeshInstance3D = objects[child_id]
-			child_node.position = parent_node.position + parent_node.quaternion * child_offset_pos[child_id]
-			child_node.quaternion = parent_node.quaternion * child_offset_rot[child_id]
+			var child_rsi: RSInstance = objects[child_id]
+			child_rsi.pos = parent_rsi.pos + parent_rsi.rot * child_offset_pos[child_id]
+			child_rsi.rot = parent_rsi.rot * child_offset_rot[child_id]
+			child_rsi.push_transform()
+
+
+## Handle face updates from material asset fetch (PBR materials resolved after initial object_create)
+func handle_update_faces(msg: Dictionary) -> void:
+	var local_id: int = int(msg.get("localId", 0))
+	var rsi: RSInstance = objects.get(local_id)
+	if rsi == null or rsi.mesh == null:
+		return
+	var faces: Array = msg.get("faces", [])
+	if faces.size() == 0:
+		return
+
+	# Purge stale _pending_by_texture entries for faces being replaced.
+	# Without this, the old legacy texture arriving later would overwrite PBR.
+	var replaced_indices: Dictionary = {}  # face index → true
+	for new_face: Dictionary in faces:
+		replaced_indices[int(new_face.get("index", -1))] = true
+	var tex_keys_to_check: Array = _pending_by_texture.keys()
+	for tid: String in tex_keys_to_check:
+		var entries: Array = _pending_by_texture[tid]
+		var filtered: Array = []
+		for entry: Dictionary in entries:
+			if entry["localId"] == local_id and replaced_indices.has(entry["faceInfo"]["faceIndex"]):
+				continue  # drop stale entry
+			filtered.append(entry)
+		if filtered.size() == 0:
+			_pending_by_texture.erase(tid)
+		else:
+			_pending_by_texture[tid] = filtered
+
+	# Also remove from per-object pending list
+	if pending_textures.has(local_id):
+		var pt: Array = pending_textures[local_id]
+		pt = pt.filter(func(fi: Dictionary) -> bool: return not replaced_indices.has(fi["faceIndex"]))
+		if pt.size() == 0:
+			pending_textures.erase(local_id)
+		else:
+			pending_textures[local_id] = pt
+
+	# Merge into existing face data so texture_ready callbacks still work
+	if not object_faces.has(local_id):
+		object_faces[local_id] = faces
+	else:
+		# Update/add faces by index
+		var existing: Array = object_faces[local_id]
+		for new_face: Dictionary in faces:
+			var idx: int = int(new_face.get("index", -1))
+			var found := false
+			for i: int in range(existing.size()):
+				if int(existing[i].get("index", -1)) == idx:
+					existing[i] = new_face
+					found = true
+					break
+			if not found:
+				existing.append(new_face)
+	_apply_face_materials(rsi, local_id, object_faces[local_id])
 
 
 func handle_object_kill(msg: Dictionary) -> void:
@@ -307,9 +420,9 @@ func _cleanup_object(local_id: int) -> void:
 			object_children[pid].erase(local_id)
 		object_parent.erase(local_id)
 
-	# Free the node
+	# Free the RenderingServer instance
 	if objects.has(local_id):
-		objects[local_id].queue_free()
+		objects[local_id].destroy()
 		objects.erase(local_id)
 
 	# Clean up all tracking dicts
@@ -361,15 +474,15 @@ func _apply_mesh_to_pending(mesh_id: String) -> void:
 	_pending_by_mesh.erase(mesh_id)
 	for local_id: int in local_ids:
 		pending_meshes.erase(local_id)
-		var mi: MeshInstance3D = objects.get(local_id)
-		if mi != null:
-			mi.mesh = loaded_mesh
+		var rsi: RSInstance = objects.get(local_id)
+		if rsi != null:
+			rsi.set_mesh(loaded_mesh)
 			# Reapply per-face materials now that we have real mesh with proper surfaces
 			if object_faces.has(local_id):
-				mi.material_override = null
-				_apply_face_materials(mi, local_id, object_faces[local_id])
-			elif mi.material_override == object_material:
-				mi.material_override = null
+				rsi.set_material_override(null)
+				_apply_face_materials(rsi, local_id, object_faces[local_id])
+			else:
+				rsi.set_material_override(null)
 
 
 ## Submit queued meshes to WorkerThreadPool (throttled)
@@ -390,21 +503,11 @@ func _submit_mesh_tasks() -> void:
 			if err != OK or _shutting_down:
 				result.error = true
 				return
-			# Store parsed doc+state; generate_scene must run on main thread (creates Nodes)
-			result.gltf_doc = doc
+			# Store parsed state; mesh extraction runs on main thread (creates RS resources)
 			result.gltf_state = state
 		)
 		_mesh_tasks[task_id] = { "meshId": mesh_id, "result": result, "path": glb_path }
 
-
-func _find_mesh_in_tree(node: Node) -> Mesh:
-	if node is MeshInstance3D:
-		return (node as MeshInstance3D).mesh
-	for child in node.get_children():
-		var m: Mesh = _find_mesh_in_tree(child)
-		if m != null:
-			return m
-	return null
 
 
 # ─── Texture Pipeline ────────────────────────────────
@@ -553,7 +656,9 @@ func _load_bctex(bctex_path: String) -> Image:
 	return Image.create_from_data(width, height, has_mipmaps, godot_format, data)
 
 
-## Apply a cached texture to all pending objects waiting for it (O(1) via reverse index)
+## Apply a cached texture to all pending objects waiting for it (O(1) via reverse index).
+## For PBR faces, this may be called multiple times as albedo/normal/ORM/emissive arrive.
+## Each call creates a material with all currently-cached textures (progressive refinement).
 func _apply_texture_to_pending(texture_id: String) -> void:
 	if not _pending_by_texture.has(texture_id):
 		return
@@ -564,23 +669,62 @@ func _apply_texture_to_pending(texture_id: String) -> void:
 	for entry: Dictionary in entries:
 		var local_id: int = entry["localId"]
 		var face_info: Dictionary = entry["faceInfo"]
-		var mi: MeshInstance3D = objects.get(local_id)
-		if mi != null:
-			var face_idx: int = face_info["faceIndex"]
-			var uv: Dictionary = face_info.get("uv", {})
-			var am: int = int(face_info.get("alphaMode", -1))
-			var ac: float = float(face_info.get("alphaCutoff", 0.5))
-			mi.set_surface_override_material(face_idx, _get_or_create_material(
-				texture_id, face_info["color"], face_info["fullBright"], face_info["doubleSided"], uv, am, ac))
+		var rsi: RSInstance = objects.get(local_id)
+		if rsi != null:
+			var albedo_id: String = face_info["textureId"]
+			# Only apply material once albedo is cached (minimum requirement)
+			if texture_cache.has(albedo_id):
+				var face_idx: int = face_info["faceIndex"]
+				var uv: Dictionary = face_info.get("uv", {})
+				var am: int = int(face_info.get("alphaMode", -1))
+				var ac: float = float(face_info.get("alphaCutoff", 0.5))
+				var pbr: Dictionary = face_info.get("pbr", {})
+				rsi.set_surface_material(face_idx, _get_or_create_material(
+					albedo_id, face_info["color"], face_info["fullBright"],
+					face_info["doubleSided"], uv, am, ac, pbr))
 
-		# Remove from per-object pending list
-		if pending_textures.has(local_id):
+		# Check if this face still has uncached textures
+		var still_pending := false
+		var pbr_info: Dictionary = face_info.get("pbr", {})
+		for tid: String in _get_face_texture_ids(face_info["textureId"], pbr_info):
+			if not texture_cache.has(tid) and not texture_load_failed.has(tid):
+				still_pending = true
+				# Re-register under remaining uncached texture IDs
+				if not _pending_by_texture.has(tid):
+					_pending_by_texture[tid] = []
+				# Avoid duplicate entries
+				var already := false
+				for existing: Dictionary in _pending_by_texture[tid]:
+					if existing["localId"] == local_id and existing["faceInfo"]["faceIndex"] == face_info["faceIndex"]:
+						already = true
+						break
+				if not already:
+					_pending_by_texture[tid].append(entry)
+
+		# Remove from per-object pending list only when ALL textures are resolved
+		if not still_pending and pending_textures.has(local_id):
 			var face_list: Array = pending_textures[local_id]
-			face_list = face_list.filter(func(fi: Dictionary) -> bool: return fi["textureId"] != texture_id)
+			var face_idx_to_remove: int = face_info["faceIndex"]
+			face_list = face_list.filter(func(fi: Dictionary) -> bool: return fi["faceIndex"] != face_idx_to_remove)
 			if face_list.size() == 0:
 				pending_textures.erase(local_id)
 			else:
 				pending_textures[local_id] = face_list
+
+
+## Get all texture IDs a face needs (albedo + PBR textures)
+func _get_face_texture_ids(albedo_id: String, pbr: Dictionary) -> Array:
+	var ids: Array = [albedo_id]
+	var nid: String = pbr.get("normalTextureId", "")
+	var oid: String = pbr.get("ormTextureId", "")
+	var eid: String = pbr.get("emissiveTextureId", "")
+	if not nid.is_empty():
+		ids.append(nid)
+	if not oid.is_empty():
+		ids.append(oid)
+	if not eid.is_empty():
+		ids.append(eid)
+	return ids
 
 
 func _process(_delta: float) -> void:
@@ -608,7 +752,9 @@ func _process(_delta: float) -> void:
 	var frame_start_ms := (Time.get_ticks_usec() / 1000.0) - (_delta * 1000.0)
 	var now_ms := Time.get_ticks_usec() / 1000.0
 	var elapsed_ms := now_ms - frame_start_ms
-	var budget_ms := maxf(TARGET_FRAME_MS - elapsed_ms, MIN_FINALIZE_MS)
+	var remaining_ms := TARGET_FRAME_MS - elapsed_ms
+	# When already over budget, be aggressive — frame is slow anyway, finish loading faster
+	var budget_ms := maxf(remaining_ms, OVERBUDGET_FINALIZE_MS if remaining_ms < MIN_FINALIZE_MS else MIN_FINALIZE_MS)
 	# Split: 60% textures, 40% meshes (textures are cheaper per-item)
 	var tex_budget_ms := budget_ms * 0.6 if has_meshes else budget_ms
 	var mesh_budget_ms := budget_ms * 0.4 if has_textures else budget_ms
@@ -634,8 +780,14 @@ func _process(_delta: float) -> void:
 			else:
 				# DXT1 = opaque (no alpha), DXT5 = has alpha channel
 				_texture_opaque[texture_id] = (img.get_format() == Image.FORMAT_DXT1)
+				var _t0 := Time.get_ticks_usec()
 				texture_cache[texture_id] = ImageTexture.create_from_image(img)
+				var _t1 := Time.get_ticks_usec()
 				_apply_texture_to_pending(texture_id)
+				var _t2 := Time.get_ticks_usec()
+				_fin_tex_create_ms += (_t1 - _t0) / 1000.0
+				_fin_tex_apply_ms += (_t2 - _t1) / 1000.0
+				_fin_tex_count += 1
 				_tex_finalized_count += 1
 			processed += 1
 
@@ -654,22 +806,31 @@ func _process(_delta: float) -> void:
 			var mesh_id: String = info["meshId"]
 			var result: AsyncResult = info["result"]
 			_mesh_in_flight.erase(mesh_id)
-			if result.error or result.gltf_doc == null:
+			if result.error or result.gltf_state == null:
 				mesh_load_failed[mesh_id] = true
 			else:
-				# generate_scene + mesh extraction must run on main thread (Node ops)
-				var scene: Node = result.gltf_doc.generate_scene(result.gltf_state)
-				if scene == null:
+				# Extract mesh via ImporterMesh — no Node tree, no queue_free
+				var gltf_meshes: Array = result.gltf_state.get_meshes()
+				if gltf_meshes.is_empty():
 					mesh_load_failed[mesh_id] = true
 				else:
-					var mesh: Mesh = _find_mesh_in_tree(scene)
-					scene.queue_free()
-					if mesh == null:
+					var importer_mesh: ImporterMesh = gltf_meshes[0].mesh
+					if importer_mesh == null:
 						mesh_load_failed[mesh_id] = true
 					else:
-						mesh_cache[mesh_id] = mesh
-						_apply_mesh_to_pending(mesh_id)
-						_mesh_finalized_count += 1
+						var _t0 := Time.get_ticks_usec()
+						var m: Mesh = importer_mesh.get_mesh()
+						var _t1 := Time.get_ticks_usec()
+						if m == null:
+							mesh_load_failed[mesh_id] = true
+						else:
+							mesh_cache[mesh_id] = m
+							_apply_mesh_to_pending(mesh_id)
+							var _t2 := Time.get_ticks_usec()
+							_fin_mesh_extract_ms += (_t1 - _t0) / 1000.0
+							_fin_mesh_apply_ms += (_t2 - _t1) / 1000.0
+							_fin_mesh_count += 1
+							_mesh_finalized_count += 1
 		for task_id: int in done_ids:
 			_mesh_tasks.erase(task_id)
 
@@ -680,11 +841,11 @@ func _process(_delta: float) -> void:
 	_budget_used_ms += (Time.get_ticks_usec() / 1000.0) - start_ms
 
 
-## Apply per-face materials to a mesh instance.
+## Apply per-face materials to an RSInstance.
 ## Faces with cached textures are applied immediately; others go to pending_textures.
-func _apply_face_materials(mi: MeshInstance3D, local_id: int, faces: Array) -> void:
-	mi.material_override = null
-	var surface_count: int = mi.mesh.get_surface_count() if mi.mesh else 0
+func _apply_face_materials(rsi: RSInstance, local_id: int, faces: Array) -> void:
+	rsi.set_material_override(null)
+	var surface_count: int = rsi.mesh.get_surface_count() if rsi.mesh else 0
 	var pending: Array = []
 
 	for fi: Dictionary in faces:
@@ -703,6 +864,25 @@ func _apply_face_materials(mi: MeshInstance3D, local_id: int, faces: Array) -> v
 			"texRotation": fi.get("rotation", 0.0)
 		}
 
+		# PBR fields (optional — only present for faces with glTF material overrides)
+		var pbr: Dictionary = {}
+		if fi.get("isPBR", false):
+			pbr["isPBR"] = true
+			if fi.has("normalTextureId"):
+				pbr["normalTextureId"] = str(fi["normalTextureId"])
+			if fi.has("ormTextureId"):
+				pbr["ormTextureId"] = str(fi["ormTextureId"])
+			if fi.has("emissiveTextureId"):
+				pbr["emissiveTextureId"] = str(fi["emissiveTextureId"])
+			if fi.has("metallicFactor"):
+				pbr["metallicFactor"] = float(fi["metallicFactor"])
+			if fi.has("roughnessFactor"):
+				pbr["roughnessFactor"] = float(fi["roughnessFactor"])
+			if fi.has("emissiveFactor"):
+				pbr["emissiveFactor"] = fi["emissiveFactor"]
+			if fi.has("pbrBaseColor"):
+				pbr["pbrBaseColor"] = fi["pbrBaseColor"]
+
 		if texture_id.is_empty():
 			continue
 
@@ -710,33 +890,55 @@ func _apply_face_materials(mi: MeshInstance3D, local_id: int, faces: Array) -> v
 		if face_idx >= surface_count:
 			continue
 
-		if texture_cache.has(texture_id):
-			mi.set_surface_override_material(face_idx, _get_or_create_material(
-				texture_id, color, full_bright, double_sided, uv_info, alpha_mode, alpha_cutoff))
+		# Collect all texture IDs this face needs (albedo + PBR textures)
+		var all_tex_ids: Array = [texture_id]
+		var normal_id: String = pbr.get("normalTextureId", "")
+		var orm_id: String = pbr.get("ormTextureId", "")
+		var emissive_id: String = pbr.get("emissiveTextureId", "")
+		if not normal_id.is_empty():
+			all_tex_ids.append(normal_id)
+		if not orm_id.is_empty():
+			all_tex_ids.append(orm_id)
+		if not emissive_id.is_empty():
+			all_tex_ids.append(emissive_id)
+
+		# Check if albedo is cached (minimum requirement to apply any material)
+		var albedo_cached := texture_cache.has(texture_id)
+
+		if albedo_cached:
+			rsi.set_surface_material(face_idx, _get_or_create_material(
+				texture_id, color, full_bright, double_sided, uv_info, alpha_mode, alpha_cutoff, pbr))
 		else:
-			mi.set_surface_override_material(face_idx, _make_placeholder_material(color, full_bright, double_sided))
-			if not texture_load_failed.has(texture_id):
-				var pending_info := {
-					"faceIndex": face_idx,
-					"textureId": texture_id,
-					"color": color,
-					"fullBright": full_bright,
-					"doubleSided": double_sided,
-					"alphaMode": alpha_mode,
-					"alphaCutoff": alpha_cutoff,
-					"uv": uv_info
-				}
-				pending.append(pending_info)
-				# Populate reverse index
-				if not _pending_by_texture.has(texture_id):
-					_pending_by_texture[texture_id] = []
-				_pending_by_texture[texture_id].append({ "localId": local_id, "faceInfo": pending_info })
+			rsi.set_surface_material(face_idx, _make_placeholder_material(color, full_bright, double_sided))
+
+		# Register under any not-yet-cached texture IDs for progressive refinement
+		var has_pending := false
+		var pending_info := {
+			"faceIndex": face_idx,
+			"textureId": texture_id,
+			"color": color,
+			"fullBright": full_bright,
+			"doubleSided": double_sided,
+			"alphaMode": alpha_mode,
+			"alphaCutoff": alpha_cutoff,
+			"uv": uv_info,
+			"pbr": pbr
+		}
+		for tid: String in all_tex_ids:
+			if not texture_cache.has(tid) and not texture_load_failed.has(tid):
+				has_pending = true
+				if not _pending_by_texture.has(tid):
+					_pending_by_texture[tid] = []
+				_pending_by_texture[tid].append({ "localId": local_id, "faceInfo": pending_info })
+
+		if has_pending:
+			pending.append(pending_info)
 
 	if pending.size() > 0:
 		pending_textures[local_id] = pending
 
 
-func _get_or_create_material(texture_id: String, color: Array, full_bright: bool, double_sided: bool, uv_info: Dictionary = {}, alpha_mode: int = -1, alpha_cutoff: float = 0.5) -> StandardMaterial3D:
+func _get_or_create_material(texture_id: String, color: Array, full_bright: bool, double_sided: bool, uv_info: Dictionary = {}, alpha_mode: int = -1, alpha_cutoff: float = 0.5, pbr: Dictionary = {}) -> StandardMaterial3D:
 	_material_lookups += 1
 
 	# Resolve effective alpha: promote known-opaque textures to mode 0 (fully opaque)
@@ -745,7 +947,29 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 	if alpha_mode == -1 and color[3] >= 1.0 and _texture_opaque.get(texture_id, false):
 		resolved_mode = 0
 
-	# Build cache key from texture + color + fullbright + doubleSided + UV + alpha params
+	# PBR params
+	var is_pbr: bool = pbr.get("isPBR", false)
+	var normal_id: String = pbr.get("normalTextureId", "")
+	var orm_id: String = pbr.get("ormTextureId", "")
+	var emissive_id: String = pbr.get("emissiveTextureId", "")
+	var metallic_factor: float = 0.0
+	var roughness_factor: float = 1.0
+	if is_pbr:
+		metallic_factor = float(pbr.get("metallicFactor", 1.0))
+		roughness_factor = float(pbr.get("roughnessFactor", 1.0))
+	var emissive_factor: Array = pbr.get("emissiveFactor", [0, 0, 0])
+	# Only include PBR tex IDs in key if they're actually cached (so key changes on arrival)
+	var norm_key: String = ""
+	if not normal_id.is_empty() and texture_cache.has(normal_id):
+		norm_key = normal_id
+	var orm_key: String = ""
+	if not orm_id.is_empty() and texture_cache.has(orm_id):
+		orm_key = orm_id
+	var emis_key: String = ""
+	if not emissive_id.is_empty() and texture_cache.has(emissive_id):
+		emis_key = emissive_id
+
+	# Build cache key from texture + color + fullbright + doubleSided + UV + alpha + PBR params
 	var color_hex := Color(color[0], color[1], color[2], color[3]).to_html()
 	var fb_str := "1" if full_bright else "0"
 	var ds_str := "1" if double_sided else "0"
@@ -761,7 +985,13 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 	var tr: float = tr_val if tr_val != null else 0.0
 	var uv_key := "%.3f_%.3f_%.3f_%.3f_%.3f" % [ru, rv, ou, ov, tr]
 	var alpha_key := "%d_%.2f" % [resolved_mode, alpha_cutoff]
-	var key := "%s_%s_%s_%s_%s_%s" % [texture_id, color_hex, fb_str, ds_str, uv_key, alpha_key]
+	var pbr_key := ""
+	if is_pbr:
+		pbr_key = "_%s_%s_%s_%.2f_%.2f_%.2f_%.2f_%.2f" % [
+			norm_key, orm_key, emis_key,
+			metallic_factor, roughness_factor,
+			emissive_factor[0], emissive_factor[1], emissive_factor[2]]
+	var key := "%s_%s_%s_%s_%s_%s%s" % [texture_id, color_hex, fb_str, ds_str, uv_key, alpha_key, pbr_key]
 
 	if material_cache.has(key):
 		return material_cache[key]
@@ -805,6 +1035,38 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 	if full_bright:
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
+	# --- PBR properties ---
+	if is_pbr:
+		mat.metallic = metallic_factor
+		mat.roughness = roughness_factor
+
+		# ORM texture (R=ambient occlusion, G=roughness, B=metallic) — glTF standard
+		if not orm_key.is_empty():
+			var orm_tex: Texture2D = texture_cache[orm_id]
+			mat.metallic_texture = orm_tex
+			mat.metallic_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_BLUE
+			mat.roughness_texture = orm_tex
+			mat.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_GREEN
+			mat.ao_enabled = true
+			mat.ao_texture = orm_tex
+			mat.ao_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
+
+		# Normal map
+		if not norm_key.is_empty():
+			mat.normal_enabled = true
+			mat.normal_texture = texture_cache[normal_id]
+
+		# Emissive
+		var ef: Array = emissive_factor
+		var has_emission_factor: bool = float(ef[0]) > 0 or float(ef[1]) > 0 or float(ef[2]) > 0
+		if has_emission_factor:
+			mat.emission_enabled = true
+			mat.emission = Color(ef[0], ef[1], ef[2])
+			mat.emission_energy_multiplier = 1.0
+		if not emis_key.is_empty():
+			mat.emission_enabled = true
+			mat.emission_texture = texture_cache[emissive_id]
+
 	material_cache[key] = mat
 	return mat
 
@@ -843,18 +1105,30 @@ func set_self_avatar_id(id: String) -> void:
 	print("[SceneManager] Self avatar: %s" % id)
 	# If we already have this avatar, emit its position
 	if avatars.has(id):
-		self_avatar_moved.emit(avatars[id].position)
+		self_avatar_moved.emit(avatars[id].pos)
 
 
 ## Set the self avatar's yaw directly (for instant A/D feedback)
 func set_self_avatar_yaw(godot_yaw: float) -> void:
 	if self_avatar_id.is_empty():
 		return
-	var mi: MeshInstance3D = avatars.get(self_avatar_id)
-	if mi == null:
+	var rsi: RSInstance = avatars.get(self_avatar_id)
+	if rsi == null:
 		return
 	# Godot yaw around Y axis
-	mi.quaternion = Quaternion(Vector3.UP, godot_yaw)
+	rsi.rot = Quaternion(Vector3.UP, godot_yaw)
+	rsi.push_transform()
+
+
+## Return click-detection data for the self avatar, or empty dict if unavailable
+func get_self_avatar_click_data() -> Dictionary:
+	if self_avatar_id.is_empty():
+		return {}
+	var rsi: RSInstance = avatars.get(self_avatar_id)
+	if rsi == null or rsi.mesh == null:
+		return {}
+	var xform := Transform3D(Basis(rsi.rot) * Basis.from_scale(rsi.scl), rsi.pos)
+	return { "position": rsi.pos, "transform": xform, "aabb": rsi.mesh.get_aabb() }
 
 
 # ─── Avatar Handlers ──────────────────────────────────
@@ -866,31 +1140,31 @@ func handle_avatar_create(msg: Dictionary) -> void:
 
 	# Remove existing if duplicate
 	if avatars.has(avatar_id):
-		avatars[avatar_id].queue_free()
+		avatars[avatar_id].destroy()
 		avatar_targets.erase(avatar_id)
 
-	var mesh_instance := MeshInstance3D.new()
-	mesh_instance.mesh = avatar_mesh
-	mesh_instance.material_override = avatar_material
+	var rsi := RSInstance.new(_scenario)
+	rsi.set_mesh(avatar_mesh)
+	rsi.set_material_override(avatar_material)
 
 	var pos: Array = msg.get("position", [128, 128, 25])
 	var godot_pos := sl_to_godot_pos(pos)
 	godot_pos.y += 0.9
-	mesh_instance.position = godot_pos
+	rsi.pos = godot_pos
 
 	var godot_rot := Quaternion.IDENTITY
 	if msg.has("rotation"):
 		godot_rot = sl_to_godot_quat(msg["rotation"])
-		mesh_instance.quaternion = godot_rot
+		rsi.rot = godot_rot
 
-	add_child(mesh_instance)
-	avatars[avatar_id] = mesh_instance
+	rsi.push_transform()
+	avatars[avatar_id] = rsi
 
 	# Initialize interpolation target at current position (no lerp on first frame)
 	avatar_targets[avatar_id] = { "pos": godot_pos, "rot": godot_rot, "vel": Vector3.ZERO }
 
 	if avatar_id == self_avatar_id:
-		self_avatar_moved.emit(mesh_instance.position)
+		self_avatar_moved.emit(rsi.pos)
 
 
 func handle_avatar_update(msg: Dictionary) -> void:
@@ -934,7 +1208,7 @@ func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
 func handle_avatar_kill(msg: Dictionary) -> void:
 	var avatar_id: String = msg.get("id", "")
 	if avatars.has(avatar_id):
-		avatars[avatar_id].queue_free()
+		avatars[avatar_id].destroy()
 		avatars.erase(avatar_id)
 		avatar_targets.erase(avatar_id)
 
@@ -944,13 +1218,13 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 ## Smoothly move all avatars toward their targets each frame
 func _interpolate_avatars(delta: float) -> void:
 	for avatar_id: String in avatar_targets:
-		var mi: MeshInstance3D = avatars.get(avatar_id)
-		if mi == null:
+		var rsi: RSInstance = avatars.get(avatar_id)
+		if rsi == null:
 			continue
 
 		var target: Dictionary = avatar_targets[avatar_id]
-		var target_pos: Vector3 = target.get("pos", mi.position)
-		var target_rot: Quaternion = target.get("rot", mi.quaternion)
+		var target_pos: Vector3 = target.get("pos", rsi.pos)
+		var target_rot: Quaternion = target.get("rot", rsi.rot)
 		var vel: Vector3 = target.get("vel", Vector3.ZERO)
 
 		# Predict slightly ahead using velocity (clamped to avoid runaway)
@@ -960,24 +1234,26 @@ func _interpolate_avatars(delta: float) -> void:
 			var extrap := vel * minf(delta, AVATAR_MAX_EXTRAP_TIME)
 			predicted_pos = target_pos + extrap
 
-		var dist := mi.position.distance_to(predicted_pos)
+		var dist := rsi.pos.distance_to(predicted_pos)
 
 		if dist > AVATAR_MAX_INTERP_DIST:
 			# Too far — snap immediately (don't lag off into the sunset)
-			mi.position = target_pos
-			mi.quaternion = target_rot
+			rsi.pos = target_pos
+			rsi.rot = target_rot
 		elif dist > 0.001:
 			# Smooth lerp toward predicted position
 			var t := clampf(AVATAR_LERP_SPEED * delta, 0.0, 1.0)
-			mi.position = mi.position.lerp(predicted_pos, t)
-			mi.quaternion = mi.quaternion.slerp(target_rot, clampf(AVATAR_SLERP_SPEED * delta, 0.0, 1.0))
+			rsi.pos = rsi.pos.lerp(predicted_pos, t)
+			rsi.rot = rsi.rot.slerp(target_rot, clampf(AVATAR_SLERP_SPEED * delta, 0.0, 1.0))
 		else:
 			# Close enough — just slerp rotation
-			mi.quaternion = mi.quaternion.slerp(target_rot, clampf(AVATAR_SLERP_SPEED * delta, 0.0, 1.0))
+			rsi.rot = rsi.rot.slerp(target_rot, clampf(AVATAR_SLERP_SPEED * delta, 0.0, 1.0))
+
+		rsi.push_transform()
 
 		# Emit camera follow signal for self avatar
 		if avatar_id == self_avatar_id:
-			self_avatar_moved.emit(mi.position)
+			self_avatar_moved.emit(rsi.pos)
 
 
 # ─── Terrain + Water + Sky ───────────────────────────
@@ -1208,6 +1484,22 @@ func get_pipeline_stats() -> Dictionary:
 	_timing_count = 0
 	_timing_lock.unlock()
 
+	# Main-thread finalization timing averages and reset
+	var ftc := maxi(_fin_tex_count, 1)
+	var avg_tex_create := _fin_tex_create_ms / ftc
+	var avg_tex_apply := _fin_tex_apply_ms / ftc
+	var fin_tex_n := _fin_tex_count
+	_fin_tex_create_ms = 0.0
+	_fin_tex_apply_ms = 0.0
+	_fin_tex_count = 0
+	var fmc := maxi(_fin_mesh_count, 1)
+	var avg_mesh_extract := _fin_mesh_extract_ms / fmc
+	var avg_mesh_apply := _fin_mesh_apply_ms / fmc
+	var fin_mesh_n := _fin_mesh_count
+	_fin_mesh_extract_ms = 0.0
+	_fin_mesh_apply_ms = 0.0
+	_fin_mesh_count = 0
+
 	return {
 		"texWorkers": TEXTURE_THREAD_COUNT,
 		"texReady": tex_ready,
@@ -1217,6 +1509,7 @@ func get_pipeline_stats() -> Dictionary:
 		"texCached": texture_cache.size(),
 		"texFailed": texture_load_failed.size(),
 		"texPending": pending_textures.size(),
+		"texFinalize": "%.2f/%.2fms create/apply (n=%d)" % [avg_tex_create, avg_tex_apply, fin_tex_n],
 		"meshWorkers": _mesh_tasks.size(),
 		"meshReady": mesh_ready,
 		"meshQueue": _mesh_queue.size(),
@@ -1224,6 +1517,7 @@ func get_pipeline_stats() -> Dictionary:
 		"meshCached": mesh_cache.size(),
 		"meshFailed": mesh_load_failed.size(),
 		"meshPending": pending_meshes.size(),
+		"meshFinalize": "%.2f/%.2fms extract/apply (n=%d)" % [avg_mesh_extract, avg_mesh_apply, fin_mesh_n],
 		"budgetElapsed": avg_elapsed,
 		"budgetAvail": avg_budget,
 		"budgetUsed": avg_used,

@@ -413,10 +413,11 @@ export class Agent {
                         a === BuiltInAnimations.MEDIUM_LAND ||
                         a === BuiltInAnimations.WALK ||
                         a === BuiltInAnimations.RUN) {
-                        // TODO: Pretty sure this isn't the best way to do this
-                        this.controlFlags = ControlFlags.AGENT_CONTROL_FINISH_ANIM;
+                        // Send FINISH_ANIM without clobbering existing control flags
+                        const savedFlags = this.controlFlags;
+                        this.controlFlags = savedFlags | ControlFlags.AGENT_CONTROL_FINISH_ANIM;
                         this.sendAgentUpdate();
-                        this.controlFlags = 0;
+                        this.controlFlags = savedFlags;
                     }
                 }
             }

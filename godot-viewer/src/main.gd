@@ -57,8 +57,17 @@ func _process(_delta: float) -> void:
 	stats_timer += _delta
 	if stats_timer >= STATS_INTERVAL:
 		stats_timer = 0.0
+		var stats: Dictionary = scene_manager.get_pipeline_stats()
+		print("[Main] FPS: %.1f | objs: %d mats: %d meshC: %d | tex: %s | mesh: %s | budget: %.1f/%.1fms" % [
+			Engine.get_frames_per_second(),
+			stats.get("objects", 0),
+			stats.get("materials", 0),
+			stats.get("meshCached", 0),
+			stats.get("texFinalize", "n/a"),
+			stats.get("meshFinalize", "n/a"),
+			stats.get("budgetUsed", 0.0),
+			stats.get("budgetAvail", 0.0)])
 		if ws_peer and ws_peer.get_ready_state() == WebSocketPeer.STATE_OPEN:
-			var stats: Dictionary = scene_manager.get_pipeline_stats()
 			stats["type"] = "pipeline_stats"
 			stats["fps"] = Engine.get_frames_per_second()
 			send_message(stats)
@@ -130,6 +139,8 @@ func _handle_message(text: String) -> void:
 			scene_manager.handle_mesh_ready(msg)
 		"texture_ready":
 			scene_manager.handle_texture_ready(msg)
+		"object_update_faces":
+			scene_manager.handle_update_faces(msg)
 		"terrain_ready":
 			scene_manager.handle_terrain_ready(msg)
 		"environment_data":

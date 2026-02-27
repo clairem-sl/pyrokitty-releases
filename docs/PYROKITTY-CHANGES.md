@@ -21,6 +21,7 @@ This document describes all modifications made in the PyroKitty branch of Firest
 - [14. Media Texture Color Fix](#14-media-texture-color-fix)
 - [15. SL MCP Server](#15-sl-mcp-server)
 - [16. Default Settings Changes](#16-default-settings-changes)
+- [17. Godot Viewer & PBR Material Pipeline](#17-godot-viewer--pbr-material-pipeline)
 - [File Change Summary](#file-change-summary)
 
 ---
@@ -45,6 +46,7 @@ The PyroKitty branch introduces several categories of changes:
 | Media Fix | Fixed inverted colors on CEF/dullahan media textures |
 | SL MCP Server | Model Context Protocol server for Second Life bot automation |
 | Default Settings | PlayTypingAnim off, welcome pack cleanup on close |
+| Godot Viewer | 3D viewer sidecar with PBR material asset fetching, texture pipeline, mesh/sculpt loading |
 
 All changes are tagged with `<FS:Pyrokitty>` comments for easy identification.
 
@@ -360,6 +362,8 @@ These prevent crashes when fast timers are disabled or during shutdown sequences
 | `llgputexturecache.cpp/.h` | ~600 | DXT5 GPU texture cache |
 | `electron-ui/` | ~8000 | Electron app (React UI, node-metaverse) |
 | `sl-mcp/` | ~2000 | MCP server for SL bot automation |
+| `electron-ui/src/main/material-fetch-queue.ts` | ~150 | PBR material asset fetch, LLSD/glTF parse |
+| `godot-viewer/` | ~1500 | Godot 4 3D viewer sidecar |
 
 ### Modified Files (Significant Changes)
 | File | Change |
@@ -1071,6 +1075,117 @@ Second Life Grid
 | `AutoTuneResolutionEnabled` | N/A (new) | 1 (on) | Auto-adjust resolution when GPU-bound |
 | `TextureFetchUpdateDivisor` | N/A (new) | 20 | Throttle texture priority updates |
 | `RenderShadowSplitRateScale` | N/A (new) | 2.0 | Far shadows update less frequently |
+
+---
+
+## 17. Godot Viewer & PBR Material Pipeline
+
+### What It Does
+
+A Godot 4 sidecar process renders the 3D world using data streamed from node-metaverse over WebSocket. Includes full PBR material asset fetching with three-layer priority resolution, concurrent texture/mesh/sculpt download queues, and GPU-compressed texture caching.
+
+### Architecture
+
+```
+node-metaverse (Bot)
+        |
+        | Object/avatar data
+        v
+GodotBridge (electron-ui/src/main/godot-bridge.ts)
+        |
+        | WebSocket (ws://127.0.0.1:9100)
+        v
+Godot 4 Viewer (godot-viewer/src/)
+        |
+        ├── main.gd — WebSocket server, message dispatch
+        └── scene_manager.gd — RenderingServer RIDs, materials, textures
+```
+
+### PBR Material Resolution (Three-Layer Priority)
+
+Each face resolves its material through a priority chain:
+
+1. **`renderMaterialData`** (highest) — Material asset UUID per face in `extraParams`. Asset is fetched, parsed (LLSD binary → glTF JSON → `LLGLTFMaterialOverride`), then `gltfMaterialOverrides` from `TextureEntry` are layered on top. This handles the SL convention where the material asset provides the base and inline overrides modify specific fields.
+
+2. **`gltfMaterialOverrides`** (mid) — Inline PBR overrides in `TextureEntry` when no `renderMaterialData` exists for that face. Already parsed during `getTextureInfo()`.
+
+3. **Legacy `TextureEntry`** (lowest) — Blinn-Phong diffuse texture from `faces[i].textureID`.
+
+### Material Asset Fetch Flow
+
+```
+sendObject() detects renderMaterialData
+        |
+        v
+MaterialFetchQueue.request(materialUuid)
+        |  (concurrent, max 8, dedup, in-memory cache)
+        v
+downloadAsset(AssetType.Material=57, uuid)
+        |
+        v
+LLGLTFMaterial — parses LLSD binary wrapper
+        |  (header: "<? LLSD/Binary ?>\n", fields: version, type, data)
+        v
+LLGLTFMaterialOverride.fromFullMaterialJSON(data)
+        |  (extracts textures[0-3], factors, alpha, doubleSided, KHR_texture_transform)
+        v
+Layer inline gltfMaterialOverrides on top
+        |  (textures, baseColor, metallic/roughness, alpha, transforms)
+        v
+Send object_update_faces to Godot + queue base color & normal textures
+```
+
+### Race Condition Prevention
+
+When `renderMaterialData` exists for a face, legacy textures for that face are NOT queued. This prevents a race where:
+1. Legacy texture `509b9ceb` is queued and fetches
+2. Material asset resolves with PBR base color `82af1fcd`
+3. Legacy texture arrives later and overwrites PBR
+
+Additionally, `handle_update_faces` in Godot purges stale `_pending_by_texture` entries for replaced faces before merging new PBR face data.
+
+### Texture Transform Handling
+
+PBR materials carry per-texture transforms via `KHR_texture_transform` (offset, scale, rotation). These override legacy TextureEntry UV params (repeatU/V, offsetU/V, rotation) when present. The mapping: glTF `scale` → SL `repeat`, glTF `offset` → SL `offset`.
+
+### Asset Fetch Queues
+
+| Queue | File | Concurrency | Output |
+|-------|------|-------------|--------|
+| `TextureFetchQueue` | `texture-fetch-queue.ts` | 16 | J2C → RGBA → GPU BC1/BC3 → `.bctex` disk cache |
+| `MeshFetchQueue` | `mesh-fetch-queue.ts` | 8 | Mesh asset → `.glb` disk cache |
+| `SculptFetchQueue` | `sculpt-fetch-queue.ts` | 4 | Sculpt texture → generated `.glb` disk cache |
+| `MaterialFetchQueue` | `material-fetch-queue.ts` | 8 | Material asset → parsed PBR data (in-memory cache) |
+
+### Godot Scene Manager
+
+Objects are lightweight `RenderingServer` RID instances (no scene tree nodes). Each object gets:
+- Visibility range: fade 96-128m, cull beyond 128m
+- Per-surface materials with texture caching and progressive refinement
+- Placeholder `BoxMesh` for non-mesh prims (proper prim geometry not yet implemented)
+
+Coordinate conversion: SL `(X=East, Y=North, Z=Up)` → Godot `(X=Right, Y=Up, Z=-Forward)`
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `electron-ui/src/main/godot-bridge.ts` | Spawns Godot, streams objects, manages all fetch queues |
+| `electron-ui/src/main/material-fetch-queue.ts` | PBR material asset download, LLSD/glTF parse, override layering |
+| `electron-ui/src/main/texture-fetch-queue.ts` | J2C texture download, decode, GPU compress, disk cache |
+| `electron-ui/src/main/mesh-fetch-queue.ts` | Mesh asset download and caching |
+| `electron-ui/src/main/sculpt-fetch-queue.ts` | Sculpt texture → GLB conversion |
+| `electron-ui/src/main/gpu-compress-queue.ts` | WebGPU BC1/BC3 compression via hidden BrowserWindow |
+| `electron-ui/src/main/decode-pool.ts` | Worker thread pool for J2C → RGBA decoding |
+| `godot-viewer/src/main.gd` | WebSocket server, message dispatch to scene_manager |
+| `godot-viewer/src/scene_manager.gd` | RenderingServer objects, materials, texture loading threads |
+| `godot-viewer/src/camera_controller.gd` | Third-person camera, WASD movement |
+
+### Limitations
+
+- **No prim geometry**: All non-mesh objects use a placeholder `BoxMesh`. UV mapping doesn't match SL's prim face UV generation. Proper prim geometry (spheres, cylinders, tori, path profiles) is not yet implemented.
+- **ORM/emissive textures**: Only base color and normal map textures are fetched. Metallic/roughness/emissive are factor-only (no texture fetch).
+- **Material override scope**: Texture transforms from inline overrides are applied, but only for the base color slot (index 0).
 
 ---
 
