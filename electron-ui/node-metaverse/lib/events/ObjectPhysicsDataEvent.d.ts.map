@@ -1,1 +1,0 @@
-{"version":3,"file":"ObjectPhysicsDataEvent.d.ts","sourceRoot":"","sources":["ObjectPhysicsDataEvent.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,gBAAgB,EAAE,MAAM,2BAA2B,CAAC;AAElE,qBAAa,sBAAsB;IAExB,OAAO,EAAE,MAAM,CAAC;IAEhB,OAAO,EAAE,MAAM,CAAC;IAChB,QAAQ,EAAE,MAAM,CAAC;IACjB,iBAAiB,EAAE,MAAM,CAAC;IAC1B,gBAAgB,EAAE,gBAAgB,CAAC;IACnC,WAAW,EAAE,MAAM,CAAC;CAC9B"}

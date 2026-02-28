@@ -1,1 +1,0 @@
-{"version":3,"file":"GroupInviteEvent.d.ts","sourceRoot":"","sources":["GroupInviteEvent.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,IAAI,EAAE,MAAM,iBAAiB,CAAC;AAE5C,qBAAa,gBAAgB;IAElB,IAAI,EAAE,IAAI,CAAC;IACX,QAAQ,EAAE,MAAM,CAAC;IACjB,OAAO,EAAE,MAAM,CAAC;IAChB,QAAQ,EAAE,IAAI,CAAC;CACzB"}

@@ -1,1 +1,0 @@
-{"version":3,"file":"GroupChatSessionJoinEvent.d.ts","sourceRoot":"","sources":["GroupChatSessionJoinEvent.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,IAAI,EAAE,MAAM,iBAAiB,CAAC;AAE5C,qBAAa,yBAAyB;IAE3B,SAAS,EAAE,IAAI,CAAC;IAChB,OAAO,EAAE,OAAO,CAAC;CAC3B"}

@@ -1,1 +1,0 @@
-{"version":3,"file":"GroupChatSessionAgentListEvent.d.ts","sourceRoot":"","sources":["GroupChatSessionAgentListEvent.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,IAAI,EAAE,MAAM,iBAAiB,CAAC;AAE5C,qBAAa,8BAA8B;IAEhC,OAAO,EAAE,IAAI,CAAC;IACd,OAAO,EAAE,IAAI,CAAC;IACd,WAAW,EAAE,OAAO,CAAC;IACrB,YAAY,EAAE,OAAO,CAAC;IACtB,OAAO,EAAE,OAAO,CAAC;CAC3B"}

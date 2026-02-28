@@ -1,1 +1,0 @@
-{"version":3,"file":"ITreeBoundingBox.d.ts","sourceRoot":"","sources":["ITreeBoundingBox.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,IAAI,EAAE,MAAM,eAAe,CAAC;AAC1C,OAAO,KAAK,EAAE,UAAU,EAAE,MAAM,sBAAsB,CAAC;AAEvD,MAAM,WAAW,gBAAiB,SAAQ,IAAI;IAE1C,UAAU,EAAE,UAAU,CAAC;CAC1B"}

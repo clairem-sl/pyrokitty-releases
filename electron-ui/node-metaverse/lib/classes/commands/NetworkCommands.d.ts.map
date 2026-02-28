@@ -1,1 +1,0 @@
-{"version":3,"file":"NetworkCommands.d.ts","sourceRoot":"","sources":["NetworkCommands.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,YAAY,EAAE,MAAM,gBAAgB,CAAC;AAI9C,qBAAa,eAAgB,SAAQ,YAAY;IAE7C,OAAO,CAAC,kBAAkB,CAAK;IAElB,YAAY,CAAC,KAAK,EAAE,MAAM,GAAG,OAAO,CAAC,IAAI,CAAC;CA0C1D"}

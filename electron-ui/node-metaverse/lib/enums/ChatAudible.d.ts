@@ -1,6 +1,0 @@
-export declare enum ChatAudibleLevel {
-    Not = -1,
-    Barely = 0,
-    Fully = 1
-}
-//# sourceMappingURL=ChatAudible.d.ts.map
