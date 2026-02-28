@@ -80,7 +80,8 @@ Godot receives a `texture_ready` message with the UUID and path, loads the WebP 
 
 ### Missing / TODO
 - **Texture rotation** — data is sent (`texRotation`) but not applied; `StandardMaterial3D` has no UV rotation property. Needs a custom shader.
-- **Planar mapping** — `mappingType` enum available (Default=0, Planar=2, Spherical=4) but not sent or applied. Needs a custom shader that projects UVs from world-space position.
+- **Planar mapping** — `mappingType` sent from bridge, custom shader (`planar_map.gdshader`) implements SL's `planarProjection()` algorithm. UV scale/offset/rotation applied via SL's `xform()`. **In progress:** U-axis flip on some faces being debugged.
+- **Spherical mapping** — `mappingType=4` not yet handled.
 - **Texture animation** — `TextureAnim` UV scrolling not implemented.
 
 ## Mesh Pipeline
@@ -203,9 +204,18 @@ SL linksets have independent scale per prim — parent scale does NOT affect chi
 - [x] Worker thread pool: 8 threads for parallel J2K→WebP decode
 - **Victory:** Godot memory usage reasonable with S3TC; textures load without freezing
 
-### M4 — Better Geometry
-- [ ] Prim type mapping (cylinder, sphere, torus, tube, ring)
-- [ ] GDExtension for accurate prim tessellation (port from llvolume)
+### M4 — Better Geometry (in progress)
+- [x] Procedural prim mesh generator (`prim_mesh_generator.gd`) — port of LLVolume path/profile sweep
+- [x] Shape params sent from bridge (`godot-bridge.ts`) for non-mesh/non-sculpt prims
+- [x] Box, cylinder, sphere, prism, torus, tube, ring with correct face count
+- [x] Mesh cached by shape parameter hash (most scenes have <100 unique shapes)
+- [x] SL→Godot coordinate conversion via `_sl_to_godot()` with correct winding
+- [x] Face ordering matches SL (verified by headless tests)
+- [x] Planar UV mapping shader (`planar_map.gdshader`) — SL's `planarProjection()` + `xform()`
+- [ ] Planar mapping U-axis flip bug (shader math matches SL but text appears mirrored)
+- [ ] Hollow prims
+- [ ] Profile/path cuts (begin/end)
+- [ ] Twist, taper, shear, skew, revolutions, radius offset
 - [ ] Sculpt map support
 - **Victory:** World looks roughly correct geometrically
 
@@ -279,9 +289,14 @@ godot-viewer/
     textures/            ← decoded texture cache (WebP files)
     meshes/              ← converted mesh cache (GLB files)
     terrain/             ← heightmap data (Float32LE binary)
+  tests/
+    test_prim_mesh.gd    ← Headless tests for prim mesh generator (face ordering, normals, vertex bounds)
+    test_prim_mesh.tscn   ← Scene to run tests: `Godot --headless --quit-after 5 --scene tests/test_prim_mesh.tscn`
   src/
     main.gd              ← WebSocket TCP server (1MB buffer), message dispatch
     scene_manager.gd     ← object/avatar CRUD (flat hierarchy with manual child transforms), terrain/water/sky, SL→Godot coord conversion, texture/material caching
+    prim_mesh_generator.gd ← Procedural prim geometry from SL shape params (port of LLVolume), cached by param hash
+    planar_map.gdshader  ← Custom shader for SL planar UV projection (planarProjection + xform)
     camera_controller.gd ← orbit camera with avatar follow, WASD+E/C input, self-avatar yaw
 
 electron-ui/src/main/

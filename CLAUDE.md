@@ -1,3 +1,12 @@
+## Godot
+
+Path: `godot-viewer/Godot_v4.6.1-stable_mono_win64/Godot_v4.6.1-stable_mono_win64.exe`
+
+Run tests (headless, no window):
+```bash
+cd godot-viewer && ./Godot_v4.6.1-stable_mono_win64/Godot_v4.6.1-stable_mono_win64_console.exe --headless --quit-after 5 --scene tests/test_prim_mesh.tscn
+```
+
 ## Building
 
 Configure (with debug symbols for crash analysis)
@@ -71,3 +80,30 @@ See `docs/architecture/` for system documentation and performance optimizations.
 Build: `cd electron-ui/voice && dotnet build`
 
 The voice sidecar (`electron-ui/voice/`) is a C# .NET 8 process using SIPSorcery + Concentus Opus for WebRTC voice. See `docs/architecture/voice-system.md` for architecture details.
+
+## OpenSimulator Reference
+
+Server source at `C:\DeeDrive\dev\opensim` — useful for understanding server-side handling of agent control flags, physics, and protocol behavior.
+
+## OpenJPEG WASM (J2K decoder)
+
+Fork: `C:\DeeDrive\dev\pyrokitty-openjpeg` → `https://github.com/pyrokitty64/openjpeg`
+
+Rebuild WASM (requires podman, uses Emscripten container):
+```bash
+cd C:/DeeDrive/dev/pyrokitty-openjpeg
+rm -rf build
+MSYS_NO_PATHCONV=1 podman run --rm -v "$(cygpath -w $(pwd)):/openjpegjs" -w /openjpegjs openjpegjsbuild bash -c "scripts/wasm-build.sh"
+```
+
+Then rebuild the npm package and reinstall:
+```bash
+cd C:/DeeDrive/dev/pyrokitty-openjpeg/packages/2.5.4-decoder && npm run build
+cd C:/DeeDrive/dev/phoenix-firestorm/electron-ui && npm install @abasb75/jpeg2000-decoder
+```
+
+**Gotchas:**
+- WASM uses Emscripten's custom `binaryDecode` string encoding (NOT base64). Bundlers (esbuild, tsup) mangle it if they inline the file. The tsup config marks `openjpegjs.js` as external and copies it raw to `dist/`.
+- `scripts/wasm-build.sh` line endings must be LF (not CRLF) or the container will fail with "bad interpreter". Fix with `sed -i 's/\r$//' scripts/wasm-build.sh`.
+- The Dockerfile's `emscripten/emsdk:latest` base image already has user `emscripten` (UID 1000). Don't try to create another UID 1000.
+- SIMD enabled via `-msimd128` on C and CXX flags. Produces ~1200 SIMD instructions in the wavelet/entropy loops.

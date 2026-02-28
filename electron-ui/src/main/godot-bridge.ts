@@ -66,6 +66,8 @@ export class GodotBridge extends EventEmitter {
   private assetReadyTimer: ReturnType<typeof setTimeout> | null = null;
   private lastGodotStats: any = null;
   private pbrFaceCount = 0; // count of faces with PBR overrides
+  private deferredTextures = new Map<number, any>(); // localId → obj reference (for re-fetching textures later)
+  private readonly TEXTURE_FETCH_RANGE = 160; // meters — 128m cull + 32m buffer for large prims
 
   constructor(bot: Bot) {
     super();
@@ -96,8 +98,12 @@ export class GodotBridge extends EventEmitter {
   /** Extract per-face texture info from a GameObject (up to 8 faces) */
   private getTextureInfo(obj: any): {
     faces: {
-      textureId: string; color: number[]; fullBright: boolean; doubleSided: boolean;
+      index: number; textureId: string; color: number[]; fullBright: boolean; doubleSided: boolean;
+      alphaMode: number; alphaCutoff: number; mappingType?: number;
       repeatU: number; repeatV: number; offsetU: number; offsetV: number; rotation: number;
+      isPBR?: boolean; normalTextureId?: string; ormTextureId?: string; emissiveTextureId?: string;
+      metallicFactor?: number; roughnessFactor?: number; emissiveFactor?: number[];
+      pbrBaseColor?: number[];
     }[];
     textureIds: string[]; // unique texture IDs for fetch queue
   } | undefined {
@@ -194,6 +200,7 @@ export class GodotBridge extends EventEmitter {
           offsetU: face.offsetU ?? 0,
           offsetV: face.offsetV ?? 0,
           rotation: face.rotation ?? 0,
+          ...(face.mappingType ? { mappingType: face.mappingType } : {}),
         };
         textureIdSet.add(textureId);
 
@@ -415,6 +422,41 @@ export class GodotBridge extends EventEmitter {
     }
   }
 
+  /** Get the bot avatar's current global position, or null if unavailable */
+  private getBotPosition(): { x: number; y: number; z: number; distance(other: any): number } | null {
+    const agentId = this.bot.agent.agentID?.toString();
+    const agents = this.bot.currentRegion?.agents;
+    if (!agentId || !agents) return null;
+    const me = agents.get(agentId);
+    return me?.position ?? null;
+  }
+
+  /** Get global position for any object (resolves child local→global via parent) */
+  private getGlobalPosition(obj: any): { x: number; y: number; z: number; distance(other: any): number } | null {
+    const pos = obj.Position;
+    if (!pos) return null;
+    // Root prims (ParentID === 0) already have global coords
+    if (!obj.ParentID || obj.ParentID === 0) return pos;
+    // Child prim — Position is local offset from parent, add to parent's global position
+    try {
+      const parent = this.bot.currentRegion.objects.getObjectByLocalID(obj.ParentID);
+      const pp = parent?.Position;
+      if (pp) {
+        const gx = pp.x + pos.x;
+        const gy = pp.y + pos.y;
+        const gz = pp.z + pos.z;
+        return {
+          x: gx, y: gy, z: gz,
+          distance(other: any) {
+            const dx = gx - other.x, dy = gy - other.y, dz = gz - other.z;
+            return Math.sqrt(dx * dx + dy * dy + dz * dz);
+          },
+        };
+      }
+    } catch { /* parent not found */ }
+    return null; // can't determine global position — skip distance check
+  }
+
   /** Send a single object to Godot with optional parentId */
   private sendObject(obj: any, parentLocalId: number): void {
     const pos = obj.Position;
@@ -427,6 +469,29 @@ export class GodotBridge extends EventEmitter {
     const sculpt_meshId = sculptInfo ? sculptMeshId(sculptInfo.textureUuid, sculptInfo.sculptType) : undefined;
     const texInfo = this.getTextureInfo(obj);
 
+    // Send prim shape params for non-mesh/non-sculpt objects so Godot can
+    // generate procedural geometry instead of a box placeholder.
+    const shapeParams = (!meshId && !sculptInfo) ? {
+      pathCurve: obj.PathCurve ?? 16,
+      profileCurve: obj.ProfileCurve ?? 1,
+      pathBegin: obj.PathBegin ?? 0,
+      pathEnd: obj.PathEnd ?? 1,
+      pathScaleX: obj.PathScaleX ?? 1,
+      pathScaleY: obj.PathScaleY ?? 1,
+      pathShearX: obj.PathShearX ?? 0,
+      pathShearY: obj.PathShearY ?? 0,
+      pathTwist: obj.PathTwist ?? 0,
+      pathTwistBegin: obj.PathTwistBegin ?? 0,
+      pathRadiusOffset: obj.PathRadiusOffset ?? 0,
+      pathTaperX: obj.PathTaperX ?? 0,
+      pathTaperY: obj.PathTaperY ?? 0,
+      pathRevolutions: obj.PathRevolutions ?? 1,
+      pathSkew: obj.PathSkew ?? 0,
+      profileBegin: obj.ProfileBegin ?? 0,
+      profileEnd: obj.ProfileEnd ?? 1,
+      profileHollow: obj.ProfileHollow ?? 0,
+    } : undefined;
+
     this.send({
       type: 'object_create',
       localId: obj.ID,
@@ -436,6 +501,7 @@ export class GodotBridge extends EventEmitter {
       rotation: rot ? [rot.x, rot.y, rot.z, rot.w] : [0, 0, 0, 1],
       scale: scl ? [scl.x, scl.y, scl.z] : [0.5, 0.5, 0.5],
       ...(meshId ? { meshId } : sculpt_meshId ? { meshId: sculpt_meshId } : {}),
+      ...(shapeParams ? { shape: shapeParams } : {}),
       ...(texInfo ? { faces: texInfo.faces } : {}),
     });
     this.trackedObjects.add(obj.ID);
@@ -446,6 +512,29 @@ export class GodotBridge extends EventEmitter {
     if (sculptInfo && this.sculptFetchQueue) {
       this.sculptFetchQueue.request(sculptInfo.textureUuid, sculptInfo.sculptType, obj.ID);
     }
+    // Distance gate: skip texture fetches for objects beyond render range
+    let skipTextures = false;
+    try {
+      const botPos = this.getBotPosition();
+      if (botPos) {
+        const globalPos = this.getGlobalPosition(obj);
+        if (globalPos) {
+          const dist = globalPos.distance(botPos);
+          if (dist > this.TEXTURE_FETCH_RANGE) {
+            skipTextures = true;
+            this.deferredTextures.set(obj.ID, obj);
+          }
+        }
+      }
+    } catch { /* bot may not be fully connected yet — fetch textures anyway */ }
+
+    if (!skipTextures) {
+      this.fetchTexturesForObject(obj, texInfo);
+    }
+  }
+
+  /** Fetch legacy + PBR textures and material assets for an object */
+  private fetchTexturesForObject(obj: any, texInfo?: ReturnType<typeof this.getTextureInfo>): void {
     // Collect face indices covered by renderMaterialData — skip legacy textures for these
     const rmd = obj.extraParams?.renderMaterialData;
     const materialFaceIndices = new Set<number>();
@@ -578,6 +667,7 @@ export class GodotBridge extends EventEmitter {
         offsetV,
         rotation,
         isPBR: true,
+        ...(face?.mappingType ? { mappingType: face.mappingType } : {}),
       };
 
       // PBR-specific fields
@@ -934,12 +1024,14 @@ export class GodotBridge extends EventEmitter {
       this.sweepDeletedObjects();
       this.sweepAvatarDepartures();
       this.rescanChildren();
+      this.sweepDeferredTextures();
 
       // Log memory stats every 30s (15 ticks × 2s)
       if (++memLogCounter % 15 === 0) {
         const mem = process.memoryUsage();
         const mb = (b: number) => (b / 1024 / 1024).toFixed(0);
-        const objStoreSize = this.bot.currentRegion?.objects?.getNumberOfObjects?.() ?? '?';
+        let objStoreSize: string | number = '?';
+        try { objStoreSize = this.bot.currentRegion?.objects?.getNumberOfObjects?.() ?? '?'; } catch { /* bot disconnected */ }
         const tq = this.textureFetchQueue;
         const mq = this.meshFetchQueue;
         const sq = this.sculptFetchQueue;
@@ -948,7 +1040,7 @@ export class GodotBridge extends EventEmitter {
         const godotStr = gs
           ? ` | godot(${gs.fps?.toFixed(0) ?? '?'}fps budget:${gs.budgetElapsed?.toFixed(1) ?? '?'}/${gs.budgetAvail?.toFixed(1) ?? '?'}/${gs.budgetUsed?.toFixed(1) ?? '?'}ms el/av/us): tex: w=${gs.texWorkers}(${gs.texReady ?? '?'}rdy) q=${gs.texQueue} done=${gs.texDone} cached=${gs.texCached} fail=${gs.texFailed} pending=${gs.texPending} [${gs.texTiming ?? '?'}] | mesh: w=${gs.meshWorkers}(${gs.meshReady ?? '?'}rdy) q=${gs.meshQueue} done=${gs.meshDone} cached=${gs.meshCached} fail=${gs.meshFailed} pending=${gs.meshPending} | mats=${gs.materials}(${gs.materialReuse ?? '?'}reuse) opaque=${gs.texOpaque ?? '?'}`
           : '';
-        console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | mesh: q=${mq?.queueDepth ?? '?'} active=${mq?.activeCount ?? '?'} done=${mq?.notifiedCount ?? '?'} fail=${mq?.failedCount ?? '?'} | sculpt: q=${sq?.queueDepth ?? '?'} active=${sq?.activeCount ?? '?'} done=${sq?.notifiedCount ?? '?'} fail=${sq?.failedCount ?? '?'} | mat: q=${matq?.queueDepth ?? '?'} active=${matq?.activeCount ?? '?'} done=${matq?.cachedCount ?? '?'} fail=${matq?.failedCount ?? '?'} | pbr: ${this.pbrFaceCount} faces${godotStr}`);
+        console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | mesh: q=${mq?.queueDepth ?? '?'} active=${mq?.activeCount ?? '?'} done=${mq?.notifiedCount ?? '?'} fail=${mq?.failedCount ?? '?'} | sculpt: q=${sq?.queueDepth ?? '?'} active=${sq?.activeCount ?? '?'} done=${sq?.notifiedCount ?? '?'} fail=${sq?.failedCount ?? '?'} | mat: q=${matq?.queueDepth ?? '?'} active=${matq?.activeCount ?? '?'} done=${matq?.cachedCount ?? '?'} fail=${matq?.failedCount ?? '?'} | pbr: ${this.pbrFaceCount} faces | deferred: ${this.deferredTextures.size}${godotStr}`);
       }
     }, 2000);
   }
@@ -1005,6 +1097,47 @@ export class GodotBridge extends EventEmitter {
           this.send({ type: 'object_kill', localId });
           this.trackedObjects.delete(localId);
         }
+      }
+    } catch { /* bot may be disconnected */ }
+  }
+
+  /** Promote deferred textures for objects now within fetch range */
+  private sweepDeferredTextures(): void {
+    if (this.deferredTextures.size === 0) return;
+    try {
+      const botPos = this.getBotPosition();
+      if (!botPos) return;
+
+      const objectStore = this.bot.currentRegion.objects;
+      let promoted = 0;
+
+      for (const [localId, obj] of this.deferredTextures) {
+        // Object deleted from store — just drop it
+        let live: any;
+        try {
+          live = objectStore.getObjectByLocalID(localId);
+          if (!live || live.deleted) {
+            this.deferredTextures.delete(localId);
+            continue;
+          }
+        } catch {
+          this.deferredTextures.delete(localId);
+          continue;
+        }
+
+        const globalPos = this.getGlobalPosition(live);
+        if (!globalPos) continue;
+        const dist = globalPos.distance(botPos);
+        if (dist <= this.TEXTURE_FETCH_RANGE) {
+          this.deferredTextures.delete(localId);
+          const texInfo = this.getTextureInfo(live);
+          this.fetchTexturesForObject(live, texInfo);
+          promoted++;
+        }
+      }
+
+      if (promoted > 0) {
+        console.log(`[GodotBridge] Promoted ${promoted} deferred objects for texture fetch (${this.deferredTextures.size} still deferred)`);
       }
     } catch { /* bot may be disconnected */ }
   }
@@ -1135,6 +1268,7 @@ export class GodotBridge extends EventEmitter {
       this.materialFetchQueue = null;
     }
     this.materialToFaces.clear();
+    this.deferredTextures.clear();
 
     // Close WebSocket
     if (this.ws) {

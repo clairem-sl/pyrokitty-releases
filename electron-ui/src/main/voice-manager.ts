@@ -435,6 +435,7 @@ export class VoiceManager extends EventEmitter {
     this._posLogCount = 0;
 
     this.positionInterval = setInterval(() => {
+      try {
       if (!this.process || !bot?.currentRegion) return;
 
       const agentId = bot.agentID?.()?.toString?.();
@@ -486,6 +487,10 @@ export class VoiceManager extends EventEmitter {
           regionName,
           parcelLocalId,
         });
+      }
+      } catch (e) {
+        // Bot may have been kicked — currentRegion getter throws. Stop polling.
+        this.stopPositionUpdates();
       }
     }, 100);
   }

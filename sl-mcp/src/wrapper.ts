@@ -113,18 +113,18 @@ function callBackendTool(toolName: string, args: Record<string, unknown>): Promi
       if (pendingCalls.has(reqId)) {
         pendingCalls.delete(reqId);
         resolve({
-          content: [{ type: 'text', text: 'Tool call timed out (60s)' }],
+          content: [{ type: 'text', text: 'Tool call timed out (120s)' }],
           isError: true,
         });
       }
-    }, 60000);
+    }, 120000);
   });
 }
 
 // Reload tool definition (always present)
 const reloadTool: ToolDefinition = {
   name: 'reload',
-  description: 'Kill and respawn the SL backend process to pick up code changes. Bot connection will drop — call sl_login again after.',
+  description: 'Kill and respawn the SL backend process to pick up code changes. Bot connection will drop but auto-reconnects on next tool call.',
   inputSchema: { type: 'object', properties: {} },
 };
 

@@ -451,6 +451,19 @@ export class MetaverseConnection extends EventEmitter {
       this.emit('groups-update', Array.from(this.groups.values()));
     });
 
+    // Disconnect/kicked handling (e.g. another client logged in with same account)
+    this.bot.clientEvents.onDisconnected.subscribe((event) => {
+      console.log(`[MetaverseConnection] Bot disconnected: ${event.message} (requested=${event.requested})`);
+      // Clean up subscriptions so timers/callbacks don't access dead bot
+      for (const sub of this.avatarLeftSubscriptions.values()) {
+        sub.unsubscribe();
+      }
+      this.avatarLeftSubscriptions.clear();
+      this.nearbyAvatars.clear();
+      this.bot = null;
+      this.setState('disconnected');
+    });
+
     // Avatar entered region
     this.bot.clientEvents.onAvatarEnteredRegion.subscribe((avatar) => {
       const avatarId = avatar.getKey().toString();

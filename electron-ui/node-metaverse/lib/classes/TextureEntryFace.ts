@@ -1,8 +1,5 @@
 import type { UUID } from './UUID';
 import type { Color4 } from './Color4';
-import { TextureFlags } from '../enums/TextureFlags';
-import { Bumpiness } from '../enums/Bumpiness';
-import { Shininess } from '../enums/Shininess';
 import { MappingType } from '../enums/MappingType';
 
 export class TextureEntryFace
@@ -22,28 +19,16 @@ export class TextureEntryFace
     private _rotation: number;
     private _glow: number;
     private _materialID: UUID;
-    private _bumpiness: Bumpiness = Bumpiness.None;
-    private _shininess: Shininess = Shininess.None;
-    private _mappingType: MappingType = MappingType.Default;
-    private _fullBright = false;
-    private _mediaFlags = false;
+    private _mappingType: MappingType | undefined;
+    private _mediaFlags: boolean | undefined;
 
     private _material: number;
     private _media: number;
-    private readonly hasAttribute: TextureFlags;
     private readonly defaultTexture: TextureEntryFace | null;
 
     public constructor(def: TextureEntryFace | null)
     {
         this.defaultTexture = def;
-        if (this.defaultTexture == null)
-        {
-            this.hasAttribute = TextureFlags.All;
-        }
-        else
-        {
-            this.hasAttribute = TextureFlags.None;
-        }
     }
 
     public get rgba(): Color4
@@ -184,18 +169,6 @@ export class TextureEntryFace
     public set material(material: number)
     {
         this._material = material;
-        if ((this.hasAttribute & TextureFlags.Material) !== 0)
-        {
-            this._bumpiness = this._material & TextureEntryFace.BUMP_MASK;
-            this._shininess = this._material & TextureEntryFace.SHINY_MASK;
-            this._fullBright = ((this._material & TextureEntryFace.FULLBRIGHT_MASK) !== 0);
-        }
-        else if (this.defaultTexture !== null)
-        {
-            this._bumpiness = this.defaultTexture._bumpiness;
-            this._shininess = this.defaultTexture._shininess;
-            this._fullBright = this.defaultTexture._fullBright;
-        }
     }
 
     public get media(): number
@@ -210,20 +183,8 @@ export class TextureEntryFace
     public set media(media: number)
     {
         this._media = media;
-        if ((this.hasAttribute & TextureFlags.Media) !== 0)
-        {
-            this._mappingType = media & TextureEntryFace.TEX_MAP_MASK;
-            this._mediaFlags = ((media & TextureEntryFace.MEDIA_MASK) !== 0);
-        }
-        else if (this.defaultTexture !== null)
-        {
-            this._mappingType = this.defaultTexture.mappingType;
-            this._mediaFlags = this.defaultTexture.mediaFlags;
-        }
-        else
-        {
-            throw new Error('No media attribute and default texture is null');
-        }
+        this._mappingType = media & TextureEntryFace.TEX_MAP_MASK;
+        this._mediaFlags = ((media & TextureEntryFace.MEDIA_MASK) !== 0);
     }
 
     public get mappingType(): number
@@ -232,7 +193,7 @@ export class TextureEntryFace
         {
             return this.defaultTexture.mappingType;
         }
-        return this._mappingType;
+        return this._mappingType ?? MappingType.Default;
     }
 
     public set mappingType(value: number)
@@ -246,7 +207,7 @@ export class TextureEntryFace
         {
             return this.defaultTexture.mediaFlags;
         }
-        return this._mediaFlags;
+        return this._mediaFlags ?? false;
     }
 
     public set mediaFlags(value: boolean)

@@ -10,6 +10,7 @@ var ws_port: int = 9100
 
 @onready var scene_manager: Node3D = $SceneManager
 var fps_timer: float = 0.0
+var _planar_debug_mode: int = 0
 var stats_timer: float = 0.0
 const STATS_INTERVAL: float = 5.0  # send pipeline stats every 5s
 
@@ -145,8 +146,17 @@ func _handle_message(text: String) -> void:
 			scene_manager.handle_terrain_ready(msg)
 		"environment_data":
 			scene_manager.handle_environment_data(msg)
+		"planar_debug":
+			scene_manager.set_planar_debug_mode(msg.get("mode", 0))
 		_:
 			push_warning("[Main] Unknown message type: %s" % msg_type)
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_F9:
+			_planar_debug_mode = (_planar_debug_mode + 1) % 4
+			scene_manager.set_planar_debug_mode(_planar_debug_mode)
 
 
 func send_message(msg: Dictionary) -> void:

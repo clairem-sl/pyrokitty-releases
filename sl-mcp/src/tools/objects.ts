@@ -101,11 +101,13 @@ export const objectTools: ToolDef[] = [
       type: 'object',
       properties: {
         pattern: { type: 'string', description: 'Glob pattern to match object names (e.g. "*keyword*")' },
+        timeout: { type: 'number', description: 'Max ms to keep retrying if no results (default: 10000). Objects may still be loading after login/teleport. Use 0 for single attempt.' },
       },
       required: ['pattern'],
     },
     handler: async (args, bot) => {
-      const objects = await bot.findObjectsByName(args.pattern as string);
+      const timeout = args.timeout as number | undefined;
+      const objects = await bot.findObjectsByName(args.pattern as string, timeout);
       if (objects.length === 0) {
         return { content: [{ type: 'text', text: 'No objects found matching that pattern.' }] };
       }
@@ -116,6 +118,26 @@ export const objectTools: ToolDef[] = [
         position: o.position,
       }));
       return { content: [{ type: 'text', text: JSON.stringify(info, null, 2) }] };
+    },
+  },
+  {
+    name: 'sl_get_object_by_uuid',
+    description: 'Find an in-world object by its UUID. Returns localId, uuid, name, and position.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        uuid: { type: 'string', description: 'Object UUID to look up' },
+        timeout: { type: 'number', description: 'Max ms to wait for the object to appear (default: 10000). Use 0 for immediate lookup only.' },
+      },
+      required: ['uuid'],
+    },
+    handler: async (args, bot) => {
+      try {
+        const result = await bot.getObjectByUUID(args.uuid as string, args.timeout as number | undefined);
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (err: any) {
+        return { content: [{ type: 'text', text: `Object not found: ${err.message}` }], isError: true };
+      }
     },
   },
   {

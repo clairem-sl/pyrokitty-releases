@@ -93,7 +93,7 @@ export const navigationTools: ToolDef[] = [
       required: ['enabled'],
     },
     handler: async (args, bot) => {
-      bot.setFlying(args.enabled as boolean);
+      await bot.setFlying(args.enabled as boolean);
       return { content: [{ type: 'text', text: args.enabled ? 'Now flying' : 'Stopped flying' }] };
     },
   },
@@ -122,7 +122,7 @@ export const navigationTools: ToolDef[] = [
     inputSchema: { type: 'object', properties: {} },
     handler: async (_args, bot) => {
       try {
-        bot.standUp();
+        await bot.standUp();
         return { content: [{ type: 'text', text: 'Stood up' }] };
       } catch (err: any) {
         return { content: [{ type: 'text', text: `Failed to stand: ${err.message}` }], isError: true };
@@ -135,7 +135,7 @@ export const navigationTools: ToolDef[] = [
     inputSchema: { type: 'object', properties: {} },
     handler: async (_args, bot) => {
       try {
-        bot.sitOnGround();
+        await bot.sitOnGround();
         return { content: [{ type: 'text', text: 'Sat on ground' }] };
       } catch (err: any) {
         return { content: [{ type: 'text', text: `Failed to sit on ground: ${err.message}` }], isError: true };

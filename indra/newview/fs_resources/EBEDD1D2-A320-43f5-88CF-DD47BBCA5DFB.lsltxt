@@ -7,7 +7,7 @@
 //
 
 // Bridge platform
-string BRIDGE_VERSION = "2.30"; // This should match fslslbridge.cpp
+string BRIDGE_VERSION = "2.31"; // This should match fslslbridge.cpp
 string gLatestURL;
 integer gViewerIsFirestorm;
 integer gTryHandshakeOnce = TRUE;
@@ -24,6 +24,9 @@ integer gStartTPTimer;
 integer gUseMoveLock;
 integer gRelockMoveLockAfterMovement;
 integer gRelockIsUserMoving;
+
+// Jump cancel on release
+float gJumpStartTime;
 
 // Flight assist
 integer gIsFlyingNow;
@@ -298,9 +301,26 @@ default
         if ((level & edge & CONTROL_DOWN) && (llGetAgentInfo(gOwner) & AGENT_IN_AIR))
         {
             vector vel = llGetVel();
-            if (vel.z > 0.5)
+            if (vel.z > 0.0)
             {
                 llSetVelocity(<vel.x, vel.y, 0.0>, FALSE);
+            }
+        }
+
+        // Jump cancel on release: if jump was held > 0.5s, kill vertical velocity on release
+        if (level & edge & CONTROL_UP)
+        {
+            gJumpStartTime = llGetTime();
+        }
+        if ((~level & edge & CONTROL_UP) && (llGetAgentInfo(gOwner) & AGENT_IN_AIR))
+        {
+            if (llGetTime() - gJumpStartTime > 0.3)
+            {
+                vector vel = llGetVel();
+                if (vel.z > 0.0)
+                {
+                    llSetVelocity(<vel.x, vel.y, 0.0>, FALSE);
+                }
             }
         }
 

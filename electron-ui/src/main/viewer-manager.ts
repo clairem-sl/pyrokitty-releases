@@ -214,6 +214,16 @@ export class ViewerManager extends EventEmitter {
       throw new Error('Password required for viewer launch');
     }
 
+    // Stop Godot viewer if running (can't run both simultaneously)
+    const godotBridge = this.godotBridges.get(instanceId);
+    if (godotBridge?.isActive) {
+      console.log(`[ViewerManager] Stopping Godot viewer before launching Firestorm`);
+      godotBridge.stop();
+      this.godotBridges.delete(instanceId);
+      instance.godotBridgeActive = false;
+      this.emit('status-update', instance);
+    }
+
     console.log(`[ViewerManager] Launching viewer for ${account.firstName} ${account.lastName}`);
 
     // Launch viewer with standard CLI login - this will auto-disconnect node-metaverse
@@ -239,7 +249,14 @@ export class ViewerManager extends EventEmitter {
     }
 
     if (instance.connectionState !== 'metaverse_connected') {
-      throw new Error(`Cannot launch Godot: instance is ${instance.connectionState}, expected metaverse_connected`);
+      // If Firestorm is running, stop it and wait for node-metaverse re-login
+      const viewerProcess = this.processes.get(instanceId);
+      if (viewerProcess) {
+        console.log(`[ViewerManager] Stopping Firestorm before launching Godot`);
+        await this.stopViewerAndWaitForReconnect(instanceId);
+      } else {
+        throw new Error(`Cannot launch Godot: instance is ${instance.connectionState}, expected metaverse_connected`);
+      }
     }
 
     // Check if already running
@@ -438,6 +455,67 @@ export class ViewerManager extends EventEmitter {
       this.cleanupInstance(instanceId);
       await metaverseConnectionManager.remove(instanceId);
     }
+  }
+
+  /**
+   * Stop the viewer process gracefully and wait for node-metaverse to re-login.
+   * Unlike stopViewer(), this keeps shouldRelogin set so handleViewerExit() triggers re-login.
+   */
+  private async stopViewerAndWaitForReconnect(instanceId: string): Promise<void> {
+    const connection = connectionManager.getConnection(instanceId);
+    if (connection?.isConnected) {
+      connection.requestQuit();
+    }
+
+    const childProcess = this.processes.get(instanceId);
+    if (childProcess) {
+      // Force kill after 10s if graceful quit doesn't work
+      const forceKillTimer = setTimeout(() => {
+        if (this.processes.has(instanceId)) {
+          console.log(`[ViewerManager] Force-killing viewer ${instanceId} for Godot switch`);
+          childProcess.kill('SIGKILL');
+        }
+      }, 10000);
+
+      // Wait for exit
+      await new Promise<void>((resolve) => {
+        childProcess.once('exit', () => {
+          clearTimeout(forceKillTimer);
+          resolve();
+        });
+      });
+    }
+
+    // Now wait for handleViewerExit() to re-login to node-metaverse
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.removeListener('status-update', onUpdate);
+        reject(new Error('Timed out waiting for metaverse reconnect after stopping viewer'));
+      }, 30000);
+
+      const onUpdate = (inst: ViewerInstance) => {
+        if (inst.id !== instanceId) return;
+        if (inst.connectionState === 'metaverse_connected') {
+          clearTimeout(timeout);
+          this.removeListener('status-update', onUpdate);
+          resolve();
+        } else if (inst.connectionState === 'disconnected' && !this.instances.has(instanceId)) {
+          clearTimeout(timeout);
+          this.removeListener('status-update', onUpdate);
+          reject(new Error('Instance disconnected while waiting for reconnect'));
+        }
+      };
+
+      // Check if already reconnected (race condition)
+      const current = this.instances.get(instanceId);
+      if (current?.connectionState === 'metaverse_connected') {
+        clearTimeout(timeout);
+        resolve();
+        return;
+      }
+
+      this.on('status-update', onUpdate);
+    });
   }
 
   private cleanupInstance(instanceId: string): void {
@@ -649,8 +727,19 @@ export class ViewerManager extends EventEmitter {
   private updateConnectionState(instanceId: string, state: ConnectionState): void {
     const instance = this.instances.get(instanceId);
     if (instance) {
+      const prevState = instance.connectionState;
       instance.connectionState = state;
       this.emit('status-update', instance);
+
+      // If we went from connected to disconnected unexpectedly (e.g. kicked by
+      // another client logging in), fully clean up the instance so the user
+      // can log in again.
+      if (prevState === 'metaverse_connected' && state === 'disconnected') {
+        console.log(`[ViewerManager] Unexpected disconnect for ${instanceId} — cleaning up`);
+        this.cleanup(instanceId).catch((err) => {
+          console.error(`[ViewerManager] Cleanup after disconnect failed:`, err);
+        });
+      }
     }
   }
 

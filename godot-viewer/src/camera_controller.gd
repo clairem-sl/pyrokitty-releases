@@ -13,16 +13,17 @@ extends Camera3D
 @export var turn_rate: float = 2.5        # Radians per second for A/D
 @export var camera_return_speed: float = 4.0  # How fast camera springs back behind avatar
 
+var default_pitch: float = 0.4     # Default camera elevation angle
 var target_point: Vector3 = Vector3(128, 25, -128)
 var avatar_point: Vector3 = Vector3(128, 25, -128)
 var has_target: bool = false
 var distance: float = 15.0
 var yaw: float = 0.0         # Current camera yaw
 var avatar_yaw: float = 0.0  # Avatar facing direction (Godot space)
-var pitch: float = 0.4
+var pitch: float = default_pitch
 
 var is_butt_grabbing: bool = false  # True while left-drag on self avatar
-var pre_grab_pitch: float = 0.0    # Pitch before butt-grab started
+var orbit_hold: bool = false       # True after butt-grab released, until movement key resets camera
 
 # Movement state
 var move_forward: bool = false
@@ -44,10 +45,19 @@ var send_timer: float = 0.0
 @onready var main_node: Node3D = get_node("/root/Main")
 @onready var scene_manager: Node3D = get_node("../SceneManager")
 
+# Debug tooltip
+var _tooltip_layer: CanvasLayer
+var _tooltip_panel: PanelContainer
+var _tooltip_label: RichTextLabel
+var _tooltip_visible: bool = false
+var _highlight_material: StandardMaterial3D
+var _highlighted_rid: RID = RID()
+
 
 func _ready() -> void:
 	if scene_manager:
 		scene_manager.self_avatar_moved.connect(_on_self_avatar_moved)
+	_create_debug_tooltip()
 	_update_camera()
 
 
@@ -76,8 +86,8 @@ func _process(delta: float) -> void:
 	if scene_manager:
 		scene_manager.set_self_avatar_yaw(avatar_yaw)
 
-	# Camera springs back behind avatar when not butt-grabbing
-	if not is_butt_grabbing:
+	# Camera springs back behind avatar when not butt-grabbing and not holding orbit
+	if not is_butt_grabbing and not orbit_hold:
 		var yaw_diff := angle_difference(yaw, avatar_yaw)
 		yaw += yaw_diff * clamp(camera_return_speed * delta, 0.0, 1.0)
 
@@ -147,6 +157,22 @@ func _input(event: InputEvent) -> void:
 			strafe_left = new_strafe_left
 			strafe_right = new_strafe_right
 			move_dirty = true
+			# Any movement key releases the orbit hold and resets pitch
+			if orbit_hold and (move_forward or move_backward or turn_left \
+				or turn_right or strafe_left or strafe_right):
+				orbit_hold = false
+				pitch = default_pitch
+				_update_camera()
+
+		# Escape dismisses tooltip first, then resets camera
+		if ke.keycode == KEY_ESCAPE and ke.pressed and not ke.echo:
+			if _tooltip_visible:
+				_hide_debug_tooltip()
+			elif orbit_hold or is_butt_grabbing:
+				orbit_hold = false
+				is_butt_grabbing = false
+				pitch = default_pitch
+				_update_camera()
 
 		# Toggle actions
 		if ke.keycode == KEY_F and ke.pressed and not ke.echo:
@@ -161,19 +187,27 @@ func _input(event: InputEvent) -> void:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
-				if _is_click_on_self_avatar(mb.position):
-					pre_grab_pitch = pitch
+				if _tooltip_visible:
+					_hide_debug_tooltip()
+				elif _is_click_on_self_avatar(mb.position):
+					orbit_hold = false
 					is_butt_grabbing = true
 			else:
 				if is_butt_grabbing:
-					pitch = pre_grab_pitch
-					_update_camera()
+					orbit_hold = true  # Hold camera angle until movement key pressed
 				is_butt_grabbing = false
 
+		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+			_handle_debug_pick(mb.position)
+
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+			if _tooltip_visible:
+				_hide_debug_tooltip()
 			distance = max(min_distance, distance - zoom_speed * (distance * 0.1))
 			_update_camera()
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			if _tooltip_visible:
+				_hide_debug_tooltip()
 			distance = min(max_distance, distance + zoom_speed * (distance * 0.1))
 			_update_camera()
 
@@ -217,6 +251,173 @@ func _is_click_on_self_avatar(screen_pos: Vector2) -> bool:
 	var local_dir := (inv.basis * ray_dir).normalized()
 	var aabb: AABB = (data["aabb"] as AABB).grow(0.3)  # slightly larger for easier clicking
 	return aabb.intersects_ray(local_from, local_dir) != null
+
+
+# ─── Debug Tooltip ──────────────────────────────────
+
+func _create_debug_tooltip() -> void:
+	# Translucent overlay material for highlighting picked objects
+	_highlight_material = StandardMaterial3D.new()
+	_highlight_material.albedo_color = Color(0.2, 0.8, 1.0, 0.3)
+	_highlight_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_highlight_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_highlight_material.no_depth_test = true
+
+	_tooltip_layer = CanvasLayer.new()
+	_tooltip_layer.layer = 100
+	add_child(_tooltip_layer)
+
+	_tooltip_panel = PanelContainer.new()
+	_tooltip_panel.visible = false
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.1, 0.1, 0.1, 0.85)
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	style.content_margin_left = 8
+	style.content_margin_right = 8
+	style.content_margin_top = 6
+	style.content_margin_bottom = 6
+	_tooltip_panel.add_theme_stylebox_override("panel", style)
+	_tooltip_layer.add_child(_tooltip_panel)
+
+	_tooltip_label = RichTextLabel.new()
+	_tooltip_label.bbcode_enabled = true
+	_tooltip_label.fit_content = true
+	_tooltip_label.scroll_active = false
+	_tooltip_label.custom_minimum_size = Vector2(320, 0)
+	_tooltip_label.add_theme_font_size_override("normal_font_size", 12)
+	_tooltip_label.add_theme_font_size_override("bold_font_size", 12)
+	_tooltip_panel.add_child(_tooltip_label)
+
+
+func _handle_debug_pick(screen_pos: Vector2) -> void:
+	if scene_manager == null:
+		return
+	var ray_from := project_ray_origin(screen_pos)
+	var ray_dir := project_ray_normal(screen_pos)
+	var hit: Dictionary = scene_manager.pick_object(ray_from, ray_dir)
+	if hit.is_empty():
+		_hide_debug_tooltip()
+		return
+	var local_id: int = hit["localId"]
+	var dist: float = hit["distance"]
+	# Highlight the picked object
+	_clear_highlight()
+	var rid: RID = scene_manager.get_object_rid(local_id)
+	if rid.is_valid():
+		RenderingServer.instance_geometry_set_material_overlay(rid, _highlight_material.get_rid())
+		_highlighted_rid = rid
+	var info: Dictionary = scene_manager.get_object_debug_info(local_id)
+	var faces: Array = scene_manager.get_object_face_info(local_id)
+	_show_debug_tooltip(screen_pos, dist, info, faces)
+
+
+const _MAPPING_NAMES: Dictionary = { 0: "default", 2: "planar", 4: "spherical", 6: "cylindrical" }
+const _ALPHA_NAMES: Dictionary = { -1: "auto", 0: "none", 1: "blend", 2: "mask", 3: "emissive" }
+
+func _show_debug_tooltip(screen_pos: Vector2, dist: float, info: Dictionary, faces: Array) -> void:
+	var bb := ""
+	# Header
+	bb += "[b]Object %d[/b]  (%.1fm)\n" % [info["localId"], dist]
+	# Object info
+	var p: Vector3 = info["pos"]
+	var s: Vector3 = info["scl"]
+	bb += "pos: (%.1f, %.1f, %.1f)  scl: (%.2f, %.2f, %.2f)\n" % [p.x, p.y, p.z, s.x, s.y, s.z]
+	var mesh_id: String = info["meshId"]
+	if not mesh_id.is_empty():
+		bb += "mesh: %s\n" % mesh_id.substr(0, 8)
+	var parent_id: int = info["parentId"]
+	if parent_id > 0:
+		bb += "parent: %d\n" % parent_id
+	var surf_count: int = info["surfaceCount"]
+	bb += "surfaces: %d  faces: %d\n" % [surf_count, faces.size()]
+
+	# Per-face info (only show faces within actual surface count)
+	for fi: Dictionary in faces:
+		var idx: int = int(fi.get("faceIndex", fi.get("index", -1)))
+		if surf_count > 0 and idx >= surf_count:
+			continue
+		var tid: String = str(fi.get("textureId", ""))
+		var mt: int = int(fi.get("mappingType", 0))
+		var uv: Dictionary = fi.get("uv", {})
+		var color_raw = fi.get("color", [1.0, 1.0, 1.0, 1.0])
+		var color_hex: String
+		if color_raw is Array and color_raw.size() >= 3:
+			var r := clampi(int(float(color_raw[0]) * 255), 0, 255)
+			var g := clampi(int(float(color_raw[1]) * 255), 0, 255)
+			var b := clampi(int(float(color_raw[2]) * 255), 0, 255)
+			color_hex = "%02x%02x%02x" % [r, g, b]
+		else:
+			color_hex = str(color_raw)
+		var am: int = int(fi.get("alphaMode", -1))
+		var fb: bool = fi.get("fullBright", false)
+		var ds: bool = fi.get("doubleSided", false)
+		var is_pbr: bool = fi.get("isPBR", false)
+
+		bb += "\n[b]Face %d[/b]  tex: [color=#aaaaff]%s[/color]\n" % [idx, tid.substr(0, 8) if tid.length() >= 8 else tid]
+		bb += "  map: %s" % _MAPPING_NAMES.get(mt, str(mt))
+		bb += "  rep: %.2f,%.2f" % [float(uv.get("repeatU", 1.0)), float(uv.get("repeatV", 1.0))]
+		bb += "  off: %.2f,%.2f" % [float(uv.get("offsetU", 0.0)), float(uv.get("offsetV", 0.0))]
+		var rot_val: float = float(uv.get("rotation", 0.0))
+		if absf(rot_val) > 0.001:
+			bb += "  rot: %.2f" % rot_val
+		bb += "\n"
+		bb += "  color: #%s  alpha: %s" % [color_hex, _ALPHA_NAMES.get(am, str(am))]
+		if fb:
+			bb += "  [color=#ffff88]fullBright[/color]"
+		if ds:
+			bb += "  [color=#88ffff]doubleSided[/color]"
+		bb += "\n"
+
+		# PBR section
+		if is_pbr:
+			var pbr: Dictionary = fi.get("pbr", {})
+			bb += "  [color=#88ff88][b]PBR[/b][/color]"
+			var nid: String = pbr.get("normalTextureId", "")
+			var oid: String = pbr.get("ormTextureId", "")
+			var eid: String = pbr.get("emissiveTextureId", "")
+			if not nid.is_empty():
+				bb += "  nrm: %s" % nid.substr(0, 8)
+			if not oid.is_empty():
+				bb += "  orm: %s" % oid.substr(0, 8)
+			if not eid.is_empty():
+				bb += "  emi: %s" % eid.substr(0, 8)
+			var metallic: float = float(pbr.get("metallicFactor", 0.0))
+			var roughness: float = float(pbr.get("roughnessFactor", 1.0))
+			bb += "  met: %.2f  rgh: %.2f" % [metallic, roughness]
+			var ef: Array = pbr.get("emissiveFactor", [])
+			if ef.size() >= 3:
+				bb += "  emF: (%.1f,%.1f,%.1f)" % [float(ef[0]), float(ef[1]), float(ef[2])]
+			bb += "\n"
+
+	_tooltip_label.text = bb
+	_tooltip_panel.visible = true
+	_tooltip_visible = true
+
+	# Position near cursor, clamped to viewport (wait one frame for size)
+	await get_tree().process_frame
+	var vp_size := get_viewport().get_visible_rect().size
+	var panel_size := _tooltip_panel.size
+	var pos := screen_pos + Vector2(16, 16)
+	pos.x = minf(pos.x, vp_size.x - panel_size.x - 8)
+	pos.y = minf(pos.y, vp_size.y - panel_size.y - 8)
+	pos.x = maxf(pos.x, 8)
+	pos.y = maxf(pos.y, 8)
+	_tooltip_panel.position = pos
+
+
+func _clear_highlight() -> void:
+	if _highlighted_rid.is_valid():
+		RenderingServer.instance_geometry_set_material_overlay(_highlighted_rid, RID())
+		_highlighted_rid = RID()
+
+
+func _hide_debug_tooltip() -> void:
+	_clear_highlight()
+	_tooltip_panel.visible = false
+	_tooltip_visible = false
 
 
 func _send_movement() -> void:

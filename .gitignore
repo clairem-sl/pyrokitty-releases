@@ -135,7 +135,7 @@ checks.json
 release.sh
 build_portable.sh
 accounts.json
-/node-metaverse
+/node-metaverse/dist
 /electron-ui/scripts/config.ts
 /electron-ui/viewer
 /electron-ui/release

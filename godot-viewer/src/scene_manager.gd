@@ -1,5 +1,11 @@
 extends Node3D
 
+const PrimMeshGeneratorScript = preload("res://src/prim_mesh_generator.gd")
+const PlanarMapShader = preload("res://src/planar_map.gdshader")
+const PlanarMapAlphaShader = preload("res://src/planar_map_alpha.gdshader")
+const StandardUVShader = preload("res://src/standard_uv.gdshader")
+const StandardUVAlphaShader = preload("res://src/standard_uv_alpha.gdshader")
+
 ## Manages in-world objects and avatars as lightweight RenderingServer RIDs.
 ## Coordinate conversion: SL (X=East, Y=North, Z=Up) -> Godot (X=Right, Y=Up, Z=-Forward)
 ##   Position: (sl.x, sl.z, -sl.y)
@@ -80,6 +86,7 @@ var mesh_load_failed: Dictionary = {}  # meshId (String) -> bool
 # Texture pipeline
 var texture_cache: Dictionary = {}        # textureId (String) -> ImageTexture
 var material_cache: Dictionary = {}       # "uuid_colorhex_fb_ds_uv" (String) -> StandardMaterial3D
+var _double_sided_shader_cache: Dictionary = {}  # Shader -> Shader (cull_back -> cull_disabled variant)
 var object_faces: Dictionary = {}         # localId (int) -> Array[face_info dicts] (persists for mesh swaps)
 var pending_textures: Dictionary = {}     # localId (int) -> Array[{ faceIndex, textureId, color, ... }]
 var texture_load_failed: Dictionary = {}  # textureId (String) -> bool
@@ -123,8 +130,15 @@ var _mesh_in_flight: Dictionary = {}     # meshId (String) -> true (dedup)
 var _mesh_queue: Array = []              # queued { meshId, path } waiting to be submitted
 const MESH_MAX_IN_FLIGHT: int = 16             # max concurrent worker tasks
 
+# Periodic stats reporting
+var _stats_timer: float = 0.0
+const STATS_INTERVAL: float = 10.0
+
 # Reverse texture index: textureId -> Array[{ localId, faceInfo }]
 var _pending_by_texture: Dictionary = {}
+
+# Prim geometry generator (procedural shapes from SL prim parameters)
+var prim_generator: RefCounted  # PrimMeshGenerator instance
 
 # Reverse mesh index: meshId -> Array[localId] (O(1) lookup in _apply_mesh_to_pending)
 var _pending_by_mesh: Dictionary = {}
@@ -183,6 +197,9 @@ func _ready() -> void:
 	avatar_material = StandardMaterial3D.new()
 	avatar_material.albedo_color = Color(0.3, 0.5, 0.9)
 
+	# Prim geometry generator
+	prim_generator = PrimMeshGeneratorScript.new()
+
 
 ## Convert SL position array [x, y, z] to Godot Vector3
 func sl_to_godot_pos(sl_pos: Array) -> Vector3:
@@ -213,19 +230,26 @@ func handle_object_create(msg: Dictionary) -> void:
 		_cleanup_object(local_id)
 
 	var mesh_id: String = msg.get("meshId", "")
+	var shape: Dictionary = msg.get("shape", {})
 	var rsi := RSInstance.new(_scenario)
 
 	if not mesh_id.is_empty() and mesh_cache.has(mesh_id):
 		# Real mesh already loaded — use it
 		rsi.set_mesh(mesh_cache[mesh_id])
-	else:
-		# Box placeholder
+	elif not mesh_id.is_empty():
+		# Mesh placeholder while waiting for mesh data
 		rsi.set_mesh(object_mesh)
-		if not mesh_id.is_empty() and not mesh_load_failed.has(mesh_id):
+		if not mesh_load_failed.has(mesh_id):
 			pending_meshes[local_id] = mesh_id
 			if not _pending_by_mesh.has(mesh_id):
 				_pending_by_mesh[mesh_id] = []
 			_pending_by_mesh[mesh_id].append(local_id)
+	elif not shape.is_empty():
+		# Procedural prim geometry from shape parameters
+		rsi.set_mesh(prim_generator.get_or_generate(shape))
+	else:
+		# Ultimate fallback — box placeholder
+		rsi.set_mesh(object_mesh)
 
 	# Apply per-face texture materials
 	var faces: Array = msg.get("faces", [])
@@ -679,9 +703,10 @@ func _apply_texture_to_pending(texture_id: String) -> void:
 				var am: int = int(face_info.get("alphaMode", -1))
 				var ac: float = float(face_info.get("alphaCutoff", 0.5))
 				var pbr: Dictionary = face_info.get("pbr", {})
+				var mt: int = int(face_info.get("mappingType", 0))
 				rsi.set_surface_material(face_idx, _get_or_create_material(
 					albedo_id, face_info["color"], face_info["fullBright"],
-					face_info["doubleSided"], uv, am, ac, pbr))
+					face_info["doubleSided"], uv, am, ac, pbr, mt))
 
 		# Check if this face still has uncached textures
 		var still_pending := false
@@ -728,6 +753,23 @@ func _get_face_texture_ids(albedo_id: String, pbr: Dictionary) -> Array:
 
 
 func _process(_delta: float) -> void:
+	# Periodic VRAM / scene stats
+	_stats_timer += _delta
+	if _stats_timer >= STATS_INTERVAL:
+		_stats_timer = 0.0
+		var tex_mem: int = 0
+		var buf_mem: int = 0
+		var vid_mem: int = 0
+		var rd := RenderingServer.get_rendering_device()
+		if rd:
+			tex_mem = rd.get_memory_usage(RenderingDevice.MEMORY_TEXTURES)
+			buf_mem = rd.get_memory_usage(RenderingDevice.MEMORY_BUFFERS)
+			vid_mem = rd.get_memory_usage(RenderingDevice.MEMORY_TOTAL)
+		print("[Stats] VRAM: %.1f MB (tex: %.1f MB, buf: %.1f MB) | Objects: %d | Avatars: %d | Tex cache: %d | Mat cache: %d | Mesh cache: %d | FPS: %.0f" % [
+			vid_mem / 1048576.0, tex_mem / 1048576.0, buf_mem / 1048576.0,
+			objects.size(), avatars.size(), texture_cache.size(), material_cache.size(), mesh_cache.size(),
+			Engine.get_frames_per_second()])
+
 	# Interpolate avatar positions/rotations toward their targets
 	_interpolate_avatars(_delta)
 
@@ -856,6 +898,7 @@ func _apply_face_materials(rsi: RSInstance, local_id: int, faces: Array) -> void
 		var double_sided: bool = fi.get("doubleSided", false)
 		var alpha_mode: int = int(fi.get("alphaMode", -1))
 		var alpha_cutoff: float = float(fi.get("alphaCutoff", 0.5))
+		var mapping_type: int = int(fi.get("mappingType", 0))
 		var uv_info: Dictionary = {
 			"repeatU": fi.get("repeatU", 1.0),
 			"repeatV": fi.get("repeatV", 1.0),
@@ -907,7 +950,7 @@ func _apply_face_materials(rsi: RSInstance, local_id: int, faces: Array) -> void
 
 		if albedo_cached:
 			rsi.set_surface_material(face_idx, _get_or_create_material(
-				texture_id, color, full_bright, double_sided, uv_info, alpha_mode, alpha_cutoff, pbr))
+				texture_id, color, full_bright, double_sided, uv_info, alpha_mode, alpha_cutoff, pbr, mapping_type))
 		else:
 			rsi.set_surface_material(face_idx, _make_placeholder_material(color, full_bright, double_sided))
 
@@ -922,7 +965,8 @@ func _apply_face_materials(rsi: RSInstance, local_id: int, faces: Array) -> void
 			"alphaMode": alpha_mode,
 			"alphaCutoff": alpha_cutoff,
 			"uv": uv_info,
-			"pbr": pbr
+			"pbr": pbr,
+			"mappingType": mapping_type
 		}
 		for tid: String in all_tex_ids:
 			if not texture_cache.has(tid) and not texture_load_failed.has(tid):
@@ -938,7 +982,16 @@ func _apply_face_materials(rsi: RSInstance, local_id: int, faces: Array) -> void
 		pending_textures[local_id] = pending
 
 
-func _get_or_create_material(texture_id: String, color: Array, full_bright: bool, double_sided: bool, uv_info: Dictionary = {}, alpha_mode: int = -1, alpha_cutoff: float = 0.5, pbr: Dictionary = {}) -> StandardMaterial3D:
+func _get_double_sided_shader(shader: Shader) -> Shader:
+	if _double_sided_shader_cache.has(shader):
+		return _double_sided_shader_cache[shader]
+	var ds := Shader.new()
+	ds.code = shader.code.replace("cull_back", "cull_disabled")
+	_double_sided_shader_cache[shader] = ds
+	return ds
+
+
+func _get_or_create_material(texture_id: String, color: Array, full_bright: bool, double_sided: bool, uv_info: Dictionary = {}, alpha_mode: int = -1, alpha_cutoff: float = 0.5, pbr: Dictionary = {}, mapping_type: int = 0) -> Material:
 	_material_lookups += 1
 
 	# Resolve effective alpha: promote known-opaque textures to mode 0 (fully opaque)
@@ -991,21 +1044,73 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 			norm_key, orm_key, emis_key,
 			metallic_factor, roughness_factor,
 			emissive_factor[0], emissive_factor[1], emissive_factor[2]]
-	var key := "%s_%s_%s_%s_%s_%s%s" % [texture_id, color_hex, fb_str, ds_str, uv_key, alpha_key, pbr_key]
+	var map_key := "m%d" % mapping_type if mapping_type != 0 else ""
+	var key := "%s_%s_%s_%s_%s_%s%s%s" % [texture_id, color_hex, fb_str, ds_str, uv_key, alpha_key, pbr_key, map_key]
 
 	if material_cache.has(key):
 		return material_cache[key]
+
+	# Planar mapping uses a custom ShaderMaterial that implements SL's planarProjection()
+	if mapping_type == 2:
+		var mat := ShaderMaterial.new()
+		# Pick opaque vs alpha-blend shader variant
+		var use_alpha: bool = resolved_mode == 1 or (resolved_mode == -1 and color[3] < 1.0)
+		var shader: Shader = PlanarMapAlphaShader if use_alpha else PlanarMapShader
+		if double_sided:
+			shader = _get_double_sided_shader(shader)
+		mat.shader = shader
+		mat.set_shader_parameter("albedo_tex", texture_cache[texture_id])
+		mat.set_shader_parameter("albedo_color", Color(color[0], color[1], color[2], color[3]))
+		mat.set_shader_parameter("repeat_u", ru)
+		mat.set_shader_parameter("repeat_v", rv)
+		mat.set_shader_parameter("offset_u", ou)
+		mat.set_shader_parameter("offset_v", ov)
+		mat.set_shader_parameter("tex_rotation", tr)
+		mat.set_shader_parameter("full_bright", full_bright)
+		# Alpha scissor (opaque variant only — alpha variant uses smooth blending)
+		if not use_alpha:
+			if resolved_mode == 2:
+				mat.set_shader_parameter("alpha_scissor_threshold", alpha_cutoff)
+			elif resolved_mode == -1 and color[3] >= 1.0:
+				mat.set_shader_parameter("alpha_scissor_threshold", 0.5)
+		material_cache[key] = mat
+		return mat
+
+	# Texture rotation requires a custom shader (StandardMaterial3D has no rotation property)
+	if abs(tr) > 0.001:
+		var smat := ShaderMaterial.new()
+		# Pick opaque vs alpha-blend shader variant
+		var use_alpha: bool = resolved_mode == 1 or (resolved_mode == -1 and color[3] < 1.0)
+		var shader: Shader = StandardUVAlphaShader if use_alpha else StandardUVShader
+		if double_sided:
+			shader = _get_double_sided_shader(shader)
+		smat.shader = shader
+		smat.set_shader_parameter("albedo_tex", texture_cache[texture_id])
+		smat.set_shader_parameter("albedo_color", Color(color[0], color[1], color[2], color[3]))
+		smat.set_shader_parameter("repeat_u", ru)
+		smat.set_shader_parameter("repeat_v", rv)
+		smat.set_shader_parameter("offset_u", ou)
+		smat.set_shader_parameter("offset_v", ov)
+		smat.set_shader_parameter("tex_rotation", tr)
+		smat.set_shader_parameter("full_bright", full_bright)
+		# Alpha scissor (opaque variant only — alpha variant uses smooth blending)
+		if not use_alpha:
+			if resolved_mode == 2:
+				smat.set_shader_parameter("alpha_scissor_threshold", alpha_cutoff)
+			elif resolved_mode == -1 and color[3] >= 1.0:
+				smat.set_shader_parameter("alpha_scissor_threshold", 0.5)
+		material_cache[key] = smat
+		return smat
 
 	var mat := StandardMaterial3D.new()
 	mat.albedo_texture = texture_cache[texture_id]
 	mat.albedo_color = Color(color[0], color[1], color[2], color[3])
 
-	# UV repeat and offset
+	# UV repeat and offset — SL's xform() centers at 0.5 before scaling:
+	#   sl: uv = (uv - 0.5) * repeat + offset + 0.5
+	# Mesh UVs have V flipped (Godot convention), so V offset sign is negated.
 	mat.uv1_scale = Vector3(ru, rv, 1.0)
-	mat.uv1_offset = Vector3(ou, ov, 0.0)
-
-	# Texture rotation — requires shader override (not supported in StandardMaterial3D)
-	# TODO: implement via custom shader when tr != 0
+	mat.uv1_offset = Vector3(ou + 0.5 * (1.0 - ru), -ov + 0.5 * (1.0 - rv), 0.0)
 
 	# Cull mode: double-sided disables backface culling
 	if double_sided:
@@ -1522,9 +1627,161 @@ func get_pipeline_stats() -> Dictionary:
 		"budgetAvail": avg_budget,
 		"budgetUsed": avg_used,
 		"objects": objects.size(),
+		"primShapes": prim_generator.get_cache_size(),
 		"avatars": avatars.size(),
 		"materials": material_cache.size(),
 		"materialLookups": _material_lookups,
 		"materialReuse": _material_lookups - material_cache.size(),
 		"texOpaque": _texture_opaque.values().count(true),
+	}
+
+
+# ─── Debug Inspection ──────────────────────────────────
+
+## Raycast against objects. AABB broad phase on all objects, then per-triangle
+## narrow phase on candidates for precise picking.
+func pick_object(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
+	# Broad phase: AABB test (skip objects far from camera)
+	var max_pick_dist := 200.0
+	var candidates: Array = []  # Array of { id, xform, inv, local_from, local_dir }
+	for id: int in objects:
+		var rsi: RSInstance = objects[id]
+		if rsi.mesh == null:
+			continue
+		if ray_origin.distance_to(rsi.pos) > max_pick_dist:
+			continue
+		var xform := Transform3D(Basis(rsi.rot) * Basis.from_scale(rsi.scl), rsi.pos)
+		var inv := xform.affine_inverse()
+		var local_from := inv * ray_origin
+		var local_dir := (inv.basis * ray_dir).normalized()
+		if rsi.mesh.get_aabb().intersects_ray(local_from, local_dir) != null:
+			candidates.append({ "id": id, "mesh": rsi.mesh, "xform": xform, "local_from": local_from, "local_dir": local_dir })
+
+	if candidates.size() == 0:
+		return {}
+
+	# Narrow phase: per-triangle intersection on AABB candidates
+	var best_id: int = -1
+	var best_dist: float = INF
+	for c: Dictionary in candidates:
+		var dist := _ray_mesh_intersect(c["mesh"], c["local_from"], c["local_dir"], c["xform"])
+		if dist >= 0.0 and dist < best_dist:
+			best_dist = dist
+			best_id = c["id"]
+
+	# Fallback: if triangle test missed all (degenerate mesh), use nearest AABB hit
+	if best_id < 0:
+		for c: Dictionary in candidates:
+			var hit = (c["mesh"] as Mesh).get_aabb().intersects_ray(c["local_from"], c["local_dir"])
+			if hit != null:
+				var world_hit: Vector3 = (c["xform"] as Transform3D) * hit
+				var dist: float = ray_origin.distance_to(world_hit)
+				if dist < best_dist:
+					best_dist = dist
+					best_id = c["id"]
+
+	if best_id < 0:
+		return {}
+	return { "localId": best_id, "distance": best_dist }
+
+
+## Test ray against mesh triangles. Returns world-space distance or -1.0 on miss.
+func _ray_mesh_intersect(mesh: Mesh, local_from: Vector3, local_dir: Vector3, xform: Transform3D) -> float:
+	var best_t: float = -1.0
+	for si: int in range(mesh.get_surface_count()):
+		var arrays: Array = mesh.surface_get_arrays(si)
+		if arrays.size() == 0:
+			continue
+		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var indices = arrays[Mesh.ARRAY_INDEX]
+		if indices != null and indices.size() >= 3:
+			var idx_count: int = indices.size()
+			var i := 0
+			while i < idx_count - 2:
+				var t := _ray_tri(local_from, local_dir,
+					verts[indices[i]], verts[indices[i + 1]], verts[indices[i + 2]])
+				if t >= 0.0:
+					var world_hit: Vector3 = xform * (local_from + local_dir * t)
+					var dist: float = (xform * local_from).distance_to(world_hit)
+					if best_t < 0.0 or dist < best_t:
+						best_t = dist
+				i += 3
+		elif verts.size() >= 3:
+			var i := 0
+			while i < verts.size() - 2:
+				var t := _ray_tri(local_from, local_dir,
+					verts[i], verts[i + 1], verts[i + 2])
+				if t >= 0.0:
+					var world_hit: Vector3 = xform * (local_from + local_dir * t)
+					var dist: float = (xform * local_from).distance_to(world_hit)
+					if best_t < 0.0 or dist < best_t:
+						best_t = dist
+				i += 3
+	return best_t
+
+
+## Möller–Trumbore ray-triangle intersection. Returns t >= 0 on hit, -1.0 on miss.
+func _ray_tri(origin: Vector3, dir: Vector3, v0: Vector3, v1: Vector3, v2: Vector3) -> float:
+	var e1 := v1 - v0
+	var e2 := v2 - v0
+	var h := dir.cross(e2)
+	var a := e1.dot(h)
+	if absf(a) < 1e-8:
+		return -1.0
+	var f := 1.0 / a
+	var s := origin - v0
+	var u := f * s.dot(h)
+	if u < 0.0 or u > 1.0:
+		return -1.0
+	var q := s.cross(e1)
+	var v := f * dir.dot(q)
+	if v < 0.0 or u + v > 1.0:
+		return -1.0
+	var t := f * e2.dot(q)
+	if t < 1e-6:
+		return -1.0
+	return t
+
+
+## Return the RenderingServer instance RID for an object (used for highlight overlay).
+func get_object_rid(local_id: int) -> RID:
+	var rsi: RSInstance = objects.get(local_id)
+	if rsi == null:
+		return RID()
+	return rsi.rid
+
+
+## Return per-face info array for an object.
+func get_object_face_info(local_id: int) -> Array:
+	return object_faces.get(local_id, [])
+
+
+## Set planar shader debug mode on all cached planar materials.
+## mode: 0=off, 1=SL normal, 2=UV, 3=binormal
+func set_planar_debug_mode(mode: int) -> void:
+	var count := 0
+	for key: String in material_cache:
+		var mat: Material = material_cache[key]
+		if mat is ShaderMaterial:
+			var smat := mat as ShaderMaterial
+			# Only set on shaders that have the debug_mode uniform (planar variants)
+			if smat.shader != null and "debug_mode" in smat.shader.code:
+				smat.set_shader_parameter("debug_mode", mode)
+				count += 1
+	print("[SceneManager] Planar debug mode=%d on %d materials" % [mode, count])
+
+
+## Return debug summary for an object.
+func get_object_debug_info(local_id: int) -> Dictionary:
+	var rsi: RSInstance = objects.get(local_id)
+	if rsi == null:
+		return {}
+	var surface_count: int = rsi.mesh.get_surface_count() if rsi.mesh else 0
+	return {
+		"localId": local_id,
+		"pos": rsi.pos,
+		"scl": rsi.scl,
+		"meshId": pending_meshes.get(local_id, ""),
+		"parentId": object_parent.get(local_id, 0),
+		"surfaceCount": surface_count,
 	}

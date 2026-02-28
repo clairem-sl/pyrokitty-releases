@@ -17,7 +17,7 @@ export interface ToolDef {
 export const sessionTools: ToolDef[] = [
   {
     name: 'sl_login',
-    description: 'Login bot to Second Life. Returns connection status and region name.',
+    description: 'Login bot to Second Life. Returns connection status and region name. All params are optional — omit them to auto-login with default credentials (BonnieBelle81).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -27,10 +27,15 @@ export const sessionTools: ToolDef[] = [
         loginUrl: { type: 'string', description: 'Grid login URL (default: Second Life main grid)' },
         startLocation: { type: 'string', description: 'Start location: "home", "last", or "uri:RegionName&x&y&z"' },
       },
-      required: ['firstName', 'lastName', 'password'],
     },
     handler: async (args, bot) => {
       try {
+        // If no credentials provided, use auto-login with defaults
+        if (!args.firstName && !args.password) {
+          await bot.ensureConnected();
+          const status = bot.getStatus();
+          return { content: [{ type: 'text', text: `Connected as ${status.avatarName} in ${status.region}` }] };
+        }
         const result = await bot.login({
           firstName: args.firstName as string,
           lastName: args.lastName as string,

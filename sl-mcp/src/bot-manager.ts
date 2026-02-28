@@ -31,6 +31,12 @@ import { Quaternion } from '../../electron-ui/node-metaverse/dist/lib/classes/Qu
 import { DeRezDestination } from '../../electron-ui/node-metaverse/dist/lib/enums/DeRezDestination.js';
 import { AssetType } from '../../electron-ui/node-metaverse/dist/lib/enums/AssetType.js';
 import { ControlFlags } from '../../electron-ui/node-metaverse/dist/lib/enums/ControlFlags.js';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 export type BotState = 'disconnected' | 'logging_in' | 'connected';
 
@@ -80,6 +86,7 @@ export class BotManager {
   private maxRecentIMs = 50;
   private maxRecentChat = 100;
   private cameraInterval: ReturnType<typeof setInterval> | null = null;
+  private loginPromise: Promise<string> | null = null;
 
   get state(): BotState {
     return this._state;
@@ -91,6 +98,42 @@ export class BotManager {
 
   getBot(): Bot | null {
     return this.bot;
+  }
+
+  // ============ Auto-login ============
+
+  /**
+   * Load default credentials from accounts.json.
+   * Uses the first account (BonnieBelle81) as the default bot.
+   */
+  private async loadDefaultCredentials(): Promise<{ firstName: string; lastName: string; password: string }> {
+    const accountsPath = join(__dirname, '..', '..', 'electron-ui', 'data', 'accounts.json');
+    const data = JSON.parse(await readFile(accountsPath, 'utf-8'));
+    const account = data[0]; // BonnieBelle81
+    return {
+      firstName: account.firstName,
+      lastName: account.lastName,
+      password: account.password,
+    };
+  }
+
+  /**
+   * Ensure the bot is connected, auto-logging in with default credentials if needed.
+   * Safe for concurrent calls — subsequent callers wait on the same login promise.
+   */
+  async ensureConnected(): Promise<void> {
+    if (this.isConnected) return;
+    if (this.loginPromise) {
+      await this.loginPromise;
+      return;
+    }
+    const creds = await this.loadDefaultCredentials();
+    this.loginPromise = this.login(creds);
+    try {
+      await this.loginPromise;
+    } finally {
+      this.loginPromise = null;
+    }
   }
 
   // ============ Camera ============
@@ -107,7 +150,8 @@ export class BotManager {
     return new Promise((resolve) => {
       const start = Date.now();
       const check = () => {
-        const region = this.bot?.currentRegion;
+        let region;
+        try { region = this.bot?.currentRegion; } catch { resolve(); return; }
         const self = region?.agents?.get(this.bot!.agentID().toString());
         if (self && (self.position.x !== 0 || self.position.y !== 0)) {
           resolve();
@@ -125,7 +169,8 @@ export class BotManager {
 
   private updateCamera(): void {
     if (!this.bot) return;
-    const region = this.bot.currentRegion;
+    let region;
+    try { region = this.bot.currentRegion; } catch { return; }
     const self = region?.agents?.get(this.bot.agentID().toString());
     if (!self) return;
 
@@ -171,6 +216,8 @@ export class BotManager {
       // Request 360-degree interest list so sim sends all objects within draw distance
       // (default mode only sends objects the camera is facing)
       await this.bot.setInterestList('360').catch(() => { });
+      // Request 1.5 Mbps bandwidth (matching Firestorm default) so the sim streams objects faster
+      await this.bot.clientCommands.network.setBandwidth(1_500_000).catch(() => { });
 
       // Wait for agent position then move camera so sim streams nearby objects
       await this.waitForAgentPosition(10000);
@@ -205,11 +252,17 @@ export class BotManager {
     this._state = 'disconnected';
   }
 
+  /** True if the bot was connected but got kicked (e.g. another client logged in). */
+  get wasKicked(): boolean {
+    return this._state === 'disconnected' && this.bot === null;
+  }
+
   getStatus(): Record<string, unknown> {
     if (!this.bot || this._state !== 'connected') {
       return { state: this._state };
     }
-    const region = this.bot.currentRegion;
+    let region;
+    try { region = this.bot.currentRegion; } catch { return { state: 'disconnected' }; }
     let agentPosition: { x: number; y: number; z: number } | undefined;
     // region.agents is a Map<string, Avatar> keyed by agent UUID string
     const selfAvatar = region?.agents?.get(this.bot.agentID().toString());
@@ -229,7 +282,7 @@ export class BotManager {
   // ============ Chat ============
 
   async say(message: string, type: 'whisper' | 'normal' | 'shout' = 'normal', channel = 0): Promise<void> {
-    this.requireConnected();
+    await this.ensureConnected();
     const chatTypeMap: Record<string, ChatType> = {
       whisper: ChatType.Whisper,
       normal: ChatType.Normal,
@@ -239,19 +292,19 @@ export class BotManager {
   }
 
   async sendIM(avatarId: string, message: string): Promise<void> {
-    this.requireConnected();
+    await this.ensureConnected();
     await this.bot!.clientCommands.comms.sendInstantMessage(avatarId, message);
   }
 
   async sendGroupMessage(groupId: string, message: string): Promise<void> {
-    this.requireConnected();
+    await this.ensureConnected();
     await this.bot!.clientCommands.comms.sendGroupMessage(groupId, message);
   }
 
   // ============ Navigation ============
 
   async teleport(regionName: string, x = 128, y = 128, z = 30): Promise<string> {
-    this.requireConnected();
+    await this.ensureConnected();
     const position = new Vector3([x, y, z]);
     const lookAt = new Vector3([0, 1, 0]);
     await this.bot!.clientCommands.teleport.teleportTo(regionName, position, lookAt);
@@ -267,7 +320,7 @@ export class BotManager {
    * string-based avatar IDs. See class-level doc for full explanation.
    */
   async getNearbyAvatars(): Promise<NearbyAvatar[]> {
-    this.requireConnected();
+    await this.ensureConnected();
     const avatars = Array.from(this.nearbyAvatars.values());
 
     const uuidsToResolve = avatars.map(a => new UUID(a.id));
@@ -314,7 +367,7 @@ export class BotManager {
     targetX: number, targetY: number, targetZ: number,
     stopDistance = 3.0, timeout = 30000
   ): Promise<string> {
-    this.requireConnected();
+    await this.ensureConnected();
 
     const agent = this.bot!.agent;
     const region = this.bot!.currentRegion;
@@ -463,8 +516,8 @@ export class BotManager {
   }
 
   /** Enable or disable flight mode. */
-  setFlying(enabled: boolean): void {
-    this.requireConnected();
+  async setFlying(enabled: boolean): Promise<void> {
+    await this.ensureConnected();
     const agent = this.bot!.agent;
     if (enabled) {
       agent.setControlFlag(ControlFlags.AGENT_CONTROL_FLY);
@@ -476,26 +529,28 @@ export class BotManager {
 
   /** Sit the bot on an object by its local ID. */
   async sitOnObject(localId: number): Promise<void> {
-    this.requireConnected();
+    await this.ensureConnected();
     const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true);
     await this.bot!.clientCommands.movement.sitOnObject(obj.FullID, new Vector3([0, 0, 0]));
   }
 
   /** Stand up from sitting. */
-  standUp(): void {
-    this.requireConnected();
+  async standUp(): Promise<void> {
+    await this.ensureConnected();
     this.bot!.clientCommands.movement.stand();
   }
 
   /** Sit on ground. */
-  sitOnGround(): void {
-    this.requireConnected();
+  async sitOnGround(): Promise<void> {
+    await this.ensureConnected();
     this.bot!.clientCommands.movement.sitOnGround();
   }
 
   getRegionInfo(): Record<string, unknown> | null {
-    if (!this.bot?.currentRegion) return null;
-    const region = this.bot.currentRegion;
+    if (!this.bot) return null;
+    let region;
+    try { region = this.bot.currentRegion; } catch { return null; }
+    if (!region) return null;
     let agentPosition: { x: number; y: number; z: number } | undefined;
     const selfAvatar = region.agents?.get(this.bot.agentID().toString());
     if (selfAvatar) {
@@ -530,7 +585,7 @@ export class BotManager {
     sittingOnName?: string;
     position: { x: number; y: number; z: number };
   } | null> {
-    this.requireConnected();
+    await this.ensureConnected();
     const region = this.bot!.currentRegion;
     const avatar = region?.agents?.get(avatarId);
     if (!avatar) return null;
@@ -562,7 +617,7 @@ export class BotManager {
    * Resolve avatar name → UUID. Accepts "First Last" or "first.last" format.
    */
   async avatarName2Key(name: string): Promise<string> {
-    this.requireConnected();
+    await this.ensureConnected();
     const uuid = await this.bot!.clientCommands.grid.avatarName2Key(name);
     return uuid.toString();
   }
@@ -572,7 +627,7 @@ export class BotManager {
    * avatarKey2Name can return a single result or an array — handle both.
    */
   async avatarKey2Name(uuid: string): Promise<string> {
-    this.requireConnected();
+    await this.ensureConnected();
     const uuidObj = new UUID(uuid);
     const result = await this.bot!.clientCommands.grid.avatarKey2Name(uuidObj);
     const info = Array.isArray(result) ? result[0] : result;
@@ -580,7 +635,7 @@ export class BotManager {
   }
 
   async getBalance(): Promise<number> {
-    this.requireConnected();
+    await this.ensureConnected();
     return await this.bot!.clientCommands.grid.getBalance();
   }
 
@@ -602,7 +657,7 @@ export class BotManager {
    * .Position = Vector3. The .name property holds the object name after resolve.
    */
   async rezPrims(count = 1): Promise<Array<{ localId: number; uuid: string; position: { x: number; y: number; z: number } }>> {
-    this.requireConnected();
+    await this.ensureConnected();
     const objects = await this.bot!.clientCommands.region.rezPrims(count);
     return objects.map(o => ({
       localId: o.ID,
@@ -612,43 +667,47 @@ export class BotManager {
   }
 
   async setObjectName(localId: number, name: string): Promise<void> {
-    this.requireConnected();
+    await this.ensureConnected();
     const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true);
     await obj.setName(name);
   }
 
   async setObjectDescription(localId: number, description: string): Promise<void> {
-    this.requireConnected();
+    await this.ensureConnected();
     const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true);
     await obj.setDescription(description);
   }
 
   /** Move object. Uses setGeometry with position only (preserves rotation/scale). */
   async setObjectPosition(localId: number, x: number, y: number, z: number): Promise<void> {
-    this.requireConnected();
+    await this.ensureConnected();
     const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true);
     await obj.setGeometry(new Vector3([x, y, z]));
   }
 
   /** Resize object. Uses setGeometry with scale only (preserves position/rotation). */
   async setObjectScale(localId: number, x: number, y: number, z: number): Promise<void> {
-    this.requireConnected();
+    await this.ensureConnected();
     const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true);
     await obj.setGeometry(undefined, undefined, new Vector3([x, y, z]));
   }
 
   /**
    * Find objects by name pattern (supports glob via micromatch internally).
-   * Uses getAllObjects with resolve:true which scans the full region — can be slow.
-   * Retries once after 2s if no results (objects may still be loading after login).
+   * Polls every 2s until results are found or timeout expires.
+   * Useful after login/teleport when the region is still streaming objects.
    *
-   * Object name is on `.name` property (not NameValue — that's avatar-specific).
+   * @param pattern  Glob pattern for object names (e.g. "*Minesweeper*")
+   * @param timeout  Max time in ms to keep retrying (default 10000). Pass 0 for a single attempt.
    */
-  async findObjectsByName(pattern: string): Promise<Array<{ localId: number; uuid: string; name: string; position: { x: number; y: number; z: number } }>> {
-    this.requireConnected();
+  async findObjectsByName(
+    pattern: string,
+    timeout = 10000,
+  ): Promise<Array<{ localId: number; uuid: string; name: string; position: { x: number; y: number; z: number } }>> {
+    await this.ensureConnected();
+    const start = Date.now();
     let objects = await this.bot!.clientCommands.region.findObjectsByName(pattern);
-    // Retry after delay — region may still be loading objects after a fresh login
-    if (objects.length === 0) {
+    while (objects.length === 0 && Date.now() - start < timeout) {
       await new Promise(r => setTimeout(r, 2000));
       objects = await this.bot!.clientCommands.region.findObjectsByName(pattern);
     }
@@ -661,6 +720,24 @@ export class BotManager {
   }
 
   /**
+   * Find an object by its UUID. Returns localId, uuid, name, and position.
+   * Uses getObjectByUUID from node-metaverse with resolve=true to fetch properties.
+   */
+  async getObjectByUUID(
+    uuid: string,
+    timeout = 10000,
+  ): Promise<{ localId: number; uuid: string; name: string; position: { x: number; y: number; z: number } }> {
+    await this.ensureConnected();
+    const obj = await this.bot!.clientCommands.region.getObjectByUUID(new UUID(uuid), true, timeout);
+    return {
+      localId: obj.ID,
+      uuid: obj.FullID.toString(),
+      name: (obj as any).name || '(unknown)',
+      position: obj.Position ? { x: obj.Position.x, y: obj.Position.y, z: obj.Position.z } : { x: 0, y: 0, z: 0 },
+    };
+  }
+
+  /**
    * Get child prims of a linkset. Resolves the root object which populates
    * obj.children via populateChildren in the object store.
    * Returns each child's localId, name, and position (relative to root).
@@ -669,7 +746,7 @@ export class BotManager {
     localId: number; uuid: string; name: string;
     position: { x: number; y: number; z: number };
   }>> {
-    this.requireConnected();
+    await this.ensureConnected();
     const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true);
     if (!obj.children || obj.children.length === 0) {
       return [];
@@ -693,13 +770,14 @@ export class BotManager {
     defaultTexture?: { textureId: string; offsetU: number; offsetV: number; repeatU: number; repeatV: number; rotation: number };
     faces: Array<{ face: number; textureId: string; offsetU: number; offsetV: number; repeatU: number; repeatV: number; rotation: number }>;
   }> {
-    this.requireConnected();
+    await this.ensureConnected();
     const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true);
     const te = obj.TextureEntry;
     if (!te) {
       return { faces: [] };
     }
 
+    const mappingNames: Record<number, string> = { 0: 'default', 2: 'planar', 4: 'spherical' };
     const faceData = (face: any) => ({
       textureId: face.textureID?.toString() || '',
       offsetU: face.offsetU ?? 0,
@@ -707,6 +785,7 @@ export class BotManager {
       repeatU: face.repeatU ?? 1,
       repeatV: face.repeatV ?? 1,
       rotation: face.rotation ?? 0,
+      mapping: mappingNames[face.mappingType as number] ?? 'default',
     });
 
     return {
@@ -735,7 +814,7 @@ export class BotManager {
       faces: Array<{ face: number; offsetU: number; offsetV: number }>;
     }>;
   }> {
-    this.requireConnected();
+    await this.ensureConnected();
     const root = await this.bot!.clientCommands.region.getObjectByLocalID(rootLocalId, true);
     const rootPos = root.Position || { x: 0, y: 0, z: 0 };
     const rootRot = root.Rotation || { x: 0, y: 0, z: 0, w: 1 };
@@ -798,7 +877,7 @@ export class BotManager {
    * Must call fetchObjectInventory first to populate obj.inventory.
    */
   async getObjectInventory(localId: number): Promise<Array<{ name: string; type: string; itemId: string; description: string }>> {
-    this.requireConnected();
+    await this.ensureConnected();
     const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true);
     await this.bot!.clientCommands.region.fetchObjectInventory(obj);
     return obj.inventory.map(item => ({
@@ -810,13 +889,13 @@ export class BotManager {
   }
 
   async touchObject(localId: number): Promise<void> {
-    this.requireConnected();
+    await this.ensureConnected();
     await this.bot!.clientCommands.region.touchObject(localId);
   }
 
   /** Delete (derez to trash) an object. Must be owned by the bot. */
   async deleteObject(localId: number): Promise<void> {
-    this.requireConnected();
+    await this.ensureConnected();
     const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true);
     await obj.deRezObject(DeRezDestination.TrashFolder, UUID.zero(), UUID.zero());
   }
@@ -903,6 +982,20 @@ export class BotManager {
       if (this.recentChat.length > this.maxRecentChat) {
         this.recentChat.shift();
       }
+    });
+
+    // Handle disconnect (e.g. kicked by another client logging in)
+    this.bot.clientEvents.onDisconnected.subscribe((event) => {
+      console.error(`[BotManager] Disconnected: ${event.message} (requested=${event.requested})`);
+      if (this.cameraInterval) {
+        clearInterval(this.cameraInterval);
+        this.cameraInterval = null;
+      }
+      this.bot = null;
+      this.friends.clear();
+      this.groups.clear();
+      this.nearbyAvatars.clear();
+      this._state = 'disconnected';
     });
 
     // Collect incoming IMs (ring buffer of last N messages)
