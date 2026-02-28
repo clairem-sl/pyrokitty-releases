@@ -31,6 +31,10 @@ func _ready() -> void:
 	_test_uv_rotation_v_flip()
 	_test_cap_uv_formula_roundtrip()
 	_test_box_cap_uv_values()
+	_test_hollow_box_surface_count()
+	_test_hollow_box_cap_normals()
+	_test_hollow_box_circle_cap_normals()
+	_test_hollow_box_inner_side_normal()
 
 	print("--- prim_mesh tests: %d passed, %d failed ---" % [_passed, _failed])
 
@@ -390,3 +394,76 @@ func _test_box_cap_uv_values() -> void:
 	var uv_bottom2 := _uv_at_nearest_vertex(mesh, 5, Vector3(0.5, -0.5, -0.5))
 	_assert_vec2_near(uv_bottom2, Vector2(1.0, 1.0), 0.01,
 		"bottom cap mesh UV at SL corner (0.5,0.5)")
+
+
+# ─── Hollow Box Tests ────────────────────────────
+#
+# Surface order for a hollow box (linear path, full cut, no profile cut):
+#   0  = top cap    (face_id 0, PATH_BEGIN, last path step → Y=+0.5)
+#   1-4 = outer sides (face_id 5-8)
+#   5  = inner wall (face_id 2, INNER_SIDE)
+#   6  = bottom cap (face_id 1, PATH_END, first path step → Y=-0.5)
+
+
+func _test_hollow_box_surface_count() -> void:
+	var mesh := _make_mesh({"pathCurve": 16, "profileCurve": 1, "profileHollow": 0.5})
+	# top + 4 outer sides + inner wall + bottom = 7
+	_assert_eq(mesh.get_surface_count(), 7, "hollow box (same hollow) surface count")
+
+
+func _test_hollow_box_cap_normals() -> void:
+	# This is the regression test for the _build_hollow_cap winding bug.
+	# use_a triangles (outer edge + inner pt) are CW from +Y.
+	# use_b triangles (outer pt + inner edge) are CCW from +Y.
+	# Before the fix, use_b got the same winding reversal as use_a, giving half
+	# the cap triangles the wrong normal. The average normal would be near zero.
+	# After the fix (reverse when is_top == use_a), all triangles agree.
+	var mesh := _make_mesh({"pathCurve": 16, "profileCurve": 1, "profileHollow": 0.5})
+
+	var n_top := _avg_normal(mesh, 0)
+	_assert_vec3_near(n_top, Vector3(0, 1, 0), 0.05,
+		"hollow box top cap (surface 0) normal → +Y")
+
+	var n_bottom := _avg_normal(mesh, 6)
+	_assert_vec3_near(n_bottom, Vector3(0, -1, 0), 0.05,
+		"hollow box bottom cap (surface 6) normal → -Y")
+
+	# Regression test for the faces[0].count override bug: if the override reverts,
+	# the top cap only renders the outer ring (4 corners at XZ dist ≈ 0.707).
+	# With the hollow inner ring present, some vertices are at XZ dist ≈ 0.354.
+	# Threshold 0.5 cleanly separates hollow (0.354) from solid-only (0.707).
+	var top_arrays := mesh.surface_get_arrays(0)
+	var top_verts: PackedVector3Array = top_arrays[Mesh.ARRAY_VERTEX]
+	var min_xz_dist := INF
+	for v in top_verts:
+		min_xz_dist = minf(min_xz_dist, Vector2(v.x, v.z).length())
+	_assert(min_xz_dist < 0.5,
+		"hollow box top cap has inner ring vertices (min XZ dist=%.3f)" % min_xz_dist)
+
+
+func _test_hollow_box_circle_cap_normals() -> void:
+	# Same regression check with circle hollow (profileCurve = HOLE_CIRCLE | PROFILE_SQUARE = 0x11 = 17).
+	# Circle hollow produces more vertices and more two-pointer steps, exercising
+	# the use_b path more heavily.
+	var mesh := _make_mesh({"pathCurve": 16, "profileCurve": 17, "profileHollow": 0.5})
+
+	var n_top := _avg_normal(mesh, 0)
+	_assert_vec3_near(n_top, Vector3(0, 1, 0), 0.05,
+		"hollow box (circle hollow) top cap normal → +Y")
+
+	var n_bottom := _avg_normal(mesh, mesh.get_surface_count() - 1)
+	_assert_vec3_near(n_bottom, Vector3(0, -1, 0), 0.05,
+		"hollow box (circle hollow) bottom cap normal → -Y")
+
+
+func _test_hollow_box_inner_side_normal() -> void:
+	# Inner wall (surface 5) faces inward — normal must be horizontal (Y ≈ 0).
+	# The four inner faces average to near zero in XZ (cancel out), but each
+	# individual face should have no Y component.
+	var mesh := _make_mesh({"pathCurve": 16, "profileCurve": 1, "profileHollow": 0.5})
+	var arrays := mesh.surface_get_arrays(5)
+	var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+	var max_y := 0.0
+	for n in normals:
+		max_y = maxf(max_y, absf(n.y))
+	_assert(max_y < 0.05, "hollow box inner wall: all normals horizontal (max |Y|=%.4f)" % max_y)

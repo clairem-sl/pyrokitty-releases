@@ -188,9 +188,6 @@ func _generate_profile(profile_type: int, hole_type: int, p_begin: float, p_end:
 			if hollow > 0:
 				_add_hollow(result, hole_type, hollow, 4, -0.375, 1.0, p_begin, p_end)
 
-			if path_open:
-				result.faces[0].count = result.total_out if result.total_out > 0 else result.points.size()
-
 		PROFILE_ISOTRI, PROFILE_EQUALTRI, PROFILE_RIGHTTRI:
 			_gen_ngon(result, 3, 0.0, 0.0, 1.0, p_begin, p_end, hollow)
 			# Scale z by 3
@@ -781,7 +778,12 @@ func _build_hollow_cap(st: SurfaceTool, verts: Array[Vector3], profile: ProfileR
 			use_a = false
 
 		# Godot's generate_normals() uses (v0-v2)×(v0-v1), opposite of standard convention.
-		# Reversed winding → outward normal for top (+Y), forward → outward for bottom (-Y).
+		# use_a triangles (outer edge + inner pt) are CW from +Y.
+		# use_b triangles (outer pt + inner edge) are CCW from +Y.
+		# CW needs reversed winding for +Y (top), forward for -Y (bottom).
+		# CCW needs forward winding for +Y (top), reversed for -Y (bottom).
+		# So: reverse when (is_top == use_a).
+		var reverse_winding := (is_top == use_a)
 		if use_a:
 			var i0: int = mini(offset + pt1, max_idx)
 			var i1: int = mini(offset + pt1 + 1, max_idx)
@@ -795,7 +797,7 @@ func _build_hollow_cap(st: SurfaceTool, verts: Array[Vector3], profile: ProfileR
 			var uv1 := _cap_uv(profile, pt1 + 1, is_top)
 			var uv2 := _cap_uv(profile, pt2, is_top)
 
-			if is_top:
+			if reverse_winding:
 				st.set_uv(uv0); st.add_vertex(v0)
 				st.set_uv(uv2); st.add_vertex(v2)
 				st.set_uv(uv1); st.add_vertex(v1)
@@ -817,7 +819,7 @@ func _build_hollow_cap(st: SurfaceTool, verts: Array[Vector3], profile: ProfileR
 			var uv1 := _cap_uv(profile, pt2, is_top)
 			var uv2 := _cap_uv(profile, pt2 - 1, is_top)
 
-			if is_top:
+			if reverse_winding:
 				st.set_uv(uv0); st.add_vertex(v0)
 				st.set_uv(uv2); st.add_vertex(v2)
 				st.set_uv(uv1); st.add_vertex(v1)

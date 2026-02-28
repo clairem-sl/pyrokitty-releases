@@ -45,6 +45,8 @@ export class Circuit
 
     private readonly onPacketReceived: Subject<Packet>;
     private readonly onAckReceived: Subject<number>;
+    private pktCount = 0;
+    private pktLogTimer: NodeJS.Timeout | null = null;
 
     public constructor()
     {
@@ -319,9 +321,17 @@ export class Circuit
         {
             if (remote.address === this.ipAddress)
             {
+                this.pktCount++;
                 this.receivedPacket(message);
             }
         });
+
+        if (!this.pktLogTimer) {
+            this.pktLogTimer = setInterval(() => {
+                console.log(`[Circuit] packets/10s=${this.pktCount} (~${(this.pktCount/10).toFixed(1)}/s) host=${this.ipAddress}:${this.port}`);
+                this.pktCount = 0;
+            }, 10000);
+        }
 
         this.active = true;
     }

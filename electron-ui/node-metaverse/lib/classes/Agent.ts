@@ -80,7 +80,7 @@ export class Agent {
     public cameraCenter: Vector3 = new Vector3([199.58, 203.95, 24.304]);
     public cameraLeftAxis: Vector3 = new Vector3([-1.0, 0.0, 0]);
     public cameraUpAxis: Vector3 = new Vector3([0.0, 0.0, 1.0]);
-    public cameraFar = 1;
+    public cameraFar = 128;
     public readonly appearanceCompleteEvent: Subject<void> = new Subject<void>();
 
     private readonly headRotation = Quaternion.getIdentity();
@@ -316,11 +316,19 @@ export class Agent {
     }
 
     public setControlFlag(flag: ControlFlags): void {
+        const prev = this.controlFlags;
         this.controlFlags = this.controlFlags | flag;
+        if (this.controlFlags !== prev) {
+            this.sendAgentUpdate();
+        }
     }
 
     public clearControlFlag(flag: ControlFlags): void {
+        const prev = this.controlFlags;
         this.controlFlags = this.controlFlags & ~flag;
+        if (this.controlFlags !== prev) {
+            this.sendAgentUpdate();
+        }
     }
 
     public async getWearables(): Promise<InventoryFolder> {
@@ -337,6 +345,11 @@ export class Agent {
     public sendAgentUpdate(): void {
         if (!this.currentRegion) {
             return;
+        }
+        // Keep camera center in sync with the agent's actual position
+        const selfAvatar = this.currentRegion.agents.get(this.agentID.toString());
+        if (selfAvatar?.position) {
+            this.cameraCenter = selfAvatar.position;
         }
         const circuit = this.currentRegion.circuit;
         const agentUpdate: AgentUpdateMessage = new AgentUpdateMessage();

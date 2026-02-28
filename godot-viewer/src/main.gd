@@ -14,6 +14,10 @@ var _planar_debug_mode: int = 0
 var stats_timer: float = 0.0
 const STATS_INTERVAL: float = 5.0  # send pipeline stats every 5s
 
+# Low-priority message backlog — object_create / mesh_ready / texture_ready etc.
+# Avatar and identity messages bypass this queue and are always dispatched immediately.
+var _low_priority_queue: Array[String] = []
+
 func _exit_tree() -> void:
 	if ws_peer:
 		ws_peer.close()
@@ -51,9 +55,6 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	fps_timer += _delta
-	if fps_timer >= 15.0:
-		fps_timer = 0.0
-		print("[Main] FPS: %.1f" % Engine.get_frames_per_second())
 	# Send pipeline stats to Electron for logging
 	stats_timer += _delta
 	if stats_timer >= STATS_INTERVAL:
@@ -94,19 +95,39 @@ func _process(_delta: float) -> void:
 
 	var state := ws_peer.get_ready_state()
 	if state == WebSocketPeer.STATE_OPEN:
-		# Process up to N messages per frame to avoid freezing on large snapshots
-		var msgs_this_frame := 0
-		while ws_peer.get_available_packet_count() > 0 and msgs_this_frame < 200:
-			var pkt := ws_peer.get_packet()
-			var text := pkt.get_string_from_utf8()
-			_handle_message(text)
-			msgs_this_frame += 1
+		# Drain the entire socket queue this frame, routing by priority:
+		#  • Avatar position/lifecycle + identity → dispatched immediately (no budget limit).
+		#    These must never be delayed behind a burst of object_create messages.
+		#  • Everything else (object_create, mesh_ready, texture_ready …) → appended to
+		#    _low_priority_queue for time-budgeted processing below.
+		while ws_peer.get_available_packet_count() > 0:
+			var text := ws_peer.get_packet().get_string_from_utf8()
+			if _is_high_priority(text):
+				_handle_message(text)
+			else:
+				_low_priority_queue.append(text)
+
+		# Process low-priority backlog with a 12ms budget so object creation never
+		# freezes a frame. Unprocessed messages carry over to the next frame.
+		var _msg_start := Time.get_ticks_usec() / 1000.0
+		while _low_priority_queue.size() > 0:
+			if (Time.get_ticks_usec() / 1000.0) - _msg_start >= 12.0:
+				break
+			_handle_message(_low_priority_queue.pop_front())
 	elif state == WebSocketPeer.STATE_CLOSING:
 		pass  # Wait for close to complete
 	elif state == WebSocketPeer.STATE_CLOSED:
 		print("[Main] WebSocket closed (code=%d)" % ws_peer.get_close_code())
 		ws_peer = null
 		tcp_peer = null
+
+
+## Classify a raw JSON string as high-priority without full parsing.
+## Peeks at the first 40 bytes — enough to see any "type":"avatar_*" or "self_id".
+## High-priority messages are dispatched immediately, bypassing the time-budgeted queue.
+func _is_high_priority(text: String) -> bool:
+	var prefix := text.left(40)
+	return '"avatar_' in prefix or '"self_id"' in prefix
 
 
 func _handle_message(text: String) -> void:

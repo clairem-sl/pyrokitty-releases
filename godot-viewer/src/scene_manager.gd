@@ -180,7 +180,6 @@ func _exit_tree() -> void:
 
 func _ready() -> void:
 	_scenario = get_world_3d().scenario
-	print("[SceneManager] CPU threads: %d, texture threads: %d" % [OS.get_processor_count(), TEXTURE_THREAD_COUNT])
 	_start_texture_threads()
 	# Create shared meshes
 	object_mesh = BoxMesh.new()
@@ -558,7 +557,7 @@ func _start_texture_threads() -> void:
 		var t := Thread.new()
 		t.start(_texture_worker_loop)
 		_texture_threads.append(t)
-	print("[SceneManager] Started %d texture threads" % TEXTURE_THREAD_COUNT)
+	print("[SceneManager] Ready: %d CPU threads, %d texture threads" % [OS.get_processor_count(), TEXTURE_THREAD_COUNT])
 
 
 ## Worker loop: runs on each dedicated texture thread
@@ -1036,7 +1035,9 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 	var ov: float = ov_val if ov_val != null else 0.0
 	var tr_val = uv_info.get("texRotation", 0.0)
 	var tr: float = tr_val if tr_val != null else 0.0
-	var uv_key := "%.3f_%.3f_%.3f_%.3f_%.3f" % [ru, rv, ou, ov, tr]
+	# Round UV params to 2 decimal places — collapses near-duplicates from floating-point
+	# protocol noise (e.g. 1.0001 vs 1.0) into shared materials, cutting material count.
+	var uv_key := "%.2f_%.2f_%.2f_%.2f_%.2f" % [ru, rv, ou, ov, tr]
 	var alpha_key := "%d_%.2f" % [resolved_mode, alpha_cutoff]
 	var pbr_key := ""
 	if is_pbr:
@@ -1207,7 +1208,6 @@ func _make_placeholder_material(color: Array, full_bright: bool, double_sided: b
 
 func set_self_avatar_id(id: String) -> void:
 	self_avatar_id = id
-	print("[SceneManager] Self avatar: %s" % id)
 	# If we already have this avatar, emit its position
 	if avatars.has(id):
 		self_avatar_moved.emit(avatars[id].pos)
@@ -1397,7 +1397,6 @@ func handle_terrain_ready(msg: Dictionary) -> void:
 	terrain_node.material_override = mat
 
 	add_child(terrain_node)
-	print("[SceneManager] Terrain mesh created (256x256)")
 
 	# Build water plane
 	var water_height: float = float(msg.get("waterHeight", 20.0))
@@ -1485,7 +1484,6 @@ func _build_water_plane(water_height: float) -> void:
 	water_node.material_override = mat
 
 	add_child(water_node)
-	print("[SceneManager] Water plane at height %.1f" % water_height)
 
 
 func handle_environment_data(msg: Dictionary) -> void:
@@ -1547,7 +1545,6 @@ func handle_environment_data(msg: Dictionary) -> void:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 		env.ambient_light_energy = 0.6
 
-	print("[SceneManager] Environment updated (sunDir=%s)" % str(godot_sun_dir))
 
 
 ## Return stats dictionary for the Godot-side asset pipeline
@@ -1768,7 +1765,6 @@ func set_planar_debug_mode(mode: int) -> void:
 			if smat.shader != null and "debug_mode" in smat.shader.code:
 				smat.set_shader_parameter("debug_mode", mode)
 				count += 1
-	print("[SceneManager] Planar debug mode=%d on %d materials" % [mode, count])
 
 
 ## Return debug summary for an object.

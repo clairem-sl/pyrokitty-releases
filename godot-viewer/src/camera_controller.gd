@@ -42,6 +42,13 @@ var last_w_press_time: float = -1.0
 var move_dirty: bool = false
 var send_timer: float = 0.0
 
+# Shadow quality throttle: reduce cascade count + max distance while moving
+var _shadow_moving: bool = false
+var _shadow_stop_timer: float = 0.0
+const SHADOW_STOP_DELAY: float = 0.4     # seconds after last key before restoring quality
+const SHADOW_DIST_MOVING: float = 40.0   # max shadow distance while moving (m)
+const SHADOW_DIST_STOPPED: float = 100.0 # max shadow distance at rest (m)
+
 @onready var main_node: Node3D = get_node("/root/Main")
 @onready var scene_manager: Node3D = get_node("../SceneManager")
 
@@ -97,6 +104,21 @@ func _process(delta: float) -> void:
 	if move_forward or move_backward or turn_left or turn_right \
 		or strafe_left or strafe_right or jump or crouch:
 		move_dirty = true
+
+	# Shadow quality: drop to 2 cascades + shorter range while any key is held,
+	# restore 0.4s after all keys release.
+	var keys_held := move_forward or move_backward or turn_left or turn_right \
+		or strafe_left or strafe_right
+	if keys_held:
+		_shadow_stop_timer = SHADOW_STOP_DELAY
+		if not _shadow_moving:
+			_shadow_moving = true
+			_set_shadow_quality(true)
+	elif _shadow_moving:
+		_shadow_stop_timer -= delta
+		if _shadow_stop_timer <= 0.0:
+			_shadow_moving = false
+			_set_shadow_quality(false)
 
 	# Send movement updates
 	send_timer -= delta
@@ -418,6 +440,18 @@ func _hide_debug_tooltip() -> void:
 	_clear_highlight()
 	_tooltip_panel.visible = false
 	_tooltip_visible = false
+
+
+func _set_shadow_quality(moving: bool) -> void:
+	var light: DirectionalLight3D = get_node_or_null("/root/Main/DirectionalLight3D")
+	if light == null:
+		return
+	if moving:
+		light.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+		light.directional_shadow_max_distance = SHADOW_DIST_MOVING
+	else:
+		light.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+		light.directional_shadow_max_distance = SHADOW_DIST_STOPPED
 
 
 func _send_movement() -> void:

@@ -61,6 +61,7 @@ export class GodotBridge extends EventEmitter {
   private sculptFetchQueue: SculptFetchQueue | null = null;
   private materialFetchQueue: MaterialFetchQueue | null = null;
   private materialToFaces = new Map<string, { localId: number; faceIndex: number; face: any; inlineOverride: any }[]>();
+  private textureUpdateSubs = new Map<number, Subscription>(); // per-object onTextureUpdate subscriptions
   private connected = false;
   private assetReadyBuffer: object[] = [];
   private assetReadyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -247,9 +248,7 @@ export class GodotBridge extends EventEmitter {
     fs.mkdirSync(path.join(cacheBase, 'textures'), { recursive: true });
     fs.mkdirSync(path.join(cacheBase, 'terrain'), { recursive: true });
 
-    console.log(`[GodotBridge] Spawning Godot on port ${this.port}`);
-    console.log(`[GodotBridge] Path: ${godotPath}`);
-    console.log(`[GodotBridge] Project: ${projectPath}`);
+    console.log(`[GodotBridge] Spawning Godot on port ${this.port} — ${godotPath}`);
 
     this.process = spawn(godotPath, [
       '--path', projectPath,
@@ -310,7 +309,6 @@ export class GodotBridge extends EventEmitter {
                 const msg = JSON.parse(data.toString());
                 switch (msg.type) {
                   case 'ready':
-                    console.log('[GodotBridge] Godot ready');
                     break;
                   case 'input_move':
                     this.handleInputMove(msg);
@@ -412,9 +410,6 @@ export class GodotBridge extends EventEmitter {
       if ((msg as any).type === 'mesh_ready') meshCount++;
       else texCount++;
     }
-    if (meshCount + texCount > 0) {
-      console.log(`[GodotBridge] Sent ${meshCount} meshes + ${texCount} textures (${this.assetReadyBuffer.length} queued)`);
-    }
 
     // Schedule next batch if more remain
     if (this.assetReadyBuffer.length > 0) {
@@ -492,6 +487,7 @@ export class GodotBridge extends EventEmitter {
       profileHollow: obj.ProfileHollow ?? 0,
     } : undefined;
 
+
     this.send({
       type: 'object_create',
       localId: obj.ID,
@@ -505,6 +501,12 @@ export class GodotBridge extends EventEmitter {
       ...(texInfo ? { faces: texInfo.faces } : {}),
     });
     this.trackedObjects.add(obj.ID);
+
+    // Subscribe to live texture changes for this object
+    if (obj.onTextureUpdate) {
+      const texSub = obj.onTextureUpdate.subscribe(() => this.handleObjectTextureUpdate(obj));
+      this.textureUpdateSubs.set(obj.ID, texSub);
+    }
 
     if (meshId && this.meshFetchQueue) {
       this.meshFetchQueue.request(meshId, obj.ID);
@@ -708,6 +710,19 @@ export class GodotBridge extends EventEmitter {
     this.materialToFaces.delete(materialUuid);
   }
 
+  /** Handle live texture/UV change on a tracked object — re-send face data to Godot */
+  private handleObjectTextureUpdate(obj: any): void {
+    if (!this.trackedObjects.has(obj.ID)) return;
+    const texInfo = this.getTextureInfo(obj);
+    if (!texInfo) return;
+    this.send({
+      type: 'object_update_faces',
+      localId: obj.ID,
+      faces: texInfo.faces,
+    });
+    this.fetchTexturesForObject(obj, texInfo);
+  }
+
   /** Recursively send children of a root/parent object */
   private sendChildren(obj: any): void {
     if (!obj.children) return;
@@ -743,28 +758,8 @@ export class GodotBridge extends EventEmitter {
   private sendInitialSnapshot(): void {
     try {
       const region = this.bot.currentRegion;
-      const objects = region.objects.getAllObjects({});
 
-      let count = 0;
-      let childCount = 0;
-      for (const obj of objects) {
-        // getAllObjects returns root objects with children[] populated
-        if (obj.PCode === 47) continue; // Skip avatars
-
-        this.sendObject(obj, 0);
-        count++;
-
-        // Send all children recursively
-        if (obj.children && obj.children.length > 0) {
-          const before = this.trackedObjects.size;
-          this.sendChildren(obj);
-          childCount += this.trackedObjects.size - before;
-        }
-      }
-
-      console.log(`[GodotBridge] Sent ${count} root objects + ${childCount} children`);
-
-      // Send initial avatars
+      // Send initial avatars immediately — small count, no throttling needed
       const agents = region.agents;
       for (const [id, avatar] of agents) {
         const pos = avatar.position;
@@ -778,8 +773,51 @@ export class GodotBridge extends EventEmitter {
         });
         this.trackedAvatars.add(id);
       }
-
       console.log(`[GodotBridge] Sent ${agents.size} initial avatars`);
+
+      // Flatten all objects (roots then children, depth-first) into a queue.
+      // Parent always comes before its children so Godot can resolve linkset positions.
+      const queue: { obj: any; parentId: number }[] = [];
+      const collect = (obj: any, parentId: number) => {
+        if (obj.PCode === 47) return;
+        queue.push({ obj, parentId });
+        if (obj.children) {
+          for (const child of obj.children) {
+            if (child.PCode !== 47) collect(child, obj.ID);
+          }
+        }
+      };
+      for (const obj of region.objects.getAllObjects({})) {
+        collect(obj, 0);
+      }
+
+      // Pre-mark all queued objects as tracked so that onNewObjectEvent won't
+      // duplicate-send any of them while the batched send is in progress.
+      for (const { obj } of queue) {
+        this.trackedObjects.add(obj.ID);
+      }
+
+      console.log(`[GodotBridge] Sending ${queue.length} objects in batches of 200 (50ms apart)`);
+
+      // Send 200 objects per tick, 50ms between ticks.
+      // Godot's 12ms per-frame message budget is the real throttle; we just avoid
+      // a single synchronous burst that would block the Electron main thread.
+      const BATCH_SIZE = 200;
+      let offset = 0;
+      const sendNextBatch = () => {
+        if (!this.connected) return;
+        const end = Math.min(offset + BATCH_SIZE, queue.length);
+        for (let i = offset; i < end; i++) {
+          this.sendObject(queue[i].obj, queue[i].parentId);
+        }
+        offset = end;
+        if (offset < queue.length) {
+          setTimeout(sendNextBatch, 50);
+        } else {
+          console.log(`[GodotBridge] Initial snapshot complete: ${queue.length} objects`);
+        }
+      };
+      sendNextBatch();
     } catch (err) {
       console.error('[GodotBridge] Error sending initial snapshot:', err);
     }
@@ -876,7 +914,6 @@ export class GodotBridge extends EventEmitter {
         }
       }
 
-      console.log(`[GodotBridge] Sending environment data (sunDir=${sunDir})`);
       this.send({
         type: 'environment_data',
         sunDirection: sunDir,
@@ -1091,11 +1128,15 @@ export class GodotBridge extends EventEmitter {
           if (!obj || obj.deleted) {
             this.send({ type: 'object_kill', localId });
             this.trackedObjects.delete(localId);
+            this.textureUpdateSubs.get(localId)?.unsubscribe();
+            this.textureUpdateSubs.delete(localId);
           }
         } catch {
           // Object not found in store — it's been killed
           this.send({ type: 'object_kill', localId });
           this.trackedObjects.delete(localId);
+          this.textureUpdateSubs.get(localId)?.unsubscribe();
+          this.textureUpdateSubs.delete(localId);
         }
       }
     } catch { /* bot may be disconnected */ }
@@ -1220,7 +1261,6 @@ export class GodotBridge extends EventEmitter {
   }
 
   stop(): void {
-    console.log('[GodotBridge] Stopping...');
     this.cleanup();
 
     if (this.process) {
@@ -1235,6 +1275,12 @@ export class GodotBridge extends EventEmitter {
       sub.unsubscribe();
     }
     this.subscriptions = [];
+
+    // Unsubscribe per-object texture update subscriptions
+    for (const sub of this.textureUpdateSubs.values()) {
+      sub.unsubscribe();
+    }
+    this.textureUpdateSubs.clear();
 
     // Clear timers
     if (this.updateTimer) {
