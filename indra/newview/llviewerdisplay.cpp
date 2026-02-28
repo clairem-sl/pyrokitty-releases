@@ -472,7 +472,18 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
     LL_PROFILE_GPU_ZONE("Render");
 
     // Check for GPU driver reset (TDR recovery)
+    // <FS:Pyrokitty> Suppress GCC -Waddress: on Linux glGetGraphicsResetStatus is a
+    // real function declaration (not a pointer), so the NULL check is always true.
+    // mHasRobustness guards actual availability; the pointer check is redundant on Linux.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waddress"
+#endif
     if (gGLManager.mHasRobustness && glGetGraphicsResetStatus)
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+    // </FS:Pyrokitty>
     {
         GLenum resetStatus = glGetGraphicsResetStatus();
         if (resetStatus != GL_NO_ERROR)

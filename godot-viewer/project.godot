@@ -17,6 +17,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 config/name="PyroKitty 3D"
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.6")
+config/icon="res://icon.png"
 
 [display]
 
@@ -26,3 +27,13 @@ window/size/viewport_height=720
 [dotnet]
 
 project/assembly_name="PyroKitty 3D"
+
+[xr]
+
+openxr/enabled=true
+shaders/enabled=true
+; DO NOT disable submit_depth_buffer. Without it the Meta runtime has no depth
+; data for ATW (Asynchronous TimeWarp) reprojection. When a frame runs late,
+; instead of warping the previous frame to match head movement it shows black.
+; The far plane is 256m (not 2048m) so depth precision is good where it counts.
+openxr/submit_depth_buffer=true

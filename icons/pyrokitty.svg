@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1c0830"/>
+      <stop offset="100%" stop-color="#08010e"/>
+    </radialGradient>
+
+    <!-- Fire trail: bright at tail end (x=176), fades going counterclockwise (x=342) -->
+    <linearGradient id="trailOuter" x1="176" y1="0" x2="342" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#ff8800"/>
+      <stop offset="25%"  stop-color="#ff5500"/>
+      <stop offset="60%"  stop-color="#cc2200" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#550000" stop-opacity="0.4"/>
+    </linearGradient>
+
+    <linearGradient id="trailMid" x1="176" y1="0" x2="342" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#ffcc00"/>
+      <stop offset="20%"  stop-color="#ffaa00"/>
+      <stop offset="50%"  stop-color="#ff5500"/>
+      <stop offset="80%"  stop-color="#cc1100" stop-opacity="0.75"/>
+      <stop offset="100%" stop-color="#440000" stop-opacity="0.3"/>
+    </linearGradient>
+
+    <linearGradient id="trailCore" x1="176" y1="0" x2="342" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#fff5a0"/>
+      <stop offset="15%"  stop-color="#ffee44"/>
+      <stop offset="40%"  stop-color="#ffaa00"/>
+      <stop offset="65%"  stop-color="#ff4400" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#880000" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Cat body -->
+    <radialGradient id="catBody" cx="42%" cy="33%" r="62%">
+      <stop offset="0%"   stop-color="#5a2080"/>
+      <stop offset="100%" stop-color="#1a0625"/>
+    </radialGradient>
+
+    <!-- Cat ear inner -->
+    <linearGradient id="earInner" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%"   stop-color="#ff7700"/>
+      <stop offset="100%" stop-color="#ffcc44"/>
+    </linearGradient>
+
+    <!-- Eye -->
+    <radialGradient id="eyeWhite" cx="35%" cy="28%" r="70%">
+      <stop offset="0%"   stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#ffd8a0"/>
+    </radialGradient>
+
+    <!-- Nose -->
+    <radialGradient id="noseG" cx="35%" cy="28%" r="68%">
+      <stop offset="0%"   stop-color="#ffccdd"/>
+      <stop offset="100%" stop-color="#ff3377"/>
+    </radialGradient>
+
+    <!-- Blush -->
+    <radialGradient id="blush" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#ff2244" stop-opacity="0.48"/>
+      <stop offset="100%" stop-color="#ff2244" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Glow filters -->
+    <filter id="bigGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <filter id="medGlow" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+    <filter id="sparkle" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- ── BACKGROUND ── -->
+  <circle cx="256" cy="256" r="252" fill="url(#bg)"/>
+
+  <!-- ── AMBIENT HEAT ── -->
+  <path d="M 342 375 A 150 150 0 1 0 176 382"
+        fill="none" stroke="#ff3300" stroke-width="90" stroke-linecap="round"
+        opacity="0.10" filter="url(#bigGlow)"/>
+
+  <!-- ── FIRE TRAIL ARC ──
+       r=150, counterclockwise from (342,375) over the top (~y=104) to (176,382).
+       Bright at the cat end, fading as it trails away.
+  -->
+  <!-- Outer red layer -->
+  <path d="M 342 375 A 150 150 0 1 0 176 382"
+        fill="none" stroke="url(#trailOuter)" stroke-width="30" stroke-linecap="round"/>
+  <!-- Mid orange layer -->
+  <path d="M 342 375 A 150 150 0 1 0 176 382"
+        fill="none" stroke="url(#trailMid)" stroke-width="18" stroke-linecap="round"/>
+  <!-- Core yellow layer -->
+  <path d="M 342 375 A 150 150 0 1 0 176 382"
+        fill="none" stroke="url(#trailCore)" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Flame wisps at the tail (bright) end of trail -->
+  <path d="M 176 382 Q 163 364 168 348 Q 170 360 172 350 Q 174 362 176 354 Q 178 366 176 382 Z"
+        fill="#ffee44" opacity="0.7" filter="url(#medGlow)"/>
+
+  <!-- ── CAT TAIL ── -->
+  <path d="M 228 409 C 210 401 194 391 176 382"
+        fill="none" stroke="#251040" stroke-width="16" stroke-linecap="round"/>
+  <path d="M 220 405 C 205 397 192 389 176 382"
+        fill="none" stroke="#ff8800" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+  <circle cx="176" cy="382" r="10" fill="#ffcc44" opacity="0.6" filter="url(#sparkle)"/>
+
+  <!-- ── BODY ── -->
+  <ellipse cx="280" cy="413" rx="60" ry="30" fill="url(#catBody)"/>
+
+  <!-- ── LEGS (running position) ── -->
+  <!-- Back left leg – swept back -->
+  <path d="M 242 433 L 222 471 L 210 477" fill="none" stroke="#251040" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Back right leg – kicked forward -->
+  <path d="M 262 435 L 268 473 L 278 477" fill="none" stroke="#251040" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Front left leg – pushed back -->
+  <path d="M 312 433 L 296 469 L 288 475" fill="none" stroke="#251040" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Front right leg – reaching forward -->
+  <path d="M 328 431 L 348 467 L 360 471" fill="none" stroke="#251040" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- ── NECK ── -->
+  <ellipse cx="330" cy="387" rx="26" ry="30" fill="url(#catBody)"/>
+
+  <!-- ── HEAD ── -->
+  <circle cx="356" cy="355" r="44" fill="url(#catBody)"/>
+
+  <!-- ── EARS ── -->
+  <!-- Far ear -->
+  <polygon points="376,319 400,279 406,323" fill="#331055"/>
+  <polygon points="379,319 400,285 403,322" fill="url(#earInner)" opacity="0.65"/>
+  <!-- Near ear -->
+  <polygon points="344,313 350,271 376,315" fill="#3d1a5c"/>
+  <polygon points="347,314 354,279 372,315" fill="url(#earInner)" opacity="0.8"/>
+
+  <!-- Small flame wisp off near ear -->
+  <path d="M 354 277 Q 348 261 352 247 Q 354 259 356 251 Q 358 261 356 253 Q 360 263 354 277 Z"
+        fill="#ffcc00" opacity="0.65" filter="url(#medGlow)"/>
+
+  <!-- ── EYE ── -->
+  <circle cx="372" cy="349" r="18" fill="url(#eyeWhite)"/>
+  <circle cx="372" cy="349" r="18" fill="none" stroke="#aa3300" stroke-width="2" opacity="0.4"/>
+  <circle cx="372" cy="349" r="13" fill="#180400"/>
+  <circle cx="372" cy="349" r="13" fill="none" stroke="#ff5500" stroke-width="2.5" opacity="0.4"/>
+  <circle cx="372" cy="349" r="8"  fill="#040000"/>
+  <circle cx="365" cy="341" r="6"  fill="white"/>
+  <circle cx="378" cy="357" r="2.8" fill="white" opacity="0.5"/>
+
+  <!-- ── NOSE ── -->
+  <path d="M 385 368 L 391 362 L 397 368 L 391 373 Z" fill="url(#noseG)"/>
+
+  <!-- ── MOUTH ── -->
+  <path d="M 391 374 Q 397 380 401 377" stroke="#cc1155" fill="none" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M 391 374 Q 385 380 381 377" stroke="#cc1155" fill="none" stroke-width="2.2" stroke-linecap="round"/>
+
+  <!-- ── BLUSH ── -->
+  <ellipse cx="382" cy="373" rx="13" ry="8" fill="url(#blush)"/>
+
+  <!-- ── WHISKER DOTS ── -->
+  <circle cx="381" cy="367" r="2.2" fill="#ccaaff" opacity="0.6"/>
+  <circle cx="377" cy="373" r="2.2" fill="#ccaaff" opacity="0.6"/>
+  <circle cx="381" cy="379" r="2.2" fill="#ccaaff" opacity="0.6"/>
+
+  <!-- ── MOTION SPARKS ── -->
+  <circle cx="205" cy="429" r="3"   fill="#ff6600" opacity="0.55"/>
+  <circle cx="196" cy="415" r="2.2" fill="#ffaa00" opacity="0.45"/>
+  <circle cx="200" cy="402" r="2"   fill="#ff4400" opacity="0.38"/>
+
+  <!-- ── BORDER ── -->
+  <circle cx="256" cy="256" r="250" fill="none" stroke="#ff4400" stroke-width="2"   opacity="0.45"/>
+  <circle cx="256" cy="256" r="246" fill="none" stroke="#ffaa00" stroke-width="1"   opacity="0.2"/>
+</svg>

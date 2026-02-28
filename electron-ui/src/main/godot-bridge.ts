@@ -70,10 +70,13 @@ export class GodotBridge extends EventEmitter {
   private deferredTextures = new Map<number, any>(); // localId → obj reference (for re-fetching textures later)
   private readonly TEXTURE_FETCH_RANGE = 160; // meters — 128m cull + 32m buffer for large prims
 
-  constructor(bot: Bot) {
+  private vrMode: boolean;
+
+  constructor(bot: Bot, options: { vrMode?: boolean } = {}) {
     super();
     this.bot = bot;
     this.port = nextPort++;
+    this.vrMode = options.vrMode ?? false;
   }
 
   /** Returns mesh asset UUID if obj is a mesh, else undefined */
@@ -250,9 +253,12 @@ export class GodotBridge extends EventEmitter {
 
     console.log(`[GodotBridge] Spawning Godot on port ${this.port} — ${godotPath}`);
 
+    const userArgs = [`--ws-port=${this.port}`];
+    if (this.vrMode) userArgs.push('--vr');
+
     this.process = spawn(godotPath, [
       '--path', projectPath,
-      '--', `--ws-port=${this.port}`,
+      '--', ...userArgs,
     ], {
       detached: false,
       stdio: ['ignore', 'pipe', 'pipe'],

@@ -17,6 +17,7 @@ const STATS_INTERVAL: float = 5.0  # send pipeline stats every 5s
 # Low-priority message backlog — object_create / mesh_ready / texture_ready etc.
 # Avatar and identity messages bypass this queue and are always dispatched immediately.
 var _low_priority_queue: Array[String] = []
+var _vr_mode: bool = false
 
 func _exit_tree() -> void:
 	if ws_peer:
@@ -29,20 +30,61 @@ func _exit_tree() -> void:
 
 
 func _ready() -> void:
-	# Parse --ws-port from command line
-	for arg in OS.get_cmdline_user_args():
-		if arg.begins_with("--ws-port="):
-			ws_port = int(arg.split("=")[1])
-		elif arg == "--ws-port":
-			# Next arg would be the value, handled by Godot's pair parsing
-			pass
-
-	# Also check paired args (--ws-port 9100)
+	# Parse command-line args
 	var args := OS.get_cmdline_user_args()
-	for i in range(args.size() - 1):
-		if args[i] == "--ws-port":
+	var vr_requested := false
+	for i in range(args.size()):
+		if args[i].begins_with("--ws-port="):
+			ws_port = int(args[i].split("=")[1])
+		elif args[i] == "--ws-port" and i + 1 < args.size():
 			ws_port = int(args[i + 1])
-			break
+		elif args[i] == "--vr":
+			vr_requested = true
+
+	# Main._ready() runs after all children's _ready(), so camera_controller
+	# and xr_rig are already initialised by the time we reach here.
+	var camera_ctrl := get_node_or_null("Camera3D") as Camera3D
+	var xr_rig := get_node_or_null("XROrigin3D")
+
+	if not vr_requested:
+		# openxr/enabled=true in project.godot auto-initialises OpenXR at startup.
+		# Shut it down immediately when not in VR mode to suppress the
+		# "No viewport marked with use_xr" spam.
+		var xr_iface := XRServer.find_interface("OpenXR")
+		if xr_iface and xr_iface.is_initialized():
+			xr_iface.uninitialize()
+
+	if vr_requested and camera_ctrl and xr_rig:
+		var xr_interface := XRServer.find_interface("OpenXR")
+		if xr_interface and xr_interface.initialize():
+			_vr_mode = true
+			# Disable vsync so OpenXR controls frame pacing via xrEndFrame().
+			# With vsync on, Godot blocks waiting for the monitor flip (60Hz)
+			# before submitting to OpenXR, which causes constant black frames
+			# on a 90Hz headset.
+			DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+			get_viewport().use_xr = true
+			# Use 72Hz — the lowest Quest 3 rate — for the largest frame budget (13.9ms).
+			# Upgrade once rendering is consistently within the tighter 90Hz window.
+			if xr_interface.has_method("set_display_refresh_rate"):
+				xr_interface.set_display_refresh_rate(72.0)
+			xr_interface.set_render_target_size_multiplier(0.8)
+			camera_ctrl.set_vr_mode(true)
+			xr_rig.call("activate", camera_ctrl)
+			# Match XR camera far plane to the object visibility range so they
+			# can't diverge — depth precision is wasted beyond where objects exist.
+			var xr_cam := xr_rig.get_node_or_null("XRCamera3D") as Camera3D
+			if xr_cam:
+				xr_cam.far = scene_manager.VISIBILITY_FAR * 2.0
+			# Tighten the finalization budget to fit the 90Hz frame window
+			if scene_manager and scene_manager.has_method("set_vr_mode"):
+				scene_manager.set_vr_mode(true)
+			# Hide self avatar in VR — you're inside it in first-person
+			if scene_manager and scene_manager.has_method("set_first_person_mode"):
+				scene_manager.set_first_person_mode(true)
+			print("[Main] OpenXR initialised — VR mode active")
+		else:
+			push_warning("[Main] OpenXR not available, falling back to desktop mode")
 
 	tcp_server = TCPServer.new()
 	var err := tcp_server.listen(ws_port, "127.0.0.1")
@@ -107,11 +149,13 @@ func _process(_delta: float) -> void:
 			else:
 				_low_priority_queue.append(text)
 
-		# Process low-priority backlog with a 12ms budget so object creation never
-		# freezes a frame. Unprocessed messages carry over to the next frame.
+		# In VR, keep the budget tight (4ms) so xrEndFrame() is never late —
+		# Oculus treats a late submission as a missed frame and flashes black.
+		# Desktop can afford 12ms since vsync is less strict.
+		var _msg_budget: float = 4.0 if _vr_mode else 12.0
 		var _msg_start := Time.get_ticks_usec() / 1000.0
 		while _low_priority_queue.size() > 0:
-			if (Time.get_ticks_usec() / 1000.0) - _msg_start >= 12.0:
+			if (Time.get_ticks_usec() / 1000.0) - _msg_start >= _msg_budget:
 				break
 			_handle_message(_low_priority_queue.pop_front())
 	elif state == WebSocketPeer.STATE_CLOSING:

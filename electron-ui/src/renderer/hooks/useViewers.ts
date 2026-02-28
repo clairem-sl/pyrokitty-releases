@@ -91,8 +91,8 @@ export function useViewers() {
     await ipcRenderer.invoke(IPC_CHANNELS.LAUNCH_VIEWER_FOR_INSTANCE, instanceId);
   };
 
-  const launchGodotViewerForInstance = async (instanceId: string): Promise<void> => {
-    await ipcRenderer.invoke(IPC_CHANNELS.LAUNCH_GODOT_VIEWER_FOR_INSTANCE, instanceId);
+  const launchGodotViewerForInstance = async (instanceId: string, vrMode = false): Promise<void> => {
+    await ipcRenderer.invoke(IPC_CHANNELS.LAUNCH_GODOT_VIEWER_FOR_INSTANCE, instanceId, vrMode);
   };
 
   const getInstanceForAccount = (accountId: string) =>

@@ -11,6 +11,12 @@ const StandardUVAlphaShader = preload("res://src/standard_uv_alpha.gdshader")
 ##   Position: (sl.x, sl.z, -sl.y)
 ##   Quaternion: (sl.x, sl.z, -sl.y, sl.w)
 
+## Maximum visibility distance for in-world objects (m). Objects fade from
+## (VISIBILITY_FAR - VISIBILITY_FADE_MARGIN) to VISIBILITY_FAR, then are culled.
+## The VR camera far plane is derived from this value (see main.gd).
+const VISIBILITY_FAR: float = 128.0
+const VISIBILITY_FADE_MARGIN: float = 32.0
+
 signal self_avatar_moved(pos: Vector3)
 
 ## Lightweight RefCounted wrapper around a RenderingServer instance RID.
@@ -25,8 +31,7 @@ class RSInstance extends RefCounted:
 	func _init(scenario: RID) -> void:
 		rid = RenderingServer.instance_create()
 		RenderingServer.instance_set_scenario(rid, scenario)
-		# Fade out 96-128m, invisible beyond 128m
-		RenderingServer.instance_geometry_set_visibility_range(rid, 0.0, 128.0, 0.0, 32.0, RenderingServer.VISIBILITY_RANGE_FADE_SELF)
+		RenderingServer.instance_geometry_set_visibility_range(rid, 0.0, VISIBILITY_FAR, 0.0, VISIBILITY_FADE_MARGIN, RenderingServer.VISIBILITY_RANGE_FADE_SELF)
 
 	func set_mesh(m: Mesh) -> void:
 		mesh = m
@@ -120,7 +125,10 @@ var _fin_tex_count: int = 0
 var _fin_mesh_extract_ms: float = 0.0  # ImporterMesh.get_mesh
 var _fin_mesh_apply_ms: float = 0.0    # _apply_mesh_to_pending
 var _fin_mesh_count: int = 0
-const TARGET_FRAME_MS: float = 33.3          # 30fps floor — finalize uses whatever is left
+const TARGET_FRAME_MS_DESKTOP: float = 33.3  # 30fps floor for desktop mode
+const TARGET_FRAME_MS_VR: float = 10.0       # 72Hz Quest 3 (13.9ms budget) — leave headroom for GPU
+var _target_frame_ms: float = TARGET_FRAME_MS_DESKTOP
+var _vr_mode: bool = false
 const MIN_FINALIZE_MS: float = 2.0            # minimum finalize budget when on-target
 const OVERBUDGET_FINALIZE_MS: float = 8.0     # more aggressive when already over budget
 
@@ -752,20 +760,20 @@ func _get_face_texture_ids(albedo_id: String, pbr: Dictionary) -> Array:
 
 
 func _process(_delta: float) -> void:
-	# Periodic VRAM / scene stats
+	# Periodic VRAM / scene stats (skipped in VR — no console visible, avoid driver stalls)
 	_stats_timer += _delta
-	if _stats_timer >= STATS_INTERVAL:
+	if _stats_timer >= STATS_INTERVAL and not _vr_mode:
 		_stats_timer = 0.0
 		var tex_mem: int = 0
 		var buf_mem: int = 0
-		var vid_mem: int = 0
 		var rd := RenderingServer.get_rendering_device()
 		if rd:
 			tex_mem = rd.get_memory_usage(RenderingDevice.MEMORY_TEXTURES)
 			buf_mem = rd.get_memory_usage(RenderingDevice.MEMORY_BUFFERS)
-			vid_mem = rd.get_memory_usage(RenderingDevice.MEMORY_TOTAL)
-		print("[Stats] VRAM: %.1f MB (tex: %.1f MB, buf: %.1f MB) | Objects: %d | Avatars: %d | Tex cache: %d | Mat cache: %d | Mesh cache: %d | FPS: %.0f" % [
-			vid_mem / 1048576.0, tex_mem / 1048576.0, buf_mem / 1048576.0,
+			# Note: MEMORY_TOTAL is intentionally omitted — it flushes the GPU
+			# pipeline on many drivers and causes multi-ms main-thread stalls.
+		print("[Stats] VRAM: tex=%.1fMB buf=%.1fMB | Objects: %d | Avatars: %d | Tex cache: %d | Mat cache: %d | Mesh cache: %d | FPS: %.0f" % [
+			tex_mem / 1048576.0, buf_mem / 1048576.0,
 			objects.size(), avatars.size(), texture_cache.size(), material_cache.size(), mesh_cache.size(),
 			Engine.get_frames_per_second()])
 
@@ -793,7 +801,7 @@ func _process(_delta: float) -> void:
 	var frame_start_ms := (Time.get_ticks_usec() / 1000.0) - (_delta * 1000.0)
 	var now_ms := Time.get_ticks_usec() / 1000.0
 	var elapsed_ms := now_ms - frame_start_ms
-	var remaining_ms := TARGET_FRAME_MS - elapsed_ms
+	var remaining_ms := _target_frame_ms - elapsed_ms
 	# When already over budget, be aggressive — frame is slow anyway, finish loading faster
 	var budget_ms := maxf(remaining_ms, OVERBUDGET_FINALIZE_MS if remaining_ms < MIN_FINALIZE_MS else MIN_FINALIZE_MS)
 	# Split: 60% textures, 40% meshes (textures are cheaper per-item)
@@ -1206,11 +1214,33 @@ func _make_placeholder_material(color: Array, full_bright: bool, double_sided: b
 
 # ─── Self Avatar ─────────────────────────────────────
 
+var _first_person_mode: bool = false
+
+
+func set_vr_mode(enabled: bool) -> void:
+	_vr_mode = enabled
+	_target_frame_ms = TARGET_FRAME_MS_VR if enabled else TARGET_FRAME_MS_DESKTOP
+
+
+func set_first_person_mode(enabled: bool) -> void:
+	_first_person_mode = enabled
+	_apply_self_avatar_visibility()
+
+
+func _apply_self_avatar_visibility() -> void:
+	if self_avatar_id.is_empty():
+		return
+	var rsi: RSInstance = avatars.get(self_avatar_id)
+	if rsi != null:
+		RenderingServer.instance_set_visible(rsi.rid, not _first_person_mode)
+
+
 func set_self_avatar_id(id: String) -> void:
 	self_avatar_id = id
-	# If we already have this avatar, emit its position
+	# If we already have this avatar, emit its position and apply visibility
 	if avatars.has(id):
 		self_avatar_moved.emit(avatars[id].pos)
+	_apply_self_avatar_visibility()
 
 
 ## Set the self avatar's yaw directly (for instant A/D feedback)
@@ -1270,6 +1300,7 @@ func handle_avatar_create(msg: Dictionary) -> void:
 
 	if avatar_id == self_avatar_id:
 		self_avatar_moved.emit(rsi.pos)
+		_apply_self_avatar_visibility()
 
 
 func handle_avatar_update(msg: Dictionary) -> void:

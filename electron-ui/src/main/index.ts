@@ -12,6 +12,13 @@ import { InventoryFolder } from '../../node-metaverse/dist/lib/classes/Inventory
 import { initGpuCompressWindow, destroyGpuCompressWindow } from './gpu-compress-window';
 import { getSavedBounds, trackWindow } from './window-state-manager';
 
+function getIconPath(filename: string): string {
+  const iconsDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'icons')
+    : path.join(__dirname, '..', '..', '..', 'icons');
+  return path.join(iconsDir, filename);
+}
+
 // Set node-metaverse inventory cache to writable location (not inside app.asar)
 InventoryFolder.cacheBasePath = path.join(app.getPath('userData'), 'asset-cache', 'inventory');
 
@@ -56,6 +63,7 @@ function createMapWindow(): void {
     minWidth: 400,
     minHeight: 300,
     title: 'PyroKitty - World Map',
+    icon: getIconPath('pyrokitty2.ico'),
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -85,10 +93,7 @@ async function performCleanup(): Promise<void> {
 }
 
 async function createWindow(): Promise<void> {
-  const iconsDir = app.isPackaged
-    ? path.join(process.resourcesPath, 'icons')
-    : path.join(__dirname, '..', '..', '..', 'indra', 'newview', 'icons', 'release');
-  const iconPath = path.join(iconsDir, 'firestorm_icon.ico');
+  const iconPath = getIconPath('pyrokitty2.ico');
 
   const saved = getSavedBounds('main');
   mainWindow = new BrowserWindow({
@@ -170,7 +175,7 @@ async function createWindow(): Promise<void> {
 
   // Menu item icons
   const showIcon = nativeImage.createFromPath(
-    path.join(iconsDir, 'firestorm_16.png')
+    getIconPath('pyrokitty2_16.png')
   );
 
   const contextMenu = Menu.buildFromTemplate([

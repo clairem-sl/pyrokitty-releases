@@ -2005,10 +2005,6 @@ class LinuxManifest(ViewerManifest):
             ):
                 self.path(libfile)
 
-        with self.prefix(src=os.path.join(pkgdir ), dst="bin"):
-            self.path("win32")
-            self.path("win64")
-
     def package_finish(self):
         # a standard map of strings for replacing in the templates
 

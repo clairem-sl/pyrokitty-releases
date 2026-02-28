@@ -94,12 +94,12 @@
                 ]
             },
             {
-                "from": "../indra/newview/icons/release/firestorm_icon.ico",
-                "to": "icons/firestorm_icon.ico"
+                "from": "../icons/pyrokitty2.ico",
+                "to": "icons/pyrokitty2.ico"
             },
             {
-                "from": "../indra/newview/icons/release/firestorm_16.png",
-                "to": "icons/firestorm_16.png"
+                "from": "../icons/pyrokitty2_16.png",
+                "to": "icons/pyrokitty2_16.png"
             }
         ],
         "win": {
@@ -108,7 +108,7 @@
                 "7z"
             ],
             "artifactName": "PyroKitty-Launcher-${version}.${ext}",
-            "icon": "../indra/newview/icons/release/firestorm_icon.ico"
+            "icon": "../icons/pyrokitty2.ico"
         }
     }
 }

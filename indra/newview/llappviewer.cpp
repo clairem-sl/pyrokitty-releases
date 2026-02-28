@@ -5338,11 +5338,7 @@ bool LLAppViewer::initCache()
             // clear the new C++ file system based cache
             LLDiskCache::getInstance()->clearCache();
     }
-        else
-        {
-            // purge excessive files from the new file system based cache
-            LLDiskCache::getInstance()->purge();
-        }
+        // else: LLPurgeDiskCacheThread handles periodic purges after startup
     }
     LLAppViewer::getPurgeDiskCacheThread()->start();
 
@@ -6695,8 +6691,12 @@ void LLAppViewer::disconnectViewer()
     }
     removeMarkerFiles();
 
-    LL_INFOS("Shutdown") << "Calling TerminateProcess" << LL_ENDL;
+    LL_INFOS("Shutdown") << "Hard exit" << LL_ENDL;
+#if LL_WINDOWS
     TerminateProcess(GetCurrentProcess(), 0);
+#else
+    _exit(0);
+#endif
     // </FS:Pyrokitty>
 
 // [SL:KB] - Patch: Appearance-Misc | Checked: 2013-02-12 (Catznip-3.4)

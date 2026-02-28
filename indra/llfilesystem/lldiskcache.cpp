@@ -567,7 +567,7 @@ LLPurgeDiskCacheThread::LLPurgeDiskCacheThread() :
 
 void LLPurgeDiskCacheThread::run()
 {
-    constexpr std::chrono::seconds CHECK_INTERVAL{60};
+    constexpr std::chrono::minutes CHECK_INTERVAL{30};
 
     while (LLApp::instance()->sleep(CHECK_INTERVAL))
     {

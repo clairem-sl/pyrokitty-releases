@@ -242,7 +242,7 @@ export class ViewerManager extends EventEmitter {
    * Launch the Godot 3D viewer sidecar for an existing metaverse session.
    * Node-metaverse stays connected and streams object data to Godot.
    */
-  async launchGodotViewerForInstance(instanceId: string): Promise<void> {
+  async launchGodotViewerForInstance(instanceId: string, vrMode = false): Promise<void> {
     const instance = this.instances.get(instanceId);
     if (!instance) {
       throw new Error('Instance not found');
@@ -282,7 +282,7 @@ export class ViewerManager extends EventEmitter {
 
     console.log(`[ViewerManager] Launching Godot viewer for ${instanceId}`);
 
-    const bridge = new GodotBridge(bot);
+    const bridge = new GodotBridge(bot, { vrMode });
     this.godotBridges.set(instanceId, bridge);
 
     bridge.on('exit', () => {

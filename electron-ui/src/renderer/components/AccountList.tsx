@@ -12,7 +12,7 @@ interface AccountListProps {
   onAddAccount: () => void;
   onStopInstance: (instanceId: string) => void;
   onLaunchViewer: (instanceId: string) => void;
-  onLaunchGodotViewer: (instanceId: string) => void;
+  onLaunchGodotViewer: (instanceId: string, vrMode?: boolean) => void;
 }
 
 export const AccountList: React.FC<AccountListProps> = ({
@@ -103,6 +103,17 @@ export const AccountList: React.FC<AccountListProps> = ({
                       disabled={!canLaunchViewer}
                     >
                       {instance.godotBridgeActive ? 'Stop Godot' : 'Godot'}
+                    </button>
+                    <button
+                      className="account-launch-btn account-launch-godot-vr"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onLaunchGodotViewer(instance.id, true);
+                      }}
+                      disabled={!canLaunchViewer}
+                      title="Launch Godot viewer in VR mode (requires OpenXR headset)"
+                    >
+                      Godot VR
                     </button>
                   </div>
                 )}

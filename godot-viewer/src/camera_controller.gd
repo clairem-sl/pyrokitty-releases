@@ -4,6 +4,11 @@ extends Camera3D
 ## A/D rotate the avatar, W/S walk forward/backward.
 ## Left-click avatar ("butt-grab") to rotate yaw + pitch by dragging.
 ## Scroll to zoom.
+##
+## In VR mode (set by main.gd), emits xr_pose_updated so xr_rig.gd can
+## position the XROrigin3D at the avatar's eye level.
+
+signal xr_pose_updated(avatar_pos: Vector3, avatar_yaw: float)
 
 @export var orbit_speed: float = 0.005
 @export var zoom_speed: float = 2.0
@@ -49,6 +54,9 @@ const SHADOW_STOP_DELAY: float = 0.4     # seconds after last key before restori
 const SHADOW_DIST_MOVING: float = 40.0   # max shadow distance while moving (m)
 const SHADOW_DIST_STOPPED: float = 100.0 # max shadow distance at rest (m)
 
+# VR mode flag — set by main.gd after OpenXR init
+var vr_mode: bool = false
+
 @onready var main_node: Node3D = get_node("/root/Main")
 @onready var scene_manager: Node3D = get_node("../SceneManager")
 
@@ -66,6 +74,16 @@ func _ready() -> void:
 		scene_manager.self_avatar_moved.connect(_on_self_avatar_moved)
 	_create_debug_tooltip()
 	_update_camera()
+
+
+## Called by main.gd when OpenXR successfully initialises.
+func set_vr_mode(enabled: bool) -> void:
+	vr_mode = enabled
+	if enabled:
+		self.current = false  # XRCamera3D takes over rendering
+		# In VR the keyboard movement throttle never fires (no W/A/S/D),
+		# so fix shadows at a cheap level for the entire session.
+		_set_shadow_quality_vr()
 
 
 func _on_self_avatar_moved(pos: Vector3) -> void:
@@ -255,6 +273,10 @@ func _update_camera() -> void:
 	global_position = target_point + offset
 	look_at(target_point, Vector3.UP)
 
+	# Let the VR rig know where the avatar is so it can position the HMD origin
+	if vr_mode:
+		xr_pose_updated.emit(avatar_point, avatar_yaw)
+
 
 ## Check if a screen-space click hits the self avatar's mesh AABB
 func _is_click_on_self_avatar(screen_pos: Vector2) -> bool:
@@ -443,6 +465,8 @@ func _hide_debug_tooltip() -> void:
 
 
 func _set_shadow_quality(moving: bool) -> void:
+	if vr_mode:
+		return  # VR uses a fixed low setting — see _set_shadow_quality_vr()
 	var light: DirectionalLight3D = get_node_or_null("/root/Main/DirectionalLight3D")
 	if light == null:
 		return
@@ -452,6 +476,15 @@ func _set_shadow_quality(moving: bool) -> void:
 	else:
 		light.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
 		light.directional_shadow_max_distance = SHADOW_DIST_STOPPED
+
+
+func _set_shadow_quality_vr() -> void:
+	# 2 cascades at 30m fits comfortably inside the 11ms Quest 3 frame budget.
+	var light: DirectionalLight3D = get_node_or_null("/root/Main/DirectionalLight3D")
+	if light == null:
+		return
+	light.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	light.directional_shadow_max_distance = 30.0
 
 
 func _send_movement() -> void:
