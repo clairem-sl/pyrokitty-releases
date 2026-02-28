@@ -3,6 +3,8 @@ extends Node3D
 ## Entry point: starts a TCP server, accepts a WebSocket connection,
 ## polls for JSON messages and dispatches them to SceneManager.
 
+const VRFrameBudget = preload("res://src/vr_frame_budget.gd")
+
 var tcp_server: TCPServer
 var ws_peer: WebSocketPeer
 var tcp_peer: StreamPeerTCP  # underlying TCP connection
@@ -57,6 +59,17 @@ func _ready() -> void:
 	if vr_requested and camera_ctrl and xr_rig:
 		var xr_interface := XRServer.find_interface("OpenXR")
 		if xr_interface and xr_interface.initialize():
+			# Wire up session-state signals so we can see if the pose is
+			# rapidly cycling valid/invalid — the symptom of the Godot 4.6
+			# OpenXR 1.1 / Meta runtime incompatibility (issue #114987).
+			if xr_interface.has_signal("session_begun"):
+				xr_interface.session_begun.connect(func(): print("[XR] session_begun"))
+			if xr_interface.has_signal("session_stopping"):
+				xr_interface.session_stopping.connect(func(): print("[XR] session_stopping"))
+			if xr_interface.has_signal("session_focused"):
+				xr_interface.session_focused.connect(func(): print("[XR] session_focused"))
+			if xr_interface.has_signal("session_visible"):
+				xr_interface.session_visible.connect(func(): print("[XR] session_visible"))
 			_vr_mode = true
 			# Disable vsync so OpenXR controls frame pacing via xrEndFrame().
 			# With vsync on, Godot blocks waiting for the monitor flip (60Hz)
@@ -67,15 +80,14 @@ func _ready() -> void:
 			# Use 72Hz — the lowest Quest 3 rate — for the largest frame budget (13.9ms).
 			# Upgrade once rendering is consistently within the tighter 90Hz window.
 			if xr_interface.has_method("set_display_refresh_rate"):
-				xr_interface.set_display_refresh_rate(72.0)
-			xr_interface.set_render_target_size_multiplier(0.8)
+				xr_interface.set_display_refresh_rate(VRFrameBudget.VR_REFRESH_HZ)
 			camera_ctrl.set_vr_mode(true)
 			xr_rig.call("activate", camera_ctrl)
 			# Match XR camera far plane to the object visibility range so they
 			# can't diverge — depth precision is wasted beyond where objects exist.
 			var xr_cam := xr_rig.get_node_or_null("XRCamera3D") as Camera3D
 			if xr_cam:
-				xr_cam.far = scene_manager.VISIBILITY_FAR * 2.0
+				xr_cam.far = VRFrameBudget.VR_CAMERA_FAR
 			# Tighten the finalization budget to fit the 90Hz frame window
 			if scene_manager and scene_manager.has_method("set_vr_mode"):
 				scene_manager.set_vr_mode(true)
@@ -137,23 +149,28 @@ func _process(_delta: float) -> void:
 
 	var state := ws_peer.get_ready_state()
 	if state == WebSocketPeer.STATE_OPEN:
-		# Drain the entire socket queue this frame, routing by priority:
-		#  • Avatar position/lifecycle + identity → dispatched immediately (no budget limit).
-		#    These must never be delayed behind a burst of object_create messages.
-		#  • Everything else (object_create, mesh_ready, texture_ready …) → appended to
-		#    _low_priority_queue for time-budgeted processing below.
+		# Single unified budget covering both the packet drain and queue processing.
+		# Previously only processing was budgeted; the drain loop allocated a string
+		# per packet with no time limit, costing several ms during loading bursts.
+		var _msg_budget: float = VRFrameBudget.VR_MSG_BUDGET_MS if _vr_mode else VRFrameBudget.DESKTOP_MSG_BUDGET_MS
+		var _msg_start := Time.get_ticks_usec() / 1000.0
+
+		# Drain incoming packets. High-priority messages (avatar, self_id) are
+		# dispatched immediately and never count against the budget — they must
+		# never be delayed behind a burst of object_create messages.
+		# Low-priority packets stop being read once the budget is spent; they
+		# stay in the WebSocket buffer and are read next frame.
 		while ws_peer.get_available_packet_count() > 0:
 			var text := ws_peer.get_packet().get_string_from_utf8()
 			if _is_high_priority(text):
 				_handle_message(text)
 			else:
+				if (Time.get_ticks_usec() / 1000.0) - _msg_start >= _msg_budget:
+					_low_priority_queue.push_front(text)
+					break
 				_low_priority_queue.append(text)
 
-		# In VR, keep the budget tight (4ms) so xrEndFrame() is never late —
-		# Oculus treats a late submission as a missed frame and flashes black.
-		# Desktop can afford 12ms since vsync is less strict.
-		var _msg_budget: float = 4.0 if _vr_mode else 12.0
-		var _msg_start := Time.get_ticks_usec() / 1000.0
+		# Process anything already queued from previous frames.
 		while _low_priority_queue.size() > 0:
 			if (Time.get_ticks_usec() / 1000.0) - _msg_start >= _msg_budget:
 				break

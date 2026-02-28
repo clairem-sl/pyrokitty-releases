@@ -2,7 +2,7 @@ extends Node
 
 ## Tests for camera_controller.gd
 ## Run headless:
-##   cd godot-viewer && ./Godot_v4.6.1-stable_mono_win64/Godot_v4.6.1-stable_mono_win64_console.exe \
+##   cd godot-viewer && GODOT=$(cat godot-version.txt | tr -d '[:space:]') && ./$GODOT/${GODOT}_console.exe \
 ##     --headless --quit-after 5 --scene tests/test_camera_controller.tscn
 ##
 ## Test status legend:

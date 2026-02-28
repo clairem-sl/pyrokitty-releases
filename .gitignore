@@ -147,7 +147,8 @@ clang-tidy-results
 docs/claude-conversations
 clang-tidy-results.txt
 generate_compile_commands.py
-Godot_v4.6.1-stable_mono_win64/
+Godot_v4.*
+godot-viewer/Godot_v4.7-dev1_win64.exe
 godot-viewer/cache/
 mobile_decompile/
 .godot/

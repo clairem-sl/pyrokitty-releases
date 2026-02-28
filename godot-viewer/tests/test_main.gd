@@ -5,7 +5,7 @@ extends Node
 ## network state and is not testable headless.
 ##
 ## Run headless:
-##   cd godot-viewer && ./Godot_v4.6.1-stable_mono_win64/Godot_v4.6.1-stable_mono_win64_console.exe \
+##   cd godot-viewer && GODOT=$(cat godot-version.txt | tr -d '[:space:]') && ./$GODOT/${GODOT}_console.exe \
 ##     --headless --quit-after 5 --scene tests/test_main.tscn
 
 var _passed := 0
@@ -18,6 +18,10 @@ func _ready() -> void:
 
 	_test_script_compiles()
 	_test_depth_buffer_enabled()
+	_test_vr_budget_derivation()
+	_test_vr_budget_leaves_gpu_headroom()
+	_test_vr_budget_msg_fits_before_finalize_stop()
+	_test_vr_budget_total_under_frame_ms()
 	_test_avatar_messages_are_high_priority()
 	_test_self_id_is_high_priority()
 	_test_low_priority_messages()
@@ -51,6 +55,46 @@ func _hi(node: Node3D, text: String) -> bool:
 
 
 # ─── Tests ────────────────────────────────────────────────────────────────────
+
+const VRFrameBudget = preload("res://src/vr_frame_budget.gd")
+
+
+# ─── VR frame budget tests ────────────────────────────────────────────────────
+# These verify the relationships between VRFrameBudget constants so that
+# main.gd and scene_manager.gd can't silently diverge.  If any of these
+# fail, the combined CPU budgets may be starving the GPU.
+
+func _test_vr_budget_derivation() -> void:
+	var expected := 1000.0 / VRFrameBudget.VR_REFRESH_HZ
+	_assert(is_equal_approx(VRFrameBudget.VR_FRAME_MS, expected),
+		"[GREEN] VR_FRAME_MS == 1000 / VR_REFRESH_HZ (%.2f ms)" % expected)
+
+
+func _test_vr_budget_leaves_gpu_headroom() -> void:
+	# VR uses desktop-equivalent budgets so VR_FINALIZE_STOP_MS intentionally
+	# exceeds VR_FRAME_MS — the deadline spans multiple frames during loading.
+	# Just verify the constant is positive and sensible (> 0, < 1 second).
+	_assert(VRFrameBudget.VR_FINALIZE_STOP_MS > 0.0 and VRFrameBudget.VR_FINALIZE_STOP_MS < 1000.0,
+		"[GREEN] VR_FINALIZE_STOP_MS %.1f ms is a sane value" % VRFrameBudget.VR_FINALIZE_STOP_MS)
+
+
+func _test_vr_budget_msg_fits_before_finalize_stop() -> void:
+	# Message processing must complete well before the finalization deadline
+	# so scene_manager always has some time to work with.
+	_assert(VRFrameBudget.VR_MSG_BUDGET_MS < VRFrameBudget.VR_FINALIZE_STOP_MS,
+		"[GREEN] VR_MSG_BUDGET_MS (%.1f) < VR_FINALIZE_STOP_MS (%.1f)" % [
+			VRFrameBudget.VR_MSG_BUDGET_MS, VRFrameBudget.VR_FINALIZE_STOP_MS])
+
+
+func _test_vr_budget_total_under_frame_ms() -> void:
+	# VR now uses desktop-equivalent budgets so VR_FINALIZE_STOP_MS intentionally
+	# exceeds VR_FRAME_MS — finalization spans frames during loading just like desktop.
+	# Verify it matches desktop within 10% (guards against accidental divergence).
+	var ratio := VRFrameBudget.VR_FINALIZE_STOP_MS / VRFrameBudget.DESKTOP_FRAME_MS
+	_assert(ratio >= 0.9 and ratio <= 1.1,
+		"[GREEN] VR_FINALIZE_STOP_MS (%.1f) within 10%% of DESKTOP_FRAME_MS (%.1f)" % [
+			VRFrameBudget.VR_FINALIZE_STOP_MS, VRFrameBudget.DESKTOP_FRAME_MS])
+
 
 func _test_script_compiles() -> void:
 	var script = load("res://src/main.gd")

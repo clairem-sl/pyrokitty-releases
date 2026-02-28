@@ -223,9 +223,11 @@ GODOT_STAGING="$ELECTRON_DIR/godot-viewer-staging"
 
 if [ -d "$GODOT_SRC" ]; then
     NEEDS_GODOT=false
-    if [ "$FORCE_REBUILD" = true ]; then
-        NEEDS_GODOT=true
-    elif [ ! -d "$GODOT_STAGING" ]; then
+
+    # Re-stage if forced, staging missing, or any project source file changed
+    GODOT_SENTINEL="$GODOT_STAGING/project.godot"
+    if [ "$FORCE_REBUILD" = true ] || [ ! -f "$GODOT_SENTINEL" ] || \
+       [ -n "$(find "$GODOT_SRC" -maxdepth 2 -type f \( -name "*.gd" -o -name "*.tscn" -o -name "*.gdshader" -o -name "*.tres" -o -name "project.godot" -o -name "godot-version.txt" \) -newer "$GODOT_SENTINEL" 2>/dev/null | head -1)" ]; then
         NEEDS_GODOT=true
     fi
 
@@ -235,13 +237,22 @@ if [ -d "$GODOT_SRC" ]; then
 
         # Copy Godot engine
         echo "  Copying Godot engine..."
-        cp -r "$GODOT_SRC/Godot_v4.6.1-stable_mono_win64" "$GODOT_STAGING/"
+        GODOT_DIR=$(cat "$GODOT_SRC/godot-version.txt" | tr -d '[:space:]')
+        cp -r "$GODOT_SRC/$GODOT_DIR" "$GODOT_STAGING/"
+
+        # Copy version file (read at runtime by godot-bridge.ts to locate the exe)
+        cp "$GODOT_SRC/godot-version.txt" "$GODOT_STAGING/"
 
         # Copy project files (not cache — cache lives in userData at runtime)
         echo "  Copying Godot project files..."
         cp "$GODOT_SRC/project.godot" "$GODOT_STAGING/"
         cp "$GODOT_SRC/main.tscn" "$GODOT_STAGING/"
         cp -r "$GODOT_SRC/src" "$GODOT_STAGING/"
+
+        # Copy OpenXR action map (required for VR controller bindings)
+        if [ -f "$GODOT_SRC/openxr_action_map.tres" ]; then
+            cp "$GODOT_SRC/openxr_action_map.tres" "$GODOT_STAGING/"
+        fi
 
         echo "  Godot staging complete: $(du -sh "$GODOT_STAGING" | cut -f1)"
     else

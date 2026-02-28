@@ -11,9 +11,9 @@ const StandardUVAlphaShader = preload("res://src/standard_uv_alpha.gdshader")
 ##   Position: (sl.x, sl.z, -sl.y)
 ##   Quaternion: (sl.x, sl.z, -sl.y, sl.w)
 
-## Maximum visibility distance for in-world objects (m). Objects fade from
+## Desktop visibility range. Objects fade from
 ## (VISIBILITY_FAR - VISIBILITY_FADE_MARGIN) to VISIBILITY_FAR, then are culled.
-## The VR camera far plane is derived from this value (see main.gd).
+## VR uses VRFrameBudget.VR_CAMERA_FAR / VR_VISIBILITY_FADE_MARGIN instead.
 const VISIBILITY_FAR: float = 128.0
 const VISIBILITY_FADE_MARGIN: float = 32.0
 
@@ -28,10 +28,13 @@ class RSInstance extends RefCounted:
 	var scl: Vector3 = Vector3.ONE
 	var mesh: Mesh = null
 
-	func _init(scenario: RID) -> void:
+	func _init(scenario: RID, vis_far: float = 128.0, vis_fade: float = 32.0) -> void:
 		rid = RenderingServer.instance_create()
 		RenderingServer.instance_set_scenario(rid, scenario)
-		RenderingServer.instance_geometry_set_visibility_range(rid, 0.0, VISIBILITY_FAR, 0.0, VISIBILITY_FADE_MARGIN, RenderingServer.VISIBILITY_RANGE_FADE_SELF)
+		RenderingServer.instance_geometry_set_visibility_range(rid, 0.0, vis_far, 0.0, vis_fade, RenderingServer.VISIBILITY_RANGE_FADE_SELF)
+
+	func set_vis_range(vis_far: float, vis_fade: float) -> void:
+		RenderingServer.instance_geometry_set_visibility_range(rid, 0.0, vis_far, 0.0, vis_fade, RenderingServer.VISIBILITY_RANGE_FADE_SELF)
 
 	func set_mesh(m: Mesh) -> void:
 		mesh = m
@@ -125,12 +128,13 @@ var _fin_tex_count: int = 0
 var _fin_mesh_extract_ms: float = 0.0  # ImporterMesh.get_mesh
 var _fin_mesh_apply_ms: float = 0.0    # _apply_mesh_to_pending
 var _fin_mesh_count: int = 0
-const TARGET_FRAME_MS_DESKTOP: float = 33.3  # 30fps floor for desktop mode
-const TARGET_FRAME_MS_VR: float = 10.0       # 72Hz Quest 3 (13.9ms budget) — leave headroom for GPU
-var _target_frame_ms: float = TARGET_FRAME_MS_DESKTOP
+const VRFrameBudget = preload("res://src/vr_frame_budget.gd")
+var _target_frame_ms: float = VRFrameBudget.DESKTOP_FRAME_MS
 var _vr_mode: bool = false
-const MIN_FINALIZE_MS: float = 2.0            # minimum finalize budget when on-target
-const OVERBUDGET_FINALIZE_MS: float = 8.0     # more aggressive when already over budget
+var _vis_far: float = VISIBILITY_FAR
+var _vis_fade: float = VISIBILITY_FADE_MARGIN
+const MIN_FINALIZE_MS: float = 2.0            # minimum finalize budget when on-target (desktop)
+const OVERBUDGET_FINALIZE_MS: float = 8.0     # more aggressive when already over budget (desktop only)
 
 # Async mesh loading (WorkerThreadPool)
 var _mesh_tasks: Dictionary = {}         # task_id (int) -> { meshId: String, result: AsyncResult, path: String }
@@ -238,7 +242,7 @@ func handle_object_create(msg: Dictionary) -> void:
 
 	var mesh_id: String = msg.get("meshId", "")
 	var shape: Dictionary = msg.get("shape", {})
-	var rsi := RSInstance.new(_scenario)
+	var rsi := RSInstance.new(_scenario, _vis_far, _vis_fade)
 
 	if not mesh_id.is_empty() and mesh_cache.has(mesh_id):
 		# Real mesh already loaded — use it
@@ -797,13 +801,19 @@ func _process(_delta: float) -> void:
 	if not has_textures and not has_meshes:
 		return
 
-	# Adaptive budget: use whatever time remains to hit 30fps target
+	# Adaptive budget: use whatever time remains before the frame deadline.
 	var frame_start_ms := (Time.get_ticks_usec() / 1000.0) - (_delta * 1000.0)
 	var now_ms := Time.get_ticks_usec() / 1000.0
 	var elapsed_ms := now_ms - frame_start_ms
 	var remaining_ms := _target_frame_ms - elapsed_ms
-	# When already over budget, be aggressive — frame is slow anyway, finish loading faster
-	var budget_ms := maxf(remaining_ms, OVERBUDGET_FINALIZE_MS if remaining_ms < MIN_FINALIZE_MS else MIN_FINALIZE_MS)
+	var budget_ms: float
+	if _vr_mode:
+		# In VR, never do finalization on an already-late frame — the deadline
+		# is missed, adding more CPU work only makes the next frame late too.
+		budget_ms = clampf(remaining_ms, 0.0, MIN_FINALIZE_MS)
+	else:
+		# Desktop: when over budget be aggressive — frame is slow anyway.
+		budget_ms = maxf(remaining_ms, OVERBUDGET_FINALIZE_MS if remaining_ms < MIN_FINALIZE_MS else MIN_FINALIZE_MS)
 	# Split: 60% textures, 40% meshes (textures are cheaper per-item)
 	var tex_budget_ms := budget_ms * 0.6 if has_meshes else budget_ms
 	var mesh_budget_ms := budget_ms * 0.4 if has_textures else budget_ms
@@ -1219,7 +1229,13 @@ var _first_person_mode: bool = false
 
 func set_vr_mode(enabled: bool) -> void:
 	_vr_mode = enabled
-	_target_frame_ms = TARGET_FRAME_MS_VR if enabled else TARGET_FRAME_MS_DESKTOP
+	_target_frame_ms = VRFrameBudget.VR_FINALIZE_STOP_MS if enabled else VRFrameBudget.DESKTOP_FRAME_MS
+	_vis_far = VRFrameBudget.VR_CAMERA_FAR if enabled else VISIBILITY_FAR
+	_vis_fade = VRFrameBudget.VR_VISIBILITY_FADE_MARGIN if enabled else VISIBILITY_FADE_MARGIN
+	for rsi in objects.values():
+		rsi.set_vis_range(_vis_far, _vis_fade)
+	for rsi in avatars.values():
+		rsi.set_vis_range(_vis_far, _vis_fade)
 
 
 func set_first_person_mode(enabled: bool) -> void:
@@ -1278,7 +1294,7 @@ func handle_avatar_create(msg: Dictionary) -> void:
 		avatars[avatar_id].destroy()
 		avatar_targets.erase(avatar_id)
 
-	var rsi := RSInstance.new(_scenario)
+	var rsi := RSInstance.new(_scenario, _vis_far, _vis_fade)
 	rsi.set_mesh(avatar_mesh)
 	rsi.set_material_override(avatar_material)
 

@@ -28,6 +28,14 @@ window/size/viewport_height=720
 
 project/assembly_name="PyroKitty 3D"
 
+[rendering]
+
+; Mobile renderer is recommended for OpenXR. It uses a simpler Vulkan path
+; (no clustered lighting pass), avoids the Vulkan 1.3 feature requests that
+; trigger Meta runtime warnings, and handles stereo viewports more efficiently.
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+
 [xr]
 
 openxr/enabled=true

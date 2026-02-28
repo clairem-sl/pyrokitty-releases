@@ -21,12 +21,21 @@ import { MaterialFetchQueue, MaterialOverrideData, TextureTransform } from './ma
 const GODOT_WS_PORT_BASE = 9100;
 let nextPort = GODOT_WS_PORT_BASE;
 
+function getGodotDir(): string {
+  const appRoot = app.getAppPath();
+  const versionFile = app.isPackaged
+    ? path.join(process.resourcesPath, 'godot-viewer', 'godot-version.txt')
+    : path.join(appRoot, '..', 'godot-viewer', 'godot-version.txt');
+  return fs.readFileSync(versionFile, 'utf8').trim();
+}
+
 function getGodotPath(): string {
+  const dir = getGodotDir();
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'godot-viewer', 'Godot_v4.6.1-stable_mono_win64', 'Godot_v4.6.1-stable_mono_win64.exe');
+    return path.join(process.resourcesPath, 'godot-viewer', dir, `${dir}.exe`);
   } else {
     const appRoot = app.getAppPath();
-    return path.join(appRoot, '..', 'godot-viewer', 'Godot_v4.6.1-stable_mono_win64', 'Godot_v4.6.1-stable_mono_win64.exe');
+    return path.join(appRoot, '..', 'godot-viewer', dir, `${dir}.exe`);
   }
 }
 

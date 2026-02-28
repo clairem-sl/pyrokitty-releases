@@ -56,6 +56,13 @@ const SHADOW_DIST_STOPPED: float = 100.0 # max shadow distance at rest (m)
 
 # VR mode flag — set by main.gd after OpenXR init
 var vr_mode: bool = false
+# Last values sent to XROrigin3D — only update when they change beyond threshold
+# so the OpenXR reference space stays stable and ATW reprojection isn't invalidated
+# every frame by floating-point noise.
+var _last_xr_pos: Vector3 = Vector3(INF, INF, INF)
+var _last_xr_yaw: float = INF
+const XR_POS_THRESHOLD: float = 0.005   # 5 mm
+const XR_YAW_THRESHOLD: float = 0.001  # ~0.06 degrees
 
 @onready var main_node: Node3D = get_node("/root/Main")
 @onready var scene_manager: Node3D = get_node("../SceneManager")
@@ -84,6 +91,11 @@ func set_vr_mode(enabled: bool) -> void:
 		# In VR the keyboard movement throttle never fires (no W/A/S/D),
 		# so fix shadows at a cheap level for the entire session.
 		_set_shadow_quality_vr()
+		# CanvasLayer renders to the viewport regardless of which Camera3D is
+		# active. In stereo XR mode it can interfere with the compositor's
+		# depth reprojection. Hide it — there's no mouse cursor in VR anyway.
+		if _tooltip_layer:
+			_tooltip_layer.visible = false
 
 
 func _on_self_avatar_moved(pos: Vector3) -> void:
@@ -273,9 +285,17 @@ func _update_camera() -> void:
 	global_position = target_point + offset
 	look_at(target_point, Vector3.UP)
 
-	# Let the VR rig know where the avatar is so it can position the HMD origin
+	# Let the VR rig know where the avatar is so it can position the HMD origin.
+	# Only emit when position or yaw actually changed — moving XROrigin3D every
+	# frame (even to the same value) invalidates ATW's reprojection reference
+	# space and causes black flicker on the Quest compositor.
 	if vr_mode:
-		xr_pose_updated.emit(avatar_point, avatar_yaw)
+		var pos_delta := avatar_point.distance_to(_last_xr_pos)
+		var yaw_delta := absf(avatar_yaw - _last_xr_yaw)
+		if pos_delta > XR_POS_THRESHOLD or yaw_delta > XR_YAW_THRESHOLD:
+			_last_xr_pos = avatar_point
+			_last_xr_yaw = avatar_yaw
+			xr_pose_updated.emit(avatar_point, avatar_yaw)
 
 
 ## Check if a screen-space click hits the self avatar's mesh AABB

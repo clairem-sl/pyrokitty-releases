@@ -1,11 +1,11 @@
 ## Godot
 
-Path: `godot-viewer/Godot_v4.6.1-stable_mono_win64/Godot_v4.6.1-stable_mono_win64.exe`
+Version is set in `godot-viewer/godot-version.txt`. Currently `Godot_v4.4-stable_win64`.
 
 Run tests (headless, no window):
 
 ```bash
-cd godot-viewer && ./Godot_v4.6.1-stable_mono_win64/Godot_v4.6.1-stable_mono_win64_console.exe --headless --quit-after 5 --scene tests/test_prim_mesh.tscn
+cd godot-viewer && GODOT=$(cat godot-version.txt | tr -d '[:space:]') && ./$GODOT/${GODOT}_console.exe --headless --quit-after 5 --scene tests/test_prim_mesh.tscn
 ```
 
 ## Building (Windows)
