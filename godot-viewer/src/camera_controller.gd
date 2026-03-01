@@ -88,9 +88,14 @@ func set_vr_mode(enabled: bool) -> void:
 	vr_mode = enabled
 	if enabled:
 		self.current = false  # XRCamera3D takes over rendering
+		# Apply stopped-quality shadows (4 cascades, 100m) as the baseline.
+		# The movement throttle will still switch to cheap shadows while walking.
+		# _set_shadow_quality(false)
+
 		# In VR the keyboard movement throttle never fires (no W/A/S/D),
 		# so fix shadows at a cheap level for the entire session.
 		_set_shadow_quality_vr()
+		
 		# CanvasLayer renders to the viewport regardless of which Camera3D is
 		# active. In stereo XR mode it can interfere with the compositor's
 		# depth reprojection. Hide it — there's no mouse cursor in VR anyway.

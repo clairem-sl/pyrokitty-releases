@@ -248,6 +248,9 @@ if [ -d "$GODOT_SRC" ]; then
         cp "$GODOT_SRC/project.godot" "$GODOT_STAGING/"
         cp "$GODOT_SRC/main.tscn" "$GODOT_STAGING/"
         cp -r "$GODOT_SRC/src" "$GODOT_STAGING/"
+        if [ -d "$GODOT_SRC/addons" ]; then
+            cp -r "$GODOT_SRC/addons" "$GODOT_STAGING/"
+        fi
 
         # Copy OpenXR action map (required for VR controller bindings)
         if [ -f "$GODOT_SRC/openxr_action_map.tres" ]; then

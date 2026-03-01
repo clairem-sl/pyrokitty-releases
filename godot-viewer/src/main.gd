@@ -20,6 +20,8 @@ const STATS_INTERVAL: float = 5.0  # send pipeline stats every 5s
 # Avatar and identity messages bypass this queue and are always dispatched immediately.
 var _low_priority_queue: Array[String] = []
 var _vr_mode: bool = false
+var _sky_dome: MeshInstance3D
+var _active_camera: Camera3D
 
 func _exit_tree() -> void:
 	if ws_peer:
@@ -47,6 +49,7 @@ func _ready() -> void:
 	# and xr_rig are already initialised by the time we reach here.
 	var camera_ctrl := get_node_or_null("Camera3D") as Camera3D
 	var xr_rig := get_node_or_null("XROrigin3D")
+	# _sky_dome = get_node_or_null("SkyDome") as MeshInstance3D
 
 	if not vr_requested:
 		# openxr/enabled=true in project.godot auto-initialises OpenXR at startup.
@@ -77,6 +80,27 @@ func _ready() -> void:
 			# on a 90Hz headset.
 			DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 			get_viewport().use_xr = true
+			# MSAA's compute resolve pass requires TEXTURE_USAGE_STORAGE_BIT which
+			# the XR swapchain images don't have — disable it for the XR viewport
+			# to silence the rendering_device.cpp errors. Desktop keeps MSAA via
+			# project.godot settings (only this viewport is affected).
+			get_viewport().msaa_3d = Viewport.MSAA_DISABLED
+			# TAA accumulates samples across frames — directly addresses temporal
+			# sparkle on thin geometry (leaves, branches). Tradeoff: slight ghosting
+			# on fast head movement. If ghosting is worse than sparkle, remove this
+			# and restore FXAA below.
+			# get_viewport().use_taa = true
+			
+			# FXAA is a screen-space fragment pass (no compute, no STORAGE_BIT)
+			# so it works fine with the XR swapchain.
+			# get_viewport().screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
+
+			# Supersample at 1.25x to reduce temporal sparkle on thin geometry
+			# (leaf edges, branches). The compositor downsamples, averaging out
+			# subpixel geometry that would otherwise flicker frame-to-frame.
+			# Cost: ~55% more fill work. Tune down to 1.1 if GPU becomes a bottleneck.
+			xr_interface.set_render_target_size_multiplier(1.5)
+
 			# Use 72Hz — the lowest Quest 3 rate — for the largest frame budget (13.9ms).
 			# Upgrade once rendering is consistently within the tighter 90Hz window.
 			if xr_interface.has_method("set_display_refresh_rate"):
@@ -88,6 +112,7 @@ func _ready() -> void:
 			var xr_cam := xr_rig.get_node_or_null("XRCamera3D") as Camera3D
 			if xr_cam:
 				xr_cam.far = VRFrameBudget.VR_CAMERA_FAR
+				_active_camera = xr_cam
 			# Tighten the finalization budget to fit the 90Hz frame window
 			if scene_manager and scene_manager.has_method("set_vr_mode"):
 				scene_manager.set_vr_mode(true)
@@ -97,6 +122,13 @@ func _ready() -> void:
 			print("[Main] OpenXR initialised — VR mode active")
 		else:
 			push_warning("[Main] OpenXR not available, falling back to desktop mode")
+
+	# Sky dome: size box to fit within the active camera's far clip plane
+	if not _vr_mode and camera_ctrl:
+		_active_camera = camera_ctrl
+	if _sky_dome:
+		var cam_far := VRFrameBudget.VR_CAMERA_FAR if _vr_mode else (camera_ctrl.far if camera_ctrl else 2048.0)
+		_sky_dome.call("set_camera_far", cam_far)
 
 	tcp_server = TCPServer.new()
 	var err := tcp_server.listen(ws_port, "127.0.0.1")
@@ -108,6 +140,10 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	# Sky dome follows the active camera so the atmosphere always surrounds the viewer
+	if _sky_dome and _active_camera:
+		_sky_dome.global_position = _active_camera.global_position
+
 	fps_timer += _delta
 	# Send pipeline stats to Electron for logging
 	stats_timer += _delta

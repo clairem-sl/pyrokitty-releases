@@ -148,16 +148,11 @@ to silently reject or mis-apply the depth layer.
 
 ### 14. Forward+ renderer → Mobile renderer
 **Theory:** Godot's Forward+ renderer uses a clustered lighting pass that makes
-heavier Vulkan API calls — matching the "Requested Vulkan version exceeds maximum"
-warning from the Meta runtime. In stereo it renders the scene twice. The Godot docs
-explicitly recommend the Mobile renderer for OpenXR: simpler Vulkan path, no
-clustered lighting, more efficient stereo.
-**Fix:** Added to project.godot:
-```
-renderer/rendering_method="mobile"
-renderer/rendering_method.mobile="mobile"
-```
-**Result:** TBD
+heavier Vulkan API calls. Mobile renderer has simpler Vulkan path, no clustered
+lighting, more efficient stereo.
+**Result:** Degraded shadow quality on BOTH desktop and VR. Did not fix flickering.
+**Verdict:** Reverted. The flickering was fixed by Godot 4.4, not the renderer switch.
+Forward+ restored.
 
 ### 15. Godot version: 4.6.1 → 4.4-stable
 **Theory:** The flickering persisted through every CPU/GPU/ATW/renderer fix. Trying
