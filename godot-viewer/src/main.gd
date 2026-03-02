@@ -20,7 +20,6 @@ const STATS_INTERVAL: float = 5.0  # send pipeline stats every 5s
 # Avatar and identity messages bypass this queue and are always dispatched immediately.
 var _low_priority_queue: Array[String] = []
 var _vr_mode: bool = false
-var _sky_dome: MeshInstance3D
 var _active_camera: Camera3D
 
 func _exit_tree() -> void:
@@ -49,8 +48,6 @@ func _ready() -> void:
 	# and xr_rig are already initialised by the time we reach here.
 	var camera_ctrl := get_node_or_null("Camera3D") as Camera3D
 	var xr_rig := get_node_or_null("XROrigin3D")
-	# _sky_dome = get_node_or_null("SkyDome") as MeshInstance3D
-
 	if not vr_requested:
 		# openxr/enabled=true in project.godot auto-initialises OpenXR at startup.
 		# Shut it down immediately when not in VR mode to suppress the
@@ -123,12 +120,8 @@ func _ready() -> void:
 		else:
 			push_warning("[Main] OpenXR not available, falling back to desktop mode")
 
-	# Sky dome: size box to fit within the active camera's far clip plane
 	if not _vr_mode and camera_ctrl:
 		_active_camera = camera_ctrl
-	if _sky_dome:
-		var cam_far := VRFrameBudget.VR_CAMERA_FAR if _vr_mode else (camera_ctrl.far if camera_ctrl else 2048.0)
-		_sky_dome.call("set_camera_far", cam_far)
 
 	tcp_server = TCPServer.new()
 	var err := tcp_server.listen(ws_port, "127.0.0.1")
@@ -140,10 +133,6 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	# Sky dome follows the active camera so the atmosphere always surrounds the viewer
-	if _sky_dome and _active_camera:
-		_sky_dome.global_position = _active_camera.global_position
-
 	fps_timer += _delta
 	# Send pipeline stats to Electron for logging
 	stats_timer += _delta
@@ -280,3 +269,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 func send_message(msg: Dictionary) -> void:
 	if ws_peer and ws_peer.get_ready_state() == WebSocketPeer.STATE_OPEN:
 		ws_peer.send_text(JSON.stringify(msg))
+	elif msg.get("type") == "input_move":
+		var state := "null" if not ws_peer else str(ws_peer.get_ready_state())
+		print("[Main] DROP input_move — ws not open (state=%s)" % state)

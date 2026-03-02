@@ -72,6 +72,8 @@ export class GodotBridge extends EventEmitter {
   private materialToFaces = new Map<string, { localId: number; faceIndex: number; face: any; inlineOverride: any }[]>();
   private textureUpdateSubs = new Map<number, Subscription>(); // per-object onTextureUpdate subscriptions
   private connected = false;
+  private _dbgMoving = false;           // for movement freeze diagnostics
+  private _dbgAgentNullAt = 0;         // timestamp of first agent-null drop in current run
   private assetReadyBuffer: object[] = [];
   private assetReadyTimer: ReturnType<typeof setTimeout> | null = null;
   private lastGodotStats: any = null;
@@ -260,6 +262,18 @@ export class GodotBridge extends EventEmitter {
     fs.mkdirSync(path.join(cacheBase, 'textures'), { recursive: true });
     fs.mkdirSync(path.join(cacheBase, 'terrain'), { recursive: true });
 
+    // VR requires openxr/enabled=true but that setting causes errors in non-VR mode.
+    // override.vr.cfg holds the VR-only settings; copy it to override.cfg for VR
+    // launches, delete it otherwise. override.cfg is .gitignored.
+    const overridePath = path.join(projectPath, 'override.cfg');
+    const overrideVrPath = path.join(projectPath, 'override.vr.cfg');
+    if (this.vrMode) {
+      fs.copyFileSync(overrideVrPath, overridePath);
+      console.log('[GodotBridge] Copied override.vr.cfg → override.cfg (VR mode)');
+    } else {
+      try { fs.unlinkSync(overridePath); } catch { /* not present, fine */ }
+    }
+
     console.log(`[GodotBridge] Spawning Godot on port ${this.port} — ${godotPath}`);
 
     const userArgs = [`--ws-port=${this.port}`];
@@ -338,6 +352,9 @@ export class GodotBridge extends EventEmitter {
             ws.on('close', () => {
               console.log('[GodotBridge] WebSocket closed');
               this.connected = false;
+              // TODO: auto-reconnect — Godot resets ws_peer=null on close and is ready
+              // to accept a new connection immediately, but we never re-call connectWebSocket().
+              // Movement is silently dead until the process is restarted.
             });
 
             resolve();
@@ -1200,7 +1217,29 @@ export class GodotBridge extends EventEmitter {
 
   private handleInputMove(msg: any): void {
     const agent = this.bot.agent;
-    if (!agent) return;
+    if (!agent) {
+      const now = Date.now();
+      if (this._dbgAgentNullAt === 0) this._dbgAgentNullAt = now;
+      // Log once per second while agent is null so the log isn't spammed
+      if (now - this._dbgAgentNullAt < 1100) {
+        console.warn(`[GodotBridge] input_move dropped — bot.agent is null (no circuit?)`);
+      }
+      return;
+    }
+    if (this._dbgAgentNullAt !== 0) {
+      console.log(`[GodotBridge] bot.agent restored after ${((Date.now() - this._dbgAgentNullAt) / 1000).toFixed(1)}s`);
+      this._dbgAgentNullAt = 0;
+    }
+
+    const isMoving = msg.forward || msg.backward || msg.strafe_left || msg.strafe_right
+      || msg.jump || msg.crouch;
+    if (isMoving && !this._dbgMoving) {
+      console.log(`[GodotBridge] Movement started fwd=${msg.forward} back=${msg.backward} sl=${msg.strafe_left} sr=${msg.strafe_right}`);
+      this._dbgMoving = true;
+    } else if (!isMoving && this._dbgMoving) {
+      console.log(`[GodotBridge] Movement stopped`);
+      this._dbgMoving = false;
+    }
 
     // Forward/backward only — A/D rotation is handled via body quaternion
     if (msg.forward) {

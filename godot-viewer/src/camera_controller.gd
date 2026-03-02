@@ -46,13 +46,7 @@ var double_tap_running: bool = false  # True after double-tap W, while W held
 var last_w_press_time: float = -1.0
 var move_dirty: bool = false
 var send_timer: float = 0.0
-
-# Shadow quality throttle: reduce cascade count + max distance while moving
-var _shadow_moving: bool = false
-var _shadow_stop_timer: float = 0.0
-const SHADOW_STOP_DELAY: float = 0.4     # seconds after last key before restoring quality
-const SHADOW_DIST_MOVING: float = 40.0   # max shadow distance while moving (m)
-const SHADOW_DIST_STOPPED: float = 100.0 # max shadow distance at rest (m)
+var _dbg_was_moving: bool = false  # for movement freeze diagnostics
 
 # VR mode flag — set by main.gd after OpenXR init
 var vr_mode: bool = false
@@ -139,21 +133,6 @@ func _process(delta: float) -> void:
 	if move_forward or move_backward or turn_left or turn_right \
 		or strafe_left or strafe_right or jump or crouch:
 		move_dirty = true
-
-	# Shadow quality: drop to 2 cascades + shorter range while any key is held,
-	# restore 0.4s after all keys release.
-	var keys_held := move_forward or move_backward or turn_left or turn_right \
-		or strafe_left or strafe_right
-	if keys_held:
-		_shadow_stop_timer = SHADOW_STOP_DELAY
-		if not _shadow_moving:
-			_shadow_moving = true
-			_set_shadow_quality(true)
-	elif _shadow_moving:
-		_shadow_stop_timer -= delta
-		if _shadow_stop_timer <= 0.0:
-			_shadow_moving = false
-			_set_shadow_quality(false)
 
 	# Send movement updates
 	send_timer -= delta
@@ -489,20 +468,6 @@ func _hide_debug_tooltip() -> void:
 	_tooltip_visible = false
 
 
-func _set_shadow_quality(moving: bool) -> void:
-	if vr_mode:
-		return  # VR uses a fixed low setting — see _set_shadow_quality_vr()
-	var light: DirectionalLight3D = get_node_or_null("/root/Main/DirectionalLight3D")
-	if light == null:
-		return
-	if moving:
-		light.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-		light.directional_shadow_max_distance = SHADOW_DIST_MOVING
-	else:
-		light.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-		light.directional_shadow_max_distance = SHADOW_DIST_STOPPED
-
-
 func _set_shadow_quality_vr() -> void:
 	# 2 cascades at 30m fits comfortably inside the 11ms Quest 3 frame budget.
 	var light: DirectionalLight3D = get_node_or_null("/root/Main/DirectionalLight3D")
@@ -513,6 +478,16 @@ func _set_shadow_quality_vr() -> void:
 
 
 func _send_movement() -> void:
+	var is_moving := move_forward or move_backward or strafe_left or strafe_right \
+		or turn_left or turn_right or jump or crouch
+	if is_moving and not _dbg_was_moving:
+		print("[CameraCtrl] Movement started fwd=%s back=%s sl=%s sr=%s tl=%s tr=%s j=%s c=%s" \
+			% [move_forward, move_backward, strafe_left, strafe_right, turn_left, turn_right, jump, crouch])
+		_dbg_was_moving = true
+	elif not is_moving and _dbg_was_moving:
+		print("[CameraCtrl] Movement stopped")
+		_dbg_was_moving = false
+
 	var msg := {
 		"type": "input_move",
 		"forward": move_forward,

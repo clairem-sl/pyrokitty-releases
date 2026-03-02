@@ -1,10 +1,9 @@
-[gd_scene load_steps=8 format=3 uid="uid://main_scene"]
+[gd_scene load_steps=7 format=3 uid="uid://main_scene"]
 
 [ext_resource type="Script" path="res://src/main.gd" id="1"]
 [ext_resource type="Script" path="res://src/scene_manager.gd" id="2"]
 [ext_resource type="Script" path="res://src/camera_controller.gd" id="3"]
 [ext_resource type="Script" path="res://src/xr_rig.gd" id="4"]
-[ext_resource type="Script" path="res://src/sky_dome.gd" id="5"]
 
 [sub_resource type="Environment" id="Environment_1"]
 background_mode = 1
@@ -38,10 +37,6 @@ far = 32.0
 transform = Transform3D(0.866, -0.25, 0.433, 0, 0.866, 0.5, -0.5, -0.433, 0.75, 0, 100, 0)
 light_energy = 0.8
 shadow_enabled = true
-
-[node name="SkyDome" type="MeshInstance3D" parent="."]
-script = ExtResource("5")
-sun_object = NodePath("../DirectionalLight3D")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_1")

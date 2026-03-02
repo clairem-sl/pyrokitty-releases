@@ -4,6 +4,9 @@
 # Export presets contain absolute paths
 export_presets.cfg
 
+# Generated per-launch by godot-bridge.ts (copy of override.vr.cfg or absent)
+override.cfg
+
 # Mono/C# build artifacts
 .mono/
 data_*/

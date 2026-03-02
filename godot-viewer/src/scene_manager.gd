@@ -781,6 +781,18 @@ func _process(_delta: float) -> void:
 			objects.size(), avatars.size(), texture_cache.size(), material_cache.size(), mesh_cache.size(),
 			Engine.get_frames_per_second()])
 
+	# Step FFT ocean simulation (Ocean3D is a Resource, not a Node, so we
+	# drive it here rather than relying on its own _process).
+	# initialize_simulation() schedules work on the render thread asynchronously,
+	# so guard on .initialized before calling simulate().
+	if _ocean != null:
+		if _ocean.initialized:
+			if not _ocean_logged_ready:
+				_ocean_logged_ready = true
+				print("[Water] Ocean3D render-thread init complete — simulation active")
+			_ocean.simulate(_delta)
+		# else: still waiting for render thread to finish _initialize_simulation
+
 	# Interpolate avatar positions/rotations toward their targets
 	_interpolate_avatars(_delta)
 
@@ -1411,7 +1423,10 @@ func _interpolate_avatars(delta: float) -> void:
 # ─── Terrain + Water + Sky ───────────────────────────
 
 var terrain_node: MeshInstance3D
-var water_node: MeshInstance3D
+var water_node: MeshInstance3D  # fallback flat plane (used if oceanfft addon absent)
+var _ocean: Resource = null     # Ocean3D resource (FFT wave simulation)
+var _ocean_quad_tree: Node3D = null  # QuadTree3D LOD mesh renderer
+var _ocean_logged_ready: bool = false  # one-shot log when render-thread init completes
 
 func handle_terrain_ready(msg: Dictionary) -> void:
 	var bin_path: String = msg.get("path", "")
@@ -1509,19 +1524,91 @@ func _build_terrain_mesh(heights: PackedFloat32Array) -> ArrayMesh:
 
 
 func _build_water_plane(water_height: float) -> void:
+	print("[Water] _build_water_plane called, water_height=", water_height)
+
+	# Tear down any existing water
 	if water_node:
 		water_node.queue_free()
+		water_node = null
+	if _ocean_quad_tree:
+		_ocean_quad_tree.queue_free()
+		_ocean_quad_tree = null
+	_ocean = null
+	_ocean_logged_ready = false
 
+	var Ocean3DScript = load("res://addons/tessarakkt.oceanfft/components/Ocean3D.gd")
+	var QuadTreeScene = load("res://addons/tessarakkt.oceanfft/components/QuadTree3D.tscn")
+
+	print("[Water] Ocean3DScript=", Ocean3DScript, " QuadTreeScene=", QuadTreeScene)
+
+	if Ocean3DScript == null or QuadTreeScene == null:
+		push_warning("[Water] oceanfft addon not found — using flat water fallback (Ocean3DScript=%s QuadTreeScene=%s)" % [Ocean3DScript, QuadTreeScene])
+		_build_flat_water(water_height)
+		return
+
+	print("[Water] oceanfft addon loaded OK — building FFT ocean")
+
+	# ── Ocean3D resource (FFT simulation, no scene-tree node needed) ──────
+	_ocean = Ocean3DScript.new()
+	# 128×128 FFT: good wave detail, moderate GPU cost. Use 256 for more
+	# detail at the cost of ~4× compute, or 64 for low-end / VR perf saves.
+	_ocean.fft_resolution = 128          # FFTResolution.FFT_128x128
+	_ocean.horizontal_dimension = 256    # patch size in metres (tiles seamlessly)
+	_ocean.wind_speed = 12.0             # m/s — controls swell size
+	_ocean.wind_direction_degrees = 45.0
+	_ocean.choppiness = 0.6
+	_ocean.time_scale = 1.0
+	_ocean.simulation_frameskip = 1      # simulate every other frame (VR budget)
+	_ocean.domain_warp_strength = 0.0   # disable domain warp (no noise texture)
+
+	# Translucency: shallow water see-through, deep water murkier
+	_ocean.material.set_shader_parameter("water_opacity", 1.0)
+	_ocean.material.set_shader_parameter("opacity_depth", 5.0)
+	_ocean.material.set_shader_parameter("refraction_background_brightness", 0.5)
+	_ocean.material.set_shader_parameter("deep_color", Color(0.01, 0.04, 0.1, 1.0))
+
+	print("[Water] Ocean3D resource created, fft_resolution=", _ocean.fft_resolution,
+		" horizontal_dimension=", _ocean.horizontal_dimension,
+		" material=", _ocean.material)
+
+	# initialize_simulation() compiles GLSL compute shaders and allocates GPU
+	# textures. Must be called before simulate() and before QuadTree3D._ready().
+	# NOTE: This dispatches to the render thread — _ocean.initialized will be
+	# false until the render thread callback completes (next frame or later).
+	_ocean.initialize_simulation()
+	print("[Water] initialize_simulation() queued on render thread (initialized=", _ocean.initialized, " — will become true once render thread completes)")
+
+	# ── QuadTree3D node (LOD mesh renderer) ───────────────────────────────
+	_ocean_quad_tree = QuadTreeScene.instantiate()
+	_ocean_quad_tree.name = "OceanQuadTree"
+	# Y = water_height positions the mesh base at the SL water surface; FFT
+	# displacement is added on top by the vertex shader.
+	_ocean_quad_tree.position = Vector3(127.5, water_height, -127.5)
+	# Share the Ocean3D material so the vertex shader sees the FFT textures.
+	_ocean_quad_tree.material = _ocean.material
+	# LOD config: 5 levels, root quad 4096 m, finest ~128 m. Six range values
+	# tell the tree at what camera distance each LOD level activates.
+	_ocean_quad_tree.lod_level = 5
+	_ocean_quad_tree.quad_size = 4096.0
+	_ocean_quad_tree.mesh_vertex_resolution = 64
+	_ocean_quad_tree.morph_range = 0.3
+	var ocean_ranges: Array[float] = [48.0, 96.0, 192.0, 384.0, 768.0, 1536.0]
+	_ocean_quad_tree.set("ranges", ocean_ranges)
+
+	print("[Water] QuadTree3D configured: position=", _ocean_quad_tree.position,
+		" lod_level=", _ocean_quad_tree.lod_level,
+		" material=", _ocean_quad_tree.material)
+
+	add_child(_ocean_quad_tree)
+	print("[Water] OceanQuadTree added to scene tree")
+
+
+func _build_flat_water(water_height: float) -> void:
 	water_node = MeshInstance3D.new()
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(256.0, 256.0)
 	water_node.mesh = plane
-
-	# Position at center of region, at water height
-	# SL region: x=0..255, y=0..255 -> Godot: x=0..255, z=0..-255
-	# Center: x=127.5, z=-127.5
 	water_node.position = Vector3(127.5, water_height, -127.5)
-
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.1, 0.3, 0.5, 0.5)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -1529,7 +1616,6 @@ func _build_water_plane(water_height: float) -> void:
 	mat.roughness = 0.1
 	mat.metallic = 0.3
 	water_node.material_override = mat
-
 	add_child(water_node)
 
 

@@ -40,6 +40,11 @@ without this setting — the module never registers.
 **Fix:** Reverted to `true`. Added `xr_interface.uninitialize()` in `main.gd._ready()`
 when `--vr` is not passed, which shuts down the auto-initialized session before it
 renders anything.
+**Resolved:** `openxr/enabled=true` is required for VR but causes errors in non-VR mode
+even with `uninitialize()`. `project.godot` omits the setting (non-VR default).
+`override.vr.cfg` in the project root contains `openxr/enabled=true`; `godot-bridge.ts`
+copies it to `override.cfg` when launching with `--vr`, and deletes `override.cfg`
+otherwise. `override.cfg` is .gitignored.
 
 ---
 
@@ -152,7 +157,7 @@ heavier Vulkan API calls. Mobile renderer has simpler Vulkan path, no clustered
 lighting, more efficient stereo.
 **Result:** Degraded shadow quality on BOTH desktop and VR. Did not fix flickering.
 **Verdict:** Reverted. The flickering was fixed by Godot 4.4, not the renderer switch.
-Forward+ restored.
+Forward+ restored. (`renderer/rendering_method="mobile"` removed from `project.godot`.)
 
 ### 15. Godot version: 4.6.1 → 4.4-stable
 **Theory:** The flickering persisted through every CPU/GPU/ATW/renderer fix. Trying

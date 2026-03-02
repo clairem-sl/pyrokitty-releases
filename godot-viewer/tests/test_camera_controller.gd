@@ -158,19 +158,19 @@ func _test_set_vr_mode_disables_camera() -> void:
 
 
 func _test_shadow_quality_noop_in_vr_mode() -> void:
-	# _set_shadow_quality() must be a no-op when vr_mode is true so that
-	# the keyboard movement throttle can never restore expensive shadow settings.
-	# Without a DirectionalLight3D at /root/Main the function returns early
-	# anyway — the important thing is it doesn't crash and vr_mode stays set.
+	# Regression: the movement shadow throttle was removed. _set_shadow_quality()
+	# and its associated state vars must not exist — if they reappear it means the
+	# throttle was accidentally re-introduced. The compile test above catches undefined
+	# constant references, so this guards the behavioral deletion.
 	var world := _make_world_with_cam()
 	var cam := world.get_child(0) as Camera3D
 
-	cam.call("set_vr_mode", true)
-	cam.call("_set_shadow_quality", false)  # would restore 4-cascade if not guarded
-	cam.call("_set_shadow_quality", true)
-
-	_assert(cam.get("vr_mode") == true,
-		"[GREEN] vr_mode still true after _set_shadow_quality() calls (guard not clobbering state)")
+	_assert(not cam.has_method("_set_shadow_quality"),
+		"[GREEN] _set_shadow_quality() is deleted (movement shadow throttle removed)")
+	_assert(cam.get("_shadow_moving") == null,
+		"[GREEN] _shadow_moving state var is deleted")
+	_assert(cam.get("_shadow_stop_timer") == null,
+		"[GREEN] _shadow_stop_timer state var is deleted")
 
 	world.queue_free()
 

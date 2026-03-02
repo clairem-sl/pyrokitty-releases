@@ -151,9 +151,9 @@ Godot_v4.*
 godot-viewer/Godot_v4.7-dev1_win64.exe
 godot-viewer/cache/
 godot-viewer/addons/
-!godot-viewer/addons/extremely_fast_atmosphere/
 mobile_decompile/
 .godot/
 
 # PyroKitty build artifacts
 dist/
+

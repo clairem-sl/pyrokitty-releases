@@ -102,17 +102,20 @@ func _test_script_compiles() -> void:
 
 
 func _test_depth_buffer_enabled() -> void:
-	# submit_depth_buffer MUST stay true. Without it the Meta ATW compositor
-	# has no depth data and shows black instead of warping the previous frame
-	# when the app runs late. Do not remove this setting.
-	var f := FileAccess.open("res://project.godot", FileAccess.READ)
-	_assert(f != null, "[GREEN] project.godot is readable")
+	# submit_depth_buffer MUST stay true in override.vr.cfg. Without it the Meta
+	# ATW compositor has no depth data and shows black instead of warping the
+	# previous frame when the app runs late. See VR_SUCKS.md #1.
+	# The setting lives in override.vr.cfg (not project.godot) because it must
+	# only be active in VR mode — godot-bridge.ts copies it to override.cfg on
+	# VR launches and deletes override.cfg on non-VR launches.
+	var f := FileAccess.open("res://override.vr.cfg", FileAccess.READ)
+	_assert(f != null, "[GREEN] override.vr.cfg is readable")
 	if f == null:
 		return
 	var content := f.get_as_text()
 	f.close()
 	_assert("openxr/submit_depth_buffer=true" in content,
-		"[GREEN] openxr/submit_depth_buffer=true — required for ATW reprojection")
+		"[GREEN] openxr/submit_depth_buffer=true in override.vr.cfg — required for ATW reprojection")
 
 
 func _test_avatar_messages_are_high_priority() -> void:
