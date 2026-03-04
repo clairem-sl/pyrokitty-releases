@@ -165,34 +165,90 @@ var _placeholder_cache: Dictionary = {}
 # Cached scenario RID for RSInstance creation
 var _scenario: RID
 
+# ─── Light Management ────────────────────────────────
+
+## Lightweight wrapper around a RenderingServer light + instance pair.
+class RSLight extends RefCounted:
+	var light_rid: RID
+	var instance_rid: RID
+	var is_spot: bool
+	var proj_texture_id: String = ""
+
+	func _init(scenario: RID, spot: bool) -> void:
+		is_spot = spot
+		if spot:
+			light_rid = RenderingServer.spot_light_create()
+		else:
+			light_rid = RenderingServer.omni_light_create()
+		instance_rid = RenderingServer.instance_create()
+		RenderingServer.instance_set_base(instance_rid, light_rid)
+		RenderingServer.instance_set_scenario(instance_rid, scenario)
+		RenderingServer.light_set_shadow(light_rid, false)
+
+	func destroy() -> void:
+		RenderingServer.free_rid(instance_rid)
+		RenderingServer.free_rid(light_rid)
+
+var object_lights: Dictionary = {}           # localId -> RSLight
+var _object_light_data: Dictionary = {}      # localId -> light dict (for re-creation after cull)
+var _pending_proj_textures: Dictionary = {}  # textureId -> Array[localId]
+var _projector_textures: Dictionary = {}    # textureId -> padded ImageTexture (square inscribed in circle)
+var _light_count: int = 0
+var _light_cull_timer: float = 0.0
+const MAX_ACTIVE_LIGHTS: int = 64
+const LIGHT_CULL_DISTANCE: float = 64.0
+const LIGHT_CULL_INTERVAL: float = 2.0
+
+## Get a padded projector texture RID.  SL projects a rectangular frustum
+## but Godot's spot-light cone is circular.  Pad the texture so the square
+## image is inscribed inside the circle (sqrt(2)x larger canvas with black
+## border).  Cached per texture_id so we only pad once.
+func _get_projector_texture_rid(texture_id: String) -> RID:
+	if _projector_textures.has(texture_id):
+		return _projector_textures[texture_id].get_rid()
+
+	var orig_tex: ImageTexture = texture_cache.get(texture_id)
+	if orig_tex == null:
+		return RID()
+
+	var img := orig_tex.get_image()
+	if img == null:
+		return orig_tex.get_rid()
+
+	img = img.duplicate()
+	if img.is_compressed():
+		img.decompress()
+
+	var ow := img.get_width()
+	var oh := img.get_height()
+	# sqrt(2) ≈ 1.4143 — padded size so square inscribes in circle
+	var nw := int(ceil(float(ow) * 1.4143))
+	var nh := int(ceil(float(oh) * 1.4143))
+	if nw % 2 != 0:
+		nw += 1
+	if nh % 2 != 0:
+		nh += 1
+
+	var padded := Image.create(nw, nh, false, img.get_format())
+	padded.fill(Color.BLACK)
+	padded.blit_rect(img, Rect2i(0, 0, ow, oh), Vector2i((nw - ow) / 2, (nh - oh) / 2))
+	padded.generate_mipmaps()
+
+	var padded_tex := ImageTexture.create_from_image(padded)
+	_projector_textures[texture_id] = padded_tex
+	print("[Light] Created padded projector texture %s: %dx%d → %dx%d" % [texture_id, ow, oh, nw, nh])
+	return padded_tex.get_rid()
+
 func _exit_tree() -> void:
 	_shutting_down = true
-
-	# Destroy all RSInstance RIDs (objects + avatars)
-	for local_id: int in objects:
-		objects[local_id].destroy()
-	objects.clear()
-	for avatar_id: String in avatars:
-		avatars[avatar_id].destroy()
-	avatars.clear()
-
-	# Wait for all dedicated texture threads to finish
-	for t: Thread in _texture_threads:
-		t.wait_to_finish()
-	_texture_threads.clear()
-	_texture_queue.clear()
-	_texture_in_flight.clear()
-
-	# Drain mesh WorkerThreadPool tasks
-	for task_id: int in _mesh_tasks:
-		WorkerThreadPool.wait_for_task_completion(task_id)
-	_mesh_tasks.clear()
-	_mesh_queue.clear()
-	_mesh_in_flight.clear()
+	# Skip all cleanup — process is about to die anyway.
+	# RenderingServer RIDs, threads, and memory are freed by the OS on exit.
+	# Waiting for threads to finish just delays the close for no benefit.
 
 func _ready() -> void:
 	_scenario = get_world_3d().scenario
 	_start_texture_threads()
+
 	# Create shared meshes
 	object_mesh = BoxMesh.new()
 	object_mesh.size = Vector3(0.5, 0.5, 0.5)
@@ -312,6 +368,11 @@ func handle_object_create(msg: Dictionary) -> void:
 	rsi.push_transform()
 	objects[local_id] = rsi
 
+	# Create light if this object is a light source
+	if msg.has("light") and msg["light"] is Dictionary:
+		print("[Light] Creating light for localId=%d: %s pos=%s" % [local_id, str(msg["light"]), str(rsi.pos)])
+		_create_or_update_light(local_id, msg["light"], rsi)
+
 	# If this is a root and we have pending children, fix their world positions
 	if parent_id == 0 and pending_children.has(local_id):
 		for child_id: int in pending_children[local_id]:
@@ -365,6 +426,18 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 			if object_children.has(local_id):
 				_update_children_transforms(local_id)
 
+		# Update light (may be added, changed, or removed)
+		if obj.has("light"):
+			if obj["light"] is Dictionary:
+				_create_or_update_light(local_id, obj["light"], rsi)
+			else:
+				# light: null means light was removed
+				_destroy_light(local_id)
+				_object_light_data.erase(local_id)
+		elif object_lights.has(local_id):
+			# Transform changed — update light position
+			_update_light_transform(local_id, rsi)
+
 
 ## Recompute world positions of all children from parent's current transform
 func _update_children_transforms(parent_id: int) -> void:
@@ -377,6 +450,20 @@ func _update_children_transforms(parent_id: int) -> void:
 			child_rsi.pos = parent_rsi.pos + parent_rsi.rot * child_offset_pos[child_id]
 			child_rsi.rot = parent_rsi.rot * child_offset_rot[child_id]
 			child_rsi.push_transform()
+			# Move child's light with it
+			if object_lights.has(child_id):
+				_update_light_transform(child_id, child_rsi)
+
+
+## Update a light's transform to match its RSInstance position/rotation
+func _update_light_transform(local_id: int, rsi: RSInstance) -> void:
+	var rsl: RSLight = object_lights.get(local_id)
+	if rsl == null:
+		return
+	var basis := Basis(rsi.rot)
+	if rsl.is_spot:
+		basis = basis * Basis(Vector3.RIGHT, -PI / 2.0)
+	RenderingServer.instance_set_transform(rsl.instance_rid, Transform3D(basis, rsi.pos))
 
 
 ## Handle face updates from material asset fetch (PBR materials resolved after initial object_create)
@@ -460,6 +547,10 @@ func _cleanup_object(local_id: int) -> void:
 		objects[local_id].destroy()
 		objects.erase(local_id)
 
+	# Destroy associated light
+	_destroy_light(local_id)
+	_object_light_data.erase(local_id)
+
 	# Clean up all tracking dicts
 	if pending_meshes.has(local_id):
 		var mid: String = pending_meshes[local_id]
@@ -482,6 +573,176 @@ func _cleanup_object(local_id: int) -> void:
 	child_offset_pos.erase(local_id)
 	child_offset_rot.erase(local_id)
 	pending_children.erase(local_id)
+
+
+# ─── Light Pipeline ──────────────────────────────────
+
+## Create or update a RenderingServer light for an object
+func _create_or_update_light(local_id: int, light_data: Dictionary, rsi: RSInstance) -> void:
+	# Cache light data for distance cull re-creation
+	_object_light_data[local_id] = light_data
+
+	# Distance check: skip if prim beyond cull distance from camera
+	var cam := get_viewport().get_camera_3d()
+	if cam:
+		var dist := rsi.pos.distance_to(cam.global_position)
+		if dist > LIGHT_CULL_DISTANCE:
+			return
+
+	var is_spot: bool = light_data.get("isSpot", false)
+
+	# If light exists and type changed (spot↔omni), destroy and recreate
+	if object_lights.has(local_id):
+		var existing: RSLight = object_lights[local_id]
+		if existing.is_spot != is_spot:
+			_destroy_light(local_id)
+		else:
+			_apply_light_params(local_id, existing, light_data, rsi)
+			return
+
+	# Light count cap: skip if at max and this is a new light
+	if _light_count >= MAX_ACTIVE_LIGHTS:
+		return
+
+	# Create new light
+	var rsl := RSLight.new(_scenario, is_spot)
+	object_lights[local_id] = rsl
+	_light_count += 1
+	_apply_light_params(local_id, rsl, light_data, rsi)
+
+
+## Apply parameters to an existing RSLight from light data dict
+func _apply_light_params(local_id: int, rsl: RSLight, light_data: Dictionary, rsi: RSInstance) -> void:
+	var RS := RenderingServer
+	var color: Array = light_data.get("color", [1.0, 1.0, 1.0])
+	RS.light_set_color(rsl.light_rid, Color(color[0], color[1], color[2]))
+	RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_ENERGY, float(light_data.get("intensity", 1.0)))
+	RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_RANGE, float(light_data.get("radius", 10.0)))
+	# SL falloff 0-2: higher = faster dropoff. Godot attenuation exponent:
+	# <1 = sub-linear (stays bright longer), 1 = linear, >1 = steep.
+	# SL lights appear brighter at distance than linear, so map to sub-linear range.
+	var sl_falloff: float = float(light_data.get("falloff", 0.75))
+	RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_ATTENUATION, clampf(sl_falloff, 0.1, 2.0))
+
+	if rsl.is_spot:
+		var fov_rad: float = float(light_data.get("spotFov", 1.0))
+		# fov_rad is the full FOV angle from SL. Godot's spot_angle is a half-angle.
+		# Widen cone to the diagonal so full square texture is visible:
+		var half_fov := fov_rad * 0.5
+		var diagonal_half := atan(sqrt(2.0) * tan(half_fov))
+		var spot_angle: float = rad_to_deg(diagonal_half)
+		RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_SPOT_ANGLE, spot_angle)
+		# Godot formula: pow(1.0 - rim, atten). Low atten → uniform brightness.
+		# 0.01 gives ~99% brightness at the cone edge (SL projectors have no angular falloff).
+		RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_SPOT_ATTENUATION, 0.01)
+		print("[Light] Spot localId=%d fov=%.4frad half=%.4frad diag=%.4frad angle=%.1fdeg" % [local_id, fov_rad, half_fov, diagonal_half, spot_angle])
+
+		# Projection texture — requires shadow_enabled to render in Godot 4
+		var proj_tex_id: String = light_data.get("projTexture", "")
+		if not proj_tex_id.is_empty():
+			rsl.proj_texture_id = proj_tex_id
+			RS.light_set_shadow(rsl.light_rid, true)
+			# Shadow must be enabled for projector textures in Godot 4, but we
+			# don't want visible shadow acne.  Near-zero opacity keeps the
+			# projector working while making shadow artifacts invisible.
+			RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_SHADOW_OPACITY, 0.01)
+			RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_SHADOW_BIAS, 0.1)
+			RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_SHADOW_NORMAL_BIAS, 1.0)
+			if texture_cache.has(proj_tex_id):
+				print("[Light] Proj texture %s already cached, applying" % proj_tex_id)
+				RS.light_set_projector(rsl.light_rid, _get_projector_texture_rid(proj_tex_id))
+			else:
+				print("[Light] Proj texture %s NOT cached, deferring" % proj_tex_id)
+				if not _pending_proj_textures.has(proj_tex_id):
+					_pending_proj_textures[proj_tex_id] = []
+				if local_id not in _pending_proj_textures[proj_tex_id]:
+					_pending_proj_textures[proj_tex_id].append(local_id)
+
+	# SL spots project along local -Z → Godot -Y. Godot spot shines along -Z.
+	# Rotate -90° around X to map -Z → -Y (downward).
+	var basis := Basis(rsi.rot)
+	if rsl.is_spot:
+		basis = basis * Basis(Vector3.RIGHT, -PI / 2.0)
+	RS.instance_set_transform(rsl.instance_rid, Transform3D(basis, rsi.pos))
+
+	# Disable shadow casting on the light-emitting prim so it doesn't
+	# cast a shadow into its own projection
+	if rsl.is_spot and not rsl.proj_texture_id.is_empty():
+		RS.instance_geometry_set_cast_shadows_setting(
+			rsi.instance_rid, RS.SHADOW_CASTING_SETTING_OFF)
+
+
+## Destroy a light for a given localId
+func _destroy_light(local_id: int) -> void:
+	if not object_lights.has(local_id):
+		return
+	var rsl: RSLight = object_lights[local_id]
+	var reason := ""
+	# Walk the stack to find what called us
+	var rsi: RSInstance = objects.get(local_id)
+	var dist_info := ""
+	if rsi:
+		var cam := get_viewport().get_camera_3d()
+		if cam:
+			dist_info = " dist=%.1f" % rsi.pos.distance_to(cam.global_position)
+	print("[Light] DESTROY localId=%d spot=%s proj=%s%s" % [local_id, str(rsl.is_spot), rsl.proj_texture_id, dist_info])
+	# Remove from pending proj textures
+	if not rsl.proj_texture_id.is_empty() and _pending_proj_textures.has(rsl.proj_texture_id):
+		_pending_proj_textures[rsl.proj_texture_id].erase(local_id)
+		if _pending_proj_textures[rsl.proj_texture_id].size() == 0:
+			_pending_proj_textures.erase(rsl.proj_texture_id)
+	rsl.destroy()
+	object_lights.erase(local_id)
+	_light_count -= 1
+
+
+## Distance culling sweep: destroy far lights, create close ones (called from _process)
+func _sweep_light_culling() -> void:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return
+	var cam_pos := cam.global_position
+
+	# Destroy lights beyond cull distance
+	var to_remove: Array[int] = []
+	for local_id: int in object_lights:
+		var rsi: RSInstance = objects.get(local_id)
+		if rsi == null:
+			to_remove.append(local_id)
+			continue
+		if rsi.pos.distance_to(cam_pos) > LIGHT_CULL_DISTANCE:
+			to_remove.append(local_id)
+	for local_id: int in to_remove:
+		_destroy_light(local_id)
+
+	# Create lights for prims now within range (if under cap), nearest first
+	var candidates: Array = []  # [[dist, local_id], ...]
+	for local_id: int in _object_light_data:
+		if object_lights.has(local_id):
+			continue
+		var rsi: RSInstance = objects.get(local_id)
+		if rsi == null:
+			continue
+		var dist := rsi.pos.distance_to(cam_pos)
+		if dist <= LIGHT_CULL_DISTANCE:
+			candidates.append([dist, local_id])
+	candidates.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	if candidates.size() > 0:
+		print("[Light] Sweep: %d candidates within %.0fm (cam=%s), active=%d/%d" % [candidates.size(), LIGHT_CULL_DISTANCE, str(cam_pos), _light_count, MAX_ACTIVE_LIGHTS])
+	for c: Array in candidates:
+		if _light_count >= MAX_ACTIVE_LIGHTS:
+			break
+		var local_id: int = int(c[1])
+		var rsi: RSInstance = objects.get(local_id)
+		if rsi == null:
+			continue
+		var light_data: Dictionary = _object_light_data[local_id]
+		var is_spot: bool = light_data.get("isSpot", false)
+		var rsl := RSLight.new(_scenario, is_spot)
+		object_lights[local_id] = rsl
+		_light_count += 1
+		_apply_light_params(local_id, rsl, light_data, rsi)
+
 
 
 # ─── Mesh Pipeline ───────────────────────────────────
@@ -695,6 +956,16 @@ func _load_bctex(bctex_path: String) -> Image:
 ## For PBR faces, this may be called multiple times as albedo/normal/ORM/emissive arrive.
 ## Each call creates a material with all currently-cached textures (progressive refinement).
 func _apply_texture_to_pending(texture_id: String) -> void:
+	# Apply projection texture to any lights waiting for it (check BEFORE early return)
+	if _pending_proj_textures.has(texture_id):
+		var waiting_ids: Array = _pending_proj_textures[texture_id]
+		_pending_proj_textures.erase(texture_id)
+		for lid: int in waiting_ids:
+			var rsl: RSLight = object_lights.get(lid)
+			if rsl != null and rsl.is_spot:
+				print("[Light] Applying proj texture %s to localId=%d" % [texture_id, lid])
+				RenderingServer.light_set_projector(rsl.light_rid, _get_projector_texture_rid(texture_id))
+
 	if not _pending_by_texture.has(texture_id):
 		return
 
@@ -748,6 +1019,7 @@ func _apply_texture_to_pending(texture_id: String) -> void:
 				pending_textures[local_id] = face_list
 
 
+
 ## Get all texture IDs a face needs (albedo + PBR textures)
 func _get_face_texture_ids(albedo_id: String, pbr: Dictionary) -> Array:
 	var ids: Array = [albedo_id]
@@ -776,9 +1048,10 @@ func _process(_delta: float) -> void:
 			buf_mem = rd.get_memory_usage(RenderingDevice.MEMORY_BUFFERS)
 			# Note: MEMORY_TOTAL is intentionally omitted — it flushes the GPU
 			# pipeline on many drivers and causes multi-ms main-thread stalls.
-		print("[Stats] VRAM: tex=%.1fMB buf=%.1fMB | Objects: %d | Avatars: %d | Tex cache: %d | Mat cache: %d | Mesh cache: %d | FPS: %.0f" % [
+		print("[Stats] VRAM: tex=%.1fMB buf=%.1fMB | Objects: %d | Avatars: %d | Lights: %d/%d | Tex cache: %d | Mat cache: %d | Mesh cache: %d | FPS: %.0f" % [
 			tex_mem / 1048576.0, buf_mem / 1048576.0,
-			objects.size(), avatars.size(), texture_cache.size(), material_cache.size(), mesh_cache.size(),
+			objects.size(), avatars.size(), _light_count, _object_light_data.size(),
+			texture_cache.size(), material_cache.size(), mesh_cache.size(),
 			Engine.get_frames_per_second()])
 
 	# Step FFT ocean simulation (Ocean3D is a Resource, not a Node, so we
@@ -795,6 +1068,12 @@ func _process(_delta: float) -> void:
 
 	# Interpolate avatar positions/rotations toward their targets
 	_interpolate_avatars(_delta)
+
+	# Periodic light distance culling sweep
+	_light_cull_timer += _delta
+	if _light_cull_timer >= LIGHT_CULL_INTERVAL:
+		_light_cull_timer = 0.0
+		_sweep_light_culling()
 
 	# Submit queued mesh work to WorkerThreadPool
 	if _mesh_queue.size() > 0:
@@ -1763,6 +2042,8 @@ func get_pipeline_stats() -> Dictionary:
 		"materialLookups": _material_lookups,
 		"materialReuse": _material_lookups - material_cache.size(),
 		"texOpaque": _texture_opaque.values().count(true),
+		"lightsActive": _light_count,
+		"lightsTotal": _object_light_data.size(),
 	}
 
 

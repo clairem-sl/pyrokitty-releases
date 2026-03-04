@@ -59,6 +59,7 @@ export class GodotBridge extends EventEmitter {
   private bot: Bot;
   private subscriptions: Subscription[] = [];
   private trackedObjects = new Set<number>(); // localIds we've sent to Godot
+  private objectsWithLights = new Set<number>(); // localIds that have active lights
   private trackedAvatars = new Set<string>(); // avatar UUIDs we've sent
   private updateBuffer: Map<number, any> = new Map(); // coalesced terse updates
   private updateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -97,6 +98,33 @@ export class GodotBridge extends EventEmitter {
       return md.meshData?.toString();
     }
     return undefined;
+  }
+
+  /** Returns light info if obj has a light source, else undefined */
+  private getLightInfo(obj: any): {
+    color: number[]; intensity: number; radius: number; falloff: number; cutoff: number;
+    isSpot?: boolean; spotFov?: number; spotFocus?: number; spotAmbiance?: number; projTexture?: string;
+  } | undefined {
+    const ld = obj.extraParams?.lightData;
+    if (!ld || ld.Intensity <= 0) return undefined;
+    const ZERO = '00000000-0000-0000-0000-000000000000';
+    const lid = obj.extraParams?.lightImageData;
+    const projTex = lid?.texture?.toString();
+    const isSpot = !!(projTex && projTex !== ZERO);
+    return {
+      color: [ld.Color.getRed(), ld.Color.getGreen(), ld.Color.getBlue()],
+      intensity: ld.Intensity,
+      radius: ld.Radius,
+      falloff: ld.Falloff,
+      cutoff: ld.Cutoff,
+      ...(isSpot ? {
+        isSpot: true,
+        spotFov: lid!.params.x,
+        spotFocus: lid!.params.y,
+        spotAmbiance: lid!.params.z,
+        projTexture: projTex!,
+      } : {}),
+    };
   }
 
   /** Returns sculpt texture UUID and type flags if obj is a sculpted prim, else undefined */
@@ -345,6 +373,10 @@ export class GodotBridge extends EventEmitter {
                   case 'pipeline_stats':
                     this.lastGodotStats = msg;
                     break;
+                  case 'quit':
+                    console.log('[GodotBridge] Godot requested immediate quit');
+                    this.stop();
+                    break;
                 }
               } catch { /* ignore bad messages */ }
             });
@@ -495,6 +527,7 @@ export class GodotBridge extends EventEmitter {
     const sculptInfo = this.getSculptInfo(obj);
     const sculpt_meshId = sculptInfo ? sculptMeshId(sculptInfo.textureUuid, sculptInfo.sculptType) : undefined;
     const texInfo = this.getTextureInfo(obj);
+    const lightInfo = this.getLightInfo(obj);
 
     // Send prim shape params for non-mesh/non-sculpt objects so Godot can
     // generate procedural geometry instead of a box placeholder.
@@ -531,7 +564,12 @@ export class GodotBridge extends EventEmitter {
       ...(meshId ? { meshId } : sculpt_meshId ? { meshId: sculpt_meshId } : {}),
       ...(shapeParams ? { shape: shapeParams } : {}),
       ...(texInfo ? { faces: texInfo.faces } : {}),
+      ...(lightInfo ? { light: lightInfo } : {}),
     });
+    if (lightInfo) {
+      console.log(`[GodotBridge] Light on localId=${obj.ID}: ${JSON.stringify(lightInfo)}`);
+      this.objectsWithLights.add(obj.ID);
+    }
     this.trackedObjects.add(obj.ID);
 
     // Subscribe to live texture changes for this object
@@ -545,6 +583,11 @@ export class GodotBridge extends EventEmitter {
     }
     if (sculptInfo && this.sculptFetchQueue) {
       this.sculptFetchQueue.request(sculptInfo.textureUuid, sculptInfo.sculptType, obj.ID);
+    }
+    // Queue projection texture fetch for spot lights
+    if (lightInfo?.isSpot && lightInfo.projTexture && this.textureFetchQueue) {
+      console.log(`[GodotBridge] Requesting proj texture ${lightInfo.projTexture} for localId=${obj.ID}`);
+      this.textureFetchQueue.request(lightInfo.projTexture, obj.ID);
     }
     // Distance gate: skip texture fetches for objects beyond render range
     let skipTextures = false;
@@ -1042,7 +1085,7 @@ export class GodotBridge extends EventEmitter {
     });
     this.subscriptions.push(terseSub);
 
-    // Full object updates (may include scale changes)
+    // Full object updates (may include scale/light changes)
     const fullUpdateSub = events.onObjectUpdatedEvent.subscribe((event) => {
       const obj = event.object;
       if (!this.trackedObjects.has(obj.ID)) return;
@@ -1050,12 +1093,25 @@ export class GodotBridge extends EventEmitter {
       const pos = obj.Position;
       const rot = obj.Rotation;
       const scl = obj.Scale;
+      const lightInfo = this.getLightInfo(obj);
+
+      // Detect light removal: object had a light before but doesn't now
+      let lightField: Record<string, any> = {};
+      if (lightInfo) {
+        lightField = { light: lightInfo };
+        this.objectsWithLights.add(obj.ID);
+      } else if (this.objectsWithLights.has(obj.ID)) {
+        // Light was removed — send null so Godot destroys it
+        lightField = { light: null };
+        this.objectsWithLights.delete(obj.ID);
+      }
 
       this.updateBuffer.set(obj.ID, {
         localId: obj.ID,
         ...(pos ? { position: [pos.x, pos.y, pos.z] } : {}),
         ...(rot ? { rotation: [rot.x, rot.y, rot.z, rot.w] } : {}),
         ...(scl ? { scale: [scl.x, scl.y, scl.z] } : {}),
+        ...lightField,
       });
 
       if (!this.updateTimer) {
@@ -1160,6 +1216,7 @@ export class GodotBridge extends EventEmitter {
           if (!obj || obj.deleted) {
             this.send({ type: 'object_kill', localId });
             this.trackedObjects.delete(localId);
+            this.objectsWithLights.delete(localId);
             this.textureUpdateSubs.get(localId)?.unsubscribe();
             this.textureUpdateSubs.delete(localId);
           }
@@ -1167,6 +1224,7 @@ export class GodotBridge extends EventEmitter {
           // Object not found in store — it's been killed
           this.send({ type: 'object_kill', localId });
           this.trackedObjects.delete(localId);
+          this.objectsWithLights.delete(localId);
           this.textureUpdateSubs.get(localId)?.unsubscribe();
           this.textureUpdateSubs.delete(localId);
         }
@@ -1377,6 +1435,7 @@ export class GodotBridge extends EventEmitter {
     }
     this.connected = false;
     this.trackedObjects.clear();
+    this.objectsWithLights.clear();
     this.trackedAvatars.clear();
     this.updateBuffer.clear();
     this.avatarUpdateBuffer.clear();

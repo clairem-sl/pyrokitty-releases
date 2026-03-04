@@ -1,3 +1,10 @@
+// Map dot colors — shared between minimap and world map
+export const MAP_COLORS = {
+  SELF: '#4cff4c',            // green — your account(s)
+  NEARBY: '#e94560',          // red — other avatars nearby
+  COUNT_DOT: '#ff8a8a',       // lighter red — agent-count population dots
+};
+
 // Grid configuration
 export interface Grid {
   id: string;
@@ -212,6 +219,7 @@ export const IPC_CHANNELS = {
 
   // Navigation
   TELEPORT_LOCAL: 'nav:teleport-local',
+  TELEPORT_REGION: 'nav:teleport-region',
 
   // Voice controls (renderer -> main)
   VOICE_PTT_DOWN: 'voice:ptt-down',

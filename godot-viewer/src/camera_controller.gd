@@ -77,6 +77,31 @@ func _ready() -> void:
 	_update_camera()
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		# Window lost focus — release all keys so nothing stays stuck
+		_key_w = false
+		_key_s = false
+		_key_a = false
+		_key_d = false
+		_key_e = false
+		_key_c = false
+		_key_shift = false
+		var had_movement := move_forward or move_backward or turn_left \
+			or turn_right or strafe_left or strafe_right or jump or crouch
+		move_forward = false
+		move_backward = false
+		turn_left = false
+		turn_right = false
+		strafe_left = false
+		strafe_right = false
+		jump = false
+		crouch = false
+		double_tap_running = false
+		if had_movement:
+			move_dirty = true
+
+
 ## Called by main.gd when OpenXR successfully initialises.
 func set_vr_mode(enabled: bool) -> void:
 	vr_mode = enabled
@@ -110,12 +135,16 @@ func _process(delta: float) -> void:
 	if has_target:
 		target_point = target_point.lerp(avatar_point, clamp(follow_smoothing * delta, 0.0, 1.0))
 
-	# A/D rotate the avatar
+	# A/D rotate the avatar (camera follows so it stays behind)
 	if turn_left:
-		avatar_yaw += turn_rate * delta
+		var step := turn_rate * delta
+		avatar_yaw += step
+		yaw += step
 		move_dirty = true
 	if turn_right:
-		avatar_yaw -= turn_rate * delta
+		var step := turn_rate * delta
+		avatar_yaw -= step
+		yaw -= step
 		move_dirty = true
 
 	# Rotate self avatar box to match local yaw (instant feedback)
@@ -147,6 +176,8 @@ var _key_w: bool = false
 var _key_s: bool = false
 var _key_a: bool = false
 var _key_d: bool = false
+var _key_e: bool = false
+var _key_c: bool = false
 var _key_shift: bool = false
 
 func _input(event: InputEvent) -> void:
@@ -171,9 +202,9 @@ func _input(event: InputEvent) -> void:
 			KEY_D:
 				_key_d = ke.pressed
 			KEY_E:
-				jump = ke.pressed
+				_key_e = ke.pressed
 			KEY_C:
-				crouch = ke.pressed
+				_key_c = ke.pressed
 			KEY_SHIFT:
 				_key_shift = ke.pressed
 
@@ -185,13 +216,16 @@ func _input(event: InputEvent) -> void:
 
 		if _key_w != move_forward or _key_s != move_backward \
 			or new_turn_left != turn_left or new_turn_right != turn_right \
-			or new_strafe_left != strafe_left or new_strafe_right != strafe_right:
+			or new_strafe_left != strafe_left or new_strafe_right != strafe_right \
+			or _key_e != jump or _key_c != crouch:
 			move_forward = _key_w
 			move_backward = _key_s
 			turn_left = new_turn_left
 			turn_right = new_turn_right
 			strafe_left = new_strafe_left
 			strafe_right = new_strafe_right
+			jump = _key_e
+			crouch = _key_c
 			move_dirty = true
 			# Any movement key releases the orbit hold and resets pitch
 			if orbit_hold and (move_forward or move_backward or turn_left \

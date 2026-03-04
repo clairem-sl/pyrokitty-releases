@@ -22,6 +22,15 @@ var _low_priority_queue: Array[String] = []
 var _vr_mode: bool = false
 var _active_camera: Camera3D
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		# Tell Electron to kill us (instant TerminateProcess) and also quit locally —
+		# whichever wins, the process is dead.
+		if ws_peer and ws_peer.get_ready_state() == WebSocketPeer.STATE_OPEN:
+			ws_peer.send_text('{"type":"quit"}')
+			ws_peer.poll()  # flush the send buffer
+		get_tree().quit()
+
 func _exit_tree() -> void:
 	if ws_peer:
 		ws_peer.close()
@@ -33,6 +42,9 @@ func _exit_tree() -> void:
 
 
 func _ready() -> void:
+	# We handle WM_CLOSE_REQUEST in _notification to send quit to Electron first
+	get_tree().auto_accept_quit = false
+
 	# Parse command-line args
 	var args := OS.get_cmdline_user_args()
 	var vr_requested := false

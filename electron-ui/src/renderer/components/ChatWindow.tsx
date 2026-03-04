@@ -60,9 +60,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     });
   };
 
-  const handleTeleport = useCallback((x: number, y: number) => {
+  const handleTeleport = useCallback((x: number, y: number, z: number) => {
     if (instanceId) {
-      ipcRenderer.invoke(IPC_CHANNELS.TELEPORT_LOCAL, instanceId, x, y);
+      ipcRenderer.invoke(IPC_CHANNELS.TELEPORT_LOCAL, instanceId, x, y, z);
     }
   }, [instanceId]);
 

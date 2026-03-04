@@ -726,14 +726,27 @@ export class BotManager {
   async getObjectByUUID(
     uuid: string,
     timeout = 10000,
-  ): Promise<{ localId: number; uuid: string; name: string; position: { x: number; y: number; z: number } }> {
+  ): Promise<{ localId: number; uuid: string; name: string; position: { x: number; y: number; z: number }; light?: any; lightImage?: any }> {
     await this.ensureConnected();
     const obj = await this.bot!.clientCommands.region.getObjectByUUID(new UUID(uuid), true, timeout);
+    const ld = obj.extraParams?.lightData;
+    const lid = obj.extraParams?.lightImageData;
     return {
       localId: obj.ID,
       uuid: obj.FullID.toString(),
       name: (obj as any).name || '(unknown)',
       position: obj.Position ? { x: obj.Position.x, y: obj.Position.y, z: obj.Position.z } : { x: 0, y: 0, z: 0 },
+      ...(ld ? { light: {
+        color: [ld.Color.getRed(), ld.Color.getGreen(), ld.Color.getBlue()],
+        intensity: ld.Intensity,
+        radius: ld.Radius,
+        falloff: ld.Falloff,
+        cutoff: ld.Cutoff,
+      }} : {}),
+      ...(lid ? { lightImage: {
+        texture: lid.texture?.toString(),
+        params: { x: lid.params.x, y: lid.params.y, z: lid.params.z },
+      }} : {}),
     };
   }
 

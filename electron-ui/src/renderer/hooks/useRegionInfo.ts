@@ -9,7 +9,7 @@ interface UseRegionInfoOptions {
 export function useRegionInfo({ instanceId }: UseRegionInfoOptions) {
   const [regionInfo, setRegionInfo] = useState<RegionInfo | null>(null);
 
-  // Load region info
+  // Load initial region info
   useEffect(() => {
     if (!instanceId) {
       setRegionInfo(null);
@@ -25,10 +25,21 @@ export function useRegionInfo({ instanceId }: UseRegionInfoOptions) {
       }
     };
     load();
+  }, [instanceId]);
 
-    // Poll for updates (region info can change on teleport)
-    const interval = setInterval(load, 5000);
-    return () => clearInterval(interval);
+  // Listen for pushed updates (throttled ~500ms from server events)
+  useEffect(() => {
+    if (!instanceId) return;
+
+    const handler = (_: any, data: { instanceId: string; regionInfo: RegionInfo }) => {
+      if (data.instanceId !== instanceId) return;
+      setRegionInfo(data.regionInfo);
+    };
+
+    ipcRenderer.on(IPC_CHANNELS.REGION_INFO_UPDATE, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.REGION_INFO_UPDATE, handler);
+    };
   }, [instanceId]);
 
   return { regionInfo };

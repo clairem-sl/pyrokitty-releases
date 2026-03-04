@@ -1,11 +1,19 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { NearbyAvatar, RegionInfo, displayName } from '../../shared/types';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { MAP_COLORS, NearbyAvatar, RegionInfo, displayName } from '../../shared/types';
+
+interface TeleportPopoverState {
+  x: number;
+  y: number;
+  z: number;
+  clickX: number; // pixel position for anchoring
+  clickY: number;
+}
 
 interface MiniMapProps {
   regionInfo: RegionInfo | null;
   nearbyAvatars: NearbyAvatar[];
   onAvatarClick?: (avatar: NearbyAvatar) => void;
-  onTeleport?: (x: number, y: number) => void;
+  onTeleport?: (x: number, y: number, z: number) => void;
 }
 
 export const MiniMap: React.FC<MiniMapProps> = ({
@@ -16,7 +24,9 @@ export const MiniMap: React.FC<MiniMapProps> = ({
 }) => {
   const [selectedAvatarId, setSelectedAvatarId] = useState<string | null>(null);
   const [teleportTarget, setTeleportTarget] = useState<{ x: number; y: number } | null>(null);
+  const [popover, setPopover] = useState<TeleportPopoverState | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
   // Safety timeout: clear teleporting state after 15s
   useEffect(() => {
@@ -33,6 +43,59 @@ export const MiniMap: React.FC<MiniMapProps> = ({
       setTeleportTarget(null);
     }
   }
+
+  // Dismiss popover on Escape
+  useEffect(() => {
+    if (!popover) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPopover(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [popover]);
+
+  // Dismiss popover on click outside
+  useEffect(() => {
+    if (!popover) return;
+    const onClick = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setPopover(null);
+      }
+    };
+    // Delay listener to avoid the double-click itself dismissing
+    const timer = setTimeout(() => window.addEventListener('mousedown', onClick), 0);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('mousedown', onClick);
+    };
+  }, [popover]);
+
+  const handleConfirmTeleport = useCallback(() => {
+    if (!popover || !onTeleport) return;
+    setTeleportTarget({ x: popover.x, y: popover.y });
+    onTeleport(popover.x, popover.y, popover.z);
+    setPopover(null);
+  }, [popover, onTeleport]);
+
+  // Compute popover position, clamping to stay within the map
+  const popoverStyle = useCallback((): React.CSSProperties => {
+    if (!popover || !mapRef.current) return {};
+    const mapRect = mapRef.current.getBoundingClientRect();
+    const popW = 160;
+    const popH = 100;
+    let left = popover.clickX;
+    let top = popover.clickY - popH - 8; // above click point
+
+    // If too close to top, show below
+    if (top < 0) {
+      top = popover.clickY + 8;
+    }
+    // Clamp horizontal
+    if (left - popW / 2 < 0) left = popW / 2;
+    if (left + popW / 2 > mapRect.width) left = mapRect.width - popW / 2;
+
+    return { left: `${left}px`, top: `${top}px` };
+  }, [popover]);
 
   // Position tooltip to avoid edge clipping
   const tooltipStyle = (xPct: number, yPct: number): React.CSSProperties => {
@@ -68,14 +131,16 @@ export const MiniMap: React.FC<MiniMapProps> = ({
     <div
       className={`mini-map ${teleportTarget ? 'teleporting' : ''}`}
       ref={mapRef}
-      onClick={() => setSelectedAvatarId(null)}
+      onClick={() => { setSelectedAvatarId(null); }}
       onDoubleClick={(e) => {
         if (!onTeleport || !mapRef.current || teleportTarget) return;
         const rect = mapRef.current.getBoundingClientRect();
         const x = Math.round(((e.clientX - rect.left) / rect.width) * 256);
         const y = Math.round((1 - (e.clientY - rect.top) / rect.height) * 256);
-        setTeleportTarget({ x, y });
-        onTeleport(x, y);
+        const z = regionInfo?.agentPosition?.z ?? 30;
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
+        setPopover({ x, y, z: Math.round(z), clickX, clickY });
       }}
     >
       <img
@@ -90,6 +155,7 @@ export const MiniMap: React.FC<MiniMapProps> = ({
             style={{
               left: `${((teleportTarget?.x ?? regionInfo.agentPosition!.x) / 256) * 100}%`,
               top: `${((256 - (teleportTarget?.y ?? regionInfo.agentPosition!.y)) / 256) * 100}%`,
+              background: MAP_COLORS.SELF,
             }}
             onClick={(e) => {
               e.stopPropagation();
@@ -99,10 +165,10 @@ export const MiniMap: React.FC<MiniMapProps> = ({
             {selectedAvatarId === 'self' && (
               <div
                 className="mini-map-avatar-tooltip self-tooltip"
-                style={tooltipStyle(
+                style={{ color: MAP_COLORS.SELF, ...tooltipStyle(
                   (regionInfo.agentPosition.x / 256) * 100,
                   ((256 - regionInfo.agentPosition.y) / 256) * 100
-                )}
+                ) }}
               >
                 You<br />({Math.round(regionInfo.agentPosition.z)}m)
               </div>
@@ -118,7 +184,7 @@ export const MiniMap: React.FC<MiniMapProps> = ({
             <div
               key={avatar.id}
               className={`mini-map-avatar-dot ${isSelected ? 'selected' : ''}`}
-              style={{ left, top }}
+              style={{ left, top, background: MAP_COLORS.NEARBY }}
               onClick={(e) => {
                 e.stopPropagation();
                 setSelectedAvatarId(isSelected ? null : avatar.id);
@@ -144,6 +210,58 @@ export const MiniMap: React.FC<MiniMapProps> = ({
           );
         })}
       </div>
+
+      {/* Teleport confirmation popover */}
+      {popover && (
+        <div
+          ref={popoverRef}
+          className="teleport-popover"
+          style={popoverStyle()}
+        >
+          <div className="teleport-popover-row">
+            <label>
+              X
+              <input
+                type="number"
+                min={0}
+                max={255}
+                value={popover.x}
+                onChange={(e) => setPopover({ ...popover, x: Number(e.target.value) })}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmTeleport(); }}
+              />
+            </label>
+            <label>
+              Y
+              <input
+                type="number"
+                min={0}
+                max={255}
+                value={popover.y}
+                onChange={(e) => setPopover({ ...popover, y: Number(e.target.value) })}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmTeleport(); }}
+              />
+            </label>
+            <label>
+              Z
+              <input
+                type="number"
+                min={0}
+                max={4096}
+                value={popover.z}
+                onChange={(e) => setPopover({ ...popover, z: Number(e.target.value) })}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmTeleport(); }}
+              />
+            </label>
+          </div>
+          <button
+            className="teleport-popover-btn"
+            onClick={handleConfirmTeleport}
+          >
+            Teleport
+          </button>
+        </div>
+      )}
+
       <div className="mini-map-region-name">{regionInfo.name}</div>
     </div>
   );

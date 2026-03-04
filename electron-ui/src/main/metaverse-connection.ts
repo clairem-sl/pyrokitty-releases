@@ -80,6 +80,7 @@ export interface MetaverseConnectionEvents {
   'friend-online': (friend: Friend, online: boolean) => void;
   'groups-update': (groups: Group[]) => void;
   'nearby-avatars-update': (avatars: NearbyAvatar[]) => void;
+  'region-info-update': (info: RegionInfo) => void;
   'error': (error: Error) => void;
   'login-progress': (message: string) => void;
   'mfa-required': () => void;
@@ -100,6 +101,9 @@ export class MetaverseConnection extends EventEmitter {
   private lastLoginParams: LoginParams | null = null;
   private lastMfaHash?: string;
   private cachedRegionInfo: RegionInfo | null = null;
+  private selfMoveSubscription: { unsubscribe: () => void } | null = null;
+  private regionInfoThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+  private regionInfoDirty = false;
 
   constructor(public readonly instanceId: string) {
     super();
@@ -244,6 +248,12 @@ export class MetaverseConnection extends EventEmitter {
     this.chatSessions.clear();
     this.nearbyAvatars.clear();
     // Clean up avatar subscriptions
+    this.selfMoveSubscription?.unsubscribe();
+    this.selfMoveSubscription = null;
+    if (this.regionInfoThrottleTimer) {
+      clearTimeout(this.regionInfoThrottleTimer);
+      this.regionInfoThrottleTimer = null;
+    }
     for (const sub of this.avatarLeftSubscriptions.values()) {
       sub.unsubscribe();
     }
@@ -455,6 +465,12 @@ export class MetaverseConnection extends EventEmitter {
     this.bot.clientEvents.onDisconnected.subscribe((event) => {
       console.log(`[MetaverseConnection] Bot disconnected: ${event.message} (requested=${event.requested})`);
       // Clean up subscriptions so timers/callbacks don't access dead bot
+      this.selfMoveSubscription?.unsubscribe();
+      this.selfMoveSubscription = null;
+      if (this.regionInfoThrottleTimer) {
+        clearTimeout(this.regionInfoThrottleTimer);
+        this.regionInfoThrottleTimer = null;
+      }
       for (const sub of this.avatarLeftSubscriptions.values()) {
         sub.unsubscribe();
       }
@@ -467,8 +483,14 @@ export class MetaverseConnection extends EventEmitter {
     // Avatar entered region
     this.bot.clientEvents.onAvatarEnteredRegion.subscribe((avatar) => {
       const avatarId = avatar.getKey().toString();
-      // Skip our own avatar
+      // Subscribe to our own avatar's movement for region-info-update
       if (avatarId === this.bot?.agentID().toString()) {
+        this.selfMoveSubscription?.unsubscribe();
+        this.selfMoveSubscription = avatar.onMoved.subscribe(() => {
+          this.emitRegionInfoThrottled();
+        });
+        // Emit initial position
+        this.emitRegionInfoThrottled();
         return;
       }
 
@@ -840,6 +862,20 @@ export class MetaverseConnection extends EventEmitter {
     return info;
   }
 
+  /** Throttled emit of region-info-update — at most once per 500ms */
+  private emitRegionInfoThrottled(): void {
+    this.regionInfoDirty = true;
+    if (this.regionInfoThrottleTimer) return; // already scheduled
+    this.regionInfoThrottleTimer = setTimeout(() => {
+      this.regionInfoThrottleTimer = null;
+      if (this.regionInfoDirty) {
+        this.regionInfoDirty = false;
+        const info = this.getRegionInfo();
+        if (info) this.emit('region-info-update', info);
+      }
+    }, 500);
+  }
+
   getChatSessions(): ChatSession[] {
     return Array.from(this.chatSessions.values());
   }
@@ -909,6 +945,9 @@ export class MetaverseConnectionManager extends EventEmitter {
     });
     connection.on('nearby-avatars-update', (avatars) => {
       this.emit('nearby-avatars-update', instanceId, avatars);
+    });
+    connection.on('region-info-update', (info) => {
+      this.emit('region-info-update', instanceId, info);
     });
     connection.on('chat-session-update', (session) => {
       this.emit('chat-session-update', instanceId, session);

@@ -25,21 +25,21 @@ html, body, #root {
   background: #20465d;
 }
 
-/* Green dot icon for individual map avatar markers */
+/* Light red dot icon for agent-count population markers */
 .map-dot-icon {
-  background: #51cf66;
+  background: #ff8a8a;
   border-radius: 50%;
   border: 1px solid rgba(0, 0, 0, 0.3);
 }
 
 /* Cluster bubble */
 .map-dot-cluster {
-  background: rgba(81, 207, 102, 0.7);
+  background: rgba(255, 138, 138, 0.7);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid rgba(81, 207, 102, 0.9);
+  border: 2px solid rgba(255, 138, 138, 0.9);
 }
 
 .map-dot-cluster span {
@@ -54,13 +54,13 @@ html, body, #root {
 .marker-cluster-small,
 .marker-cluster-medium,
 .marker-cluster-large {
-  background: rgba(81, 207, 102, 0.4) !important;
+  background: rgba(255, 138, 138, 0.4) !important;
 }
 
 .marker-cluster-small div,
 .marker-cluster-medium div,
 .marker-cluster-large div {
-  background: rgba(81, 207, 102, 0.7) !important;
+  background: rgba(255, 138, 138, 0.7) !important;
   color: #fff !important;
   font-weight: bold;
 }
@@ -81,4 +81,109 @@ html, body, #root {
 .avatar-tooltip .region-name {
   color: #8899bb;
   font-size: 10px;
+}
+
+/* Teleport popup (dark theme override for Leaflet popup) */
+.tp-popup .leaflet-popup-content-wrapper {
+  background: rgba(22, 33, 62, 0.95);
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  color: #eaeaea;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.tp-popup .leaflet-popup-tip {
+  background: rgba(22, 33, 62, 0.95);
+  border: 1px solid #2a2a4a;
+  border-top: none;
+  border-left: none;
+}
+
+.tp-popup .leaflet-popup-close-button {
+  color: #a0a0a0;
+  font-size: 16px;
+}
+
+.tp-popup .leaflet-popup-close-button:hover {
+  color: #eaeaea;
+}
+
+.tp-popup .leaflet-popup-content {
+  margin: 8px 10px;
+}
+
+.tp-popup-content {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.tp-popup-region {
+  font-size: 11px;
+  color: #a0a0a0;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.tp-popup-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.tp-popup-row label {
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  color: #a0a0a0;
+  flex: 1;
+}
+
+.tp-popup-row input {
+  width: 100%;
+  padding: 3px 4px;
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 3px;
+  color: #eaeaea;
+  font-size: 12px;
+  text-align: center;
+  margin-top: 2px;
+  -moz-appearance: textfield;
+}
+
+.tp-popup-row input::-webkit-inner-spin-button,
+.tp-popup-row input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.tp-popup-row input:focus {
+  outline: none;
+  border-color: #e94560;
+}
+
+.tp-popup-btn {
+  width: 100%;
+  padding: 4px 0;
+  background: #e94560;
+  border: none;
+  border-radius: 4px;
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.tp-popup-btn:hover {
+  background: #ff6b6b;
+}
+
+/* Teleport in-progress pulse marker */
+.tp-pulse-marker {
+  animation: map-tp-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes map-tp-pulse {
+  0%, 100% { stroke-opacity: 1; fill-opacity: 0.8; }
+  50% { stroke-opacity: 0.3; fill-opacity: 0.2; }
 }

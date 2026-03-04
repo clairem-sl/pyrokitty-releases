@@ -229,8 +229,8 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     }
   });
 
-  // Teleport to local coordinates
-  ipcMain.handle(IPC_CHANNELS.TELEPORT_LOCAL, async (_, instanceId: string, x: number, y: number) => {
+  // Teleport to local coordinates (within current region)
+  ipcMain.handle(IPC_CHANNELS.TELEPORT_LOCAL, async (_, instanceId: string, x: number, y: number, z: number = 30) => {
     const metaverse = metaverseConnectionManager.get(instanceId);
     if (!metaverse) return { error: 'Not connected' };
     const bot = metaverse.getBot();
@@ -238,13 +238,57 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     try {
       const regionName = bot.currentRegion?.regionName;
       if (!regionName) return { error: 'No region' };
-      const pos = new Vector3([x, y, 0]);
+      const pos = new Vector3([x, y, z]);
       const lookAt = new Vector3([0, 1, 0]);
       await bot.clientCommands.teleport.teleportTo(regionName, pos, lookAt);
       return { ok: true };
     } catch (err: any) {
       console.error('[Teleport] Failed:', err.message);
       return { error: err.message };
+    }
+  });
+
+  // Teleport to region by grid coordinates (cross-region)
+  // teleportToRegionCoordinates expects global coords (grid * 256).
+  // Callers pass grid coords (e.g. 1007, 1194). Detect and convert.
+  ipcMain.handle(IPC_CHANNELS.TELEPORT_REGION, async (_, gridX: number, gridY: number, x: number, y: number, z: number) => {
+    // Pick first connected metaverse instance
+    const instances = viewerManager.getInstances();
+    let bot: any = null;
+    let instanceId: string | undefined;
+    for (const inst of instances) {
+      if (inst.connectionState !== 'metaverse_connected' && inst.connectionState !== 'viewer_connected') continue;
+      const metaverse = metaverseConnectionManager.get(inst.id);
+      if (!metaverse) continue;
+      bot = metaverse.getBot();
+      if (bot) { instanceId = inst.id; break; }
+    }
+    if (!bot) return { error: 'Not connected — no active metaverse instance found' };
+    try {
+      // Detect coordinate type: values < 256 are invalid (no SL regions at grid 0,0),
+      // values 256..65535 are grid coords, values >= 65536 (256*256) are already global
+      let globalX: number, globalY: number;
+      if (gridX < 256 || gridY < 256) {
+        return { error: `Invalid region coordinates (${gridX}, ${gridY}) — too small to be grid or global coords` };
+      } else if (gridX < 65536 && gridY < 65536) {
+        // Grid coords — multiply to get global
+        globalX = gridX * 256;
+        globalY = gridY * 256;
+        console.log(`[Teleport] Grid coords (${gridX},${gridY}) → global (${globalX},${globalY}), local=(${x},${y},${z})`);
+      } else {
+        // Already global coords
+        globalX = gridX;
+        globalY = gridY;
+        console.log(`[Teleport] Global coords (${globalX},${globalY}), local=(${x},${y},${z})`);
+      }
+      const pos = new Vector3([x, y, z]);
+      const lookAt = new Vector3([0, 1, 0]);
+      await bot.clientCommands.teleport.teleportToRegionCoordinates(globalX, globalY, pos, lookAt);
+      return { ok: true };
+    } catch (err: any) {
+      const msg = err.teleportEvent?.message || err.message || 'Unknown error';
+      console.error(`[Teleport] Region teleport failed: input=(${gridX},${gridY}) local=(${x},${y},${z}) error=${msg}`);
+      return { error: msg };
     }
   });
 
@@ -461,6 +505,15 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
   metaverseConnectionManager.on('nearby-avatars-update', (instanceId: string, avatars: any[]) => {
     mainWindow.webContents.send(IPC_CHANNELS.NEARBY_AVATARS_UPDATE, { instanceId, avatars });
+  });
+
+  metaverseConnectionManager.on('region-info-update', (instanceId: string, regionInfo: any) => {
+    mainWindow.webContents.send(IPC_CHANNELS.REGION_INFO_UPDATE, { instanceId, regionInfo });
+    // Also push to map window so world map account marker stays in sync
+    const mw = getMapWindow();
+    if (mw && !mw.isDestroyed()) {
+      mw.webContents.send(IPC_CHANNELS.REGION_INFO_UPDATE, { instanceId, regionInfo });
+    }
   });
 
   metaverseConnectionManager.on('mfa-required', (instanceId: string) => {
