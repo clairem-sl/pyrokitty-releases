@@ -2,7 +2,7 @@
 
 ## Concept
 
-A Godot 4.6 application that acts as a **render sidecar** to the existing PyroKitty stack. node-metaverse handles all SL protocol work (login, UDP, caps, object tracking, asset fetch). Godot receives scene commands over WebSocket and renders the 3D world. The Electron UI continues to handle chat, inventory, friends, groups, and map.
+A Godot 4.4 application that acts as a **render sidecar** to the existing PyroKitty stack. node-metaverse handles all SL protocol work (login, UDP, caps, object tracking, asset fetch). Godot receives scene commands over WebSocket and renders the 3D world. The Electron UI continues to handle chat, inventory, friends, groups, and map.
 
 ```
 ┌──────────────────────────────┐
@@ -13,13 +13,15 @@ A Godot 4.6 application that acts as a **render sidecar** to the existing PyroKi
 │  node-metaverse (TypeScript) │
 │  SL protocol, UDP, caps,     │
 │  object tracking, avatars,   │
-│  asset fetch, texture decode │
+│  asset fetch, texture decode, │
+│  GPU BC1/BC3 compression     │
 ├──────────┬───────────────────┘
 │    WebSocket IPC             │
 ├──────────┴───────────────────┐
-│  Godot 4.6 sidecar           │
-│  Scene tree, rendering,      │
-│  camera, input forwarding    │
+│  Godot 4.4 sidecar           │
+│  Scene tree (RS RIDs),       │
+│  rendering, camera, VR,      │
+│  input forwarding            │
 └──────────────────────────────┘
 ```
 
@@ -32,100 +34,219 @@ Godot runs a WebSocket (TCP) server on a local port (default 9100). node-metaver
 | Message | Purpose |
 |---------|---------|
 | `self_id` | Identify the bot's own avatar UUID so camera can follow it |
-| `object_create` | New object: localId, uuid, parentId, position, rotation, scale, meshId, textureId, color, fullBright, doubleSided, repeatU/V, offsetU/V, texRotation |
+| `object_create` | New object: localId, uuid, parentId, position, rotation, scale, meshId, shape, faces[], light |
 | `object_update_batch` | Batched position/rotation/scale changes (coalesced every 50ms) |
+| `object_update_faces` | Face/material update after initial create (PBR materials resolved asynchronously) |
 | `object_kill` | Remove object from scene |
 | `mesh_ready` | Mesh converted to GLB and written to cache |
-| `texture_ready` | Texture decoded to WebP and written to cache |
+| `texture_ready` | Texture decoded to .bctex (or WebP fallback) and written to cache |
 | `avatar_create` | New avatar: id, name, position, rotation |
-| `avatar_update` | Avatar position + rotation update |
+| `avatar_update` | Single avatar position + rotation update |
+| `avatar_update_batch` | Batched avatar position/rotation updates |
 | `avatar_kill` | Remove avatar |
 | `terrain_ready` | Heightmap binary cached to disk, path + waterHeight |
 | `environment_data` | Sun direction, sunlight color, ambient color from EEP |
-| `region_info` | Region name, coordinates, flags *(future)* |
+| `planar_debug` | Toggle planar UV debug visualization mode (F9) |
 
 ### Godot → node-metaverse
 
 | Message | Purpose |
 |---------|---------|
-| `input_move` | WASD/E/C state + camera yaw → control flags + body rotation |
+| `input_move` | WASD/E/C/QE state + camera yaw + fly toggle + running flag → control flags + body rotation |
+| `quit` | Godot window closed, Electron should terminate the sidecar |
+| `pipeline_stats` | Object/texture/mesh/material counts, FPS, finalize timing (every 5s) |
 | `input_click` | Object click: localId, face, UV *(future)* |
 | `camera_position` | Current camera world position *(future)* |
-| `ready` | Godot finished loading, ready for data |
+
+## Rendering Architecture
+
+All objects and avatars use lightweight `RSInstance` wrappers around RenderingServer RIDs — no MeshInstance3D nodes in the scene tree. This eliminates scene tree overhead (notification propagation, transform inheritance) and allows thousands of objects without GDScript bottlenecks.
+
+- `RSInstance` holds: RID, position, rotation, scale, mesh reference
+- Transform pushed via `RenderingServer.instance_set_transform()`
+- Materials applied via `instance_geometry_set_material_override()` or `instance_set_surface_override_material()`
+- Visibility range: objects fade from (far - margin) to far, then are culled
+  - Desktop: 128m far, 32m fade margin
+  - VR: 32m far, 8m fade margin
 
 ## Texture Pipeline
 
-node-metaverse fetches J2C textures from SL CDN. A worker thread pool (8 threads) decodes each texture. On Windows, uses native `opj_decompress.exe` (no WASM heap overhead). On other platforms, lazy-loads the fixed WASM decoder (`pyrokitty64/openjpeg` fork — original had a multi-component pixel stride bug). Output is converted to WebP via sharp, then written to a shared cache folder:
+### Decode & Compress (Electron side)
+
+node-metaverse fetches J2C textures from SL CDN. A worker thread pool (8 threads) decodes each texture. On Windows, uses native `opj_decompress.exe` (no WASM heap overhead). On other platforms, lazy-loads the fixed WASM decoder (`pyrokitty64/openjpeg` fork).
+
+Decoded RGBA is then GPU-compressed via WebGPU compute shaders (BC1 for opaque, BC3 for alpha) in a hidden BrowserWindow. Mipmap chain is generated progressively (each level from previous via sharp lanczos3). Output is written as `.bctex` files:
 
 ```
-godot-viewer/cache/textures/{uuid}.webp
+asset-cache/textures/{uuid}.bctex
 ```
 
-Godot receives a `texture_ready` message with the UUID and path, loads the WebP into an ImageTexture, and applies it as a material_override. Materials are cached by a composite key of `{textureId}_{colorHex}_{fullBright}_{doubleSided}_{uvParams}`.
+`.bctex` format: 32-byte header (magic `0x42435458`, version 1, width, height, format, mipCount, flags, dataSize) + concatenated mip data. Falls back to WebP if WebGPU is unavailable.
 
-### Material properties
-- `albedo_texture` = loaded ImageTexture
-- `albedo_color` = face color tint from TextureEntry (multiplied with texture)
-- `uv1_scale` = repeatU, repeatV (texture tiling)
-- `uv1_offset` = offsetU, offsetV (texture offset)
-- `transparency = ALPHA_SCISSOR` when alpha < 1.0 (threshold 0.5)
-- `shading_mode = UNSHADED` when fullBright flag set
-- `cull_mode = CULL_DISABLED` when GLTF doubleSided flag set, else `CULL_BACK`
-- Placeholder material (solid color tint) shown while texture downloads
+### Load & Apply (Godot side)
 
-### Current scope
-- Per-face texturing: bridge extracts up to 8 faces from TextureEntry, sends per-face info (textureId, color, UV, alpha mode)
-- Godot applies per-surface override materials via `set_surface_override_material()`
-- S3TC compression in Godot (`Image.compress(COMPRESS_S3TC)` + `generate_mipmaps()`) — 4:1 VRAM savings, GPU-native
+Godot receives a `texture_ready` message with the UUID and path. 16 dedicated OS threads (bypassing WorkerThreadPool's low-priority cap) load images from disk:
 
-### Missing / TODO
-- **Texture rotation** — data is sent (`texRotation`) but not applied; `StandardMaterial3D` has no UV rotation property. Needs a custom shader.
-- **Planar mapping** — `mappingType` sent from bridge, custom shader (`planar_map.gdshader`) implements SL's `planarProjection()` algorithm. UV scale/offset/rotation applied via SL's `xform()`. **In progress:** U-axis flip on some faces being debugged.
-- **Spherical mapping** — `mappingType=4` not yet handled.
-- **Texture animation** — `TextureAnim` UV scrolling not implemented.
+- `.bctex`: loaded directly via `_load_bctex()` — already has mipmaps and BC1/BC3 compression
+- `.webp` fallback: loaded via `Image.load()`, then `generate_mipmaps()` + `compress(COMPRESS_S3TC)` on the worker thread
+
+Results are pushed to main thread via mutex-guarded queue, finalized within an adaptive time budget (60% of remaining frame time). `ImageTexture.create_from_image()` runs on main thread, then materials are applied to all pending objects.
+
+### Material system
+
+Materials are cached by a composite key: `{textureId}_{colorHex}_{fullBright}_{doubleSided}_{uvParams}_{alphaMode}_{pbrParams}_{mappingType}`. UV params rounded to 2 decimal places to collapse near-duplicates from protocol noise.
+
+**Shader variants** (custom ShaderMaterial, not StandardMaterial3D) for UV mapping:
+- `standard_uv.gdshader` / `standard_uv_alpha.gdshader` — texture rotation support (StandardMaterial3D has no UV rotation property)
+- `planar_map.gdshader` / `planar_map_alpha.gdshader` — SL's `planarProjection()` + `xform()` algorithm
+- Double-sided variants generated at runtime by replacing `cull_back` → `cull_disabled` in shader source
+
+**Placeholder materials** (solid color tint) shown while textures download, cached by `{colorHex}_{fullBright}_{doubleSided}`.
+
+### Alpha handling
+
+- **GLTF OPAQUE** (mode 0): no transparency
+- **GLTF BLEND** (mode 1): smooth alpha blending
+- **GLTF MASK** (mode 2): alpha scissor with explicit cutoff
+- **SL standard** (mode -1): alpha scissor at 0.5 for textures, smooth blend for semi-transparent color
+- Known-opaque textures (DXT1/BC1) promoted to mode 0, skipping the transparency pipeline entirely
+
+## PBR Material Pipeline
+
+Three-layer priority system for material resolution:
+
+1. **renderMaterialData** (highest) — fetch full material asset from SL CDN
+2. **gltfMaterialOverrides** — inline overrides from object's ExtraParams
+3. **Legacy TextureEntry** (lowest) — diffuse texture + color tint
+
+`MaterialFetchQueue` downloads `AssetType.Material=57`, parses via `LLGLTFMaterial` (LLSD binary → glTF JSON), extracts per-face PBR properties. Results sent to Godot via `object_update_faces` message.
+
+**PBR properties applied in Godot:**
+- Albedo texture + base color tint
+- Normal map (`normal_enabled`, `normal_texture`)
+- ORM texture (R=ambient occlusion, G=roughness, B=metallic) — single texture, per-channel routing
+- Metallic/roughness factors
+- Emissive color + emissive texture
+- Texture transforms from `KHR_texture_transform` (offset, scale, rotation) — glTF `scale` = SL `repeat`
+
+**Race condition guard:** Legacy textures for faces with `renderMaterialData` are not queued — otherwise they arrive later and overwrite PBR. Stale `_pending_by_texture` entries purged in `handle_update_faces`.
 
 ## Mesh Pipeline
 
 node-metaverse fetches SL mesh assets, converts to GLB (binary glTF 2.0) with hand-rolled encoder, writes to cache:
 
 ```
-godot-viewer/cache/meshes/{uuid}.glb
+asset-cache/meshes/{uuid}.glb
 ```
 
 Coordinate transform: SL (X,Y,Z) → Godot (X,Z,-Y). This is a det=+1 rotation (90° around X), so triangle winding is preserved (no swap needed). Normals are transformed by the same matrix.
 
+GLB files are parsed on WorkerThreadPool threads (`GLTFDocument.append_from_file()`), then `ImporterMesh.get_mesh()` runs on main thread (creates RS resources). Up to 16 concurrent mesh tasks.
+
 ### Fetch dedup
-Both mesh and texture fetch queues track a `notified` set — each asset UUID is sent to Godot exactly once per session. Godot's `handle_object_create` checks its in-memory `mesh_cache`/`texture_cache` so objects arriving after the first load use the cached resource directly.
 
-## Terrain Pipeline
+Both mesh and texture fetch queues track a `notified` set — each asset UUID is sent to Godot exactly once per session. Godot's `mesh_cache`/`texture_cache` provide a second layer of dedup. Failed loads tracked in `mesh_load_failed`/`texture_load_failed` to avoid retries.
 
-Terrain heights are written as raw Float32LE binary (256KB) to:
+## Sculpt Pipeline
 
-```
-godot-viewer/cache/terrain/heightmap.bin
-```
+Sculpt maps (texture-encoded vertex data) are handled by `SculptFetchQueue`:
 
-Godot receives a `terrain_ready` message with path + waterHeight. The scene manager reads the binary file, builds an ArrayMesh (256×256 vertices, 130,050 triangles), and creates a water plane at the specified height.
-
-### Missing / TODO
-- **Terrain textures** — SL regions specify 4 terrain textures + height ranges for blending. Currently using a solid green-brown material.
-- **Neighbor region terrain** — only current region terrain is loaded.
-- **Terrain LOD** — full resolution everywhere; could use LOD for distant terrain.
+1. Bridge detects `extraParams.sculptData` on prim objects
+2. Sculpt texture UUID + type fetched, decoded to RGBA
+3. `sculpt-converter.ts` interprets pixel data as vertex positions, generates GLB
+4. Mesh ID = hash of `{textureUuid}_{sculptType}`, cached and reused
+5. Sent to Godot via `mesh_ready`, same as regular meshes
 
 ## Prim Geometry
 
-SL prims are defined by path type, profile, hollow, twist, taper, etc. These must be tessellated into triangle meshes client-side.
+SL prims are defined by path type, profile, hollow, twist, taper, etc. `prim_mesh_generator.gd` is a GDScript port of the LLVolume path/profile sweep algorithm.
 
-### Phased approach:
+- Shape params sent from bridge for non-mesh/non-sculpt prims
+- Box, cylinder, sphere, prism, torus, tube, ring with correct face count
+- Meshes cached by shape parameter hash (most scenes have <100 unique shapes)
+- SL→Godot coordinate conversion via `_sl_to_godot()` with correct winding
+- Face ordering matches SL (verified by headless tests)
 
-1. **Phase 1 — Box placeholder:** All prims render as scaled boxes.
-2. **Phase 2 — Prim type mapping:** Map SL prim types to Godot built-ins (CylinderMesh, SphereMesh, etc.)
-3. **Phase 3 — Accurate tessellation:** Port the path/profile sweep code from llvolume.cpp into a GDExtension (C++)
+### Missing prim features
+- [ ] Hollow prims
+- [ ] Profile/path cuts (begin/end)
+- [ ] Twist, taper, shear, skew, revolutions, radius offset
+- [ ] Spherical UV mapping (mappingType=4)
+
+## Light Pipeline
+
+SL point and spot lights are rendered via RenderingServer light RIDs (`RSLight` wrapper).
+
+- **Omni lights**: color, intensity, radius, falloff (SL exponential → Godot attenuation curve)
+- **Spot lights**: above + FOV (SL full FOV radians → Godot half-angle degrees) + focus
+- **Projection textures**: rectangular image padded to square inscribed in circle (sqrt(2) border) for Godot's circular spot cone
+- **Distance culling**: max 64 active lights, swept every 2s. Nearest lights within 64m created; far lights destroyed. Light data preserved for re-creation when camera moves closer.
+- **Shadow avoidance**: lights on layer 1 only, water on layer 2 — prevents shadow map artifacts
+- Lights track parent object transform, updated on `object_update_batch`
+
+## Water
+
+### OceanFFT + Custom SSR
+
+Production water uses the `tessarakkt.oceanfft` addon for FFT-based wave displacement with QuadTree3D LOD, plus custom screen-space reflections spliced into `SurfaceVisual.gdshader`.
+
+- FFT resolution 128, horizontal dimension 256m, wind speed 12 m/s
+- QuadTree LOD: 5 levels, quad size 4096, LOD ranges [48, 96, 192, 384, 768, 1536]
+- Custom SSR ray-march: 0.25m steps + binary refinement, dithered ray start, distance fade
+- Refraction via screen-texture UV offset by world-space wave normals
+- Depth-based color: `mix(background, deep_blue, depth²)` + fresnel sky blend
+- Shore fade: transparent → opaque over `shore_fade_depth`
+- Underwater fog via `_update_underwater_fog()` using `Ocean3D.get_wave_height()`
+- Water on render layer 2 (set recursively on QuadTree3D children)
+
+Flat water fallback (`_build_flat_water()`) exists for when OceanFFT is unavailable.
+
+See `docs/water-rendering.md` for shader details, pitfalls, and depth reconstruction fix.
+
+## Terrain
+
+Terrain heights are written as raw Float32LE binary (256KB) to cache. Godot builds an ArrayMesh (256x256 vertices, 130,050 triangles) with computed normals.
+
+### Missing / TODO
+- [ ] Terrain textures (4-texture blend based on height ranges)
+- [ ] Neighbor region terrain
+- [ ] Terrain LOD for distant terrain
+
+## Frame Budget System
+
+Adaptive time budgeting prevents asset finalization from causing frame drops:
+
+- **Desktop**: 33.3ms target (30 fps floor). Min 2ms finalize budget when on-target; 8ms when already over budget (no point protecting FPS that's already bad).
+- **VR**: 13.9ms target (72 Hz). Zero finalize budget when frame is already late — adding CPU work only makes the next frame late too.
+- Budget split: 60% textures / 40% meshes (textures are cheaper per-item)
+- WebSocket message processing: 12ms budget (both VR and desktop). High-priority messages (avatar updates, self_id) bypass budget and are always dispatched immediately.
+- All constants in `vr_frame_budget.gd` so the two competing budgets (message processing in main.gd, finalization in scene_manager.gd) can't silently drift apart.
+
+## VR Support
+
+OpenXR integration via Godot's XR interface, triggered by `--vr` command-line flag.
+
+**Working:**
+- [x] XROrigin3D + XRCamera3D positioning at avatar eye height
+- [x] OpenXR initialization with session state logging
+- [x] 72 Hz refresh rate (Quest 3 lowest rate = largest frame budget)
+- [x] 1.5x render target supersample for thin geometry anti-aliasing
+- [x] MSAA disabled (XR swapchain lacks STORAGE_BIT for compute resolve)
+- [x] VSync disabled (OpenXR controls frame pacing via xrEndFrame)
+- [x] Self avatar hidden in first-person
+- [x] Tighter visibility range (32m) and finalize budgets
+- [x] XR pose threshold gating (5mm / 0.06°) to keep ATW reprojection stable
+
+**Known issue:** Godot 4.6.x and 4.7-dev1 have an OpenXR regression causing whole-screen black flicker on Quest 3 via PC Link. Use Godot 4.4-stable for VR.
+
+**TODO:**
+- [ ] Motion controller input (movement, interaction)
+- [ ] VR-appropriate UI panels
 
 ## Milestones
 
 ### M1 — Boxes in Space ✅
-- [x] Godot 4.6.1 project with WebSocket TCP server (GDScript)
+- [x] Godot 4.4 project with WebSocket TCP server (GDScript)
 - [x] GodotBridge (TypeScript) spawns Godot, connects WebSocket, streams data
 - [x] Initial snapshot of all root prims sent on connect
 - [x] Live object create/update/kill via event subscriptions + batched terse updates
@@ -165,8 +286,21 @@ SL prims are defined by path type, profile, hollow, twist, taper, etc. These mus
 - [x] Self avatar rotates instantly from local A/D yaw (no server round-trip)
 - [x] Jump (E key → AGENT_CONTROL_UP_POS)
 - [x] Crouch (C key → AGENT_CONTROL_UP_NEG)
+- [x] Fly toggle (F key → fly state sent via input_move)
+- [x] Always-run toggle + double-tap W sprint
+- [x] Strafing (Q/E)
 - [x] SL quaternion w-positive fix (wire format reconstructs w as always positive)
-- **Victory:** Avatar box visually rotates with A/D, jumps with E, crouches with C
+- **Victory:** Avatar box visually rotates with A/D, jumps, crouches, flies, runs
+
+### M3 — Terrain + Water + Sky ✅
+- [x] Terrain heightmap cached as binary, loaded by Godot from disk (not over WebSocket)
+- [x] ArrayMesh terrain (256×256 vertices, computed normals, green-brown material)
+- [x] OceanFFT water with QuadTree3D LOD and custom SSR reflections + refraction
+- [x] ProceduralSkyMaterial from EEP sun direction + sunlight/ambient colors
+- [x] DirectionalLight3D oriented to match SL sun direction
+- [x] Underwater fog detection via wave height
+- [x] WebSocket buffer increased to 1MB for larger messages
+- **Victory:** Standing on ground with animated water and sky, not floating in void
 
 ### M3.5 — Linksets (Child Prims) ✅
 - [x] Bridge sends child prims with `parentId` field in `object_create`
@@ -182,50 +316,73 @@ SL prims are defined by path type, profile, hollow, twist, taper, etc. These mus
 - **Victory:** Linksets (buildings, furniture, vehicles) render fully, not just root prims
 
 #### Why flat hierarchy?
-SL linksets have independent scale per prim — parent scale does NOT affect children. Godot's scene tree inherits scale from parent nodes, and with rotated non-uniform parents this causes shearing. The flat approach keeps all nodes as direct children of SceneManager, computing world positions manually from parent transform + child offset.
-
-### M3 — Terrain + Water + Sky ✅
-- [x] Terrain heightmap cached as binary, loaded by Godot from disk (not over WebSocket)
-- [x] ArrayMesh terrain (256×256 vertices, computed normals, green-brown material)
-- [x] Water plane (256×256m PlaneMesh, semi-transparent blue, at waterHeight)
-- [x] ProceduralSkyMaterial from EEP sun direction + sunlight/ambient colors
-- [x] DirectionalLight3D oriented to match SL sun direction
-- [x] WebSocket buffer increased to 1MB for larger messages
-- **Victory:** Standing on ground with water and sky, not floating in void
+SL linksets have independent scale per prim — parent scale does NOT affect children. Godot's scene tree inherits scale from parent nodes, and with rotated non-uniform parents this causes shearing. The flat approach keeps all RSInstances independent, computing world positions manually from parent transform + child offset.
 
 ### M3.6 — Performance & Memory ✅
 - [x] Fixed WASM J2K decoder bug (forked `pyrokitty64/openjpeg` — multi-component pixel stride was hardcoded to 3)
 - [x] Platform-conditional decode: native `opj_decompress` on Windows (no WASM heap), lazy WASM fallback on other platforms
-- [x] S3TC GPU texture compression in Godot (`Image.compress(COMPRESS_S3TC)` — 4:1 memory savings, GPU-native)
-- [x] Asset ready batching: buffer texture_ready/mesh_ready, flush 50 per tick at 100-200ms intervals
+- [x] GPU BC1/BC3 texture compression via WebGPU compute shaders (`.bctex` output) — 4:1 VRAM savings, GPU-native
+- [x] S3TC fallback compression in Godot for WebP textures
+- [x] Asset ready batching: buffer texture_ready/mesh_ready, flush within adaptive time budget
 - [x] Per-face textures: bridge sends up to 8 faces per object, Godot applies per-surface override materials
 - [x] GLTF alpha mode support (OPAQUE, BLEND, MASK with cutoff) alongside SL standard alpha
-- [x] Memory diagnostics logging (RSS, heap, external, arrayBuffers, object store, decode queue — every 30s)
-- [x] Worker thread pool: 8 threads for parallel J2K→WebP decode
-- **Victory:** Godot memory usage reasonable with S3TC; textures load without freezing
+- [x] Memory diagnostics logging (VRAM textures/buffers, object/avatar/light counts, cache sizes — every 10s)
+- [x] 16 dedicated OS threads for texture loading (bypasses WorkerThreadPool low-priority cap)
+- [x] 16 concurrent mesh tasks via WorkerThreadPool
+- [x] Adaptive frame budget: desktop (33ms target, aggressive when over) vs VR (13.9ms, zero when late)
+- [x] RenderingServer RID instances replace MeshInstance3D nodes (eliminates scene tree overhead)
+- [x] Known-opaque texture promotion (DXT1 → skip transparency pipeline entirely)
+- [x] Material cache key rounding (2 decimal UV params to collapse near-duplicates)
+- **Victory:** Godot renders thousands of objects at 30+ fps desktop, 72 fps VR
 
-### M4 — Better Geometry (in progress)
+### M4 — Better Geometry ✅ (basic) / in progress (advanced)
 - [x] Procedural prim mesh generator (`prim_mesh_generator.gd`) — port of LLVolume path/profile sweep
 - [x] Shape params sent from bridge (`godot-bridge.ts`) for non-mesh/non-sculpt prims
 - [x] Box, cylinder, sphere, prism, torus, tube, ring with correct face count
 - [x] Mesh cached by shape parameter hash (most scenes have <100 unique shapes)
 - [x] SL→Godot coordinate conversion via `_sl_to_godot()` with correct winding
 - [x] Face ordering matches SL (verified by headless tests)
+- [x] Sculpt map support (sculpt texture → GLB via SculptFetchQueue)
 - [x] Planar UV mapping shader (`planar_map.gdshader`) — SL's `planarProjection()` + `xform()`
-- [ ] Planar mapping U-axis flip bug (shader math matches SL but text appears mirrored)
+- [x] Standard UV shader with texture rotation support (`standard_uv.gdshader`)
 - [ ] Hollow prims
 - [ ] Profile/path cuts (begin/end)
 - [ ] Twist, taper, shear, skew, revolutions, radius offset
-- [ ] Sculpt map support
-- **Victory:** World looks roughly correct geometrically
+- [ ] Spherical UV mapping (mappingType=4)
+- **Victory (basic):** Most objects have correct geometry; advanced prim params remain
 
-### M5 — Navigation & Movement
-- [ ] Fly mode toggle (F key or double-jump)
+### M4.5 — PBR Materials ✅
+- [x] MaterialFetchQueue: download material assets (AssetType 57), parse LLSD binary → glTF JSON
+- [x] Three-layer priority: renderMaterialData > gltfMaterialOverrides > legacy TextureEntry
+- [x] `object_update_faces` message for async PBR material resolution
+- [x] Normal maps, ORM textures (AO/roughness/metallic), emissive color + texture
+- [x] Metallic/roughness factors from glTF material
+- [x] KHR_texture_transform (offset, scale, rotation) for PBR textures
+- [x] Race condition guard: legacy textures not queued for faces with renderMaterialData
+- **Victory:** PBR content renders with correct metallic/rough/normal/emissive
+
+### M4.6 — Lights ✅
+- [x] Point lights (omni) and spot lights via RenderingServer RIDs
+- [x] Projection textures with sqrt(2) padding for circular cone mapping
+- [x] SL falloff → Godot attenuation conversion
+- [x] SL spotFov (full FOV radians) → Godot half-angle degrees
+- [x] Distance culling: max 64 active, swept every 2s, nearest-first priority
+- [x] Light data preserved for re-creation when camera approaches
+- [x] Light transforms track parent object movement
+- **Victory:** Lit environments with projection textures and spot lights
+
+### M5 — Navigation & Movement (partially done)
+- [x] Fly mode toggle (F key)
+- [x] Run mode (always-run toggle + double-tap W sprint)
+- [x] Strafing (Q/E keys)
+- [x] Avatar interpolation (smooth lerp/slerp with velocity extrapolation)
 - [ ] Minimap or coordinate display
+- [ ] Teleport support (region crossing, teleport to coordinates)
 - **Victory:** Can navigate a region freely
 
 ### M6 — Avatars
-- [ ] Avatar capsule/placeholder at correct positions
+- [ ] Avatar capsule/placeholder at correct positions (currently boxes)
+- [ ] Display names
 - [ ] Skeleton + mesh rigging
 - [ ] Bake textures for appearance
 - [ ] Basic animations
@@ -240,8 +397,7 @@ SL linksets have independent scale per prim — parent scale does NOT affect chi
 ### M8 — Visual Polish (ongoing)
 - [ ] Terrain textures (4-texture blend based on height ranges)
 - [ ] Neighbor region terrain
-- [ ] Texture rotation via custom shader
-- [ ] Planar/spherical UV mapping via custom shader
+- [ ] Spherical UV mapping
 - [ ] Texture animation (TextureAnim UV scrolling)
 - [ ] Particles
 - [ ] Flexi prims
@@ -250,61 +406,87 @@ SL linksets have independent scale per prim — parent scale does NOT affect chi
 - [ ] Shadows + lighting improvements
 - [ ] Draw distance / LOD tuning
 - [ ] Rigged mesh support
-- [ ] PBR/glTF material overrides
 - [ ] Distance-based texture fetch priority
 - [ ] Texture LOD / mipmap size selection
-- [ ] Electron memory optimization (object store, worker overhead)
-- [ ] Send TURN_LEFT/TURN_RIGHT control flags during A/D rotation
+- [ ] Underwater view (camera below water surface)
 
-### M9 — VR Support (future)
-- [ ] OpenXR integration via Godot's XR interface
-- [ ] Head-tracked camera (replace orbit camera)
+### M9 — VR Support (partially done)
+- [x] OpenXR integration via Godot's XR interface
+- [x] Head-tracked camera (XROrigin3D + XRCamera3D at avatar eye height)
+- [x] VR frame budgets and visibility range tuning
+- [x] Supersample + anti-aliasing for thin geometry
 - [ ] Motion controller input (movement, interaction)
 - [ ] VR-appropriate UI panels
 
 ## Resolved Questions
 
 - **Embedded or separate window?** Separate window. Godot runs as its own process, Electron spawns it.
-- **Which Godot version?** 4.6.1 stable (mono build for potential C# use).
-- **GDExtension language?** C++ for prim tessellation (closest to existing llvolume code), GDScript for everything else.
+- **Which Godot version?** 4.4-stable. Godot 4.6.x has an OpenXR regression (black flicker on Quest 3). Version controlled by `godot-version.txt`.
+- **GDExtension language?** C++ for prim tessellation (closest to existing llvolume code), GDScript for everything else. Currently all GDScript.
+- **Scene tree or RenderingServer?** RenderingServer RIDs via `RSInstance` wrappers. MeshInstance3D nodes caused scene tree overhead at scale.
 - **Camera ownership?** Godot owns camera locally for responsiveness, sends yaw back to node-metaverse for body rotation in AgentUpdate.
-- **Movement model?** Godot sends key state (WASD + E/C) + camera yaw. Bridge sets ControlFlags on agent and mutates bodyRotation quaternion directly. Agent auto-sends AgentUpdate every 1s; we also call sendAgentUpdate() immediately on input change.
-- **Texture format?** WebP via sharp (switched from PNG for ~5-10x disk savings). Godot loads both natively via Image.load(). Legacy PNG cache entries still work as fallback.
-- **JPEG2000 decoder?** Platform-conditional: native `opj_decompress.exe` on Windows (in `electron-ui/bin/`), WASM on other platforms. The WASM decoder uses a fork (`pyrokitty64/openjpeg`) that fixes a multi-component pixel stride bug in the original `@abasb75/jpeg2000-decoder` — the pixel copy loop hardcoded stride 3, garbling 4-component (RGBA) textures.
-- **Linkset parenting?** Flat hierarchy — all Godot nodes are direct children of SceneManager. SL prims have independent scale (parent scale doesn't affect children), but Godot's scene tree inherits scale from parents, causing shearing with rotated non-uniform parents. World positions are computed manually: `parent_pos + parent_rot * child_offset`.
-- **Winding order?** SL→Godot transform is det=+1 (rotation), so winding preserved. Original winding swap was incorrect and has been removed.
+- **Movement model?** Godot sends key state (WASD + Q/E + jump/crouch) + camera yaw + fly toggle + running flag. Bridge sets ControlFlags on agent and mutates bodyRotation quaternion directly. Agent auto-sends AgentUpdate every 1s; we also call sendAgentUpdate() immediately on input change.
+- **Texture format?** GPU-compressed `.bctex` (BC1/BC3 via WebGPU compute) is primary. WebP via sharp is fallback when WebGPU unavailable. Godot loads both natively.
+- **JPEG2000 decoder?** Platform-conditional: native `opj_decompress.exe` on Windows (in `electron-ui/bin/`), WASM on other platforms. The WASM decoder uses a fork (`pyrokitty64/openjpeg`) that fixes a multi-component pixel stride bug in the original `@abasb75/jpeg2000-decoder`.
+- **Linkset parenting?** Flat hierarchy — all RSInstances are independent. SL prims have independent scale (parent scale doesn't affect children), but Godot's scene tree inherits scale from parents, causing shearing with rotated non-uniform parents. World positions are computed manually: `parent_pos + parent_rot * child_offset`.
+- **Winding order?** SL→Godot transform is det=+1 (rotation), so winding preserved.
 - **Backface culling?** Respect GLTF doubleSided flag from material overrides. Default is CULL_BACK (single-sided).
 - **Terrain delivery?** Binary file cache (not JSON over WebSocket) — avoids 1009 message-too-large errors.
 - **SL quaternion wire format?** Only x,y,z sent; w reconstructed as sqrt(1-x²-y²-z²) so always positive. Must negate all components when w<0 before sending.
+- **Water rendering?** OceanFFT addon for FFT wave simulation + QuadTree3D LOD. Custom SSR ray-march in shader (Godot built-in SSR doesn't work on transparent surfaces). See `docs/water-rendering.md`.
 
 ## File Structure
 
 ```
 godot-viewer/
   PLAN.md                ← this file
-  project.godot          ← Godot 4.6.1 project config (forward_plus renderer)
-  main.tscn              ← Main scene (Node3D + SceneManager + Camera3D + light + env)
-  Godot_v4.6.1-stable_mono_win64/  ← Godot engine binary
-  cache/
-    textures/            ← decoded texture cache (WebP files)
-    meshes/              ← converted mesh cache (GLB files)
-    terrain/             ← heightmap data (Float32LE binary)
+  project.godot          ← Godot 4.4 project config (forward_plus renderer)
+  godot-version.txt      ← Engine version string (read by godot-bridge.ts)
+  main.tscn              ← Main scene (Node3D + SceneManager + Camera3D + XROrigin3D + light + env)
+  Godot_v4.4-stable_win64/  ← Godot engine binary
+  addons/
+    tessarakkt.oceanfft/   ← OceanFFT addon (FFT wave simulation, QuadTree3D LOD)
+      shaders/SurfaceVisual.gdshader  ← Water shader (FFT + custom SSR + refraction)
+      Ocean.tres           ← Material resource with shader parameter defaults
+  shaders/
+    water_ssr.gdshader     ← Old standalone SSR water shader (reference only, not loaded)
   tests/
-    test_prim_mesh.gd    ← Headless tests for prim mesh generator (face ordering, normals, vertex bounds)
-    test_prim_mesh.tscn   ← Scene to run tests: `Godot --headless --quit-after 5 --scene tests/test_prim_mesh.tscn`
+    test_prim_mesh.gd/.tscn         ← Prim mesh face ordering, normals, vertex bounds
+    test_shader_materials.gd/.tscn  ← Shader compilation, material creation
+    test_camera_controller.gd/.tscn ← Camera input, orbit, follow
+    test_main.gd/.tscn              ← WebSocket server, message dispatch
+    test_xr_rig.gd/.tscn            ← VR rig positioning
+    test_water_setup.gd/.tscn       ← Shader compilation, Ocean3D initialization guards
   src/
-    main.gd              ← WebSocket TCP server (1MB buffer), message dispatch
-    scene_manager.gd     ← object/avatar CRUD (flat hierarchy with manual child transforms), terrain/water/sky, SL→Godot coord conversion, texture/material caching
+    main.gd              ← WebSocket TCP server (1MB buffer), message dispatch, VR init, frame budget
+    scene_manager.gd     ← RSInstance-based object/avatar CRUD, flat linkset hierarchy, terrain/water/sky,
+                           texture/material/mesh/light pipelines, PBR materials, frame-budgeted finalization
     prim_mesh_generator.gd ← Procedural prim geometry from SL shape params (port of LLVolume), cached by param hash
-    planar_map.gdshader  ← Custom shader for SL planar UV projection (planarProjection + xform)
-    camera_controller.gd ← orbit camera with avatar follow, WASD+E/C input, self-avatar yaw
+    camera_controller.gd ← Orbit camera with avatar follow, WASD+Q/E+F input, fly/run/sprint, self-avatar yaw
+    xr_rig.gd            ← XROrigin3D positioning at avatar eye height (VR mode)
+    vr_frame_budget.gd   ← Central timing constants for VR (72Hz) and desktop (30fps) budgets
+    standard_uv.gdshader ← Custom shader for texture rotation + UV transform (opaque)
+    standard_uv_alpha.gdshader ← Same with alpha blending
+    planar_map.gdshader  ← Custom shader for SL planar UV projection (opaque)
+    planar_map_alpha.gdshader ← Same with alpha blending
 
 electron-ui/src/main/
-  godot-bridge.ts        ← Spawns Godot, WebSocket client, streams objects/avatars (incl. linkset children), terrain/environment, handles input_move
+  godot-bridge.ts        ← Spawns Godot, WebSocket client, streams objects/avatars/terrain/environment,
+                           handles input_move, queues projection texture fetches, kills on shader errors
   mesh-fetch-queue.ts    ← Concurrent mesh download queue with dedup, disk caching, and notify-once
   mesh-converter.ts      ← LLMesh → GLB (binary glTF 2.0) converter
-  texture-fetch-queue.ts ← Concurrent texture download queue with J2C→WebP decode, disk caching, and notify-once
-  decode-pool.ts         ← Worker thread pool (8 workers) for parallel J2K→WebP decode
-  texture-decode-worker.ts ← Worker thread: native opj_decompress (Windows) or WASM (other) → sharp WebP
-  j2k-converter.ts       ← J2C↔PNG conversion via native opj_decompress/opj_compress, J2C→WebP via sharp
+  sculpt-fetch-queue.ts  ← Sculpt texture fetch + conversion to GLB mesh
+  sculpt-converter.ts    ← Sculpt map pixel data → vertex positions → GLB
+  texture-fetch-queue.ts ← Concurrent texture download queue with J2C decode, disk caching, and notify-once
+  decode-pool.ts         ← Worker thread pool (8 workers) for parallel J2K decode
+  texture-decode-worker.ts ← Worker thread: native opj_decompress (Windows) or WASM (other) → sharp
+  material-fetch-queue.ts ← PBR material asset download, LLSD binary parse → glTF JSON, override layering
+  gpu-compress-queue.ts  ← Queues RGBA textures for GPU compression, writes .bctex output
+  gpu-compress-window.ts ← Hidden BrowserWindow hosting WebGPU compute shader for BC1/BC3 compression
+
+electron-ui/src/gpu-compress/
+  compress.ts            ← WebGPU compute shader orchestration (BC1/BC3 block encoding)
+  bc-compress.wgsl       ← WGSL compute shader for BC1/BC3 block compression
+  bctex-format.ts        ← .bctex file format: header + mip chain serialization
+  index.html             ← Minimal HTML for hidden BrowserWindow WebGPU context
 ```

@@ -8,7 +8,7 @@ const VRFrameBudget = preload("res://src/vr_frame_budget.gd")
 var tcp_server: TCPServer
 var ws_peer: WebSocketPeer
 var tcp_peer: StreamPeerTCP  # underlying TCP connection
-var ws_port: int = 9100
+var ws_port: int = 9200
 
 @onready var scene_manager: Node3D = $SceneManager
 var fps_timer: float = 0.0

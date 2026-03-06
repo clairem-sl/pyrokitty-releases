@@ -5,6 +5,7 @@
 
 import { spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
+import * as net from 'net';
 import * as path from 'path';
 import { app } from 'electron';
 import WebSocket from 'ws';
@@ -18,8 +19,32 @@ import { SculptFetchQueue } from './sculpt-fetch-queue';
 import { sculptMeshId } from './sculpt-converter';
 import { MaterialFetchQueue, MaterialOverrideData, TextureTransform } from './material-fetch-queue';
 
-const GODOT_WS_PORT_BASE = 9100;
+const GODOT_WS_PORT_BASE = 9200;
 let nextPort = GODOT_WS_PORT_BASE;
+
+/** Find a free TCP port starting from `startPort`, trying up to 20 ports. */
+function findFreePort(startPort: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const tryPort = (port: number, attempts: number) => {
+      if (attempts <= 0) {
+        reject(new Error(`No free port found starting from ${startPort}`));
+        return;
+      }
+      const srv = net.createServer();
+      srv.once('error', () => tryPort(port + 1, attempts - 1));
+      srv.listen(port, '127.0.0.1', () => {
+        srv.close(() => resolve(port));
+      });
+    };
+    tryPort(startPort, 20);
+  });
+}
+
+/** Magic texture UUIDs for SL water exclusion (invisiprims) — skip downloading these */
+const WATER_EXCLUSION_TEXTURES = new Set([
+  'e97cf410-8e61-7005-ec06-629eba4cd1fb',
+  '38b86f85-2575-52a9-a531-23108d8da837',
+]);
 
 function getGodotDir(): string {
   const appRoot = app.getAppPath();
@@ -87,7 +112,7 @@ export class GodotBridge extends EventEmitter {
   constructor(bot: Bot, options: { vrMode?: boolean } = {}) {
     super();
     this.bot = bot;
-    this.port = nextPort++;
+    this.port = 0; // resolved in start()
     this.vrMode = options.vrMode ?? false;
   }
 
@@ -280,6 +305,10 @@ export class GodotBridge extends EventEmitter {
   }
 
   async start(): Promise<void> {
+    // Find a free port for the Godot WebSocket server
+    this.port = await findFreePort(nextPort);
+    nextPort = this.port + 1;
+
     // Spawn Godot process
     const godotPath = getGodotPath();
     const projectPath = getProjectPath();
@@ -316,7 +345,12 @@ export class GodotBridge extends EventEmitter {
     });
 
     this.process.stdout?.on('data', (data) => {
-      console.log(`[Godot] ${data.toString().trim()}`);
+      const text = data.toString().trim();
+      console.log(`[Godot] ${text}`);
+      if (text.includes('SHADER ERROR')) {
+        console.error(`[GodotBridge] Shader compilation failed — killing Godot`);
+        this.process?.kill();
+      }
     });
 
     this.process.stderr?.on('data', (data) => {
@@ -567,7 +601,7 @@ export class GodotBridge extends EventEmitter {
       ...(lightInfo ? { light: lightInfo } : {}),
     });
     if (lightInfo) {
-      console.log(`[GodotBridge] Light on localId=${obj.ID}: ${JSON.stringify(lightInfo)}`);
+      //console.log(`[GodotBridge] Light on localId=${obj.ID}: ${JSON.stringify(lightInfo)}`);
       this.objectsWithLights.add(obj.ID);
     }
     this.trackedObjects.add(obj.ID);
@@ -628,7 +662,7 @@ export class GodotBridge extends EventEmitter {
       // Only queue legacy textures for faces NOT covered by material assets
       for (const face of texInfo.faces) {
         if (materialFaceIndices.has(face.index)) continue;
-        if (face.textureId) {
+        if (face.textureId && !WATER_EXCLUSION_TEXTURES.has(face.textureId)) {
           this.textureFetchQueue.request(face.textureId, obj.ID);
         }
         // Also queue PBR textures from inline overrides (not from renderMaterialData)

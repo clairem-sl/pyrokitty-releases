@@ -150,7 +150,6 @@ generate_compile_commands.py
 Godot_v4.*
 godot-viewer/Godot_v4.7-dev1_win64.exe
 godot-viewer/cache/
-godot-viewer/addons/
 mobile_decompile/
 .godot/
 

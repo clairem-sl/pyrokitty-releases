@@ -184,6 +184,8 @@ class RSLight extends RefCounted:
 		RenderingServer.instance_set_base(instance_rid, light_rid)
 		RenderingServer.instance_set_scenario(instance_rid, scenario)
 		RenderingServer.light_set_shadow(light_rid, false)
+		# Layer 1 only — excludes water (layer 2) to avoid shadow map artifacts
+		RenderingServer.light_set_cull_mask(light_rid, 1)
 
 	func destroy() -> void:
 		RenderingServer.free_rid(instance_rid)
@@ -370,7 +372,7 @@ func handle_object_create(msg: Dictionary) -> void:
 
 	# Create light if this object is a light source
 	if msg.has("light") and msg["light"] is Dictionary:
-		print("[Light] Creating light for localId=%d: %s pos=%s" % [local_id, str(msg["light"]), str(rsi.pos)])
+		#print("[Light] Creating light for localId=%d: %s pos=%s" % [local_id, str(msg["light"]), str(rsi.pos)])
 		_create_or_update_light(local_id, msg["light"], rsi)
 
 	# If this is a root and we have pending children, fix their world positions
@@ -635,7 +637,7 @@ func _apply_light_params(local_id: int, rsl: RSLight, light_data: Dictionary, rs
 		# Godot formula: pow(1.0 - rim, atten). Low atten → uniform brightness.
 		# 0.01 gives ~99% brightness at the cone edge (SL projectors have no angular falloff).
 		RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_SPOT_ATTENUATION, 0.01)
-		print("[Light] Spot localId=%d fov=%.4frad half=%.4frad diag=%.4frad angle=%.1fdeg" % [local_id, fov_rad, half_fov, diagonal_half, spot_angle])
+		#print("[Light] Spot localId=%d fov=%.4frad half=%.4frad diag=%.4frad angle=%.1fdeg" % [local_id, fov_rad, half_fov, diagonal_half, spot_angle])
 
 		# Projection texture — requires shadow_enabled to render in Godot 4
 		var proj_tex_id: String = light_data.get("projTexture", "")
@@ -649,10 +651,10 @@ func _apply_light_params(local_id: int, rsl: RSLight, light_data: Dictionary, rs
 			RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_SHADOW_BIAS, 0.1)
 			RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_SHADOW_NORMAL_BIAS, 1.0)
 			if texture_cache.has(proj_tex_id):
-				print("[Light] Proj texture %s already cached, applying" % proj_tex_id)
+				#print("[Light] Proj texture %s already cached, applying" % proj_tex_id)
 				RS.light_set_projector(rsl.light_rid, _get_projector_texture_rid(proj_tex_id))
 			else:
-				print("[Light] Proj texture %s NOT cached, deferring" % proj_tex_id)
+				#print("[Light] Proj texture %s NOT cached, deferring" % proj_tex_id)
 				if not _pending_proj_textures.has(proj_tex_id):
 					_pending_proj_textures[proj_tex_id] = []
 				if local_id not in _pending_proj_textures[proj_tex_id]:
@@ -669,7 +671,7 @@ func _apply_light_params(local_id: int, rsl: RSLight, light_data: Dictionary, rs
 	# cast a shadow into its own projection
 	if rsl.is_spot and not rsl.proj_texture_id.is_empty():
 		RS.instance_geometry_set_cast_shadows_setting(
-			rsi.instance_rid, RS.SHADOW_CASTING_SETTING_OFF)
+			rsi.rid, RS.SHADOW_CASTING_SETTING_OFF)
 
 
 ## Destroy a light for a given localId
@@ -727,8 +729,6 @@ func _sweep_light_culling() -> void:
 		if dist <= LIGHT_CULL_DISTANCE:
 			candidates.append([dist, local_id])
 	candidates.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
-	if candidates.size() > 0:
-		print("[Light] Sweep: %d candidates within %.0fm (cam=%s), active=%d/%d" % [candidates.size(), LIGHT_CULL_DISTANCE, str(cam_pos), _light_count, MAX_ACTIVE_LIGHTS])
 	for c: Array in candidates:
 		if _light_count >= MAX_ACTIVE_LIGHTS:
 			break
@@ -1054,17 +1054,13 @@ func _process(_delta: float) -> void:
 			texture_cache.size(), material_cache.size(), mesh_cache.size(),
 			Engine.get_frames_per_second()])
 
-	# Step FFT ocean simulation (Ocean3D is a Resource, not a Node, so we
-	# drive it here rather than relying on its own _process).
-	# initialize_simulation() schedules work on the render thread asynchronously,
-	# so guard on .initialized before calling simulate().
-	if _ocean != null:
-		if _ocean.initialized:
-			if not _ocean_logged_ready:
-				_ocean_logged_ready = true
-				print("[Water] Ocean3D render-thread init complete — simulation active")
-			_ocean.simulate(_delta)
-		# else: still waiting for render thread to finish _initialize_simulation
+	# OceanFFT simulation
+	if _ocean != null and _ocean.initialized:
+		_ocean.simulate(_delta)
+
+	# Underwater fog check
+	if _ocean_quad_tree != null or water_node != null:
+		_update_underwater_fog()
 
 	# Interpolate avatar positions/rotations toward their targets
 	_interpolate_avatars(_delta)
@@ -1702,10 +1698,12 @@ func _interpolate_avatars(delta: float) -> void:
 # ─── Terrain + Water + Sky ───────────────────────────
 
 var terrain_node: MeshInstance3D
-var water_node: MeshInstance3D  # fallback flat plane (used if oceanfft addon absent)
-var _ocean: Resource = null     # Ocean3D resource (FFT wave simulation)
-var _ocean_quad_tree: Node3D = null  # QuadTree3D LOD mesh renderer
-var _ocean_logged_ready: bool = false  # one-shot log when render-thread init completes
+var water_node: MeshInstance3D  # flat fallback (only if OceanFFT unavailable)
+var _ocean: Ocean3D = null
+var _ocean_quad_tree: QuadTree3D = null
+var _ocean_logged_ready: bool = false
+var _water_height: float = 20.0       # SL water surface Y (Godot coords), set by handle_terrain_ready
+var _camera_underwater: bool = false   # true when camera is below water surface
 
 func handle_terrain_ready(msg: Dictionary) -> void:
 	var bin_path: String = msg.get("path", "")
@@ -1741,6 +1739,7 @@ func handle_terrain_ready(msg: Dictionary) -> void:
 
 	# Build water plane
 	var water_height: float = float(msg.get("waterHeight", 20.0))
+	_water_height = water_height
 	_build_water_plane(water_height)
 
 
@@ -1815,71 +1814,93 @@ func _build_water_plane(water_height: float) -> void:
 	_ocean = null
 	_ocean_logged_ready = false
 
-	var Ocean3DScript = load("res://addons/tessarakkt.oceanfft/components/Ocean3D.gd")
-	var QuadTreeScene = load("res://addons/tessarakkt.oceanfft/components/QuadTree3D.tscn")
-
-	print("[Water] Ocean3DScript=", Ocean3DScript, " QuadTreeScene=", QuadTreeScene)
-
-	if Ocean3DScript == null or QuadTreeScene == null:
-		push_warning("[Water] oceanfft addon not found — using flat water fallback (Ocean3DScript=%s QuadTreeScene=%s)" % [Ocean3DScript, QuadTreeScene])
+	# Try OceanFFT addon
+	var qt_scene = load("res://addons/tessarakkt.oceanfft/components/QuadTree3D.tscn")
+	if qt_scene == null:
+		push_warning("[Water] OceanFFT addon not found — using flat water fallback")
 		_build_flat_water(water_height)
 		return
 
-	print("[Water] oceanfft addon loaded OK — building FFT ocean")
-
-	# ── Ocean3D resource (FFT simulation, no scene-tree node needed) ──────
-	_ocean = Ocean3DScript.new()
-	# 128×128 FFT: good wave detail, moderate GPU cost. Use 256 for more
-	# detail at the cost of ~4× compute, or 64 for low-end / VR perf saves.
-	_ocean.fft_resolution = 128          # FFTResolution.FFT_128x128
-	_ocean.horizontal_dimension = 256    # patch size in metres (tiles seamlessly)
-	_ocean.wind_speed = 12.0             # m/s — controls swell size
+	# Create Ocean3D resource (FFT simulation)
+	_ocean = Ocean3D.new()
+	_ocean.fft_resolution = Ocean3D.FFTResolution.FFT_128x128
+	_ocean.horizontal_dimension = 256
+	_ocean.wind_speed = 12.0
 	_ocean.wind_direction_degrees = 45.0
 	_ocean.choppiness = 0.6
 	_ocean.time_scale = 1.0
-	_ocean.simulation_frameskip = 1      # simulate every other frame (VR budget)
-	_ocean.domain_warp_strength = 0.0   # disable domain warp (no noise texture)
-
-	# Translucency: shallow water see-through, deep water murkier
-	_ocean.material.set_shader_parameter("water_opacity", 1.0)
-	_ocean.material.set_shader_parameter("opacity_depth", 5.0)
-	_ocean.material.set_shader_parameter("refraction_background_brightness", 0.5)
-	_ocean.material.set_shader_parameter("deep_color", Color(0.01, 0.04, 0.1, 1.0))
-
-	print("[Water] Ocean3D resource created, fft_resolution=", _ocean.fft_resolution,
-		" horizontal_dimension=", _ocean.horizontal_dimension,
-		" material=", _ocean.material)
-
-	# initialize_simulation() compiles GLSL compute shaders and allocates GPU
-	# textures. Must be called before simulate() and before QuadTree3D._ready().
-	# NOTE: This dispatches to the render thread — _ocean.initialized will be
-	# false until the render thread callback completes (next frame or later).
+	_ocean.simulation_frameskip = 1
+	_ocean.simulation_enabled = true
 	_ocean.initialize_simulation()
-	print("[Water] initialize_simulation() queued on render thread (initialized=", _ocean.initialized, " — will become true once render thread completes)")
 
-	# ── QuadTree3D node (LOD mesh renderer) ───────────────────────────────
-	_ocean_quad_tree = QuadTreeScene.instantiate()
-	_ocean_quad_tree.name = "OceanQuadTree"
-	# Y = water_height positions the mesh base at the SL water surface; FFT
-	# displacement is added on top by the vertex shader.
-	_ocean_quad_tree.position = Vector3(127.5, water_height, -127.5)
-	# Share the Ocean3D material so the vertex shader sees the FFT textures.
-	_ocean_quad_tree.material = _ocean.material
-	# LOD config: 5 levels, root quad 4096 m, finest ~128 m. Six range values
-	# tell the tree at what camera distance each LOD level activates.
+	# Configure shader material params
+	var mat: ShaderMaterial = _ocean.material
+	mat.set_shader_parameter("water_opacity", 1.0)
+	mat.set_shader_parameter("opacity_depth", 5.0)
+	mat.set_shader_parameter("deep_color", Color(0.01, 0.04, 0.1))
+	mat.set_shader_parameter("fresnel_strength", 1.0)
+	# Refraction: default depth_factor (0.00001) is invisible — boost so
+	# underwater objects visibly distort through the FFT wave normals.
+	mat.set_shader_parameter("refraction_depth_factor", 0.03)
+	mat.set_shader_parameter("refraction_factor_max", 0.15)
+
+	# Create QuadTree3D (LOD mesh tiles)
+	_ocean_quad_tree = qt_scene.instantiate() as QuadTree3D
 	_ocean_quad_tree.lod_level = 5
-	_ocean_quad_tree.quad_size = 4096.0
+	_ocean_quad_tree.quad_size = 4096
 	_ocean_quad_tree.mesh_vertex_resolution = 64
 	_ocean_quad_tree.morph_range = 0.3
-	var ocean_ranges: Array[float] = [48.0, 96.0, 192.0, 384.0, 768.0, 1536.0]
-	_ocean_quad_tree.set("ranges", ocean_ranges)
+	_ocean_quad_tree.ranges = [48.0, 96.0, 192.0, 384.0, 768.0, 1536.0]
+	_ocean_quad_tree.material = mat
 
-	print("[Water] QuadTree3D configured: position=", _ocean_quad_tree.position,
-		" lod_level=", _ocean_quad_tree.lod_level,
-		" material=", _ocean_quad_tree.material)
+	# Position at water height
+	_ocean_quad_tree.position = Vector3(128.0, water_height, -128.0)
 
 	add_child(_ocean_quad_tree)
-	print("[Water] OceanQuadTree added to scene tree")
+
+	# Layer 2 so spot/omni lights don't cast blocky shadow artifacts on water
+	_set_layer_recursive(_ocean_quad_tree, 2)
+
+	print("[Water] OceanFFT water added at height ", water_height)
+
+
+
+## Recursively set all MeshInstance3D children to a specific render layer (removing layer 1).
+## Skips VisibleOnScreenNotifier3D so LOD visibility detection still works.
+func _set_layer_recursive(node: Node, layer: int) -> void:
+	if node is MeshInstance3D:
+		node.set_layer_mask_value(1, false)
+		node.set_layer_mask_value(layer, true)
+	for child in node.get_children():
+		_set_layer_recursive(child, layer)
+
+
+func _update_underwater_fog() -> void:
+	var camera: Camera3D = get_node_or_null("../Camera3D")
+	if camera == null:
+		return
+	# Use FFT wave height at camera position when available
+	var effective_water_y := _water_height
+	if _ocean != null and _ocean.initialized:
+		effective_water_y = _ocean.get_wave_height(camera, camera.global_position) + _water_height
+	var is_underwater := camera.global_position.y < effective_water_y
+
+	if is_underwater == _camera_underwater:
+		return  # no state change
+	_camera_underwater = is_underwater
+
+	var world_env: WorldEnvironment = get_node_or_null("../WorldEnvironment")
+	if world_env == null or world_env.environment == null:
+		return
+	var env := world_env.environment
+
+	if is_underwater:
+		env.fog_enabled = true
+		env.fog_light_color = Color(0.03, 0.06, 0.12)
+		env.fog_density = 0.12
+		env.fog_light_energy = 0.6
+	else:
+		env.fog_enabled = false
 
 
 func _build_flat_water(water_height: float) -> void:
@@ -1895,6 +1916,8 @@ func _build_flat_water(water_height: float) -> void:
 	mat.roughness = 0.1
 	mat.metallic = 0.3
 	water_node.material_override = mat
+	water_node.set_layer_mask_value(1, false)
+	water_node.set_layer_mask_value(2, true)
 	add_child(water_node)
 
 

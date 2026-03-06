@@ -262,9 +262,11 @@ func _input(event: InputEvent) -> void:
 				elif _is_click_on_self_avatar(mb.position):
 					orbit_hold = false
 					is_butt_grabbing = true
+					Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 			else:
 				if is_butt_grabbing:
 					orbit_hold = true  # Hold camera angle until movement key pressed
+					Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 				is_butt_grabbing = false
 
 		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
