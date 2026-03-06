@@ -1121,21 +1121,36 @@ export class RegionCommands extends CommandsBase
         return new Promise<GameObject>((resolve, reject) =>
         {
             let tmr: NodeJS.Timeout | null = null;
+            let pollTmr: NodeJS.Timeout | null = null;
+            const cleanup = (): void =>
+            {
+                if (tmr !== null) { clearTimeout(tmr); tmr = null; }
+                if (pollTmr !== null) { clearInterval(pollTmr as unknown as number); pollTmr = null; }
+                subscription.unsubscribe();
+            };
             const subscription = this.currentRegion.clientEvents.onNewObjectEvent.subscribe((event: NewObjectEvent) =>
             {
                 if (event.objectID.equals(objectID))
                 {
-                    if (tmr !== null)
-                    {
-                        clearTimeout(tmr);
-                    }
-                    subscription.unsubscribe();
+                    cleanup();
                     resolve(event.object);
                 }
             });
+            // Poll the store periodically to catch objects that arrived between
+            // the initial lookup failure and the event subscription
+            pollTmr = setInterval(() =>
+            {
+                try
+                {
+                    const obj = this.currentRegion.objects.getObjectByUUID(objectID);
+                    cleanup();
+                    resolve(obj);
+                }
+                catch { /* not yet */ }
+            }, 1000) as unknown as NodeJS.Timeout;
             tmr = setTimeout(() =>
             {
-                subscription.unsubscribe();
+                cleanup();
                 reject(new Error('Timeout'));
             }, timeout)
         });

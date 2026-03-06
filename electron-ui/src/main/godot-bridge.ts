@@ -18,6 +18,8 @@ import { TextureFetchQueue } from './texture-fetch-queue';
 import { SculptFetchQueue } from './sculpt-fetch-queue';
 import { sculptMeshId } from './sculpt-converter';
 import { MaterialFetchQueue, MaterialOverrideData, TextureTransform } from './material-fetch-queue';
+import { RegionEnvironment } from '../../node-metaverse/dist/lib/classes/public/RegionEnvironment';
+import { LLSD } from '../../node-metaverse/dist/lib/classes/llsd/LLSD';
 
 const GODOT_WS_PORT_BASE = 9200;
 let nextPort = GODOT_WS_PORT_BASE;
@@ -87,6 +89,7 @@ export class GodotBridge extends EventEmitter {
   private objectsWithLights = new Set<number>(); // localIds that have active lights
   private trackedAvatars = new Set<string>(); // avatar UUIDs we've sent
   private updateBuffer: Map<number, any> = new Map(); // coalesced terse updates
+  private updateSeq: Map<number, number> = new Map(); // latest sequence number per localId
   private updateTimer: ReturnType<typeof setTimeout> | null = null;
   private avatarUpdateBuffer: Map<string, any> = new Map(); // coalesced avatar terse updates
   private avatarUpdateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -106,6 +109,10 @@ export class GodotBridge extends EventEmitter {
   private pbrFaceCount = 0; // count of faces with PBR overrides
   private deferredTextures = new Map<number, any>(); // localId → obj reference (for re-fetching textures later)
   private readonly TEXTURE_FETCH_RANGE = 160; // meters — 128m cull + 32m buffer for large prims
+  private envTimer: ReturnType<typeof setInterval> | null = null;
+  private _parcelEnvCache: { parcelId: number; env: RegionEnvironment | null; fetchedAt: number } | null = null;
+  private _parcelEnvFetching = false;
+  private static readonly PARCEL_ENV_TTL_MS = 30_000; // re-fetch parcel env every 30s
 
   private vrMode: boolean;
 
@@ -963,26 +970,183 @@ export class GodotBridge extends EventEmitter {
       waterHeight: region.waterHeight ?? 20,
     });
 
-    // Send environment data (small message, no caching needed)
+    // Clear parcel env cache on region change (parcel IDs are per-region)
+    this._parcelEnvCache = null;
+    // Send environment data and start periodic day cycle updates
     this.sendEnvironment();
+    // Update sun position every 5s to track the day cycle
+    if (!this.envTimer) {
+      this.envTimer = setInterval(() => this.sendEnvironment(), 5000);
+    }
+  }
+
+  /** Rotate x_axis (1,0,0) by quaternion to get sun direction.
+   *  SL's operator*(v, q) in llquaternion.cpp:571 computes q * v * q^-1 (standard rotation). */
+  private static sunRotToDir(q: { x: number; y: number; z: number; w: number }): number[] {
+    return [
+      1 - 2 * (q.y * q.y + q.z * q.z),
+      2 * (q.x * q.y + q.z * q.w),
+      2 * (q.x * q.z - q.y * q.w),
+    ];
+  }
+
+  /** Extract sun color as [r, g, b] clamped to [0,1] */
+  private static extractColor(c: any): number[] | null {
+    if (!c) return null;
+    const r = (c as any).x ?? 0;
+    const g = (c as any).y ?? 0;
+    const b = (c as any).z ?? 0;
+    return [Math.min(r, 1), Math.min(g, 1), Math.min(b, 1)];
+  }
+
+  /** Lerp between two [r,g,b] arrays */
+  private static lerpColor(a: number[], b: number[], t: number): number[] {
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  }
+
+  /** Get the agent's avatar position, or null if unavailable. */
+  private getAgentPosition(): { x: number; y: number; z: number } | null {
+    try {
+      const selfId = this.bot.agent?.agentID?.toString();
+      if (!selfId) return null;
+      const avatar = this.bot.currentRegion?.agents.get(selfId);
+      return avatar?.position ?? null;
+    } catch { return null; }
+  }
+
+  /** Resolve the real parcel LocalID at the agent's position. */
+  private async getAgentParcelId(): Promise<number> {
+    try {
+      const pos = this.getAgentPosition();
+      if (!pos) return -1;
+      return await this.bot.currentRegion.getParcelLocalId(pos.x, pos.y);
+    } catch { return -1; }
+  }
+
+  /** Fetch parcel environment override if needed (cached by parcel ID). */
+  private async fetchParcelEnvironment(parcelId: number): Promise<RegionEnvironment | null> {
+    if (parcelId <= 0) return null;
+    // Return cached if same parcel and not expired
+    if (this._parcelEnvCache && this._parcelEnvCache.parcelId === parcelId
+        && (Date.now() - this._parcelEnvCache.fetchedAt) < GodotBridge.PARCEL_ENV_TTL_MS) {
+      return this._parcelEnvCache.env;
+    }
+    // Avoid concurrent fetches
+    if (this._parcelEnvFetching) return this._parcelEnvCache?.env ?? null;
+    this._parcelEnvFetching = true;
+    try {
+      const region = this.bot.currentRegion;
+      const xml = await region.caps.capsGetString(['ExtEnvironment', { parcelid: String(parcelId) }]);
+      const parsed = LLSD.parseXML(xml);
+      const parcelEnv = new RegionEnvironment(parsed);
+      // If is_default, the parcel uses the region environment — no override
+      if (parcelEnv.isDefault) {
+        this._parcelEnvCache = { parcelId, env: null, fetchedAt: Date.now() };
+        console.log(`[Env] Parcel ${parcelId} uses region default environment`);
+      } else {
+        this._parcelEnvCache = { parcelId, env: parcelEnv, fetchedAt: Date.now() };
+        console.log(`[Env] Parcel ${parcelId} has environment override (dayLength=${parcelEnv.dayLength})`);
+      }
+      return this._parcelEnvCache.env;
+    } catch (err) {
+      console.warn(`[Env] Failed to fetch parcel ${parcelId} environment:`, err);
+      this._parcelEnvCache = { parcelId, env: null, fetchedAt: Date.now() };
+      return null;
+    } finally {
+      this._parcelEnvFetching = false;
+    }
   }
 
   private sendEnvironment(): void {
+    // Kick off async parcel ID resolve + env fetch, then compute and send
+    this.getAgentParcelId().then((parcelId) => {
+      return this.fetchParcelEnvironment(parcelId);
+    }).then((parcelEnv) => {
+      this._sendEnvironmentData(parcelEnv);
+    }).catch(() => {
+      this._sendEnvironmentData(null);
+    });
+  }
+
+  private _sendEnvironmentData(parcelEnv: RegionEnvironment | null): void {
     try {
-      const env = this.bot.currentRegion.environment;
+      // Use parcel environment if available, otherwise fall back to region
+      const regionEnv = this.bot.currentRegion.environment;
+      const env = parcelEnv ?? regionEnv;
       const dayCycle = env?.dayCycle;
 
-      // Default sun direction: roughly 45° elevation, from southeast
+      // Defaults
       let sunDir = [0.5, 0.7, -0.5];
       let sunColor = [1.0, 0.95, 0.8];
       let ambientColor = [0.3, 0.35, 0.4];
 
-      if (dayCycle) {
-        // Try to get sun rotation from dayCycle or first frame
+      if (dayCycle && dayCycle.tracks && dayCycle.frames && env!.dayLength) {
+        const dayLength = env!.dayLength;   // seconds
+        const dayOffset = env!.dayOffset ?? 0; // seconds
+        const nowSec = Date.now() / 1000;
+        const position = ((nowSec + dayOffset) % dayLength) / dayLength;
+
+        // Log only once per env source change
+
+
+        // Sky track is track 1 (track 0 = water)
+        const skyTrack = dayCycle.tracks[1];
+        if (skyTrack && skyTrack.length > 0) {
+          type SkyKeyframe = { pos: number; sunRot: any; sunColor: any; ambient: any };
+          const keyframes: SkyKeyframe[] = [];
+          for (const kf of skyTrack) {
+            const frame = dayCycle.frames.get(kf.keyName);
+            if (frame?.sunRotation) {
+              keyframes.push({
+                pos: kf.keyKeyframe,
+                sunRot: frame.sunRotation,
+                sunColor: GodotBridge.extractColor(frame.sunlightColor),
+                ambient: GodotBridge.extractColor((frame as any).legacyHaze?.ambient),
+              });
+            }
+          }
+          keyframes.sort((a, b) => a.pos - b.pos);
+
+          if (keyframes.length === 1) {
+            sunDir = GodotBridge.sunRotToDir(keyframes[0].sunRot);
+            if (keyframes[0].sunColor) sunColor = keyframes[0].sunColor;
+            if (keyframes[0].ambient) ambientColor = keyframes[0].ambient;
+          } else if (keyframes.length >= 2) {
+            let before = keyframes[keyframes.length - 1];
+            let after = keyframes[0];
+            for (let i = 0; i < keyframes.length; i++) {
+              if (keyframes[i].pos > position) {
+                after = keyframes[i];
+                before = keyframes[(i - 1 + keyframes.length) % keyframes.length];
+                break;
+              }
+              if (i === keyframes.length - 1) {
+                before = keyframes[keyframes.length - 1];
+                after = keyframes[0];
+              }
+            }
+
+            let span = after.pos - before.pos;
+            if (span <= 0) span += 1.0;
+            let local = position - before.pos;
+            if (local < 0) local += 1.0;
+            const t = span > 0 ? local / span : 0;
+
+            const blended = before.sunRot.shortMix(after.sunRot, t);
+            sunDir = GodotBridge.sunRotToDir(blended);
+
+            const sc1 = before.sunColor ?? sunColor;
+            const sc2 = after.sunColor ?? sunColor;
+            sunColor = GodotBridge.lerpColor(sc1, sc2, t);
+
+            const ac1 = before.ambient ?? ambientColor;
+            const ac2 = after.ambient ?? ambientColor;
+            ambientColor = GodotBridge.lerpColor(ac1, ac2, t);
+          }
+        }
+      } else if (dayCycle) {
         let sunRot = dayCycle.sunRotation;
         let slColor = dayCycle.sunlightColor;
-
-        // If no direct properties, try first frame
         if (!sunRot && dayCycle.frames) {
           for (const [, frame] of dayCycle.frames) {
             if (frame.sunRotation) {
@@ -992,35 +1156,13 @@ export class GodotBridge extends EventEmitter {
             }
           }
         }
+        if (sunRot) sunDir = GodotBridge.sunRotToDir(sunRot);
+        const sc = GodotBridge.extractColor(slColor);
+        if (sc) sunColor = sc;
 
-        if (sunRot) {
-          // Rotate (0, 0, -1) by sunRotation to get sun direction in SL coords
-          const { x: qx, y: qy, z: qz, w: qw } = sunRot;
-          // v = q * (0,0,-1) * q^-1, simplified:
-          const vx = -2 * (qx * qz + qy * qw);
-          const vy = -2 * (qy * qz - qx * qw);
-          const vz = -(1 - 2 * (qx * qx + qy * qy));
-          sunDir = [vx, vy, vz];
-        }
-
-        if (slColor) {
-          // sunlightColor can be Vector3 or Vector4
-          const r = (slColor as any).x ?? 0;
-          const g = (slColor as any).y ?? 0;
-          const b = (slColor as any).z ?? 0;
-          sunColor = [Math.min(r, 1), Math.min(g, 1), Math.min(b, 1)];
-        }
-
-        // Ambient from legacy haze if available
         const haze = (dayCycle as any).legacyHaze;
-        if (haze?.ambient) {
-          const a = haze.ambient;
-          ambientColor = [
-            Math.min((a as any).x ?? 0.3, 1),
-            Math.min((a as any).y ?? 0.35, 1),
-            Math.min((a as any).z ?? 0.4, 1),
-          ];
-        }
+        const ac = GodotBridge.extractColor(haze?.ambient);
+        if (ac) ambientColor = ac;
       }
 
       this.send({
@@ -1089,7 +1231,7 @@ export class GodotBridge extends EventEmitter {
             this.avatarUpdateTimer = setTimeout(() => {
               this.flushAvatarUpdateBuffer();
               this.avatarUpdateTimer = null;
-            }, 50);
+            }, 16);
           }
         }
         return;
@@ -1098,23 +1240,35 @@ export class GodotBridge extends EventEmitter {
       // Object terse updates
       if (!this.trackedObjects.has(obj.ID)) return;
 
+      // Drop stale updates — only accept newer sequence numbers
+      const seq = event.sequenceNumber;
+      const prevSeq = this.updateSeq.get(obj.ID) ?? -1;
+      if (seq < prevSeq) return;
+      this.updateSeq.set(obj.ID, seq);
+
       const pos = obj.Position;
       const rot = obj.Rotation;
       const scl = obj.Scale;
+      const vel = obj.Velocity;
+      const accel = obj.Acceleration;
+      const angVel = obj.AngularVelocity;
 
       this.updateBuffer.set(obj.ID, {
         localId: obj.ID,
         ...(pos ? { position: [pos.x, pos.y, pos.z] } : {}),
         ...(rot ? { rotation: [rot.x, rot.y, rot.z, rot.w] } : {}),
         ...(scl ? { scale: [scl.x, scl.y, scl.z] } : {}),
+        ...(vel ? { velocity: [vel.x, vel.y, vel.z] } : {}),
+        ...(accel ? { acceleration: [accel.x, accel.y, accel.z] } : {}),
+        ...(angVel ? { angularVelocity: [angVel.x, angVel.y, angVel.z] } : {}),
       });
 
-      // Flush every 50ms
+      // Flush every 16ms (~1 frame) for responsive corrections
       if (!this.updateTimer) {
         this.updateTimer = setTimeout(() => {
           this.flushUpdateBuffer();
           this.updateTimer = null;
-        }, 50);
+        }, 16);
       }
     });
     this.subscriptions.push(terseSub);
@@ -1124,9 +1278,18 @@ export class GodotBridge extends EventEmitter {
       const obj = event.object;
       if (!this.trackedObjects.has(obj.ID)) return;
 
+      // Drop stale updates — only accept newer sequence numbers
+      const seq = event.sequenceNumber;
+      const prevSeq = this.updateSeq.get(obj.ID) ?? -1;
+      if (seq < prevSeq) return;
+      this.updateSeq.set(obj.ID, seq);
+
       const pos = obj.Position;
       const rot = obj.Rotation;
       const scl = obj.Scale;
+      const vel = obj.Velocity;
+      const accel = obj.Acceleration;
+      const angVel = obj.AngularVelocity;
       const lightInfo = this.getLightInfo(obj);
 
       // Detect light removal: object had a light before but doesn't now
@@ -1140,11 +1303,18 @@ export class GodotBridge extends EventEmitter {
         this.objectsWithLights.delete(obj.ID);
       }
 
+      // Merge with existing buffer entry — a full update may carry light/scale
+      // changes while a terse update already set fresher position/velocity.
+      const existing = this.updateBuffer.get(obj.ID);
       this.updateBuffer.set(obj.ID, {
+        ...(existing || {}),
         localId: obj.ID,
         ...(pos ? { position: [pos.x, pos.y, pos.z] } : {}),
         ...(rot ? { rotation: [rot.x, rot.y, rot.z, rot.w] } : {}),
         ...(scl ? { scale: [scl.x, scl.y, scl.z] } : {}),
+        ...(vel ? { velocity: [vel.x, vel.y, vel.z] } : {}),
+        ...(accel ? { acceleration: [accel.x, accel.y, accel.z] } : {}),
+        ...(angVel ? { angularVelocity: [angVel.x, angVel.y, angVel.z] } : {}),
         ...lightField,
       });
 
@@ -1152,7 +1322,7 @@ export class GodotBridge extends EventEmitter {
         this.updateTimer = setTimeout(() => {
           this.flushUpdateBuffer();
           this.updateTimer = null;
-        }, 50);
+        }, 16);
       }
     });
     this.subscriptions.push(fullUpdateSub);
@@ -1207,13 +1377,22 @@ export class GodotBridge extends EventEmitter {
   private flushUpdateBuffer(): void {
     if (this.updateBuffer.size === 0) return;
 
-    const objects = Array.from(this.updateBuffer.values());
+    const statics: any[] = [];
+    const physics: any[] = [];
+
+    for (const obj of this.updateBuffer.values()) {
+      const hasMotion =
+        obj.velocity || obj.acceleration || obj.angularVelocity;
+      (hasMotion ? physics : statics).push(obj);
+    }
     this.updateBuffer.clear();
 
-    this.send({
-      type: 'object_update_batch',
-      objects,
-    });
+    if (physics.length > 0) {
+      this.send({ type: 'object_update_physics', objects: physics });
+    }
+    if (statics.length > 0) {
+      this.send({ type: 'object_update_batch', objects: statics });
+    }
   }
 
   private flushAvatarUpdateBuffer(): void {
@@ -1251,6 +1430,7 @@ export class GodotBridge extends EventEmitter {
             this.send({ type: 'object_kill', localId });
             this.trackedObjects.delete(localId);
             this.objectsWithLights.delete(localId);
+            this.updateSeq.delete(localId);
             this.textureUpdateSubs.get(localId)?.unsubscribe();
             this.textureUpdateSubs.delete(localId);
           }
@@ -1259,6 +1439,7 @@ export class GodotBridge extends EventEmitter {
           this.send({ type: 'object_kill', localId });
           this.trackedObjects.delete(localId);
           this.objectsWithLights.delete(localId);
+          this.updateSeq.delete(localId);
           this.textureUpdateSubs.get(localId)?.unsubscribe();
           this.textureUpdateSubs.delete(localId);
         }
@@ -1441,6 +1622,10 @@ export class GodotBridge extends EventEmitter {
       clearInterval(this.killSweepTimer);
       this.killSweepTimer = null;
     }
+    if (this.envTimer) {
+      clearInterval(this.envTimer);
+      this.envTimer = null;
+    }
 
     // Destroy fetch queues
     if (this.meshFetchQueue) {
@@ -1470,6 +1655,7 @@ export class GodotBridge extends EventEmitter {
     this.connected = false;
     this.trackedObjects.clear();
     this.objectsWithLights.clear();
+    this.updateSeq.clear();
     this.trackedAvatars.clear();
     this.updateBuffer.clear();
     this.avatarUpdateBuffer.clear();

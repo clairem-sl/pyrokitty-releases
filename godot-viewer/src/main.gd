@@ -3,7 +3,7 @@ extends Node3D
 ## Entry point: starts a TCP server, accepts a WebSocket connection,
 ## polls for JSON messages and dispatches them to SceneManager.
 
-const VRFrameBudget = preload("res://src/vr_frame_budget.gd")
+const FrameBudget = preload("res://src/frame_budget.gd")
 
 var tcp_server: TCPServer
 var ws_peer: WebSocketPeer
@@ -113,14 +113,14 @@ func _ready() -> void:
 			# Use 72Hz — the lowest Quest 3 rate — for the largest frame budget (13.9ms).
 			# Upgrade once rendering is consistently within the tighter 90Hz window.
 			if xr_interface.has_method("set_display_refresh_rate"):
-				xr_interface.set_display_refresh_rate(VRFrameBudget.VR_REFRESH_HZ)
+				xr_interface.set_display_refresh_rate(FrameBudget.VR_REFRESH_HZ)
 			camera_ctrl.set_vr_mode(true)
 			xr_rig.call("activate", camera_ctrl)
 			# Match XR camera far plane to the object visibility range so they
 			# can't diverge — depth precision is wasted beyond where objects exist.
 			var xr_cam := xr_rig.get_node_or_null("XRCamera3D") as Camera3D
 			if xr_cam:
-				xr_cam.far = VRFrameBudget.VR_CAMERA_FAR
+				xr_cam.far = FrameBudget.VR_CAMERA_FAR
 				_active_camera = xr_cam
 			# Tighten the finalization budget to fit the 90Hz frame window
 			if scene_manager and scene_manager.has_method("set_vr_mode"):
@@ -189,23 +189,25 @@ func _process(_delta: float) -> void:
 		# Single unified budget covering both the packet drain and queue processing.
 		# Previously only processing was budgeted; the drain loop allocated a string
 		# per packet with no time limit, costing several ms during loading bursts.
-		var _msg_budget: float = VRFrameBudget.VR_MSG_BUDGET_MS if _vr_mode else VRFrameBudget.DESKTOP_MSG_BUDGET_MS
+		var _msg_budget: float = FrameBudget.VR_MSG_BUDGET_MS if _vr_mode else FrameBudget.DESKTOP_MSG_BUDGET_MS
 		var _msg_start := Time.get_ticks_usec() / 1000.0
 
-		# Drain incoming packets. High-priority messages (avatar, self_id) are
-		# dispatched immediately and never count against the budget — they must
-		# never be delayed behind a burst of object_create messages.
-		# Low-priority packets stop being read once the budget is spent; they
-		# stay in the WebSocket buffer and are read next frame.
+		# Drain ALL incoming packets every frame.  High-priority messages
+		# (avatar, physics, self_id) are always dispatched immediately.
+		# Low-priority messages are queued once the budget is spent, but we
+		# keep reading so high-priority packets behind them aren't delayed.
+		var over_budget := false
 		while ws_peer.get_available_packet_count() > 0:
 			var text := ws_peer.get_packet().get_string_from_utf8()
 			if _is_high_priority(text):
 				_handle_message(text)
-			else:
-				if (Time.get_ticks_usec() / 1000.0) - _msg_start >= _msg_budget:
-					_low_priority_queue.push_front(text)
-					break
+				continue
+			if not over_budget and (Time.get_ticks_usec() / 1000.0) - _msg_start >= _msg_budget:
+				over_budget = true
+			if over_budget:
 				_low_priority_queue.append(text)
+			else:
+				_handle_message(text)
 
 		# Process anything already queued from previous frames.
 		while _low_priority_queue.size() > 0:
@@ -225,7 +227,7 @@ func _process(_delta: float) -> void:
 ## High-priority messages are dispatched immediately, bypassing the time-budgeted queue.
 func _is_high_priority(text: String) -> bool:
 	var prefix := text.left(40)
-	return '"avatar_' in prefix or '"self_id"' in prefix
+	return '"avatar_' in prefix or '"self_id"' in prefix or '"object_update_p"' in prefix
 
 
 func _handle_message(text: String) -> void:
@@ -243,7 +245,7 @@ func _handle_message(text: String) -> void:
 			scene_manager.set_self_avatar_id(msg.get("id", ""))
 		"object_create":
 			scene_manager.handle_object_create(msg)
-		"object_update_batch":
+		"object_update_batch", "object_update_physics":
 			scene_manager.handle_object_update_batch(msg)
 		"object_kill":
 			scene_manager.handle_object_kill(msg)

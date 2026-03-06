@@ -2260,7 +2260,7 @@ void LLEnvironment::coroUpdateEnvironment(S32 parcel_id, S32 track_no, UpdateInf
     }
 
     body[KEY_ENVIRONMENT][KEY_FLAGS] = LLSD::Integer(updates->mFlags);
-    //_WARNS("ENVIRONMENT") << "Body = " << body << LL_ENDL;
+    LL_WARNS("ENVIRONMENT") << "coroUpdateEnvironment Body = " << body << LL_ENDL;
 
     if ((parcel_id != INVALID_PARCEL_ID) || (track_no != NO_TRACK))
     {

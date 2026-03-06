@@ -11,11 +11,7 @@ const StandardUVAlphaShader = preload("res://src/standard_uv_alpha.gdshader")
 ##   Position: (sl.x, sl.z, -sl.y)
 ##   Quaternion: (sl.x, sl.z, -sl.y, sl.w)
 
-## Desktop visibility range. Objects fade from
-## (VISIBILITY_FAR - VISIBILITY_FADE_MARGIN) to VISIBILITY_FAR, then are culled.
-## VR uses VRFrameBudget.VR_CAMERA_FAR / VR_VISIBILITY_FADE_MARGIN instead.
-const VISIBILITY_FAR: float = 128.0
-const VISIBILITY_FADE_MARGIN: float = 32.0
+const FrameBudget = preload("res://src/frame_budget.gd")
 
 signal self_avatar_moved(pos: Vector3)
 
@@ -31,6 +27,7 @@ class RSInstance extends RefCounted:
 	func _init(scenario: RID, vis_far: float = 128.0, vis_fade: float = 32.0) -> void:
 		rid = RenderingServer.instance_create()
 		RenderingServer.instance_set_scenario(rid, scenario)
+		RenderingServer.instance_geometry_set_cast_shadows_setting(rid, RenderingServer.SHADOW_CASTING_SETTING_ON)
 		RenderingServer.instance_geometry_set_visibility_range(rid, 0.0, vis_far, 0.0, vis_fade, RenderingServer.VISIBILITY_RANGE_FADE_SELF)
 
 	func set_vis_range(vis_far: float, vis_fade: float) -> void:
@@ -65,11 +62,15 @@ var avatars: Dictionary = {}   # avatarId (String) -> RSInstance
 var self_avatar_id: String = ""
 
 # Avatar interpolation state
-var avatar_targets: Dictionary = {}   # avatarId -> { pos: Vector3, rot: Quaternion, vel: Vector3 }
-const AVATAR_LERP_SPEED: float = 15.0       # position lerp rate (per second)
-const AVATAR_SLERP_SPEED: float = 15.0      # rotation slerp rate (per second)
+var avatar_targets: Dictionary = {}   # avatarId -> { pos, rot, vel, age }
 const AVATAR_MAX_INTERP_DIST: float = 10.0  # snap if further than this (meters)
-const AVATAR_MAX_EXTRAP_TIME: float = 0.25  # max seconds to extrapolate with velocity
+const AVATAR_SLERP_SPEED: float = 15.0      # rotation slerp rate (per second)
+
+# Object interpolation state (for physical/moving objects with velocity)
+var object_targets: Dictionary = {}   # localId -> { pos, rot, vel, accel, angVel, age }
+const PHYSICS_TIMESTEP: float = 1.0 / 45.0
+const INTERP_PHASE_OUT_TIME: float = 2.0  # Start fading extrapolation
+const INTERP_MAX_TIME: float = 3.0        # Stop extrapolation entirely
 
 # Linkset tracking (flat hierarchy — no Godot node parenting to avoid scale inheritance)
 var pending_children: Dictionary = {}   # parentLocalId -> Array[childLocalId] (children arrived before parent)
@@ -100,7 +101,7 @@ var pending_textures: Dictionary = {}     # localId (int) -> Array[{ faceIndex, 
 var texture_load_failed: Dictionary = {}  # textureId (String) -> bool
 
 # Async texture loading (own Thread pool — bypasses WorkerThreadPool low-priority cap)
-const TEXTURE_THREAD_COUNT: int = 16          # dedicated OS threads for texture loading
+var TEXTURE_THREAD_COUNT: int = FrameBudget.TEXTURE_THREAD_COUNT
 var _texture_threads: Array[Thread] = []      # running Thread objects
 var _texture_queue: Array = []                # shared queue: { textureId, path } (main thread pushes, workers pop)
 var _texture_queue_lock: Mutex = Mutex.new()
@@ -128,19 +129,16 @@ var _fin_tex_count: int = 0
 var _fin_mesh_extract_ms: float = 0.0  # ImporterMesh.get_mesh
 var _fin_mesh_apply_ms: float = 0.0    # _apply_mesh_to_pending
 var _fin_mesh_count: int = 0
-const VRFrameBudget = preload("res://src/vr_frame_budget.gd")
-var _target_frame_ms: float = VRFrameBudget.DESKTOP_FRAME_MS
+var _target_frame_ms: float = FrameBudget.DESKTOP_FRAME_MS
 var _vr_mode: bool = false
-var _vis_far: float = VISIBILITY_FAR
-var _vis_fade: float = VISIBILITY_FADE_MARGIN
-const MIN_FINALIZE_MS: float = 2.0            # minimum finalize budget when on-target (desktop)
-const OVERBUDGET_FINALIZE_MS: float = 8.0     # more aggressive when already over budget (desktop only)
+var _vis_far: float = FrameBudget.VISIBILITY_FAR
+var _vis_fade: float = FrameBudget.VISIBILITY_FADE_MARGIN
 
 # Async mesh loading (WorkerThreadPool)
 var _mesh_tasks: Dictionary = {}         # task_id (int) -> { meshId: String, result: AsyncResult, path: String }
 var _mesh_in_flight: Dictionary = {}     # meshId (String) -> true (dedup)
 var _mesh_queue: Array = []              # queued { meshId, path } waiting to be submitted
-const MESH_MAX_IN_FLIGHT: int = 16             # max concurrent worker tasks
+var MESH_MAX_IN_FLIGHT: int = FrameBudget.MESH_MAX_IN_FLIGHT
 
 # Periodic stats reporting
 var _stats_timer: float = 0.0
@@ -167,29 +165,39 @@ var _scenario: RID
 
 # ─── Light Management ────────────────────────────────
 
-## Lightweight wrapper around a RenderingServer light + instance pair.
+## Lightweight wrapper around a light.
+## Spot lights use a SpotLight3D node (for shadow_reverse_cull_face access).
+## Omni lights use raw RenderingServer RIDs (no node needed).
 class RSLight extends RefCounted:
-	var light_rid: RID
-	var instance_rid: RID
+	var light_rid: RID       # omni only
+	var instance_rid: RID    # omni only
+	var node: SpotLight3D    # spot only
 	var is_spot: bool
 	var proj_texture_id: String = ""
 
-	func _init(scenario: RID, spot: bool) -> void:
+	func _init(parent: Node3D, scenario: RID, spot: bool) -> void:
 		is_spot = spot
 		if spot:
-			light_rid = RenderingServer.spot_light_create()
+			node = SpotLight3D.new()
+			node.light_cull_mask = 1
+			node.shadow_enabled = false
+			parent.add_child(node)
 		else:
 			light_rid = RenderingServer.omni_light_create()
-		instance_rid = RenderingServer.instance_create()
-		RenderingServer.instance_set_base(instance_rid, light_rid)
-		RenderingServer.instance_set_scenario(instance_rid, scenario)
-		RenderingServer.light_set_shadow(light_rid, false)
-		# Layer 1 only — excludes water (layer 2) to avoid shadow map artifacts
-		RenderingServer.light_set_cull_mask(light_rid, 1)
+			instance_rid = RenderingServer.instance_create()
+			RenderingServer.instance_set_base(instance_rid, light_rid)
+			RenderingServer.instance_set_scenario(instance_rid, scenario)
+			RenderingServer.light_set_shadow(light_rid, false)
+			# Layer 1 only — excludes water (layer 2) to avoid shadow map artifacts
+			RenderingServer.light_set_cull_mask(light_rid, 1)
 
 	func destroy() -> void:
-		RenderingServer.free_rid(instance_rid)
-		RenderingServer.free_rid(light_rid)
+		if node:
+			node.queue_free()
+			node = null
+		else:
+			RenderingServer.free_rid(instance_rid)
+			RenderingServer.free_rid(light_rid)
 
 var object_lights: Dictionary = {}           # localId -> RSLight
 var _object_light_data: Dictionary = {}      # localId -> light dict (for re-creation after cull)
@@ -197,25 +205,25 @@ var _pending_proj_textures: Dictionary = {}  # textureId -> Array[localId]
 var _projector_textures: Dictionary = {}    # textureId -> padded ImageTexture (square inscribed in circle)
 var _light_count: int = 0
 var _light_cull_timer: float = 0.0
-const MAX_ACTIVE_LIGHTS: int = 64
-const LIGHT_CULL_DISTANCE: float = 64.0
-const LIGHT_CULL_INTERVAL: float = 2.0
+var MAX_ACTIVE_LIGHTS: int = FrameBudget.MAX_ACTIVE_LIGHTS
+var LIGHT_CULL_DISTANCE: float = FrameBudget.LIGHT_CULL_DISTANCE
+var LIGHT_CULL_INTERVAL: float = FrameBudget.LIGHT_CULL_INTERVAL
 
 ## Get a padded projector texture RID.  SL projects a rectangular frustum
 ## but Godot's spot-light cone is circular.  Pad the texture so the square
 ## image is inscribed inside the circle (sqrt(2)x larger canvas with black
 ## border).  Cached per texture_id so we only pad once.
-func _get_projector_texture_rid(texture_id: String) -> RID:
+func _get_projector_texture(texture_id: String) -> ImageTexture:
 	if _projector_textures.has(texture_id):
-		return _projector_textures[texture_id].get_rid()
+		return _projector_textures[texture_id]
 
 	var orig_tex: ImageTexture = texture_cache.get(texture_id)
 	if orig_tex == null:
-		return RID()
+		return null
 
 	var img := orig_tex.get_image()
 	if img == null:
-		return orig_tex.get_rid()
+		return orig_tex
 
 	img = img.duplicate()
 	if img.is_compressed():
@@ -239,7 +247,7 @@ func _get_projector_texture_rid(texture_id: String) -> RID:
 	var padded_tex := ImageTexture.create_from_image(padded)
 	_projector_textures[texture_id] = padded_tex
 	print("[Light] Created padded projector texture %s: %dx%d → %dx%d" % [texture_id, ow, oh, nw, nh])
-	return padded_tex.get_rid()
+	return padded_tex
 
 func _exit_tree() -> void:
 	_shutting_down = true
@@ -397,25 +405,63 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 		if rsi == null:
 			continue
 
+		# Parse motion data for interpolation
+		var has_motion := false
+		var vel := Vector3.ZERO
+		var accel := Vector3.ZERO
+		var ang_vel := Vector3.ZERO
+		if obj.has("velocity"):
+			var sv: Array = obj["velocity"]
+			vel = Vector3(sv[0], sv[2], -sv[1])
+			if vel.length_squared() > 0.0001:
+				has_motion = true
+		if obj.has("acceleration"):
+			var sa: Array = obj["acceleration"]
+			accel = Vector3(sa[0], sa[2], -sa[1])
+			if accel.length_squared() > 0.0001:
+				has_motion = true
+		if obj.has("angularVelocity"):
+			var sav: Array = obj["angularVelocity"]
+			ang_vel = Vector3(sav[0], sav[2], -sav[1])
+			if ang_vel.length_squared() > 0.0001:
+				has_motion = true
+
 		if object_parent.has(local_id):
-			# Child prim — positions are relative to parent
+			# Child prim — update offsets, parent interpolation handles world pos
 			if obj.has("position"):
-				var new_offset := sl_to_godot_pos(obj["position"])
-				child_offset_pos[local_id] = new_offset
-				var parent_rsi: RSInstance = objects.get(object_parent[local_id])
-				if parent_rsi:
-					rsi.pos = parent_rsi.pos + parent_rsi.rot * new_offset
+				child_offset_pos[local_id] = sl_to_godot_pos(obj["position"])
 			if obj.has("rotation"):
-				var new_rot := sl_to_godot_quat(obj["rotation"])
-				child_offset_rot[local_id] = new_rot
-				var parent_rsi: RSInstance = objects.get(object_parent[local_id])
-				if parent_rsi:
-					rsi.rot = parent_rsi.rot * new_rot
+				child_offset_rot[local_id] = sl_to_godot_quat(obj["rotation"])
 			if obj.has("scale"):
 				rsi.scl = sl_to_godot_scale(obj["scale"])
+			# Recompute world transform from parent
+			var parent_rsi: RSInstance = objects.get(object_parent[local_id])
+			if parent_rsi and child_offset_pos.has(local_id):
+				rsi.pos = parent_rsi.pos + parent_rsi.rot * child_offset_pos[local_id]
+				rsi.rot = parent_rsi.rot * child_offset_rot.get(local_id, Quaternion.IDENTITY)
 			rsi.push_transform()
+		elif has_motion:
+			# Root prim with motion — Firestorm-style interpolation
+			# Server update resets position/velocity/acceleration; client extrapolates between updates
+			if obj.has("position"):
+				rsi.pos = sl_to_godot_pos(obj["position"])
+			if obj.has("rotation"):
+				rsi.rot = sl_to_godot_quat(obj["rotation"])
+			var target: Dictionary = {}
+			target["pos"] = rsi.pos
+			target["rot"] = rsi.rot
+			target["vel"] = vel
+			target["accel"] = accel
+			target["angVel"] = ang_vel
+			target["age"] = 0.0
+			object_targets[local_id] = target
+			# Scale always snaps
+			if obj.has("scale"):
+				rsi.scl = sl_to_godot_scale(obj["scale"])
+				rsi.push_transform()
 		else:
-			# Root prim — positions are world absolute
+			# Root prim, no motion — snap immediately
+			object_targets.erase(local_id)
 			if obj.has("position"):
 				rsi.pos = sl_to_godot_pos(obj["position"])
 			if obj.has("rotation"):
@@ -465,7 +511,10 @@ func _update_light_transform(local_id: int, rsi: RSInstance) -> void:
 	var basis := Basis(rsi.rot)
 	if rsl.is_spot:
 		basis = basis * Basis(Vector3.RIGHT, -PI / 2.0)
-	RenderingServer.instance_set_transform(rsl.instance_rid, Transform3D(basis, rsi.pos))
+	if rsl.node:
+		rsl.node.global_transform = Transform3D(basis, rsi.pos)
+	else:
+		RenderingServer.instance_set_transform(rsl.instance_rid, Transform3D(basis, rsi.pos))
 
 
 ## Handle face updates from material asset fetch (PBR materials resolved after initial object_create)
@@ -552,6 +601,7 @@ func _cleanup_object(local_id: int) -> void:
 	# Destroy associated light
 	_destroy_light(local_id)
 	_object_light_data.erase(local_id)
+	object_targets.erase(local_id)
 
 	# Clean up all tracking dicts
 	if pending_meshes.has(local_id):
@@ -607,7 +657,7 @@ func _create_or_update_light(local_id: int, light_data: Dictionary, rsi: RSInsta
 		return
 
 	# Create new light
-	var rsl := RSLight.new(_scenario, is_spot)
+	var rsl := RSLight.new(self, _scenario, is_spot)
 	object_lights[local_id] = rsl
 	_light_count += 1
 	_apply_light_params(local_id, rsl, light_data, rsi)
@@ -615,63 +665,66 @@ func _create_or_update_light(local_id: int, light_data: Dictionary, rsi: RSInsta
 
 ## Apply parameters to an existing RSLight from light data dict
 func _apply_light_params(local_id: int, rsl: RSLight, light_data: Dictionary, rsi: RSInstance) -> void:
-	var RS := RenderingServer
 	var color: Array = light_data.get("color", [1.0, 1.0, 1.0])
-	RS.light_set_color(rsl.light_rid, Color(color[0], color[1], color[2]))
-	RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_ENERGY, float(light_data.get("intensity", 1.0)))
-	RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_RANGE, float(light_data.get("radius", 10.0)))
-	# SL falloff 0-2: higher = faster dropoff. Godot attenuation exponent:
-	# <1 = sub-linear (stays bright longer), 1 = linear, >1 = steep.
-	# SL lights appear brighter at distance than linear, so map to sub-linear range.
-	var sl_falloff: float = float(light_data.get("falloff", 0.75))
-	RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_ATTENUATION, clampf(sl_falloff, 0.1, 2.0))
+	var intensity: float = float(light_data.get("intensity", 1.0))
+	var radius: float = float(light_data.get("radius", 10.0))
+	var sl_falloff: float = clampf(float(light_data.get("falloff", 0.75)), 0.1, 2.0)
 
-	if rsl.is_spot:
+	if rsl.node:
+		# ── SpotLight3D node path (projection spots) ──
+		var n := rsl.node
+		n.light_color = Color(color[0], color[1], color[2])
+		n.light_energy = intensity
+		n.spot_range = radius
+		n.light_specular = 0.5
+		# SL falloff → Godot attenuation (sub-linear range)
+		n.spot_attenuation = sl_falloff
+
 		var fov_rad: float = float(light_data.get("spotFov", 1.0))
-		# fov_rad is the full FOV angle from SL. Godot's spot_angle is a half-angle.
-		# Widen cone to the diagonal so full square texture is visible:
 		var half_fov := fov_rad * 0.5
 		var diagonal_half := atan(sqrt(2.0) * tan(half_fov))
-		var spot_angle: float = rad_to_deg(diagonal_half)
-		RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_SPOT_ANGLE, spot_angle)
-		# Godot formula: pow(1.0 - rim, atten). Low atten → uniform brightness.
-		# 0.01 gives ~99% brightness at the cone edge (SL projectors have no angular falloff).
-		RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_SPOT_ATTENUATION, 0.01)
-		#print("[Light] Spot localId=%d fov=%.4frad half=%.4frad diag=%.4frad angle=%.1fdeg" % [local_id, fov_rad, half_fov, diagonal_half, spot_angle])
+		n.spot_angle = rad_to_deg(diagonal_half)
+		# Near-uniform brightness across the cone (SL has no angular falloff)
+		n.spot_angle_attenuation = 0.01
 
-		# Projection texture — requires shadow_enabled to render in Godot 4
 		var proj_tex_id: String = light_data.get("projTexture", "")
 		if not proj_tex_id.is_empty():
 			rsl.proj_texture_id = proj_tex_id
-			RS.light_set_shadow(rsl.light_rid, true)
-			# Shadow must be enabled for projector textures in Godot 4, but we
-			# don't want visible shadow acne.  Near-zero opacity keeps the
-			# projector working while making shadow artifacts invisible.
-			RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_SHADOW_OPACITY, 0.01)
-			RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_SHADOW_BIAS, 0.1)
-			RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_SHADOW_NORMAL_BIAS, 1.0)
-			if texture_cache.has(proj_tex_id):
-				#print("[Light] Proj texture %s already cached, applying" % proj_tex_id)
-				RS.light_set_projector(rsl.light_rid, _get_projector_texture_rid(proj_tex_id))
+			# Shadow required for projector textures in Godot 4.
+			# Reverse cull face renders back faces into shadow map,
+			# preventing surfaces from self-shadowing while walls
+			# still block the projection.
+			n.shadow_enabled = true
+			n.shadow_reverse_cull_face = true
+			n.shadow_opacity = 1.0
+			n.shadow_bias = 0.03
+			n.shadow_normal_bias = 1.0
+			var proj_tex := _get_projector_texture(proj_tex_id)
+			if proj_tex:
+				n.light_projector = proj_tex
 			else:
-				#print("[Light] Proj texture %s NOT cached, deferring" % proj_tex_id)
 				if not _pending_proj_textures.has(proj_tex_id):
 					_pending_proj_textures[proj_tex_id] = []
 				if local_id not in _pending_proj_textures[proj_tex_id]:
 					_pending_proj_textures[proj_tex_id].append(local_id)
 
-	# SL spots project along local -Z → Godot -Y. Godot spot shines along -Z.
-	# Rotate -90° around X to map -Z → -Y (downward).
-	var basis := Basis(rsi.rot)
-	if rsl.is_spot:
-		basis = basis * Basis(Vector3.RIGHT, -PI / 2.0)
-	RS.instance_set_transform(rsl.instance_rid, Transform3D(basis, rsi.pos))
+		# SL spots project along local -Z. Godot spot shines along -Z.
+		# Rotate -90° around X to map SL -Z → Godot -Z via the Y-up transform.
+		var basis := Basis(rsi.rot) * Basis(Vector3.RIGHT, -PI / 2.0)
+		n.global_transform = Transform3D(basis, rsi.pos)
 
-	# Disable shadow casting on the light-emitting prim so it doesn't
-	# cast a shadow into its own projection
-	if rsl.is_spot and not rsl.proj_texture_id.is_empty():
-		RS.instance_geometry_set_cast_shadows_setting(
-			rsi.rid, RS.SHADOW_CASTING_SETTING_OFF)
+		# Disable shadow casting on the emitter prim
+		if not rsl.proj_texture_id.is_empty():
+			RenderingServer.instance_geometry_set_cast_shadows_setting(
+				rsi.rid, RenderingServer.SHADOW_CASTING_SETTING_OFF)
+	else:
+		# ── Raw RenderingServer path (omni lights) ──
+		var RS := RenderingServer
+		RS.light_set_color(rsl.light_rid, Color(color[0], color[1], color[2]))
+		RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_ENERGY, intensity)
+		RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_RANGE, radius)
+		RS.light_set_param(rsl.light_rid, RS.LIGHT_PARAM_ATTENUATION, sl_falloff)
+		RS.instance_set_transform(rsl.instance_rid, Transform3D(Basis(rsi.rot), rsi.pos))
 
 
 ## Destroy a light for a given localId
@@ -738,7 +791,7 @@ func _sweep_light_culling() -> void:
 			continue
 		var light_data: Dictionary = _object_light_data[local_id]
 		var is_spot: bool = light_data.get("isSpot", false)
-		var rsl := RSLight.new(_scenario, is_spot)
+		var rsl := RSLight.new(self, _scenario, is_spot)
 		object_lights[local_id] = rsl
 		_light_count += 1
 		_apply_light_params(local_id, rsl, light_data, rsi)
@@ -962,9 +1015,9 @@ func _apply_texture_to_pending(texture_id: String) -> void:
 		_pending_proj_textures.erase(texture_id)
 		for lid: int in waiting_ids:
 			var rsl: RSLight = object_lights.get(lid)
-			if rsl != null and rsl.is_spot:
+			if rsl != null and rsl.is_spot and rsl.node:
 				print("[Light] Applying proj texture %s to localId=%d" % [texture_id, lid])
-				RenderingServer.light_set_projector(rsl.light_rid, _get_projector_texture_rid(texture_id))
+				rsl.node.light_projector = _get_projector_texture(texture_id)
 
 	if not _pending_by_texture.has(texture_id):
 		return
@@ -1065,6 +1118,9 @@ func _process(_delta: float) -> void:
 	# Interpolate avatar positions/rotations toward their targets
 	_interpolate_avatars(_delta)
 
+	# Interpolate moving objects (physical objects with velocity)
+	_interpolate_objects(_delta)
+
 	# Periodic light distance culling sweep
 	_light_cull_timer += _delta
 	if _light_cull_timer >= LIGHT_CULL_INTERVAL:
@@ -1097,10 +1153,10 @@ func _process(_delta: float) -> void:
 	if _vr_mode:
 		# In VR, never do finalization on an already-late frame — the deadline
 		# is missed, adding more CPU work only makes the next frame late too.
-		budget_ms = clampf(remaining_ms, 0.0, MIN_FINALIZE_MS)
+		budget_ms = clampf(remaining_ms, 0.0, FrameBudget.MIN_FINALIZE_MS)
 	else:
 		# Desktop: when over budget be aggressive — frame is slow anyway.
-		budget_ms = maxf(remaining_ms, OVERBUDGET_FINALIZE_MS if remaining_ms < MIN_FINALIZE_MS else MIN_FINALIZE_MS)
+		budget_ms = maxf(remaining_ms, FrameBudget.OVERBUDGET_FINALIZE_MS if remaining_ms < FrameBudget.MIN_FINALIZE_MS else FrameBudget.MIN_FINALIZE_MS)
 	# Split: 60% textures, 40% meshes (textures are cheaper per-item)
 	var tex_budget_ms := budget_ms * 0.6 if has_meshes else budget_ms
 	var mesh_budget_ms := budget_ms * 0.4 if has_textures else budget_ms
@@ -1516,9 +1572,9 @@ var _first_person_mode: bool = false
 
 func set_vr_mode(enabled: bool) -> void:
 	_vr_mode = enabled
-	_target_frame_ms = VRFrameBudget.VR_FINALIZE_STOP_MS if enabled else VRFrameBudget.DESKTOP_FRAME_MS
-	_vis_far = VRFrameBudget.VR_CAMERA_FAR if enabled else VISIBILITY_FAR
-	_vis_fade = VRFrameBudget.VR_VISIBILITY_FADE_MARGIN if enabled else VISIBILITY_FADE_MARGIN
+	_target_frame_ms = FrameBudget.VR_FINALIZE_STOP_MS if enabled else FrameBudget.DESKTOP_FRAME_MS
+	_vis_far = FrameBudget.VR_CAMERA_FAR if enabled else FrameBudget.VISIBILITY_FAR
+	_vis_fade = FrameBudget.VR_VISIBILITY_FADE_MARGIN if enabled else FrameBudget.VISIBILITY_FADE_MARGIN
 	for rsi in objects.values():
 		rsi.set_vis_range(_vis_far, _vis_fade)
 	for rsi in avatars.values():
@@ -1624,24 +1680,37 @@ func handle_avatar_update_batch(msg: Dictionary) -> void:
 
 ## Set interpolation target for an avatar from an update message
 func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
-	var target: Dictionary = avatar_targets.get(avatar_id, {})
+	var rsi: RSInstance = avatars.get(avatar_id)
 
 	if data.has("position"):
 		var godot_pos := sl_to_godot_pos(data["position"])
 		godot_pos.y += 0.9
+		if rsi:
+			rsi.pos = godot_pos
+		var target: Dictionary = {}
 		target["pos"] = godot_pos
-
-	if data.has("rotation"):
-		target["rot"] = sl_to_godot_quat(data["rotation"])
-
-	if data.has("velocity"):
-		# Convert SL velocity to Godot coords (same transform as position axes)
-		var sl_vel: Array = data["velocity"]
-		target["vel"] = Vector3(sl_vel[0], sl_vel[2], -sl_vel[1])
+		if data.has("rotation"):
+			var r := sl_to_godot_quat(data["rotation"])
+			target["rot"] = r
+			if rsi:
+				rsi.rot = r
+		elif rsi:
+			target["rot"] = rsi.rot
+		else:
+			target["rot"] = Quaternion.IDENTITY
+		if data.has("velocity"):
+			var sl_vel: Array = data["velocity"]
+			target["vel"] = Vector3(sl_vel[0], sl_vel[2], -sl_vel[1])
+		else:
+			target["vel"] = Vector3.ZERO
+		target["age"] = 0.0
+		avatar_targets[avatar_id] = target
 	else:
-		target["vel"] = Vector3.ZERO
-
-	avatar_targets[avatar_id] = target
+		# Rotation-only update
+		if data.has("rotation"):
+			var target: Dictionary = avatar_targets.get(avatar_id, {})
+			target["rot"] = sl_to_godot_quat(data["rotation"])
+			avatar_targets[avatar_id] = target
 
 
 func handle_avatar_kill(msg: Dictionary) -> void:
@@ -1655,6 +1724,7 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 # ─── Avatar Interpolation ────────────────────────────
 
 ## Smoothly move all avatars toward their targets each frame
+## Firestorm-style: velocity extrapolation with phase-out, no angular velocity for avatars
 func _interpolate_avatars(delta: float) -> void:
 	for avatar_id: String in avatar_targets:
 		var rsi: RSInstance = avatars.get(avatar_id)
@@ -1662,37 +1732,96 @@ func _interpolate_avatars(delta: float) -> void:
 			continue
 
 		var target: Dictionary = avatar_targets[avatar_id]
-		var target_pos: Vector3 = target.get("pos", rsi.pos)
-		var target_rot: Quaternion = target.get("rot", rsi.rot)
 		var vel: Vector3 = target.get("vel", Vector3.ZERO)
+		var target_rot: Quaternion = target.get("rot", rsi.rot)
 
-		# Predict slightly ahead using velocity (clamped to avoid runaway)
-		var predicted_pos := target_pos
-		if vel.length_squared() > 0.001:
-			# Extrapolate up to AVATAR_MAX_EXTRAP_TIME seconds ahead
-			var extrap := vel * minf(delta, AVATAR_MAX_EXTRAP_TIME)
-			predicted_pos = target_pos + extrap
+		var age: float = target.get("age", 0.0) + delta
+		target["age"] = age
 
-		var dist := rsi.pos.distance_to(predicted_pos)
+		# Velocity extrapolation (same as objects but no angular velocity for avatars)
+		if not vel.is_zero_approx() and age < INTERP_MAX_TIME:
+			var phase_out := 1.0
+			if age > INTERP_PHASE_OUT_TIME:
+				phase_out = clampf((INTERP_MAX_TIME - age) / (INTERP_MAX_TIME - INTERP_PHASE_OUT_TIME), 0.0, 1.0)
+			var pos_delta: Vector3 = (vel + 0.5 * (delta - PHYSICS_TIMESTEP) * Vector3.ZERO) * delta * phase_out
+			target["pos"] = target.get("pos", rsi.pos) + pos_delta
+			rsi.pos = target["pos"]
+		# else: already snapped to server pos in _apply_avatar_target
 
-		if dist > AVATAR_MAX_INTERP_DIST:
-			# Too far — snap immediately (don't lag off into the sunset)
-			rsi.pos = target_pos
-			rsi.rot = target_rot
-		elif dist > 0.001:
-			# Smooth lerp toward predicted position
-			var t := clampf(AVATAR_LERP_SPEED * delta, 0.0, 1.0)
-			rsi.pos = rsi.pos.lerp(predicted_pos, t)
-			rsi.rot = rsi.rot.slerp(target_rot, clampf(AVATAR_SLERP_SPEED * delta, 0.0, 1.0))
-		else:
-			# Close enough — just slerp rotation
-			rsi.rot = rsi.rot.slerp(target_rot, clampf(AVATAR_SLERP_SPEED * delta, 0.0, 1.0))
+		# Slerp rotation (Firestorm restores rotation for non-self avatars, no angular vel)
+		rsi.rot = rsi.rot.slerp(target_rot, clampf(AVATAR_SLERP_SPEED * delta, 0.0, 1.0))
 
 		rsi.push_transform()
 
 		# Emit camera follow signal for self avatar
 		if avatar_id == self_avatar_id:
 			self_avatar_moved.emit(rsi.pos)
+
+
+# ─── Object Interpolation ────────────────────────────
+
+## Smoothly move objects with velocity toward their targets each frame.
+## Dead reckoning: advance the target by velocity each frame.
+## Server updates correct the target position when they arrive.
+func _interpolate_objects(delta: float) -> void:
+	# Firestorm-style: each frame, advance position by vel*dt + 0.5*accel*dt^2
+	# Server updates reset pos/vel/accel. Server omits updates when object follows predicted path.
+	var to_remove: Array[int] = []
+	for local_id: int in object_targets:
+		var rsi: RSInstance = objects.get(local_id)
+		if rsi == null:
+			to_remove.append(local_id)
+			continue
+
+		var target: Dictionary = object_targets[local_id]
+		var vel: Vector3 = target.get("vel", Vector3.ZERO)
+		var accel: Vector3 = target.get("accel", Vector3.ZERO)
+		var ang_vel: Vector3 = target.get("angVel", Vector3.ZERO)
+
+		var age: float = target.get("age", 0.0) + delta
+		target["age"] = age
+
+		# Stop entirely after max time
+		if age > INTERP_MAX_TIME:
+			to_remove.append(local_id)
+			continue
+
+		# Nothing to do if stationary
+		if vel.is_zero_approx() and accel.is_zero_approx() and ang_vel.is_zero_approx():
+			continue
+
+		# Phase out motion if no server update for a while
+		var phase_out := 1.0
+		if age > INTERP_PHASE_OUT_TIME:
+			phase_out = clampf((INTERP_MAX_TIME - age) / (INTERP_MAX_TIME - INTERP_PHASE_OUT_TIME), 0.0, 1.0)
+
+		# Linear motion: pos += (vel + 0.5 * (dt - PHYSICS_TIMESTEP) * accel) * dt
+		# The PHYSICS_TIMESTEP correction accounts for velocity being the average of the last sim step
+		var dt := delta
+		var pos_delta: Vector3 = (vel + 0.5 * (dt - PHYSICS_TIMESTEP) * accel) * dt * phase_out
+		target["pos"] = target.get("pos", rsi.pos) + pos_delta
+		rsi.pos = target["pos"]
+
+		# Update velocity for next frame
+		target["vel"] = vel + accel * dt * phase_out
+
+		# Angular velocity: apply rotation delta
+		var ang_speed := ang_vel.length()
+		if ang_speed > 0.0001:
+			var ang_axis := ang_vel / ang_speed
+			var dq := Quaternion(ang_axis, ang_speed * dt * phase_out)
+			rsi.rot = rsi.rot * dq
+
+		rsi.push_transform()
+
+		# Propagate to linkset children + lights
+		if object_children.has(local_id):
+			_update_children_transforms(local_id)
+		if object_lights.has(local_id):
+			_update_light_transform(local_id, rsi)
+
+	for local_id: int in to_remove:
+		object_targets.erase(local_id)
 
 
 # ─── Terrain + Water + Sky ───────────────────────────
@@ -1930,14 +2059,12 @@ func handle_environment_data(msg: Dictionary) -> void:
 	var sl_dir := Vector3(float(sun_dir_arr[0]), float(sun_dir_arr[1]), float(sun_dir_arr[2]))
 	var godot_sun_dir := Vector3(sl_dir.x, sl_dir.z, -sl_dir.y).normalized()
 
-	# Update DirectionalLight3D — light shines along -Z of its local space
 	var light: DirectionalLight3D = get_node_or_null("../DirectionalLight3D")
 	if light:
 		if godot_sun_dir.length() > 0.001:
-			# DirectionalLight3D shines along its -Z axis, so orient it to face -sun_dir
-			var target := -godot_sun_dir
-			light.global_position = Vector3.ZERO
-			light.look_at(target, Vector3.UP)
+			# Basis.looking_at(-dir) makes -Z point away from sun, +Z toward sun.
+			# ProceduralSkyMaterial renders the sun disc at the light's +Z direction.
+			light.basis = Basis.looking_at(-godot_sun_dir, Vector3.UP)
 		var sun_color := Color(float(sun_color_arr[0]), float(sun_color_arr[1]), float(sun_color_arr[2]))
 		light.light_color = sun_color
 		light.light_energy = 1.0

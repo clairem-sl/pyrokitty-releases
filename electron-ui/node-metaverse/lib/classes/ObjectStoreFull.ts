@@ -476,7 +476,7 @@ export class ObjectStoreFull extends ObjectStoreLite implements IObjectStore
         }
     }
 
-    protected objectUpdateTerse(objectUpdateTerse: ImprovedTerseObjectUpdateMessage): void
+    protected objectUpdateTerse(objectUpdateTerse: ImprovedTerseObjectUpdateMessage, sequenceNumber: number = 0): void
     {
         const dilation = objectUpdateTerse.RegionData.TimeDilation / 65535.0;
         this.clientEvents.onRegionTimeDilation.next(dilation);
@@ -543,7 +543,7 @@ export class ObjectStoreFull extends ObjectStoreLite implements IObjectStore
                         o.onTextureUpdate.next();
                     }
                     this.insertIntoRtree(o);
-                    this.notifyTerseUpdate(o);
+                    this.notifyTerseUpdate(o, sequenceNumber);
 
                 }
                 else

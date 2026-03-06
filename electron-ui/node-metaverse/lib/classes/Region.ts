@@ -164,6 +164,9 @@ export class Region {
 
     private uploadCost: number;
 
+    /** Cache: overlay index → real server LocalID */
+    private overlayToLocalId: Record<number, number> = {};
+
     private parcelOverlayReceived: Record<number, Buffer> = {};
 
     public constructor(agent: Agent, clientEvents: ClientEvents, options: BotOptionFlags) {
@@ -436,6 +439,7 @@ export class Region {
                         }
 
                         this.parcelOverlay = [];
+                        this.overlayToLocalId = {};
                         for (let seq = 0; seq <= highestSeq; seq++) {
                             const data = this.parcelOverlayReceived[seq];
                             for (let x = 0; x < data.length; x++) {
@@ -443,7 +447,7 @@ export class Region {
                                 this.parcelOverlay.push({
                                     landType: block & 0xF,
                                     landFlags: block & ~0xF,
-                                    parcelID: -1
+                                    overlayIndex: -1
                                 });
                             }
                         }
@@ -452,7 +456,7 @@ export class Region {
                         let currentParcelID = 0;
                         for (let y = 63; y > -1; y--) {
                             for (let x = 63; x > -1; x--) {
-                                if (this.parcelOverlay[(y * 64) + x].parcelID === -1) {
+                                if (this.parcelOverlay[(y * 64) + x].overlayIndex === -1) {
                                     this.parcelCoordinates.push({ x, y });
                                     currentParcelID++;
                                     this.fillParcel(currentParcelID, x, y);
@@ -787,6 +791,25 @@ export class Region {
                 reject(new Error('Timed out'));
             }, 10000) as unknown as number;
         });
+    }
+
+    /** Get the real server parcel LocalID at the given position.
+     *  Caches the overlay-index-to-LocalID mapping so repeated calls in the
+     *  same overlay zone don't cause additional round-trips. */
+    public async getParcelLocalId(x: number, y: number): Promise<number> {
+        const gx = Math.floor(x / 4);
+        const gy = Math.floor(y / 4);
+        if (gx < 0 || gx >= 64 || gy < 0 || gy >= 64) return -1;
+        const block = this.parcelOverlay[(gy * 64) + gx];
+        if (!block || block.overlayIndex === -1) return -1;
+        const cached = this.overlayToLocalId[block.overlayIndex];
+        if (cached !== undefined) return cached;
+        const parcel = await this.getParcelProperties(x, y);
+        const localId = parcel?.LocalID ?? -1;
+        if (localId !== -1) {
+            this.overlayToLocalId[block.overlayIndex] = localId;
+        }
+        return localId;
     }
 
     public async getParcels(): Promise<Parcel[]> {
@@ -1192,7 +1215,7 @@ export class Region {
             let row = '';
             for (let x2 = 0; x2 < 64; x2++)
             {
-                const parcelID = this.parcelOverlay[(y2 * 64) + x2].parcelID;
+                const parcelID = this.parcelOverlay[(y2 * 64) + x2].overlayIndex;
                 if (parcelID === -1)
                 {
                     row += 'X';
@@ -1215,10 +1238,10 @@ export class Region {
         if (x < 0 || y < 0 || x > 63 || y > 63) {
             return;
         }
-        if (this.parcelOverlay[(y * 64) + x].parcelID !== -1) {
+        if (this.parcelOverlay[(y * 64) + x].overlayIndex !== -1) {
             return;
         }
-        this.parcelOverlay[(y * 64) + x].parcelID = parcelID;
+        this.parcelOverlay[(y * 64) + x].overlayIndex = parcelID;
         const flags = this.parcelOverlay[(y * 64) + x].landFlags;
         if (!(flags & LandFlags.BorderSouth)) {
             this.fillParcel(parcelID, x, y - 1);

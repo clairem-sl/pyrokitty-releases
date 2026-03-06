@@ -56,17 +56,17 @@ func _hi(node: Node3D, text: String) -> bool:
 
 # ─── Tests ────────────────────────────────────────────────────────────────────
 
-const VRFrameBudget = preload("res://src/vr_frame_budget.gd")
+const FrameBudget = preload("res://src/frame_budget.gd")
 
 
-# ─── VR frame budget tests ────────────────────────────────────────────────────
-# These verify the relationships between VRFrameBudget constants so that
+# ─── Frame budget tests ───────────────────────────────────────────────────────
+# These verify the relationships between FrameBudget constants so that
 # main.gd and scene_manager.gd can't silently diverge.  If any of these
 # fail, the combined CPU budgets may be starving the GPU.
 
 func _test_vr_budget_derivation() -> void:
-	var expected := 1000.0 / VRFrameBudget.VR_REFRESH_HZ
-	_assert(is_equal_approx(VRFrameBudget.VR_FRAME_MS, expected),
+	var expected := 1000.0 / FrameBudget.VR_REFRESH_HZ
+	_assert(is_equal_approx(FrameBudget.VR_FRAME_MS, expected),
 		"[GREEN] VR_FRAME_MS == 1000 / VR_REFRESH_HZ (%.2f ms)" % expected)
 
 
@@ -74,26 +74,26 @@ func _test_vr_budget_leaves_gpu_headroom() -> void:
 	# VR uses desktop-equivalent budgets so VR_FINALIZE_STOP_MS intentionally
 	# exceeds VR_FRAME_MS — the deadline spans multiple frames during loading.
 	# Just verify the constant is positive and sensible (> 0, < 1 second).
-	_assert(VRFrameBudget.VR_FINALIZE_STOP_MS > 0.0 and VRFrameBudget.VR_FINALIZE_STOP_MS < 1000.0,
-		"[GREEN] VR_FINALIZE_STOP_MS %.1f ms is a sane value" % VRFrameBudget.VR_FINALIZE_STOP_MS)
+	_assert(FrameBudget.VR_FINALIZE_STOP_MS > 0.0 and FrameBudget.VR_FINALIZE_STOP_MS < 1000.0,
+		"[GREEN] VR_FINALIZE_STOP_MS %.1f ms is a sane value" % FrameBudget.VR_FINALIZE_STOP_MS)
 
 
 func _test_vr_budget_msg_fits_before_finalize_stop() -> void:
 	# Message processing must complete well before the finalization deadline
 	# so scene_manager always has some time to work with.
-	_assert(VRFrameBudget.VR_MSG_BUDGET_MS < VRFrameBudget.VR_FINALIZE_STOP_MS,
+	_assert(FrameBudget.VR_MSG_BUDGET_MS < FrameBudget.VR_FINALIZE_STOP_MS,
 		"[GREEN] VR_MSG_BUDGET_MS (%.1f) < VR_FINALIZE_STOP_MS (%.1f)" % [
-			VRFrameBudget.VR_MSG_BUDGET_MS, VRFrameBudget.VR_FINALIZE_STOP_MS])
+			FrameBudget.VR_MSG_BUDGET_MS, FrameBudget.VR_FINALIZE_STOP_MS])
 
 
 func _test_vr_budget_total_under_frame_ms() -> void:
 	# VR now uses desktop-equivalent budgets so VR_FINALIZE_STOP_MS intentionally
 	# exceeds VR_FRAME_MS — finalization spans frames during loading just like desktop.
 	# Verify it matches desktop within 10% (guards against accidental divergence).
-	var ratio := VRFrameBudget.VR_FINALIZE_STOP_MS / VRFrameBudget.DESKTOP_FRAME_MS
+	var ratio := FrameBudget.VR_FINALIZE_STOP_MS / FrameBudget.DESKTOP_FRAME_MS
 	_assert(ratio >= 0.9 and ratio <= 1.1,
 		"[GREEN] VR_FINALIZE_STOP_MS (%.1f) within 10%% of DESKTOP_FRAME_MS (%.1f)" % [
-			VRFrameBudget.VR_FINALIZE_STOP_MS, VRFrameBudget.DESKTOP_FRAME_MS])
+			FrameBudget.VR_FINALIZE_STOP_MS, FrameBudget.DESKTOP_FRAME_MS])
 
 
 func _test_script_compiles() -> void:

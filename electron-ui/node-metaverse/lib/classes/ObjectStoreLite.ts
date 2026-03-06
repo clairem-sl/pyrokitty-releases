@@ -280,7 +280,7 @@ export class ObjectStoreLite implements IObjectStore
                 case Message.ObjectUpdate:
                 {
                     const objectUpdate = packet.message as ObjectUpdateMessage;
-                    this.objectUpdate(objectUpdate);
+                    this.objectUpdate(objectUpdate, packet.sequenceNumber);
                     break;
                 }
                 case Message.ObjectUpdateCached:
@@ -292,13 +292,13 @@ export class ObjectStoreLite implements IObjectStore
                 case Message.ObjectUpdateCompressed:
                 {
                     const objectUpdateCompressed = packet.message as ObjectUpdateCompressedMessage;
-                    this.objectUpdateCompressed(objectUpdateCompressed);
+                    this.objectUpdateCompressed(objectUpdateCompressed, packet.sequenceNumber);
                     break;
                 }
                 case Message.ImprovedTerseObjectUpdate:
                 {
                     const objectUpdateTerse = packet.message as ImprovedTerseObjectUpdateMessage;
-                    this.objectUpdateTerse(objectUpdateTerse);
+                    this.objectUpdateTerse(objectUpdateTerse, packet.sequenceNumber);
                     break;
                 }
                 case Message.KillObject:
@@ -702,7 +702,7 @@ export class ObjectStoreLite implements IObjectStore
         const go = this.objects.get(localID);
         if (!go)
         {
-            throw new Error('No object found with that UUID');
+            throw new Error(`No object found with localID ${localID}`);
         }
         return go;
     }
@@ -892,7 +892,7 @@ export class ObjectStoreLite implements IObjectStore
         }
     }
 
-    protected objectUpdate(objectUpdate: ObjectUpdateMessage): void
+    protected objectUpdate(objectUpdate: ObjectUpdateMessage, sequenceNumber: number = 0): void
     {
         for (const objData of objectUpdate.ObjectData)
         {
@@ -1010,7 +1010,7 @@ export class ObjectStoreLite implements IObjectStore
                     }
                 }
 
-                this.notifyObjectUpdate(newObject, obj);
+                this.notifyObjectUpdate(newObject, obj, sequenceNumber);
 
                 if (objData.ParentID !== undefined && objData.ParentID !== 0 && !this.objects.get(objData.ParentID) && !obj?.IsAttachment)
                 {
@@ -1023,7 +1023,7 @@ export class ObjectStoreLite implements IObjectStore
         }
     }
 
-    protected notifyTerseUpdate(obj: GameObject): void
+    protected notifyTerseUpdate(obj: GameObject, sequenceNumber: number = 0): void
     {
         if (this.objects.get(obj.ID))
         {
@@ -1043,11 +1043,12 @@ export class ObjectStoreLite implements IObjectStore
             updObj.localID = obj.ID;
             updObj.objectID = obj.FullID;
             updObj.object = obj;
+            updObj.sequenceNumber = sequenceNumber;
             this.clientEvents.onObjectUpdatedTerseEvent.next(updObj);
         }
     }
 
-    protected notifyObjectUpdate(newObject: boolean, obj: GameObject): void
+    protected notifyObjectUpdate(newObject: boolean, obj: GameObject, sequenceNumber: number = 0): void
     {
         if (obj.PCode === PCode.Avatar)
         {
@@ -1143,6 +1144,7 @@ export class ObjectStoreLite implements IObjectStore
                 updObj.localID = obj.ID;
                 updObj.objectID = obj.FullID;
                 updObj.object = obj;
+                updObj.sequenceNumber = sequenceNumber;
                 this.clientEvents.onObjectUpdatedEvent.next(updObj);
             }
             const pendingProp = this.pendingObjectProperties.get(obj.FullID.toString());
@@ -1176,7 +1178,7 @@ export class ObjectStoreLite implements IObjectStore
         this.circuit.sendMessage(rmo, 0 as PacketFlags);
     }
 
-    protected objectUpdateCompressed(objectUpdateCompressed: ObjectUpdateCompressedMessage): void
+    protected objectUpdateCompressed(objectUpdateCompressed: ObjectUpdateCompressedMessage, sequenceNumber: number = 0): void
     {
         for (const obj of objectUpdateCompressed.ObjectData)
         {
@@ -1329,7 +1331,7 @@ export class ObjectStoreLite implements IObjectStore
                 o.attachmentPoint = this.decodeAttachPoint(o.State);
             }
 
-            this.notifyObjectUpdate(newObj, o);
+            this.notifyObjectUpdate(newObj, o, sequenceNumber);
         }
     }
 
@@ -1339,7 +1341,7 @@ export class ObjectStoreLite implements IObjectStore
         return (((state & mask) >>> 4) | ((state & ~mask) << 4)) >>> 0;
     }
 
-    protected objectUpdateTerse(_objectUpdateTerse: ImprovedTerseObjectUpdateMessage): void
+    protected objectUpdateTerse(_objectUpdateTerse: ImprovedTerseObjectUpdateMessage, _sequenceNumber: number = 0): void
     {
         // Not implemented
     }

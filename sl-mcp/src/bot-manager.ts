@@ -760,7 +760,7 @@ export class BotManager {
     position: { x: number; y: number; z: number };
   }>> {
     await this.ensureConnected();
-    const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true);
+    const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true, 5000);
     if (!obj.children || obj.children.length === 0) {
       return [];
     }
