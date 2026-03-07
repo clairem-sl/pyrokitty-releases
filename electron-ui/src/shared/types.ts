@@ -230,6 +230,10 @@ export const IPC_CHANNELS = {
   // Voice state (main -> renderer)
   VOICE_STATE_UPDATE: 'voice:state-update',
 
+  // World sounds
+  SOUND_SET_VOLUME: 'sound:set-master-volume',
+  SOUND_GET_VOLUME: 'sound:get-master-volume',
+
   // World map
   MAP_OPEN: 'map:open',
   MAP_POSITION_UPDATE: 'map:position-update',

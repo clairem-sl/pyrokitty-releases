@@ -5,7 +5,7 @@
 
 import { AssetType, LLMesh } from '../../node-metaverse/dist/lib';
 import type { Bot } from '../../node-metaverse/dist/lib';
-import { isMeshCached, meshCachePath, ensureMeshCached } from './mesh-converter';
+import { isMeshCached, meshCachePath, readMeshMeta, ensureMeshCached } from './mesh-converter';
 import type { MeshConvertResult } from './mesh-converter';
 
 const MAX_CONCURRENT = 4;
@@ -38,10 +38,11 @@ export class MeshFetchQueue {
     // Already cached and Godot notified — nothing to do
     if (this.notified.has(meshUuid)) return;
 
-    // On disk but Godot doesn't know yet — notify once
+    // On disk but Godot doesn't know yet — notify once (with rigged info from meta)
     if (isMeshCached(meshUuid)) {
       this.notified.add(meshUuid);
-      this.onReady(meshUuid, meshCachePath(meshUuid));
+      const meta = readMeshMeta(meshUuid);
+      this.onReady(meshUuid, meshCachePath(meshUuid), meta?.isRigged, meta?.jointNames);
       return;
     }
 

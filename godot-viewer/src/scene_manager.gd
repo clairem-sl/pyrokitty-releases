@@ -95,6 +95,17 @@ var texture_load_failed: Dictionary = {}  # textureId (String) -> bool
 var _pending_by_texture: Dictionary = {}  # textureId -> Array[{ localId, faceInfo }]
 var _pending_by_mesh: Dictionary = {}     # meshId -> Array[localId]
 
+# Animesh (rigged mesh with skeleton animation)
+var animesh_roots: Dictionary = {}         # root localId (int) -> Node3D (scene tree parent)
+var animesh_skeletons: Dictionary = {}     # localId (int) -> Skeleton3D
+var animesh_players: Dictionary = {}       # localId (int) -> AnimationPlayer
+var animesh_root_for: Dictionary = {}      # localId (int) -> root localId (maps object to its animesh root)
+var rigged_mesh_paths: Dictionary = {}     # meshId (String) -> GLB path (for generate_scene)
+var animesh_anim_cache: Dictionary = {}    # animId (String) -> Animation resource
+var animesh_pending_anims: Dictionary = {} # root localId (int) -> Array[animId String] (pending animation IDs)
+var animesh_mesh_instances: Dictionary = {} # localId (int) -> MeshInstance3D (for texture application)
+var object_mesh_id: Dictionary = {}        # localId (int) -> meshId (String) — persists after mesh loads
+
 # Prim geometry generator
 var prim_generator: RefCounted
 
@@ -247,6 +258,13 @@ func set_vr_mode(enabled: bool) -> void:
 
 func set_first_person_mode(enabled: bool) -> void:
 	object_mgr.set_first_person_mode(enabled)
+
+# Animesh
+func handle_object_animation(msg: Dictionary) -> void:
+	object_mgr.handle_object_animation(msg)
+
+func handle_animation_ready(msg: Dictionary) -> void:
+	object_mgr.handle_animation_ready(msg)
 
 # Assets
 func handle_mesh_ready(msg: Dictionary) -> void:

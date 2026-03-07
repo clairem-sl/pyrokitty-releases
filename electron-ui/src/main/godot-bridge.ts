@@ -15,14 +15,19 @@ import { ControlFlags, SculptType, PacketFlags } from '../../node-metaverse/dist
 import { ObjectSelectMessage } from '../../node-metaverse/lib/classes/messages/ObjectSelect';
 import { ObjectDeselectMessage } from '../../node-metaverse/lib/classes/messages/ObjectDeselect';
 import { SetAlwaysRunMessage } from '../../node-metaverse/lib/classes/messages/SetAlwaysRun';
+import { Message } from '../../node-metaverse/lib/enums/Message';
+import type { ObjectAnimationMessage } from '../../node-metaverse/lib/classes/messages/ObjectAnimation';
 import type { Subscription } from 'rxjs';
 import { MeshFetchQueue } from './mesh-fetch-queue';
 import { TextureFetchQueue } from './texture-fetch-queue';
 import { SculptFetchQueue } from './sculpt-fetch-queue';
 import { sculptMeshId } from './sculpt-converter';
 import { MaterialFetchQueue, MaterialOverrideData, TextureTransform } from './material-fetch-queue';
+import { AnimationFetchQueue } from './animation-fetch-queue';
+import type { AnimationData } from './animation-fetch-queue';
 import { RegionEnvironment } from '../../node-metaverse/dist/lib/classes/public/RegionEnvironment';
 import { LLSD } from '../../node-metaverse/dist/lib/classes/llsd/LLSD';
+import { getSavedBounds, saveExternalBounds } from './window-state-manager';
 
 const GODOT_WS_PORT_BASE = 9200;
 let nextPort = GODOT_WS_PORT_BASE;
@@ -102,6 +107,7 @@ export class GodotBridge extends EventEmitter {
   private textureFetchQueue: TextureFetchQueue | null = null;
   private sculptFetchQueue: SculptFetchQueue | null = null;
   private materialFetchQueue: MaterialFetchQueue | null = null;
+  private animationFetchQueue: AnimationFetchQueue | null = null;
   private materialToFaces = new Map<string, { localId: number; faceIndex: number; face: any; inlineOverride: any }[]>();
   private textureUpdateSubs = new Map<number, Subscription>(); // per-object onTextureUpdate subscriptions
   private connected = false;
@@ -113,6 +119,8 @@ export class GodotBridge extends EventEmitter {
   private lastGodotStats: any = null;
   private pbrFaceCount = 0; // count of faces with PBR overrides
   private deferredTextures = new Map<number, any>(); // localId → obj reference (for re-fetching textures later)
+  private animeshObjects = new Map<string, number>(); // UUID → localId for animesh objects
+  private animeshAnimState = new Map<string, { animId: string; sequenceId: number }[]>(); // UUID → latest animation list (buffered from ObjectAnimation before Godot connects)
   private readonly TEXTURE_FETCH_RANGE = 160; // meters — 128m cull + 32m buffer for large prims
   private envTimer: ReturnType<typeof setInterval> | null = null;
   private _parcelEnvCache: { parcelId: number; env: RegionEnvironment | null; fetchedAt: number } | null = null;
@@ -343,10 +351,22 @@ export class GodotBridge extends EventEmitter {
       try { fs.unlinkSync(overridePath); } catch { /* not present, fine */ }
     }
 
+    // Subscribe to ObjectAnimation EARLY — SL sends animation state once when objects
+    // enter the interest list. If we wait until after Godot connects, those initial
+    // messages are lost and animesh objects never start their animations.
+    this.subscribeToObjectAnimation();
+
     console.log(`[GodotBridge] Spawning Godot on port ${this.port} — ${godotPath}`);
 
     const userArgs = [`--ws-port=${this.port}`];
     if (this.vrMode) userArgs.push('--vr');
+
+    // Restore saved window position/size
+    const savedBounds = getSavedBounds('godot');
+    if (savedBounds) {
+      userArgs.push(`--window-position=${savedBounds.x},${savedBounds.y}`);
+      userArgs.push(`--window-size=${savedBounds.width},${savedBounds.height}`);
+    }
 
     this.process = spawn(godotPath, [
       '--path', projectPath,
@@ -428,6 +448,12 @@ export class GodotBridge extends EventEmitter {
                   case 'set_object_description':
                     this.handleSetObjectDescription(msg.localId, msg.description);
                     break;
+                  case 'window_bounds':
+                    saveExternalBounds('godot', {
+                      x: msg.x, y: msg.y,
+                      width: msg.width, height: msg.height,
+                    });
+                    break;
                   case 'quit':
                     console.log('[GodotBridge] Godot requested immediate quit');
                     this.stop();
@@ -495,6 +521,11 @@ export class GodotBridge extends EventEmitter {
     // Init material fetch queue (PBR material assets → texture UUIDs + factors)
     this.materialFetchQueue = new MaterialFetchQueue(this.bot, (materialUuid, data) => {
       this.handleMaterialReady(materialUuid, data);
+    });
+
+    // Init animation fetch queue (animesh animation assets → parsed keyframe data)
+    this.animationFetchQueue = new AnimationFetchQueue(this.bot, (animUuid, data) => {
+      this.send({ type: 'animation_ready', animId: animUuid, data });
     });
 
     // Send initial snapshot and subscribe to events
@@ -613,6 +644,9 @@ export class GodotBridge extends EventEmitter {
     } : undefined;
 
 
+    // Detect animesh: ExtendedMesh with ANIMATED_MESH_ENABLED_FLAG (0x1)
+    const isAnimesh = !!(obj.extraParams?.extendedMeshData?.flags & 0x1);
+
     this.send({
       type: 'object_create',
       localId: obj.ID,
@@ -625,10 +659,31 @@ export class GodotBridge extends EventEmitter {
       ...(shapeParams ? { shape: shapeParams } : {}),
       ...(texInfo ? { faces: texInfo.faces } : {}),
       ...(lightInfo ? { light: lightInfo } : {}),
+      ...(isAnimesh ? { animesh: true } : {}),
     });
     if (lightInfo) {
-      //console.log(`[GodotBridge] Light on localId=${obj.ID}: ${JSON.stringify(lightInfo)}`);
       this.objectsWithLights.add(obj.ID);
+    }
+    if (isAnimesh) {
+      const uuid = obj.FullID?.toString();
+      if (uuid) {
+        this.animeshObjects.set(uuid, obj.ID);
+        // Replay buffered animation state (ObjectAnimation arrived before sendObject)
+        const buffered = this.animeshAnimState.get(uuid);
+        if (buffered && buffered.length > 0) {
+          this.send({
+            type: 'object_animation',
+            localId: obj.ID,
+            uuid,
+            animations: buffered,
+          });
+          if (this.animationFetchQueue) {
+            for (const a of buffered) {
+              this.animationFetchQueue.request(a.animId, obj.ID);
+            }
+          }
+        }
+      }
     }
     this.trackedObjects.add(obj.ID);
 
@@ -1195,6 +1250,45 @@ export class GodotBridge extends EventEmitter {
     }
   }
 
+  /** Subscribe to ObjectAnimation circuit messages early (before Godot connects).
+   *  Buffers animation state per object UUID so sendObject() can replay it. */
+  private subscribeToObjectAnimation(): void {
+    try {
+      const circuit = this.bot.currentRegion?.circuit;
+      if (!circuit) return;
+      const animSub = circuit.subscribeToMessages([
+        Message.ObjectAnimation,
+      ], (packet: any) => {
+        const msg = packet.message as ObjectAnimationMessage;
+        const senderUuid = msg.Sender.ID.toString();
+        const animations = msg.AnimationList.map(a => ({
+          animId: a.AnimID.toString(),
+          sequenceId: a.AnimSequenceID,
+        }));
+
+        // Always buffer latest state (sendObject may not have run yet)
+        this.animeshAnimState.set(senderUuid, animations);
+
+        // If Godot is connected and we know this object, forward immediately
+        const localId = this.animeshObjects.get(senderUuid);
+        if (localId !== undefined && this.connected) {
+          this.send({
+            type: 'object_animation',
+            localId,
+            uuid: senderUuid,
+            animations,
+          });
+          if (this.animationFetchQueue) {
+            for (const a of animations) {
+              this.animationFetchQueue.request(a.animId, localId);
+            }
+          }
+        }
+      });
+      this.subscriptions.push(animSub);
+    } catch { /* circuit may not be ready */ }
+  }
+
   private subscribeToEvents(): void {
     const events = this.bot.clientEvents;
 
@@ -1393,6 +1487,9 @@ export class GodotBridge extends EventEmitter {
     });
     this.subscriptions.push(avatarEnterSub);
 
+    // ObjectAnimation is subscribed early in start() via subscribeToObjectAnimation().
+    // No need to subscribe again here.
+
     // Kill sweep + child rescan: every 2s
     // (onObjectKilledEvent and child onNewObjectEvent are not fired in node-metaverse)
     let memLogCounter = 0;
@@ -1498,6 +1595,10 @@ export class GodotBridge extends EventEmitter {
             this.updateSeq.delete(localId);
             this.textureUpdateSubs.get(localId)?.unsubscribe();
             this.textureUpdateSubs.delete(localId);
+            // Clean up animesh tracking
+            for (const [uuid, lid] of this.animeshObjects) {
+              if (lid === localId) { this.animeshObjects.delete(uuid); break; }
+            }
           }
         } catch {
           // Object not found in store — it's been killed
@@ -1507,6 +1608,9 @@ export class GodotBridge extends EventEmitter {
           this.updateSeq.delete(localId);
           this.textureUpdateSubs.get(localId)?.unsubscribe();
           this.textureUpdateSubs.delete(localId);
+          for (const [uuid, lid] of this.animeshObjects) {
+            if (lid === localId) { this.animeshObjects.delete(uuid); break; }
+          }
         }
       }
     } catch { /* bot may be disconnected */ }
@@ -1795,8 +1899,14 @@ export class GodotBridge extends EventEmitter {
       this.materialFetchQueue.destroy();
       this.materialFetchQueue = null;
     }
+    if (this.animationFetchQueue) {
+      this.animationFetchQueue.destroy();
+      this.animationFetchQueue = null;
+    }
     this.materialToFaces.clear();
     this.deferredTextures.clear();
+    this.animeshObjects.clear();
+    this.animeshAnimState.clear();
 
     // Close WebSocket
     if (this.ws) {

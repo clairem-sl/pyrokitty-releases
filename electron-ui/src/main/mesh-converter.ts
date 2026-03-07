@@ -95,77 +95,34 @@ function parseSkeletonXml(xml: string): Map<string, SkeletonJoint> {
   return joints;
 }
 
-// --- SL↔Godot coordinate transform for 4×4 matrices ---
-// SL: X=east, Y=north, Z=up  →  Godot: X=right, Y=up, Z=back
-// Position: (x,y,z) → (x, z, -y)
-// Transform matrix R:  [1 0 0; 0 0 -1; 0 1 0]  (det=+1)
-// For a 4×4 matrix M: M_godot = R * M * R^T
-//
-// The node-metaverse Matrix4 stores SL data in its constructor order.
-// SL LLSD is row-major; Matrix4 constructor is column-major.
-// So the stored matrix is the TRANSPOSE of the actual SL matrix.
-// For glTF (column-major): we need transpose().all(), then apply R*M*R^T.
-
-// Row-major 4x4 matrix multiply: result = A * B
-function mulMat4RowMajor(a: number[], b: number[]): number[] {
-  const r = new Array(16).fill(0);
-  for (let row = 0; row < 4; row++) {
-    for (let col = 0; col < 4; col++) {
-      for (let k = 0; k < 4; k++) {
-        r[row * 4 + col] += a[row * 4 + k] * b[k * 4 + col];
-      }
-    }
-  }
-  return r;
-}
+// --- SL↔Godot coordinate transform for 4×4 inverse bind matrices ---
 
 function transformInverseBindMatrix(slRowMajor: number[]): number[] {
-  // Input: 16 floats in SL row-major order (= what node-metaverse .all() returns)
-  // We need: column-major output in Godot coordinate space
+  // Input: 16 floats from SL row-major IBM: m[row*4+col] = M[row][col]
+  //   (.all() returns raw LLSD bytes which are SL row-major)
   //
-  // First interpret as SL row-major matrix, then apply coordinate transform,
-  // then output as column-major for glTF.
+  // Output: column-major for glTF, representing R * M^T * R^T
+  //   M^T: SL uses row-vector convention (v * M), glTF uses column-vector (M * v),
+  //         so the IBM must be transposed.
+  //   R:   SL→Godot coordinate transform (x,y,z)→(x,z,-y)
+  //        R = [[1,0,0,0],[0,0,1,0],[0,-1,0,0],[0,0,0,1]]
+  //
+  // Derivation: v_joint_godot = R * IBM_sl^T * R^T * v_bind_godot
+  //   so IBM_gltf = R * M^T * R^T
+  //
+  // Row-major result of R * M^T * R^T (where M^T[i][j] = M[j][i] = m[j*4+i]):
+  //   Row 0: m[0],  m[8],  -m[4],  m[12]
+  //   Row 1: m[2],  m[10], -m[6],  m[14]
+  //   Row 2: -m[1], -m[9],  m[5],  -m[13]
+  //   Row 3: m[3],  m[11], -m[7],  m[15]
 
-  // Read as row-major: m[row][col] = slRowMajor[row*4 + col]
   const m = slRowMajor;
-  // R * M * R^T where R swaps y↔z and negates new z (old y)
-  // R = [[1,0,0,0],[0,0,1,0],[0,-1,0,0],[0,0,0,1]]
-  // R^T = [[1,0,0,0],[0,0,-1,0],[0,1,0,0],[0,0,0,1]]
-  //
-  // For row-major M[r][c], (R*M*R^T)[i][j]:
-  // Row 0 of R is [1,0,0,0] → selects row 0 of M
-  // Row 1 of R is [0,0,1,0] → selects row 2 of M
-  // Row 2 of R is [0,-1,0,0] → selects -row 1 of M
-  // Row 3 of R is [0,0,0,1] → selects row 3 of M
-  //
-  // Then multiply on right by R^T (column transform):
-  // Col 0 of R^T is [1,0,0,0] → selects col 0
-  // Col 1 of R^T is [0,0,-1,0] → selects -col 2
-  // Col 2 of R^T is [0,1,0,0] → selects col 1
-  // Col 3 of R^T is [0,0,0,1] → selects col 3
-  //
-  // Combined: result[i][j] where i,j use Godot axes
-  // result[0][0] = M[0][0], result[0][1] = -M[0][2], result[0][2] = M[0][1], result[0][3] = M[0][3]
-  // result[1][0] = M[2][0], result[1][1] = -M[2][2], result[1][2] = M[2][1], result[1][3] = M[2][3]
-  // result[2][0] = -M[1][0], result[2][1] = M[1][2], result[2][2] = -M[1][1], result[2][3] = -M[1][3]
-  // result[3][0] = M[3][0], result[3][1] = -M[3][2], result[3][2] = M[3][1], result[3][3] = M[3][3]
-
-  const r = new Array(16);
-  // Row 0: from SL row 0, cols transformed
-  r[0*4+0] = m[0*4+0];  r[0*4+1] = -m[0*4+2]; r[0*4+2] = m[0*4+1];  r[0*4+3] = m[0*4+3];
-  // Row 1: from SL row 2, cols transformed
-  r[1*4+0] = m[2*4+0];  r[1*4+1] = -m[2*4+2]; r[1*4+2] = m[2*4+1];  r[1*4+3] = m[2*4+3];
-  // Row 2: from -SL row 1, cols transformed
-  r[2*4+0] = -m[1*4+0]; r[2*4+1] = m[1*4+2];  r[2*4+2] = -m[1*4+1]; r[2*4+3] = -m[1*4+3];
-  // Row 3: from SL row 3, cols transformed
-  r[3*4+0] = m[3*4+0];  r[3*4+1] = -m[3*4+2]; r[3*4+2] = m[3*4+1];  r[3*4+3] = m[3*4+3];
-
-  // Convert to column-major for glTF
+  // Column-major output (read columns top-to-bottom from the row-major result)
   return [
-    r[0], r[4], r[8],  r[12],
-    r[1], r[5], r[9],  r[13],
-    r[2], r[6], r[10], r[14],
-    r[3], r[7], r[11], r[15],
+    m[0],   m[2],  -m[1],   m[3],   // col 0
+    m[8],   m[10], -m[9],   m[11],  // col 1
+   -m[4],  -m[6],   m[5],  -m[7],   // col 2
+    m[12],  m[14], -m[13],  m[15],  // col 3
   ];
 }
 
@@ -181,6 +138,46 @@ export function isMeshCached(meshUuid: string): boolean {
   return fs.existsSync(meshCachePath(meshUuid));
 }
 
+function metaPath(meshUuid: string): string {
+  return path.join(getCacheDir(), `${meshUuid}.meta`);
+}
+
+/** Read persisted rigged/jointNames info for a cached mesh.
+ *  Falls back to scanning the GLB JSON chunk for "skins" if no .meta file exists. */
+export function readMeshMeta(meshUuid: string): { isRigged: boolean; jointNames?: string[] } | undefined {
+  // Fast path: .meta sidecar exists
+  try {
+    const data = JSON.parse(fs.readFileSync(metaPath(meshUuid), 'utf8'));
+    return { isRigged: !!data.isRigged, jointNames: data.jointNames };
+  } catch { /* no meta file — fall through to GLB scan */ }
+
+  // Fallback: scan GLB JSON chunk for "skins" (handles meshes cached before meta was added)
+  try {
+    const glbPath = meshCachePath(meshUuid);
+    const fd = fs.openSync(glbPath, 'r');
+    try {
+      // GLB header: 12 bytes (magic + version + length)
+      // Chunk 0 header: 4 bytes length + 4 bytes type
+      const header = Buffer.alloc(20);
+      fs.readSync(fd, header, 0, 20, 0);
+      const jsonLen = header.readUInt32LE(12);
+      // Read just enough of the JSON chunk to detect "skins"
+      const readLen = Math.min(jsonLen, 8192);
+      const jsonBuf = Buffer.alloc(readLen);
+      fs.readSync(fd, jsonBuf, 0, readLen, 20);
+      const jsonStr = jsonBuf.toString('utf8');
+      const isRigged = jsonStr.includes('"skins"');
+      // Persist for next time
+      if (isRigged) {
+        try { fs.writeFileSync(metaPath(meshUuid), JSON.stringify({ isRigged })); } catch { /* ignore */ }
+      }
+      return { isRigged };
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch { return undefined; }
+}
+
 export interface MeshConvertResult {
   cachePath: string;
   isRigged: boolean;
@@ -192,6 +189,10 @@ export async function ensureMeshCached(meshUuid: string, mesh: LLMesh): Promise<
   const isRigged = !!(mesh.skin && mesh.skin.jointNames.length > 0);
 
   if (fs.existsSync(cachePath)) {
+    // Persist meta if missing (backfill for meshes cached before meta was added)
+    if (!fs.existsSync(metaPath(meshUuid)) && isRigged) {
+      try { fs.writeFileSync(metaPath(meshUuid), JSON.stringify({ isRigged, jointNames: mesh.skin?.jointNames })); } catch { /* ignore */ }
+    }
     return { cachePath, isRigged, jointNames: mesh.skin?.jointNames };
   }
 
@@ -200,6 +201,10 @@ export async function ensureMeshCached(meshUuid: string, mesh: LLMesh): Promise<
 
   fs.mkdirSync(path.dirname(cachePath), { recursive: true });
   fs.writeFileSync(cachePath, glb);
+  // Persist rigged info alongside the GLB
+  if (isRigged) {
+    try { fs.writeFileSync(metaPath(meshUuid), JSON.stringify({ isRigged, jointNames: mesh.skin?.jointNames })); } catch { /* ignore */ }
+  }
   return { cachePath, isRigged, jointNames: mesh.skin?.jointNames };
 }
 

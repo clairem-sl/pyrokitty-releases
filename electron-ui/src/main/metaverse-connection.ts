@@ -6,12 +6,20 @@
  */
 
 import { EventEmitter } from 'events';
-import { Bot, BotOptionFlags, LoginParameters, Vector3 } from '../../node-metaverse/dist/lib';
+import { Bot, BotOptionFlags, LoginParameters, UUID, Vector3 } from '../../node-metaverse/dist/lib';
 import { LoginError } from '../../node-metaverse/dist/lib/classes/LoginError';
 import { ChatType } from '../../node-metaverse/dist/lib/enums/ChatType';
 import { ChatSourceType } from '../../node-metaverse/dist/lib/enums/ChatSourceType';
 import { InstantMessageEventFlags } from '../../node-metaverse/dist/lib/enums/InstantMessageEventFlags';
 import { RightsFlags } from '../../node-metaverse/dist/lib/enums/RightsFlags';
+import { Message } from '../../node-metaverse/lib/enums/Message';
+import { SoundFlags } from '../../node-metaverse/lib/enums/SoundFlags';
+import type { SoundTriggerMessage } from '../../node-metaverse/lib/classes/messages/SoundTrigger';
+import type { AttachedSoundMessage } from '../../node-metaverse/lib/classes/messages/AttachedSound';
+import type { AttachedSoundGainChangeMessage } from '../../node-metaverse/lib/classes/messages/AttachedSoundGainChange';
+import type { PreloadSoundMessage } from '../../node-metaverse/lib/classes/messages/PreloadSound';
+import { SoundFetchQueue } from './sound-fetch-queue';
+import * as SoundPlayer from './sound-player';
 import {
   ConnectionState,
   ChatMessage,
@@ -104,6 +112,15 @@ export class MetaverseConnection extends EventEmitter {
   private selfMoveSubscription: { unsubscribe: () => void } | null = null;
   private regionInfoThrottleTimer: ReturnType<typeof setTimeout> | null = null;
   private regionInfoDirty = false;
+  private soundFetchQueue: SoundFetchQueue | null = null;
+  private soundSubscription: { unsubscribe: () => void } | null = null;
+  private soundUpdateTimer: ReturnType<typeof setInterval> | null = null;
+  private pendingSounds = new Map<string, { type: 'trigger' | 'attached'; gain: number; position?: any; localId?: number; loop?: boolean }[]>();
+  private attachedSoundGains = new Map<number, number>(); // localId → base gain (before distance)
+  private triggerSounds = new Map<number, { baseGain: number; position: { x: number; y: number; z: number } }>(); // triggerId → position + gain
+  private nextTriggerId = -1; // negative IDs to avoid collision with object localIds
+  private soundDistLogCounter = 0;
+  private static readonly MAX_SOUND_DISTANCE = 50;
 
   constructor(public readonly instanceId: string) {
     super();
@@ -191,6 +208,9 @@ export class MetaverseConnection extends EventEmitter {
       this.setState('metaverse_connected');
       this.emit('login-progress', `Connected to ${this.bot!.currentRegion?.regionName || 'region'}`);
 
+      // Subscribe to world sound messages (circuit is available after connectToSim)
+      this.setupSoundSubscriptions();
+
       // Resolve display names for all friends in background
       this.resolveDisplayNamesForFriends().catch((err) => {
         console.error('[MetaverseConnection] Error resolving friend display names:', err);
@@ -247,6 +267,16 @@ export class MetaverseConnection extends EventEmitter {
     this.groups.clear();
     this.chatSessions.clear();
     this.nearbyAvatars.clear();
+    // Clean up sound subscriptions and stop all playing sounds
+    this.soundSubscription?.unsubscribe();
+    this.soundSubscription = null;
+    if (this.soundUpdateTimer) { clearInterval(this.soundUpdateTimer); this.soundUpdateTimer = null; }
+    if (this.soundFetchQueue) { this.soundFetchQueue.destroy(); this.soundFetchQueue = null; }
+    this.pendingSounds.clear();
+    for (const localId of this.attachedSoundGains.keys()) SoundPlayer.stopAttached(localId);
+    for (const triggerId of this.triggerSounds.keys()) SoundPlayer.stopAttached(triggerId);
+    this.attachedSoundGains.clear();
+    this.triggerSounds.clear();
     // Clean up avatar subscriptions
     this.selfMoveSubscription?.unsubscribe();
     this.selfMoveSubscription = null;
@@ -472,6 +502,15 @@ export class MetaverseConnection extends EventEmitter {
     this.bot.clientEvents.onDisconnected.subscribe((event) => {
       console.log(`[MetaverseConnection] Bot disconnected: ${event.message} (requested=${event.requested})`);
       // Clean up subscriptions so timers/callbacks don't access dead bot
+      this.soundSubscription?.unsubscribe();
+      this.soundSubscription = null;
+      if (this.soundFetchQueue) { this.soundFetchQueue.destroy(); this.soundFetchQueue = null; }
+      this.pendingSounds.clear();
+      if (this.soundUpdateTimer) { clearInterval(this.soundUpdateTimer); this.soundUpdateTimer = null; }
+      for (const localId of this.attachedSoundGains.keys()) SoundPlayer.stopAttached(localId);
+      for (const triggerId of this.triggerSounds.keys()) SoundPlayer.stopAttached(triggerId);
+      this.attachedSoundGains.clear();
+      this.triggerSounds.clear();
       this.selfMoveSubscription?.unsubscribe();
       this.selfMoveSubscription = null;
       if (this.regionInfoThrottleTimer) {
@@ -555,6 +594,248 @@ export class MetaverseConnection extends EventEmitter {
 
       this.emit('nearby-avatars-update', Array.from(this.nearbyAvatars.values()));
     });
+  }
+
+  // ─── World Sound Handling ────────────────────────────
+
+  private setupSoundSubscriptions(): void {
+    if (!this.bot) return;
+
+    // Init sound fetch queue
+    this.soundFetchQueue = new SoundFetchQueue(this.bot, (soundUuid, cachePath) => {
+      this.flushPendingSounds(soundUuid, cachePath);
+    });
+
+    // Init sound player (singleton, no-ops if already init)
+    SoundPlayer.initSoundPlayer().catch(err => {
+      console.error('[MetaverseConnection] Failed to init sound player:', err);
+    });
+    SoundPlayer.setOnSoundEnded((id) => this.triggerSounds.delete(id));
+
+    try {
+      const circuit = this.bot.currentRegion?.circuit;
+      if (!circuit) return;
+
+      const sub = circuit.subscribeToMessages([
+        Message.SoundTrigger,
+        Message.AttachedSound,
+        Message.AttachedSoundGainChange,
+        Message.PreloadSound,
+      ], (packet: any) => {
+        switch (packet.message.id) {
+          case Message.SoundTrigger:
+            this.handleSoundTrigger(packet.message as SoundTriggerMessage);
+            break;
+          case Message.AttachedSound:
+            this.handleAttachedSound(packet.message as AttachedSoundMessage);
+            break;
+          case Message.AttachedSoundGainChange:
+            this.handleAttachedSoundGainChange(packet.message as AttachedSoundGainChangeMessage);
+            break;
+          case Message.PreloadSound:
+            this.handlePreloadSound(packet.message as PreloadSoundMessage);
+            break;
+        }
+      });
+      this.soundSubscription = sub;
+      console.log('[MetaverseConnection] Subscribed to world sound messages');
+    } catch {
+      console.warn('[MetaverseConnection] Could not subscribe to sound messages (circuit not ready)');
+    }
+
+    // Periodically update attached sound volumes based on distance
+    this.soundUpdateTimer = setInterval(() => this.updateSoundDistances(), 250);
+  }
+
+  private getAvatarPosition(): { x: number; y: number; z: number } | null {
+    const agentId = this.bot?.agentID?.()?.toString();
+    if (!agentId) return null;
+    const self = this.bot?.currentRegion?.agents?.get(agentId);
+    if (self?.position && (self.position.x !== 0 || self.position.y !== 0)) {
+      return self.position;
+    }
+    return null;
+  }
+
+  /** Get world position for an object, resolving child prim local offsets */
+  private getObjectWorldPosition(obj: any): { x: number; y: number; z: number } | null {
+    const pos = obj?.Position;
+    if (!pos) return null;
+    if (!obj.ParentID || obj.ParentID === 0) return pos;
+    try {
+      const parent = this.bot?.currentRegion?.objects?.getObjectByLocalID(obj.ParentID);
+      const pp = parent?.Position;
+      if (pp) return { x: pp.x + pos.x, y: pp.y + pos.y, z: pp.z + pos.z };
+    } catch { /* fall through */ }
+    return pos;
+  }
+
+  private updateSoundDistances(): void {
+    if (this.attachedSoundGains.size === 0 && this.triggerSounds.size === 0) return;
+    const avatarPos = this.getAvatarPosition();
+    if (!avatarPos) return;
+
+    const maxDist = MetaverseConnection.MAX_SOUND_DISTANCE;
+    const doLog = (this.soundDistLogCounter++ % 16) === 0; // log every ~4s
+
+    // Attached sounds — position comes from the object
+    for (const [localId, baseGain] of this.attachedSoundGains) {
+      try {
+        const obj = this.bot?.currentRegion?.objects?.getObjectByLocalID(localId);
+        if (!obj) {
+          SoundPlayer.stopAttached(localId);
+          this.attachedSoundGains.delete(localId);
+          continue;
+        }
+        const op = this.getObjectWorldPosition(obj);
+        if (!op) continue;
+        const dx = op.x - avatarPos.x, dy = op.y - avatarPos.y, dz = op.z - avatarPos.z;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const effectiveGain = dist > maxDist ? 0 : baseGain / Math.max(1, dist);
+        SoundPlayer.setAttachedGain(localId, effectiveGain);
+        if (doLog) {
+          console.log(`[Sound] Dist localId=${localId} dist=${dist.toFixed(1)}m base=${baseGain.toFixed(2)} eff=${effectiveGain.toFixed(3)} av=(${avatarPos.x.toFixed(0)},${avatarPos.y.toFixed(0)},${avatarPos.z.toFixed(0)}) obj=(${op.x.toFixed(0)},${op.y.toFixed(0)},${op.z.toFixed(0)})`);
+        }
+      } catch {
+        SoundPlayer.stopAttached(localId);
+        this.attachedSoundGains.delete(localId);
+      }
+    }
+
+    // Trigger sounds — fixed position in world
+    for (const [triggerId, info] of this.triggerSounds) {
+      const dx = info.position.x - avatarPos.x, dy = info.position.y - avatarPos.y, dz = info.position.z - avatarPos.z;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const effectiveGain = dist > maxDist ? 0 : info.baseGain / Math.max(1, dist);
+      SoundPlayer.setAttachedGain(triggerId, effectiveGain);
+    }
+  }
+
+  private handleSoundTrigger(msg: SoundTriggerMessage): void {
+    const soundId = msg.SoundData.SoundID.toString();
+    if (!soundId || soundId === '00000000-0000-0000-0000-000000000000') return;
+
+    const pos = msg.SoundData.Position;
+    const gain = msg.SoundData.Gain;
+
+    const avatarPos = this.getAvatarPosition();
+    if (avatarPos) {
+      const dx = pos.x - avatarPos.x, dy = pos.y - avatarPos.y, dz = pos.z - avatarPos.z;
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq > MetaverseConnection.MAX_SOUND_DISTANCE ** 2) return;
+      console.log(`[Sound] Trigger ${soundId.slice(0, 8)} gain=${gain.toFixed(2)} dist=${Math.sqrt(distSq).toFixed(1)}m`);
+    }
+
+    if (!this.pendingSounds.has(soundId)) this.pendingSounds.set(soundId, []);
+    this.pendingSounds.get(soundId)!.push({ type: 'trigger', gain, position: pos });
+    this.soundFetchQueue?.request(soundId);
+  }
+
+  private handleAttachedSound(msg: AttachedSoundMessage): void {
+    const soundId = msg.DataBlock.SoundID.toString();
+    const objectUuid = msg.DataBlock.ObjectID.toString();
+    const gain = msg.DataBlock.Gain;
+    const flags = msg.DataBlock.Flags;
+
+    let localId: number | undefined;
+    let obj: any;
+    try {
+      obj = this.bot?.currentRegion?.objects?.getObjectByUUID(new UUID(objectUuid));
+      if (obj) localId = obj.ID;
+    } catch { /* not found */ }
+    if (localId === undefined) return;
+
+    if (flags & SoundFlags.Stop) {
+      console.log(`[Sound] Stop attached localId=${localId} obj=${objectUuid.slice(0, 8)}`);
+      SoundPlayer.stopAttached(localId);
+      this.attachedSoundGains.delete(localId);
+      return;
+    }
+
+    if (!soundId || soundId === '00000000-0000-0000-0000-000000000000') return;
+
+    const loop = !!(flags & SoundFlags.Loop);
+
+    const avatarPos = this.getAvatarPosition();
+    if (obj && avatarPos) {
+      const op = this.getObjectWorldPosition(obj);
+      if (op) {
+        const dx = op.x - avatarPos.x, dy = op.y - avatarPos.y, dz = op.z - avatarPos.z;
+        const distSq = dx * dx + dy * dy + dz * dz;
+        if (distSq > MetaverseConnection.MAX_SOUND_DISTANCE ** 2) return;
+        console.log(`[Sound] Attached ${soundId.slice(0, 8)} localId=${localId} gain=${gain.toFixed(2)} loop=${loop} dist=${Math.sqrt(distSq).toFixed(1)}m`);
+      }
+    }
+
+    if (!this.pendingSounds.has(soundId)) this.pendingSounds.set(soundId, []);
+    this.pendingSounds.get(soundId)!.push({ type: 'attached', gain, localId, loop });
+    this.soundFetchQueue?.request(soundId);
+  }
+
+  private handleAttachedSoundGainChange(msg: AttachedSoundGainChangeMessage): void {
+    const objectUuid = msg.DataBlock.ObjectID.toString();
+    const gain = msg.DataBlock.Gain;
+
+    let localId: number | undefined;
+    try {
+      const obj = this.bot?.currentRegion?.objects?.getObjectByUUID(new UUID(objectUuid));
+      if (obj) localId = obj.ID;
+    } catch { /* not found */ }
+    if (localId === undefined) return;
+
+    // Update base gain — distance timer will apply attenuation on next tick
+    this.attachedSoundGains.set(localId, gain);
+  }
+
+  private handlePreloadSound(msg: PreloadSoundMessage): void {
+    for (const entry of msg.DataBlock) {
+      const soundId = entry.SoundID.toString();
+      if (soundId && soundId !== '00000000-0000-0000-0000-000000000000') {
+        this.soundFetchQueue?.request(soundId);
+      }
+    }
+  }
+
+  private flushPendingSounds(soundId: string, cachePath: string): void {
+    const pending = this.pendingSounds.get(soundId);
+    if (!pending || pending.length === 0) return;
+    this.pendingSounds.delete(soundId);
+
+    const fwdPath = cachePath.replace(/\\/g, '/');
+    const avatarPos = this.getAvatarPosition();
+    const maxDist = MetaverseConnection.MAX_SOUND_DISTANCE;
+
+    for (const evt of pending) {
+      if (evt.type === 'trigger') {
+        let distGain = 1;
+        if (avatarPos && evt.position) {
+          const dx = evt.position.x - avatarPos.x, dy = evt.position.y - avatarPos.y, dz = evt.position.z - avatarPos.z;
+          distGain = Math.max(0, 1 - Math.sqrt(dx * dx + dy * dy + dz * dz) / maxDist);
+        }
+        const triggerId = this.nextTriggerId--;
+        this.triggerSounds.set(triggerId, { baseGain: evt.gain, position: evt.position });
+        console.log(`[Sound] Play trigger ${soundId.slice(0, 8)} gain=${evt.gain.toFixed(2)} distGain=${distGain.toFixed(2)}`);
+        SoundPlayer.playAttached(triggerId, fwdPath, evt.gain * distGain, false);
+        setTimeout(() => this.triggerSounds.delete(triggerId), 30_000);
+      } else if (evt.type === 'attached' && evt.localId !== undefined) {
+        let distGain = 1;
+        if (avatarPos) {
+          try {
+            const obj = this.bot?.currentRegion?.objects?.getObjectByLocalID(evt.localId);
+            if (obj) {
+              const op = this.getObjectWorldPosition(obj);
+              if (op) {
+                const dx = op.x - avatarPos.x, dy = op.y - avatarPos.y, dz = op.z - avatarPos.z;
+                distGain = Math.max(0, 1 - Math.sqrt(dx * dx + dy * dy + dz * dz) / maxDist);
+              }
+            }
+          } catch { /* ok */ }
+        }
+        this.attachedSoundGains.set(evt.localId, evt.gain);
+        console.log(`[Sound] Play attached ${soundId.slice(0, 8)} localId=${evt.localId} gain=${evt.gain.toFixed(2)} distGain=${distGain.toFixed(2)} loop=${evt.loop}`);
+        SoundPlayer.playAttached(evt.localId, fwdPath, evt.gain * distGain, evt.loop ?? false);
+      }
+    }
   }
 
   /**

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useVoice } from '../hooks/useVoice';
+import { useWorldSounds } from '../hooks/useWorldSounds';
 
 export const VoiceBar: React.FC = () => {
   const {
@@ -14,6 +15,8 @@ export const VoiceBar: React.FC = () => {
     setVolume,
     toggleSpeakerMute,
   } = useVoice();
+
+  const { volume: soundVolume, setVolume: setSoundVolume, muted: soundMuted, toggleMute: toggleSoundMute } = useWorldSounds();
 
   const statusText = connected ? 'Voice' : connecting ? 'Connecting...' : 'No voice';
   const dotClass = connected ? 'connected' : connecting ? 'connecting' : 'disconnected';
@@ -59,6 +62,26 @@ export const VoiceBar: React.FC = () => {
           />
         </div>
       )}
+
+      {/* World sounds — right-aligned */}
+      <span className="voice-sounds-spacer" />
+      <span className="voice-status-text">Sounds</span>
+      <button
+        className={`voice-btn ${soundMuted ? 'muted' : ''}`}
+        onClick={toggleSoundMute}
+        title={soundMuted ? 'Unmute sounds' : 'Mute sounds'}
+      >
+        {soundMuted ? '\uD83D\uDD07' : '\uD83D\uDD0A'}
+      </button>
+      <input
+        type="range"
+        className="voice-volume-slider"
+        min={0}
+        max={100}
+        value={Math.round(soundVolume * 100)}
+        onChange={(e) => setSoundVolume(parseInt(e.target.value) / 100)}
+        title={`Sound volume: ${Math.round(soundVolume * 100)}%`}
+      />
     </div>
   );
 };

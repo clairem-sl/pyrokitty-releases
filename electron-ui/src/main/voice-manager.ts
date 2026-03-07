@@ -172,15 +172,9 @@ export class VoiceManager extends EventEmitter {
   }
 
   private getBotPosition(bot: any, agentId: string): { x: number; y: number; z: number } | null {
-    // Try agents map first (populated by ObjectUpdate packets, available earlier)
     const self = bot.currentRegion?.agents?.get(agentId);
     if (self?.position && (self.position.x !== 0 || self.position.y !== 0)) {
       return self.position;
-    }
-    // Fallback to agent.localPosition
-    const pos = bot.agent?.localPosition;
-    if (pos && (pos.x !== 0 || pos.y !== 0)) {
-      return pos;
     }
     return null;
   }

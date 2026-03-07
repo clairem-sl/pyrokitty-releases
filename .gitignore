@@ -162,3 +162,4 @@ animesh.md
 download-rigged-*
 inspect-mesh-skin.ts
 test-rigged-glb.ts
+roundtrip-glb.ts

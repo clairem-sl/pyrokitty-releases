@@ -21,6 +21,9 @@ const STATS_INTERVAL: float = 5.0  # send pipeline stats every 5s
 var _low_priority_queue: Array[String] = []
 var _vr_mode: bool = false
 var _active_camera: Camera3D
+var _window_bounds_timer: float = 0.0
+var _last_window_pos: Vector2i = Vector2i(-99999, -99999)
+var _last_window_size: Vector2i = Vector2i(-99999, -99999)
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
@@ -48,6 +51,8 @@ func _ready() -> void:
 	# Parse command-line args
 	var args := OS.get_cmdline_user_args()
 	var vr_requested := false
+	var restore_pos := Vector2i.MIN
+	var restore_size := Vector2i.ZERO
 	for i in range(args.size()):
 		if args[i].begins_with("--ws-port="):
 			ws_port = int(args[i].split("=")[1])
@@ -55,6 +60,20 @@ func _ready() -> void:
 			ws_port = int(args[i + 1])
 		elif args[i] == "--vr":
 			vr_requested = true
+		elif args[i].begins_with("--window-position="):
+			var parts := args[i].split("=")[1].split(",")
+			if parts.size() == 2:
+				restore_pos = Vector2i(int(parts[0]), int(parts[1]))
+		elif args[i].begins_with("--window-size="):
+			var parts := args[i].split("=")[1].split(",")
+			if parts.size() == 2:
+				restore_size = Vector2i(int(parts[0]), int(parts[1]))
+
+	# Apply saved window bounds
+	if restore_size.x > 100 and restore_size.y > 100:
+		DisplayServer.window_set_size(restore_size)
+	if restore_pos != Vector2i.MIN:
+		DisplayServer.window_set_position(restore_pos)
 
 	# Main._ready() runs after all children's _ready(), so camera_controller
 	# and xr_rig are already initialised by the time we reach here.
@@ -164,13 +183,31 @@ func _process(_delta: float) -> void:
 			stats["type"] = "pipeline_stats"
 			stats["fps"] = Engine.get_frames_per_second()
 			send_message(stats)
+	# Report window bounds changes (debounced, every 0.5s max)
+	_window_bounds_timer += _delta
+	if _window_bounds_timer >= 0.5:
+		_window_bounds_timer = 0.0
+		var cur_pos := DisplayServer.window_get_position()
+		var cur_size := DisplayServer.window_get_size()
+		if cur_pos != _last_window_pos or cur_size != _last_window_size:
+			_last_window_pos = cur_pos
+			_last_window_size = cur_size
+			if ws_peer and ws_peer.get_ready_state() == WebSocketPeer.STATE_OPEN:
+				send_message({
+					"type": "window_bounds",
+					"x": cur_pos.x, "y": cur_pos.y,
+					"width": cur_size.x, "height": cur_size.y,
+				})
+
 	# Accept new TCP connection and upgrade to WebSocket
 	if ws_peer == null and tcp_server and tcp_server.is_connection_available():
 		tcp_peer = tcp_server.take_connection()
 		ws_peer = WebSocketPeer.new()
-		# Increase from default 64KB for larger messages
-		ws_peer.inbound_buffer_size = 1 * 1024 * 1024  # 1MB
-		ws_peer.max_queued_packets = 16384
+		# Must be large enough to hold all data between poll() calls.
+		# During initial snapshot (500+ objects + textures + events) the sender
+		# can burst several MB before Godot's next _process frame.
+		ws_peer.inbound_buffer_size = 16 * 1024 * 1024  # 16MB
+		ws_peer.max_queued_packets = 65536
 		var err := ws_peer.accept_stream(tcp_peer)
 		if err != OK:
 			push_error("[Main] WebSocket accept failed: %s" % error_string(err))
@@ -271,6 +308,10 @@ func _handle_message(text: String) -> void:
 			scene_manager.set_planar_debug_mode(msg.get("mode", 0))
 		"object_properties":
 			scene_manager.handle_object_properties(msg)
+		"object_animation":
+			scene_manager.handle_object_animation(msg)
+		"animation_ready":
+			scene_manager.handle_animation_ready(msg)
 		_:
 			push_warning("[Main] Unknown message type: %s" % msg_type)
 

@@ -84,6 +84,10 @@ func handle_mesh_ready(msg: Dictionary) -> void:
 	if mesh_id.is_empty() or glb_path.is_empty():
 		return
 
+	# Track rigged mesh GLB paths for animesh scene instantiation
+	if msg.get("isRigged", false):
+		sm.rigged_mesh_paths[mesh_id] = glb_path
+
 	# Skip if already cached, in-flight, or previously failed
 	if _shutting_down or sm.mesh_cache.has(mesh_id) or _mesh_in_flight.has(mesh_id) or sm.mesh_load_failed.has(mesh_id):
 		return
@@ -99,8 +103,17 @@ func _apply_mesh_to_pending(mesh_id: String) -> void:
 	var loaded_mesh: Mesh = sm.mesh_cache[mesh_id]
 	var local_ids: Array = sm._pending_by_mesh[mesh_id]
 	sm._pending_by_mesh.erase(mesh_id)
+	var is_rigged: bool = sm.rigged_mesh_paths.has(mesh_id)
 	for local_id: int in local_ids:
 		sm.pending_meshes.erase(local_id)
+
+		# Check if this object belongs to an animesh linkset and the mesh is rigged
+		var animesh_root_id: int = _get_animesh_root(local_id)
+		if animesh_root_id > 0 and is_rigged:
+			sm.object_mgr._instantiate_animesh_mesh(local_id, mesh_id, animesh_root_id)
+			# Fall through — still set RSI mesh (for surface count) and apply face materials
+			# (apply_face_materials will also target the animesh MeshInstance3D)
+
 		var rsi = sm.objects.get(local_id)
 		if rsi != null:
 			rsi.set_mesh(loaded_mesh)
@@ -110,6 +123,16 @@ func _apply_mesh_to_pending(mesh_id: String) -> void:
 				apply_face_materials(rsi, local_id, sm.object_faces[local_id])
 			else:
 				rsi.set_material_override(null)
+
+
+## Find the animesh root for a given object (0 if not part of an animesh linkset)
+func _get_animesh_root(local_id: int) -> int:
+	if sm.animesh_roots.has(local_id):
+		return local_id
+	var parent_id: int = sm.object_parent.get(local_id, 0)
+	if sm.animesh_roots.has(parent_id):
+		return parent_id
+	return 0
 
 
 ## Submit queued meshes to WorkerThreadPool (throttled)
@@ -309,9 +332,14 @@ func _apply_texture_to_pending(texture_id: String) -> void:
 				var ac: float = float(face_info.get("alphaCutoff", 0.5))
 				var pbr: Dictionary = face_info.get("pbr", {})
 				var mt: int = int(face_info.get("mappingType", 0))
-				rsi.set_surface_material(face_idx, _get_or_create_material(
+				var mat: Material = _get_or_create_material(
 					albedo_id, face_info["color"], face_info["fullBright"],
-					face_info["doubleSided"], uv, am, ac, pbr, mt))
+					face_info["doubleSided"], uv, am, ac, pbr, mt)
+				rsi.set_surface_material(face_idx, mat)
+				# Also apply to animesh MeshInstance3D
+				var ami: MeshInstance3D = sm.animesh_mesh_instances.get(local_id)
+				if ami and ami.mesh and face_idx < ami.mesh.get_surface_count():
+					ami.set_surface_override_material(face_idx, mat)
 
 		# Check if this face still has uncached textures
 		var still_pending := false
@@ -545,11 +573,17 @@ func apply_face_materials(rsi, local_id: int, faces: Array) -> void:
 		# Check if albedo is cached (minimum requirement to apply any material)
 		var albedo_cached: bool = sm.texture_cache.has(texture_id)
 
+		var mat: Material
 		if albedo_cached:
-			rsi.set_surface_material(face_idx, _get_or_create_material(
-				texture_id, color, full_bright, double_sided, uv_info, alpha_mode, alpha_cutoff, pbr, mapping_type))
+			mat = _get_or_create_material(
+				texture_id, color, full_bright, double_sided, uv_info, alpha_mode, alpha_cutoff, pbr, mapping_type)
 		else:
-			rsi.set_surface_material(face_idx, _make_placeholder_material(color, full_bright, double_sided))
+			mat = _make_placeholder_material(color, full_bright, double_sided)
+		rsi.set_surface_material(face_idx, mat)
+		# Also apply to animesh MeshInstance3D if this object has one
+		var ami: MeshInstance3D = sm.animesh_mesh_instances.get(local_id)
+		if ami and ami.mesh and face_idx < ami.mesh.get_surface_count():
+			ami.set_surface_override_material(face_idx, mat)
 
 		# Register under any not-yet-cached texture IDs for progressive refinement
 		var has_pending := false

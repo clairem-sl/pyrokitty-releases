@@ -336,19 +336,11 @@ export class Agent {
     }
 
     public setControlFlag(flag: ControlFlags): void {
-        const prev = this.controlFlags;
         this.controlFlags = this.controlFlags | flag;
-        if (this.controlFlags !== prev) {
-            this.sendAgentUpdate();
-        }
     }
 
     public clearControlFlag(flag: ControlFlags): void {
-        const prev = this.controlFlags;
         this.controlFlags = this.controlFlags & ~flag;
-        if (this.controlFlags !== prev) {
-            this.sendAgentUpdate();
-        }
     }
 
     public async getWearables(): Promise<InventoryFolder> {
@@ -372,13 +364,14 @@ export class Agent {
             this.cameraCenter = selfAvatar.position;
         }
 
-        // If in a transition animation and delay has elapsed, inject FINISH_ANIM
-        // (mirrors Firestorm's FSPreJumpDelayMs timer in propagateControlFlags)
+        // If in a transition animation and delay has elapsed, inject FINISH_ANIM once
+        // (mirrors Firestorm's FSPreJumpDelayMs — one-shot, not continuous)
         let flags = this.controlFlags;
         if (this._inTransition) {
             const elapsed = Date.now() - this._transitionStartMs;
             if (elapsed >= Agent.TRANSITION_DELAY_MS) {
                 flags |= ControlFlags.AGENT_CONTROL_FINISH_ANIM;
+                this._inTransition = false; // one-shot: clear after injecting
                 console.log(`[Agent] Injecting FINISH_ANIM (elapsed=${elapsed}ms, flags=0x${flags.toString(16)})`);
             }
         }

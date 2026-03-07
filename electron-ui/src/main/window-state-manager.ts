@@ -13,6 +13,7 @@ interface WindowBounds {
 interface WindowStateFile {
   main?: WindowBounds;
   map?: WindowBounds;
+  godot?: WindowBounds;
 }
 
 const SAVE_DEBOUNCE_MS = 500;
@@ -65,7 +66,7 @@ function isVisibleOnAnyDisplay(bounds: WindowBounds): boolean {
  * Get saved bounds for a window key, validated against current displays.
  * Returns undefined if no saved state or saved position is offscreen.
  */
-export function getSavedBounds(key: 'main' | 'map'): WindowBounds | undefined {
+export function getSavedBounds(key: 'main' | 'map' | 'godot'): WindowBounds | undefined {
   const state = loadState();
   const bounds = state[key];
   if (!bounds) return undefined;
@@ -81,6 +82,15 @@ export function getSavedBounds(key: 'main' | 'map'): WindowBounds | undefined {
  * Track a window's position/size and auto-save on changes.
  * Call this right after creating a BrowserWindow.
  */
+/**
+ * Save bounds for a non-BrowserWindow (e.g. Godot sidecar).
+ */
+export function saveExternalBounds(key: 'godot', bounds: WindowBounds): void {
+  const state = loadState();
+  state[key] = bounds;
+  saveState(state);
+}
+
 export function trackWindow(win: BrowserWindow, key: 'main' | 'map'): void {
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
