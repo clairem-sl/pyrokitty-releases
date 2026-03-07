@@ -35,9 +35,11 @@ Godot runs a WebSocket (TCP) server on a local port (default 9100). node-metaver
 |---------|---------|
 | `self_id` | Identify the bot's own avatar UUID so camera can follow it |
 | `object_create` | New object: localId, uuid, parentId, position, rotation, scale, meshId, shape, faces[], light |
-| `object_update_batch` | Batched position/rotation/scale changes (coalesced every 50ms) |
+| `object_update_batch` | Batched position/rotation/scale changes for static objects (coalesced every 50ms) |
+| `object_update_physics` | Batched updates for moving objects: includes velocity, acceleration, angular velocity for interpolation |
 | `object_update_faces` | Face/material update after initial create (PBR materials resolved asynchronously) |
 | `object_kill` | Remove object from scene |
+| `object_properties` | Object name + description (response to `request_object_properties`) |
 | `mesh_ready` | Mesh converted to GLB and written to cache |
 | `texture_ready` | Texture decoded to .bctex (or WebP fallback) and written to cache |
 | `avatar_create` | New avatar: id, name, position, rotation |
@@ -55,8 +57,11 @@ Godot runs a WebSocket (TCP) server on a local port (default 9100). node-metaver
 | `input_move` | WASD/E/C/QE state + camera yaw + fly toggle + running flag → control flags + body rotation |
 | `quit` | Godot window closed, Electron should terminate the sidecar |
 | `pipeline_stats` | Object/texture/mesh/material counts, FPS, finalize timing (every 5s) |
-| `input_click` | Object click: localId, face, UV *(future)* |
-| `camera_position` | Current camera world position *(future)* |
+| `input_click` | Object click: localId, face, UV |
+| `camera_position` | Current camera world position |
+| `request_object_properties` | Request name + description for an object (by localId) |
+| `set_object_name` | Set object name (from inspector panel) |
+| `set_object_description` | Set object description (from inspector panel) |
 
 ## Rendering Architecture
 
@@ -68,6 +73,16 @@ All objects and avatars use lightweight `RSInstance` wrappers around RenderingSe
 - Visibility range: objects fade from (far - margin) to far, then are culled
   - Desktop: 128m far, 32m fade margin
   - VR: 32m far, 8m fade margin
+
+### Physics Object Interpolation
+
+Objects with velocity/acceleration (`object_update_physics`) are extrapolated between server updates:
+
+- Velocity + acceleration integrated at 45 Hz physics timestep
+- Angular velocity applied via incremental quaternion rotation
+- Blend correction: when a new server update arrives, the position snap is smoothed over 0.25s (or instant if >10m)
+- Phase-out: extrapolation fades to zero over 2s if no new update arrives (max 3s)
+- Sequence numbers (`_fseq`) prevent stale batched updates from overwriting fresh physics data
 
 ## Texture Pipeline
 
@@ -167,10 +182,12 @@ SL prims are defined by path type, profile, hollow, twist, taper, etc. `prim_mes
 - SL→Godot coordinate conversion via `_sl_to_godot()` with correct winding
 - Face ordering matches SL (verified by headless tests)
 
+### Implemented prim features
+- [x] Hollow prims (all profile types)
+- [x] Profile/path cuts (begin/end)
+- [x] Twist, taper, shear, skew, revolutions, radius offset
+
 ### Missing prim features
-- [ ] Hollow prims
-- [ ] Profile/path cuts (begin/end)
-- [ ] Twist, taper, shear, skew, revolutions, radius offset
 - [ ] Spherical UV mapping (mappingType=4)
 
 ## Light Pipeline
@@ -220,7 +237,8 @@ Adaptive time budgeting prevents asset finalization from causing frame drops:
 - **VR**: 13.9ms target (72 Hz). Zero finalize budget when frame is already late — adding CPU work only makes the next frame late too.
 - Budget split: 60% textures / 40% meshes (textures are cheaper per-item)
 - WebSocket message processing: 12ms budget (both VR and desktop). High-priority messages (avatar updates, self_id) bypass budget and are always dispatched immediately.
-- All constants in `vr_frame_budget.gd` so the two competing budgets (message processing in main.gd, finalization in scene_manager.gd) can't silently drift apart.
+- Light constants also centralized: `MAX_ACTIVE_LIGHTS` (64), `LIGHT_CULL_DISTANCE` (64m), `LIGHT_CULL_INTERVAL` (2s), `MAX_SHADOW_LIGHTS` (4 nearest spots).
+- All constants in `frame_budget.gd` so the two competing budgets (message processing in main.gd, finalization in scene_manager.gd) can't silently drift apart.
 
 ## VR Support
 
@@ -335,7 +353,7 @@ SL linksets have independent scale per prim — parent scale does NOT affect chi
 - [x] Material cache key rounding (2 decimal UV params to collapse near-duplicates)
 - **Victory:** Godot renders thousands of objects at 30+ fps desktop, 72 fps VR
 
-### M4 — Better Geometry ✅ (basic) / in progress (advanced)
+### M4 — Better Geometry ✅
 - [x] Procedural prim mesh generator (`prim_mesh_generator.gd`) — port of LLVolume path/profile sweep
 - [x] Shape params sent from bridge (`godot-bridge.ts`) for non-mesh/non-sculpt prims
 - [x] Box, cylinder, sphere, prism, torus, tube, ring with correct face count
@@ -345,11 +363,11 @@ SL linksets have independent scale per prim — parent scale does NOT affect chi
 - [x] Sculpt map support (sculpt texture → GLB via SculptFetchQueue)
 - [x] Planar UV mapping shader (`planar_map.gdshader`) — SL's `planarProjection()` + `xform()`
 - [x] Standard UV shader with texture rotation support (`standard_uv.gdshader`)
-- [ ] Hollow prims
-- [ ] Profile/path cuts (begin/end)
-- [ ] Twist, taper, shear, skew, revolutions, radius offset
+- [x] Hollow prims (all profile types)
+- [x] Profile/path cuts (begin/end)
+- [x] Twist, taper, shear, skew, revolutions, radius offset
 - [ ] Spherical UV mapping (mappingType=4)
-- **Victory (basic):** Most objects have correct geometry; advanced prim params remain
+- **Victory:** Prims render with full geometry parameters; only spherical UV mapping remains
 
 ### M4.5 — PBR Materials ✅
 - [x] MaterialFetchQueue: download material assets (AssetType 57), parse LLSD binary → glTF JSON
@@ -376,6 +394,7 @@ SL linksets have independent scale per prim — parent scale does NOT affect chi
 - [x] Run mode (always-run toggle + double-tap W sprint)
 - [x] Strafing (Q/E keys)
 - [x] Avatar interpolation (smooth lerp/slerp with velocity extrapolation)
+- [x] Physics object interpolation (velocity/acceleration extrapolation with blend correction)
 - [ ] Minimap or coordinate display
 - [ ] Teleport support (region crossing, teleport to coordinates)
 - **Victory:** Can navigate a region freely
@@ -388,8 +407,11 @@ SL linksets have independent scale per prim — parent scale does NOT affect chi
 - [ ] Basic animations
 - **Victory:** See other avatars moving around
 
-### M7 — Interaction
-- [ ] Click to select/touch objects
+### M7 — Interaction (partially done)
+- [x] Right-click object picking with raycast
+- [x] Debug inspector panel (object name, description, geometry info)
+- [x] Object name/description editing via inspector
+- [ ] Touch objects (trigger script events)
 - [ ] Sit on objects
 - [ ] Object hover highlight
 - **Victory:** Can interact with the world
@@ -462,9 +484,10 @@ godot-viewer/
     scene_manager.gd     ← RSInstance-based object/avatar CRUD, flat linkset hierarchy, terrain/water/sky,
                            texture/material/mesh/light pipelines, PBR materials, frame-budgeted finalization
     prim_mesh_generator.gd ← Procedural prim geometry from SL shape params (port of LLVolume), cached by param hash
-    camera_controller.gd ← Orbit camera with avatar follow, WASD+Q/E+F input, fly/run/sprint, self-avatar yaw
+    camera_controller.gd ← Orbit camera with avatar follow, WASD+Q/E+F input, fly/run/sprint, self-avatar yaw,
+                           right-click object picking, debug inspector panel
     xr_rig.gd            ← XROrigin3D positioning at avatar eye height (VR mode)
-    vr_frame_budget.gd   ← Central timing constants for VR (72Hz) and desktop (30fps) budgets
+    frame_budget.gd      ← Central timing constants for VR (72Hz) and desktop (30fps) budgets, light limits, shadow caps
     standard_uv.gdshader ← Custom shader for texture rotation + UV transform (opaque)
     standard_uv_alpha.gdshader ← Same with alpha blending
     planar_map.gdshader  ← Custom shader for SL planar UV projection (opaque)

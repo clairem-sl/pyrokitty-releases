@@ -61,11 +61,18 @@ const XR_YAW_THRESHOLD: float = 0.001  # ~0.06 degrees
 @onready var main_node: Node3D = get_node("/root/Main")
 @onready var scene_manager: Node3D = get_node("../SceneManager")
 
-# Debug tooltip
+# Inspector panel
 var _tooltip_layer: CanvasLayer
 var _tooltip_panel: PanelContainer
-var _tooltip_label: RichTextLabel
+var _tooltip_tabs: TabContainer
+var _general_label: RichTextLabel
+var _name_edit: LineEdit
+var _desc_edit: LineEdit
+var _faces_label: RichTextLabel
 var _tooltip_visible: bool = false
+var _inspected_local_id: int = -1
+var _dragging_panel: bool = false
+var _drag_offset: Vector2 = Vector2.ZERO
 var _highlight_material: StandardMaterial3D
 var _highlighted_rid: RID = RID()
 
@@ -73,6 +80,7 @@ var _highlighted_rid: RID = RID()
 func _ready() -> void:
 	if scene_manager:
 		scene_manager.self_avatar_moved.connect(_on_self_avatar_moved)
+		scene_manager.object_properties_received.connect(_on_object_properties_received)
 	_create_debug_tooltip()
 	_update_camera()
 
@@ -192,9 +200,14 @@ func _input(event: InputEvent) -> void:
 					var now := Time.get_ticks_msec() / 1000.0
 					if now - last_w_press_time < 0.3:
 						double_tap_running = true
+						move_dirty = true
+						print("[CameraCtrl] Double-tap W → running")
 					last_w_press_time = now
 				if not ke.pressed:
+					if double_tap_running:
+						print("[CameraCtrl] W released → stopped running")
 					double_tap_running = false
+					move_dirty = true
 			KEY_S:
 				_key_s = ke.pressed
 			KEY_A:
@@ -252,25 +265,31 @@ func _input(event: InputEvent) -> void:
 		if ke.keycode == KEY_R and ke.pressed and not ke.echo and Input.is_key_pressed(KEY_CTRL):
 			always_run = not always_run
 			move_dirty = true
+			print("[CameraCtrl] Ctrl+R → always_run=%s" % always_run)
 
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
-				if _tooltip_visible:
+				if _tooltip_visible and _is_click_on_drag_bar(mb.position):
+					_dragging_panel = true
+					_drag_offset = mb.position - _tooltip_panel.global_position
+				elif _tooltip_visible and not _is_click_on_panel(mb.position):
 					_hide_debug_tooltip()
-				elif _is_click_on_self_avatar(mb.position):
+				elif not _tooltip_visible and _is_click_on_self_avatar(mb.position):
 					orbit_hold = false
 					is_butt_grabbing = true
 					Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 			else:
+				_dragging_panel = false
 				if is_butt_grabbing:
 					orbit_hold = true  # Hold camera angle until movement key pressed
 					Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 				is_butt_grabbing = false
 
 		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
-			_handle_debug_pick(mb.position)
+			if not _is_click_on_panel(mb.position):
+				_handle_debug_pick(mb.position)
 
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
 			if _tooltip_visible:
@@ -285,7 +304,9 @@ func _input(event: InputEvent) -> void:
 
 	if event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		if is_butt_grabbing:
+		if _dragging_panel:
+			_tooltip_panel.global_position = mm.position - _drag_offset
+		elif is_butt_grabbing:
 			# Butt-grab: X rotates avatar yaw, Y adjusts camera pitch
 			var yaw_delta := mm.relative.x * orbit_speed
 			avatar_yaw -= yaw_delta
@@ -339,6 +360,19 @@ func _is_click_on_self_avatar(screen_pos: Vector2) -> bool:
 
 # ─── Debug Tooltip ──────────────────────────────────
 
+func _make_tab_label() -> RichTextLabel:
+	var label := RichTextLabel.new()
+	label.bbcode_enabled = true
+	label.fit_content = true
+	label.scroll_active = false
+	label.selection_enabled = true
+	label.context_menu_enabled = true
+	label.custom_minimum_size = Vector2(340, 0)
+	label.add_theme_font_size_override("normal_font_size", 12)
+	label.add_theme_font_size_override("bold_font_size", 12)
+	return label
+
+
 func _create_debug_tooltip() -> void:
 	# Translucent overlay material for highlighting picked objects
 	_highlight_material = StandardMaterial3D.new()
@@ -366,14 +400,89 @@ func _create_debug_tooltip() -> void:
 	_tooltip_panel.add_theme_stylebox_override("panel", style)
 	_tooltip_layer.add_child(_tooltip_panel)
 
-	_tooltip_label = RichTextLabel.new()
-	_tooltip_label.bbcode_enabled = true
-	_tooltip_label.fit_content = true
-	_tooltip_label.scroll_active = false
-	_tooltip_label.custom_minimum_size = Vector2(320, 0)
-	_tooltip_label.add_theme_font_size_override("normal_font_size", 12)
-	_tooltip_label.add_theme_font_size_override("bold_font_size", 12)
-	_tooltip_panel.add_child(_tooltip_label)
+	var panel_vbox := VBoxContainer.new()
+	panel_vbox.add_theme_constant_override("separation", 0)
+	_tooltip_panel.add_child(panel_vbox)
+
+	# Drag handle bar
+	var drag_bar := Panel.new()
+	drag_bar.custom_minimum_size = Vector2(0, 14)
+	var drag_style := StyleBoxFlat.new()
+	drag_style.bg_color = Color(0.25, 0.25, 0.25, 1.0)
+	drag_style.corner_radius_top_left = 3
+	drag_style.corner_radius_top_right = 3
+	drag_bar.add_theme_stylebox_override("panel", drag_style)
+	# Small centered grip indicator
+	var grip := Label.new()
+	grip.text = "· · ·"
+	grip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	grip.add_theme_font_size_override("font_size", 10)
+	grip.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+	drag_bar.add_child(grip)
+	grip.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Close button
+	var close_btn := Button.new()
+	close_btn.text = "x"
+	close_btn.flat = true
+	close_btn.custom_minimum_size = Vector2(16, 14)
+	close_btn.add_theme_font_size_override("font_size", 10)
+	close_btn.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	close_btn.add_theme_color_override("font_hover_color", Color(1.0, 0.4, 0.4))
+	close_btn.pressed.connect(_hide_debug_tooltip)
+	drag_bar.add_child(close_btn)
+	close_btn.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT)
+	panel_vbox.add_child(drag_bar)
+
+	_tooltip_tabs = TabContainer.new()
+	_tooltip_tabs.tab_alignment = TabBar.ALIGNMENT_LEFT
+	# Style the tab bar to match the dark panel
+	var tab_style := StyleBoxFlat.new()
+	tab_style.bg_color = Color(0.18, 0.18, 0.18, 1.0)
+	tab_style.content_margin_left = 8
+	tab_style.content_margin_right = 8
+	tab_style.content_margin_top = 4
+	tab_style.content_margin_bottom = 4
+	_tooltip_tabs.add_theme_stylebox_override("panel", tab_style)
+	panel_vbox.add_child(_tooltip_tabs)
+
+	var general_box := VBoxContainer.new()
+	general_box.name = "General"
+
+	# Editable name field
+	var name_row := HBoxContainer.new()
+	var name_lbl := Label.new()
+	name_lbl.text = "Name:"
+	name_lbl.custom_minimum_size = Vector2(40, 0)
+	name_lbl.add_theme_font_size_override("font_size", 12)
+	name_row.add_child(name_lbl)
+	_name_edit = LineEdit.new()
+	_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_name_edit.add_theme_font_size_override("font_size", 12)
+	_name_edit.text_submitted.connect(_on_name_submitted)
+	name_row.add_child(_name_edit)
+	general_box.add_child(name_row)
+
+	# Editable description field
+	var desc_row := HBoxContainer.new()
+	var desc_lbl := Label.new()
+	desc_lbl.text = "Desc:"
+	desc_lbl.custom_minimum_size = Vector2(40, 0)
+	desc_lbl.add_theme_font_size_override("font_size", 12)
+	desc_row.add_child(desc_lbl)
+	_desc_edit = LineEdit.new()
+	_desc_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_desc_edit.add_theme_font_size_override("font_size", 12)
+	_desc_edit.text_submitted.connect(_on_desc_submitted)
+	desc_row.add_child(_desc_edit)
+	general_box.add_child(desc_row)
+
+	_general_label = _make_tab_label()
+	general_box.add_child(_general_label)
+	_tooltip_tabs.add_child(general_box)
+
+	_faces_label = _make_tab_label()
+	_faces_label.name = "Faces"
+	_tooltip_tabs.add_child(_faces_label)
 
 
 func _handle_debug_pick(screen_pos: Vector2) -> void:
@@ -396,29 +505,53 @@ func _handle_debug_pick(screen_pos: Vector2) -> void:
 	var info: Dictionary = scene_manager.get_object_debug_info(local_id)
 	var faces: Array = scene_manager.get_object_face_info(local_id)
 	_show_debug_tooltip(screen_pos, dist, info, faces)
+	# Request name/description from server (arrives async via object_properties_received)
+	main_node.send_message({ "type": "request_object_properties", "localId": local_id })
 
 
 const _MAPPING_NAMES: Dictionary = { 0: "default", 2: "planar", 4: "spherical", 6: "cylindrical" }
 const _ALPHA_NAMES: Dictionary = { -1: "auto", 0: "none", 1: "blend", 2: "mask", 3: "emissive" }
 
 func _show_debug_tooltip(screen_pos: Vector2, dist: float, info: Dictionary, faces: Array) -> void:
-	var bb := ""
-	# Header
-	bb += "[b]Object %d[/b]  (%.1fm)\n" % [info["localId"], dist]
-	# Object info
-	var p: Vector3 = info["pos"]
-	var s: Vector3 = info["scl"]
-	bb += "pos: (%.1f, %.1f, %.1f)  scl: (%.2f, %.2f, %.2f)\n" % [p.x, p.y, p.z, s.x, s.y, s.z]
-	var mesh_id: String = info["meshId"]
-	if not mesh_id.is_empty():
-		bb += "mesh: %s\n" % mesh_id.substr(0, 8)
+	_inspected_local_id = info["localId"]
+
+	# ── General tab — editable fields (populated async via object_properties_received) ──
+	var cached_name: String = info.get("name", "")
+	var cached_desc: String = info.get("description", "")
+	_name_edit.text = cached_name
+	_name_edit.placeholder_text = "loading..." if cached_name.is_empty() else ""
+	_desc_edit.text = cached_desc
+	_desc_edit.placeholder_text = "loading..." if cached_desc.is_empty() else ""
+
+	# ── General tab — read-only info ──
+	var gb := ""
+	var uuid: String = info.get("uuid", "")
+	if not uuid.is_empty():
+		gb += "uuid: [color=#aaaaff]%s[/color]\n" % uuid
+	gb += "localId: %d  (%.1fm away)\n" % [info["localId"], dist]
+
 	var parent_id: int = info["parentId"]
 	if parent_id > 0:
-		bb += "parent: %d\n" % parent_id
-	var surf_count: int = info["surfaceCount"]
-	bb += "surfaces: %d  faces: %d\n" % [surf_count, faces.size()]
+		gb += "parent: %d\n" % parent_id
 
-	# Per-face info (only show faces within actual surface count)
+	var p: Vector3 = info["pos"]
+	var r: Quaternion = info.get("rot", Quaternion.IDENTITY)
+	var s: Vector3 = info["scl"]
+	gb += "\npos: (%.2f, %.2f, %.2f)\n" % [p.x, p.y, p.z]
+	gb += "rot: (%.3f, %.3f, %.3f, %.3f)\n" % [r.x, r.y, r.z, r.w]
+	gb += "scl: (%.3f, %.3f, %.3f)\n" % [s.x, s.y, s.z]
+
+	var mesh_id: String = info["meshId"]
+	if not mesh_id.is_empty():
+		gb += "\nmesh: [color=#aaaaff]%s[/color]\n" % mesh_id
+
+	var surf_count: int = info["surfaceCount"]
+	gb += "surfaces: %d  faces: %d\n" % [surf_count, faces.size()]
+
+	_general_label.text = gb
+
+	# ── Faces tab ──
+	var fb := ""
 	for fi: Dictionary in faces:
 		var idx: int = int(fi.get("faceIndex", fi.get("index", -1)))
 		if surf_count > 0 and idx >= surf_count:
@@ -429,54 +562,58 @@ func _show_debug_tooltip(screen_pos: Vector2, dist: float, info: Dictionary, fac
 		var color_raw = fi.get("color", [1.0, 1.0, 1.0, 1.0])
 		var color_hex: String
 		if color_raw is Array and color_raw.size() >= 3:
-			var r := clampi(int(float(color_raw[0]) * 255), 0, 255)
-			var g := clampi(int(float(color_raw[1]) * 255), 0, 255)
-			var b := clampi(int(float(color_raw[2]) * 255), 0, 255)
-			color_hex = "%02x%02x%02x" % [r, g, b]
+			var rv := clampi(int(float(color_raw[0]) * 255), 0, 255)
+			var gv := clampi(int(float(color_raw[1]) * 255), 0, 255)
+			var bv := clampi(int(float(color_raw[2]) * 255), 0, 255)
+			color_hex = "%02x%02x%02x" % [rv, gv, bv]
 		else:
 			color_hex = str(color_raw)
 		var am: int = int(fi.get("alphaMode", -1))
-		var fb: bool = fi.get("fullBright", false)
+		var full_bright: bool = fi.get("fullBright", false)
 		var ds: bool = fi.get("doubleSided", false)
 		var is_pbr: bool = fi.get("isPBR", false)
 
-		bb += "\n[b]Face %d[/b]  tex: [color=#aaaaff]%s[/color]\n" % [idx, tid.substr(0, 8) if tid.length() >= 8 else tid]
-		bb += "  map: %s" % _MAPPING_NAMES.get(mt, str(mt))
-		bb += "  rep: %.2f,%.2f" % [float(uv.get("repeatU", 1.0)), float(uv.get("repeatV", 1.0))]
-		bb += "  off: %.2f,%.2f" % [float(uv.get("offsetU", 0.0)), float(uv.get("offsetV", 0.0))]
+		fb += "[b]Face %d[/b]  tex: [color=#aaaaff]%s[/color]\n" % [idx, tid.substr(0, 8) if tid.length() >= 8 else tid]
+		fb += "  map: %s" % _MAPPING_NAMES.get(mt, str(mt))
+		fb += "  rep: %.2f,%.2f" % [float(uv.get("repeatU", 1.0)), float(uv.get("repeatV", 1.0))]
+		fb += "  off: %.2f,%.2f" % [float(uv.get("offsetU", 0.0)), float(uv.get("offsetV", 0.0))]
 		var rot_val: float = float(uv.get("rotation", 0.0))
 		if absf(rot_val) > 0.001:
-			bb += "  rot: %.2f" % rot_val
-		bb += "\n"
-		bb += "  color: #%s  alpha: %s" % [color_hex, _ALPHA_NAMES.get(am, str(am))]
-		if fb:
-			bb += "  [color=#ffff88]fullBright[/color]"
+			fb += "  rot: %.2f" % rot_val
+		fb += "\n"
+		fb += "  color: #%s  alpha: %s" % [color_hex, _ALPHA_NAMES.get(am, str(am))]
+		if full_bright:
+			fb += "  [color=#ffff88]fullBright[/color]"
 		if ds:
-			bb += "  [color=#88ffff]doubleSided[/color]"
-		bb += "\n"
+			fb += "  [color=#88ffff]doubleSided[/color]"
+		fb += "\n"
 
 		# PBR section
 		if is_pbr:
 			var pbr: Dictionary = fi.get("pbr", {})
-			bb += "  [color=#88ff88][b]PBR[/b][/color]"
+			fb += "  [color=#88ff88][b]PBR[/b][/color]"
 			var nid: String = pbr.get("normalTextureId", "")
 			var oid: String = pbr.get("ormTextureId", "")
 			var eid: String = pbr.get("emissiveTextureId", "")
 			if not nid.is_empty():
-				bb += "  nrm: %s" % nid.substr(0, 8)
+				fb += "  nrm: %s" % nid.substr(0, 8)
 			if not oid.is_empty():
-				bb += "  orm: %s" % oid.substr(0, 8)
+				fb += "  orm: %s" % oid.substr(0, 8)
 			if not eid.is_empty():
-				bb += "  emi: %s" % eid.substr(0, 8)
+				fb += "  emi: %s" % eid.substr(0, 8)
 			var metallic: float = float(pbr.get("metallicFactor", 0.0))
 			var roughness: float = float(pbr.get("roughnessFactor", 1.0))
-			bb += "  met: %.2f  rgh: %.2f" % [metallic, roughness]
+			fb += "  met: %.2f  rgh: %.2f" % [metallic, roughness]
 			var ef: Array = pbr.get("emissiveFactor", [])
 			if ef.size() >= 3:
-				bb += "  emF: (%.1f,%.1f,%.1f)" % [float(ef[0]), float(ef[1]), float(ef[2])]
-			bb += "\n"
+				fb += "  emF: (%.1f,%.1f,%.1f)" % [float(ef[0]), float(ef[1]), float(ef[2])]
+			fb += "\n"
+		fb += "\n"
 
-	_tooltip_label.text = bb
+	if fb.is_empty():
+		fb = "[i]No face data[/i]\n"
+	_faces_label.text = fb
+
 	_tooltip_panel.visible = true
 	_tooltip_visible = true
 
@@ -492,6 +629,46 @@ func _show_debug_tooltip(screen_pos: Vector2, dist: float, info: Dictionary, fac
 	_tooltip_panel.position = pos
 
 
+func _on_object_properties_received(local_id: int, obj_name: String, obj_desc: String) -> void:
+	if local_id == _inspected_local_id and _tooltip_visible:
+		_name_edit.text = obj_name
+		_desc_edit.text = obj_desc
+
+
+func _on_name_submitted(new_name: String) -> void:
+	if _inspected_local_id < 0:
+		return
+	main_node.send_message({ "type": "set_object_name", "localId": _inspected_local_id, "name": new_name })
+	# Update local cache
+	if scene_manager and scene_manager.object_meta.has(_inspected_local_id):
+		scene_manager.object_meta[_inspected_local_id]["name"] = new_name
+	_name_edit.release_focus()
+
+
+func _on_desc_submitted(new_desc: String) -> void:
+	if _inspected_local_id < 0:
+		return
+	main_node.send_message({ "type": "set_object_description", "localId": _inspected_local_id, "description": new_desc })
+	if scene_manager and scene_manager.object_meta.has(_inspected_local_id):
+		scene_manager.object_meta[_inspected_local_id]["description"] = new_desc
+	_desc_edit.release_focus()
+
+
+func _is_click_on_panel(screen_pos: Vector2) -> bool:
+	if not _tooltip_panel or not _tooltip_panel.visible:
+		return false
+	var rect := Rect2(_tooltip_panel.global_position, _tooltip_panel.size)
+	return rect.has_point(screen_pos)
+
+
+func _is_click_on_drag_bar(screen_pos: Vector2) -> bool:
+	if not _tooltip_panel or not _tooltip_panel.visible:
+		return false
+	# Drag bar is the top 20px of the panel (14px bar + padding)
+	var drag_rect := Rect2(_tooltip_panel.global_position, Vector2(_tooltip_panel.size.x, 20))
+	return drag_rect.has_point(screen_pos)
+
+
 func _clear_highlight() -> void:
 	if _highlighted_rid.is_valid():
 		RenderingServer.instance_geometry_set_material_overlay(_highlighted_rid, RID())
@@ -502,6 +679,8 @@ func _hide_debug_tooltip() -> void:
 	_clear_highlight()
 	_tooltip_panel.visible = false
 	_tooltip_visible = false
+	_inspected_local_id = -1
+	_dragging_panel = false
 
 
 func _set_shadow_quality_vr() -> void:

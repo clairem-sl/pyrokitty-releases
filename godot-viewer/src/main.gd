@@ -227,7 +227,7 @@ func _process(_delta: float) -> void:
 ## High-priority messages are dispatched immediately, bypassing the time-budgeted queue.
 func _is_high_priority(text: String) -> bool:
 	var prefix := text.left(40)
-	return '"avatar_' in prefix or '"self_id"' in prefix or '"object_update_p"' in prefix
+	return '"avatar_' in prefix or '"self_id"' in prefix or '"object_update_p' in prefix
 
 
 func _handle_message(text: String) -> void:
@@ -269,6 +269,8 @@ func _handle_message(text: String) -> void:
 			scene_manager.handle_environment_data(msg)
 		"planar_debug":
 			scene_manager.set_planar_debug_mode(msg.get("mode", 0))
+		"object_properties":
+			scene_manager.handle_object_properties(msg)
 		_:
 			push_warning("[Main] Unknown message type: %s" % msg_type)
 

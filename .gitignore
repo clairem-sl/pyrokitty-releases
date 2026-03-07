@@ -156,3 +156,9 @@ mobile_decompile/
 # PyroKitty build artifacts
 dist/
 
+# animesh
+test-output/
+animesh.md
+download-rigged-*
+inspect-mesh-skin.ts
+test-rigged-glb.ts

@@ -21,7 +21,7 @@ const PATH_LINE = 0x10
 const PATH_CIRCLE = 0x20
 
 const MIN_DETAIL_FACES = 6
-const DETAIL = 1.0  # LOD detail level (1.0 = medium)
+const DETAIL = 4.0  # LOD detail level (matches Firestorm highest LOD; scales: 1.0, 1.5, 2.5, 4.0)
 
 const TABLE_SCALE := [1.0, 1.0, 1.0, 0.5, 0.707107, 0.53, 0.525, 0.5]
 

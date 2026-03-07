@@ -11,7 +11,10 @@ import { app } from 'electron';
 import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import type { Bot } from '../../node-metaverse/dist/lib';
-import { ControlFlags, SculptType } from '../../node-metaverse/dist/lib';
+import { ControlFlags, SculptType, PacketFlags } from '../../node-metaverse/dist/lib';
+import { ObjectSelectMessage } from '../../node-metaverse/lib/classes/messages/ObjectSelect';
+import { ObjectDeselectMessage } from '../../node-metaverse/lib/classes/messages/ObjectDeselect';
+import { SetAlwaysRunMessage } from '../../node-metaverse/lib/classes/messages/SetAlwaysRun';
 import type { Subscription } from 'rxjs';
 import { MeshFetchQueue } from './mesh-fetch-queue';
 import { TextureFetchQueue } from './texture-fetch-queue';
@@ -90,6 +93,7 @@ export class GodotBridge extends EventEmitter {
   private trackedAvatars = new Set<string>(); // avatar UUIDs we've sent
   private updateBuffer: Map<number, any> = new Map(); // coalesced terse updates
   private updateSeq: Map<number, number> = new Map(); // latest sequence number per localId
+  private recentTerse = new Set<number>(); // objects with terse updates since last flush
   private updateTimer: ReturnType<typeof setTimeout> | null = null;
   private avatarUpdateBuffer: Map<string, any> = new Map(); // coalesced avatar terse updates
   private avatarUpdateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -103,6 +107,7 @@ export class GodotBridge extends EventEmitter {
   private connected = false;
   private _dbgMoving = false;           // for movement freeze diagnostics
   private _dbgAgentNullAt = 0;         // timestamp of first agent-null drop in current run
+  private _lastRunning = false;        // track running state for SetAlwaysRun
   private assetReadyBuffer: object[] = [];
   private assetReadyTimer: ReturnType<typeof setTimeout> | null = null;
   private lastGodotStats: any = null;
@@ -414,6 +419,15 @@ export class GodotBridge extends EventEmitter {
                   case 'pipeline_stats':
                     this.lastGodotStats = msg;
                     break;
+                  case 'request_object_properties':
+                    this.handleRequestObjectProperties(msg.localId);
+                    break;
+                  case 'set_object_name':
+                    this.handleSetObjectName(msg.localId, msg.name);
+                    break;
+                  case 'set_object_description':
+                    this.handleSetObjectDescription(msg.localId, msg.description);
+                    break;
                   case 'quit':
                     console.log('[GodotBridge] Godot requested immediate quit');
                     this.stop();
@@ -456,9 +470,14 @@ export class GodotBridge extends EventEmitter {
     }
 
     // Init mesh fetch queue
-    this.meshFetchQueue = new MeshFetchQueue(this.bot, (meshUuid, cachePath) => {
+    this.meshFetchQueue = new MeshFetchQueue(this.bot, (meshUuid, cachePath, isRigged, jointNames) => {
       const fwdPath = cachePath.replace(/\\/g, '/');
-      this.queueAssetReady({ type: 'mesh_ready', meshId: meshUuid, path: fwdPath });
+      const msg: any = { type: 'mesh_ready', meshId: meshUuid, path: fwdPath };
+      if (isRigged) {
+        msg.isRigged = true;
+        msg.jointNames = jointNames;
+      }
+      this.queueAssetReady(msg);
     });
 
     // Init texture fetch queue
@@ -1240,13 +1259,20 @@ export class GodotBridge extends EventEmitter {
       // Object terse updates
       if (!this.trackedObjects.has(obj.ID)) return;
 
-      // Drop stale updates — only accept newer sequence numbers
       const seq = event.sequenceNumber;
       const prevSeq = this.updateSeq.get(obj.ID) ?? -1;
+      const uid = obj.FullID?.toString() ?? '';
+      const pos = obj.Position;
+
+      // Log ALL updates for debug target
+      if (uid === 'bbafd512-4ab8-9878-0e68-eba086760821') {
+        console.log(`[ObjUpdate] TERSE localId=${obj.ID} seq=${seq} prevSeq=${prevSeq} pos=[${pos?.x.toFixed(2)},${pos?.y.toFixed(2)},${pos?.z.toFixed(2)}] vel=[${obj.Velocity?.x.toFixed(2)},${obj.Velocity?.y.toFixed(2)},${obj.Velocity?.z.toFixed(2)}]`);
+      }
+
+      // Drop stale updates — only accept newer sequence numbers
       if (seq < prevSeq) return;
       this.updateSeq.set(obj.ID, seq);
 
-      const pos = obj.Position;
       const rot = obj.Rotation;
       const scl = obj.Scale;
       const vel = obj.Velocity;
@@ -1262,6 +1288,7 @@ export class GodotBridge extends EventEmitter {
         ...(accel ? { acceleration: [accel.x, accel.y, accel.z] } : {}),
         ...(angVel ? { angularVelocity: [angVel.x, angVel.y, angVel.z] } : {}),
       });
+      this.recentTerse.add(obj.ID);
 
       // Flush every 16ms (~1 frame) for responsive corrections
       if (!this.updateTimer) {
@@ -1278,13 +1305,20 @@ export class GodotBridge extends EventEmitter {
       const obj = event.object;
       if (!this.trackedObjects.has(obj.ID)) return;
 
-      // Drop stale updates — only accept newer sequence numbers
       const seq = event.sequenceNumber;
       const prevSeq = this.updateSeq.get(obj.ID) ?? -1;
+      const uid = obj.FullID?.toString() ?? '';
+      const pos = obj.Position;
+
+      // Log ALL updates for debug target
+      if (uid === 'bbafd512-4ab8-9878-0e68-eba086760821') {
+        const terseGuard = this.updateBuffer.get(obj.ID)?.velocity || this.recentTerse.has(obj.ID);
+        console.log(`[ObjUpdate] FULL localId=${obj.ID} seq=${seq} prevSeq=${prevSeq} pos=[${pos?.x.toFixed(2)},${pos?.y.toFixed(2)},${pos?.z.toFixed(2)}] vel=[${obj.Velocity?.x.toFixed(2)},${obj.Velocity?.y.toFixed(2)},${obj.Velocity?.z.toFixed(2)}] terseGuard=${terseGuard}`);
+      }
+
+      // Drop stale updates — only accept newer sequence numbers
       if (seq < prevSeq) return;
       this.updateSeq.set(obj.ID, seq);
-
-      const pos = obj.Position;
       const rot = obj.Rotation;
       const scl = obj.Scale;
       const vel = obj.Velocity;
@@ -1303,18 +1337,31 @@ export class GodotBridge extends EventEmitter {
         this.objectsWithLights.delete(obj.ID);
       }
 
-      // Merge with existing buffer entry — a full update may carry light/scale
-      // changes while a terse update already set fresher position/velocity.
+      // If a terse update recently set motion data, don't overwrite position/velocity —
+      // full/compressed updates can carry staler position than the latest terse update.
       const existing = this.updateBuffer.get(obj.ID);
+      const terseHasMotion = existing?.velocity || this.recentTerse.has(obj.ID);
+      if (terseHasMotion && pos) {
+        console.log(`[ObjUpdate] FULL SKIP POS localId=${obj.ID} uuid=${obj.FullID} seq=${seq} (terse guard)`);
+      } else if (pos) {
+        const ex = existing?.position;
+        if (ex) {
+          const dx = pos.x - ex[0], dy = pos.y - ex[1], dz = pos.z - ex[2];
+          const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+          if (dist > 0.5) {
+            console.log(`[ObjUpdate] FULL JUMP localId=${obj.ID} uuid=${obj.FullID} seq=${seq} dist=${dist.toFixed(2)}`);
+          }
+        }
+      }
       this.updateBuffer.set(obj.ID, {
         ...(existing || {}),
         localId: obj.ID,
-        ...(pos ? { position: [pos.x, pos.y, pos.z] } : {}),
-        ...(rot ? { rotation: [rot.x, rot.y, rot.z, rot.w] } : {}),
+        ...(!terseHasMotion && pos ? { position: [pos.x, pos.y, pos.z] } : {}),
+        ...(!terseHasMotion && rot ? { rotation: [rot.x, rot.y, rot.z, rot.w] } : {}),
         ...(scl ? { scale: [scl.x, scl.y, scl.z] } : {}),
-        ...(vel ? { velocity: [vel.x, vel.y, vel.z] } : {}),
-        ...(accel ? { acceleration: [accel.x, accel.y, accel.z] } : {}),
-        ...(angVel ? { angularVelocity: [angVel.x, angVel.y, angVel.z] } : {}),
+        ...(!terseHasMotion && vel ? { velocity: [vel.x, vel.y, vel.z] } : {}),
+        ...(!terseHasMotion && accel ? { acceleration: [accel.x, accel.y, accel.z] } : {}),
+        ...(!terseHasMotion && angVel ? { angularVelocity: [angVel.x, angVel.y, angVel.z] } : {}),
         ...lightField,
       });
 
@@ -1374,6 +1421,8 @@ export class GodotBridge extends EventEmitter {
     }, 2000);
   }
 
+  private _debugFlushSeq = 0;
+
   private flushUpdateBuffer(): void {
     if (this.updateBuffer.size === 0) return;
 
@@ -1383,9 +1432,25 @@ export class GodotBridge extends EventEmitter {
     for (const obj of this.updateBuffer.values()) {
       const hasMotion =
         obj.velocity || obj.acceleration || obj.angularVelocity;
+      // Tag each entry with a monotonic flush sequence for bridge↔Godot correlation
+      obj._fseq = ++this._debugFlushSeq;
       (hasMotion ? physics : statics).push(obj);
     }
     this.updateBuffer.clear();
+    this.recentTerse.clear();
+
+    // Log what we're actually flushing for the debug object
+    const debugLocalId = 642829107;
+    for (const obj of physics) {
+      if (obj.localId === debugLocalId) {
+        console.log(`[ObjFlush] PHYSICS fseq=${obj._fseq} pos=[${obj.position?.[0]?.toFixed(2)},${obj.position?.[1]?.toFixed(2)},${obj.position?.[2]?.toFixed(2)}] vel=[${obj.velocity?.[0]?.toFixed(2)},${obj.velocity?.[1]?.toFixed(2)},${obj.velocity?.[2]?.toFixed(2)}]`);
+      }
+    }
+    for (const obj of statics) {
+      if (obj.localId === debugLocalId) {
+        console.log(`[ObjFlush] STATIC fseq=${obj._fseq} pos=[${obj.position?.[0]?.toFixed(2)},${obj.position?.[1]?.toFixed(2)},${obj.position?.[2]?.toFixed(2)}]`);
+      }
+    }
 
     if (physics.length > 0) {
       this.send({ type: 'object_update_physics', objects: physics });
@@ -1514,14 +1579,15 @@ export class GodotBridge extends EventEmitter {
       this._dbgMoving = false;
     }
 
-    // Forward/backward only — A/D rotation is handled via body quaternion
+    // Forward/backward — always pair with FAST_AT (matching Firestorm llagent.cpp:774)
+    // The server uses SetAlwaysRun state to decide actual speed, not FAST_AT alone.
     if (msg.forward) {
-      agent.setControlFlag(ControlFlags.AGENT_CONTROL_AT_POS);
+      agent.setControlFlag(ControlFlags.AGENT_CONTROL_AT_POS | ControlFlags.AGENT_CONTROL_FAST_AT);
     } else {
       agent.clearControlFlag(ControlFlags.AGENT_CONTROL_AT_POS);
     }
     if (msg.backward) {
-      agent.setControlFlag(ControlFlags.AGENT_CONTROL_AT_NEG);
+      agent.setControlFlag(ControlFlags.AGENT_CONTROL_AT_NEG | ControlFlags.AGENT_CONTROL_FAST_AT);
     } else {
       agent.clearControlFlag(ControlFlags.AGENT_CONTROL_AT_NEG);
     }
@@ -1548,11 +1614,21 @@ export class GodotBridge extends EventEmitter {
       agent.clearControlFlag(ControlFlags.AGENT_CONTROL_LEFT_NEG);
     }
 
-    // Run (double-tap W or Ctrl+R always-run)
-    if (msg.running) {
-      agent.setControlFlag(ControlFlags.AGENT_CONTROL_FAST_AT);
-    } else {
+    // Run (double-tap W or Ctrl+R always-run) — send SetAlwaysRun on change
+    const running = !!msg.running;
+    if (!msg.forward && !msg.backward) {
       agent.clearControlFlag(ControlFlags.AGENT_CONTROL_FAST_AT);
+    }
+    if (running !== this._lastRunning) {
+      console.log(`[GodotBridge] Running changed: ${running} — sending SetAlwaysRun`);
+      this._lastRunning = running;
+      const runMsg = new SetAlwaysRunMessage();
+      runMsg.AgentData = {
+        AgentID: this.bot.agent.agentID,
+        SessionID: this.bot.currentRegion!.circuit.sessionID,
+        AlwaysRun: running,
+      };
+      this.bot.currentRegion!.circuit.sendMessage(runMsg, PacketFlags.Reliable);
     }
 
     // Fly toggle
@@ -1585,6 +1661,81 @@ export class GodotBridge extends EventEmitter {
     }
 
     agent.sendAgentUpdate();
+  }
+
+  private async handleRequestObjectProperties(localId: number): Promise<void> {
+    try {
+      const region = this.bot.currentRegion;
+      if (!region) return;
+      const obj = region.objects?.getObjectByLocalID(localId);
+      if (!obj) {
+        this.send({ type: 'object_properties', localId, name: '', description: '' });
+        return;
+      }
+
+      // If already resolved, send immediately
+      if (obj.resolvedAt) {
+        this.send({ type: 'object_properties', localId, name: obj.name || '', description: obj.description || '' });
+        return;
+      }
+
+      // Send ObjectSelect to request properties from server
+      const selectMsg = new ObjectSelectMessage();
+      selectMsg.AgentData = {
+        AgentID: region.agent.agentID,
+        SessionID: region.circuit.sessionID,
+      };
+      selectMsg.ObjectData = [{ ObjectLocalID: localId }];
+      region.circuit.sendMessage(selectMsg, PacketFlags.Reliable);
+
+      // Poll for properties (server usually responds within 100-500ms)
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 100));
+        if (obj.resolvedAt || obj.name !== undefined) break;
+      }
+
+      // Deselect
+      const deselectMsg = new ObjectDeselectMessage();
+      deselectMsg.AgentData = {
+        AgentID: region.agent.agentID,
+        SessionID: region.circuit.sessionID,
+      };
+      deselectMsg.ObjectData = [{ ObjectLocalID: localId }];
+      region.circuit.sendMessage(deselectMsg, PacketFlags.Reliable);
+
+      this.send({ type: 'object_properties', localId, name: obj.name || '', description: obj.description || '' });
+    } catch (e) {
+      console.error(`[GodotBridge] request_object_properties failed for ${localId}:`, e);
+      this.send({ type: 'object_properties', localId, name: '', description: '' });
+    }
+  }
+
+  private async handleSetObjectName(localId: number, name: string): Promise<void> {
+    try {
+      const obj = this.bot.currentRegion?.objects?.getObjectByLocalID(localId);
+      if (!obj) {
+        console.warn(`[GodotBridge] set_object_name: object ${localId} not found`);
+        return;
+      }
+      await obj.setName(name);
+      console.log(`[GodotBridge] Renamed object ${localId} to "${name}"`);
+    } catch (e) {
+      console.error(`[GodotBridge] set_object_name failed for ${localId}:`, e);
+    }
+  }
+
+  private async handleSetObjectDescription(localId: number, description: string): Promise<void> {
+    try {
+      const obj = this.bot.currentRegion?.objects?.getObjectByLocalID(localId);
+      if (!obj) {
+        console.warn(`[GodotBridge] set_object_description: object ${localId} not found`);
+        return;
+      }
+      await obj.setDescription(description);
+      console.log(`[GodotBridge] Set description on object ${localId}`);
+    } catch (e) {
+      console.error(`[GodotBridge] set_object_description failed for ${localId}:`, e);
+    }
   }
 
   stop(): void {
@@ -1656,6 +1807,7 @@ export class GodotBridge extends EventEmitter {
     this.trackedObjects.clear();
     this.objectsWithLights.clear();
     this.updateSeq.clear();
+    this.recentTerse.clear();
     this.trackedAvatars.clear();
     this.updateBuffer.clear();
     this.avatarUpdateBuffer.clear();

@@ -94,6 +94,26 @@ export class Agent {
 
     private controlFlags: ControlFlags = 0;
 
+    // Animation transition tracking (mirrors Firestorm's FSPreJumpDelayMs)
+    private _transitionStartMs: number = 0;
+    private _inTransition: boolean = false;
+    private static readonly TRANSITION_DELAY_MS = 100; // ms before sending FINISH_ANIM
+    private static readonly TRANSITION_ANIMS = new Set<string>([
+        BuiltInAnimations.STANDUP,
+        BuiltInAnimations.PRE_JUMP,
+        BuiltInAnimations.LAND,
+        BuiltInAnimations.MEDIUM_LAND,
+        BuiltInAnimations.FALLDOWN,
+    ]);
+    // Reverse lookup: UUID -> name for logging
+    private static readonly _animNameLookup: Map<string, string> = (() => {
+        const m = new Map<string, string>();
+        for (const [name, uuid] of Object.entries(BuiltInAnimations)) {
+            if (typeof uuid === 'string') m.set(uuid, name);
+        }
+        return m;
+    })();
+
     private readonly clientEvents: ClientEvents;
     private animSubscription?: Subscription;
     private readonly chatSessions = new Map<string, {
@@ -351,6 +371,18 @@ export class Agent {
         if (selfAvatar?.position) {
             this.cameraCenter = selfAvatar.position;
         }
+
+        // If in a transition animation and delay has elapsed, inject FINISH_ANIM
+        // (mirrors Firestorm's FSPreJumpDelayMs timer in propagateControlFlags)
+        let flags = this.controlFlags;
+        if (this._inTransition) {
+            const elapsed = Date.now() - this._transitionStartMs;
+            if (elapsed >= Agent.TRANSITION_DELAY_MS) {
+                flags |= ControlFlags.AGENT_CONTROL_FINISH_ANIM;
+                console.log(`[Agent] Injecting FINISH_ANIM (elapsed=${elapsed}ms, flags=0x${flags.toString(16)})`);
+            }
+        }
+
         const circuit = this.currentRegion.circuit;
         const agentUpdate: AgentUpdateMessage = new AgentUpdateMessage();
         agentUpdate.AgentData = {
@@ -364,7 +396,7 @@ export class Agent {
             CameraLeftAxis: this.cameraLeftAxis,
             CameraUpAxis: this.cameraUpAxis,
             Far: this.cameraFar,
-            ControlFlags: this.controlFlags,
+            ControlFlags: flags,
             Flags: AgentFlags.None
         };
         circuit.sendMessage(agentUpdate, 0 as PacketFlags);
@@ -418,20 +450,29 @@ export class Agent {
         else if (packet.message.id === Message.AvatarAnimation) {
             const animMsg = packet.message as AvatarAnimationMessage;
             if (animMsg.Sender.ID.toString() === this.agentID.toString()) {
+                // Build reverse lookup for readable names
+                const animNames: string[] = [];
+                let hasTransition = false;
+                const transitionNames: string[] = [];
                 for (const anim of animMsg.AnimationList) {
-                    const a = anim.AnimID.toString() as BuiltInAnimations;
-                    if (a === BuiltInAnimations.STANDUP ||
-                        a === BuiltInAnimations.PRE_JUMP ||
-                        a === BuiltInAnimations.LAND ||
-                        a === BuiltInAnimations.MEDIUM_LAND ||
-                        a === BuiltInAnimations.WALK ||
-                        a === BuiltInAnimations.RUN) {
-                        // Send FINISH_ANIM without clobbering existing control flags
-                        const savedFlags = this.controlFlags;
-                        this.controlFlags = savedFlags | ControlFlags.AGENT_CONTROL_FINISH_ANIM;
-                        this.sendAgentUpdate();
-                        this.controlFlags = savedFlags;
+                    const id = anim.AnimID.toString();
+                    const name = Agent._animNameLookup.get(id) ?? id.substring(0, 8);
+                    animNames.push(name);
+                    if (Agent.TRANSITION_ANIMS.has(id)) {
+                        hasTransition = true;
+                        transitionNames.push(name);
                     }
+                }
+
+                console.log(`[Agent] AvatarAnimation: [${animNames.join(', ')}]${hasTransition ? ` transition=[${transitionNames.join(', ')}]` : ''} inTransition=${this._inTransition}`);
+
+                if (hasTransition && !this._inTransition) {
+                    this._inTransition = true;
+                    this._transitionStartMs = Date.now();
+                    console.log(`[Agent] Transition started — will send FINISH_ANIM after ${Agent.TRANSITION_DELAY_MS}ms`);
+                } else if (!hasTransition && this._inTransition) {
+                    this._inTransition = false;
+                    console.log(`[Agent] Transition cleared after ${Date.now() - this._transitionStartMs}ms`);
                 }
             }
         }

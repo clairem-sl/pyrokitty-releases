@@ -6,10 +6,11 @@
 import { AssetType, LLMesh } from '../../node-metaverse/dist/lib';
 import type { Bot } from '../../node-metaverse/dist/lib';
 import { isMeshCached, meshCachePath, ensureMeshCached } from './mesh-converter';
+import type { MeshConvertResult } from './mesh-converter';
 
 const MAX_CONCURRENT = 4;
 
-export type MeshReadyCallback = (meshUuid: string, cachePath: string) => void;
+export type MeshReadyCallback = (meshUuid: string, cachePath: string, isRigged?: boolean, jointNames?: string[]) => void;
 
 export class MeshFetchQueue {
   private bot: Bot;
@@ -73,10 +74,10 @@ export class MeshFetchQueue {
         AssetType.Mesh, meshUuid
       );
       const llmesh = await LLMesh.from(buf);
-      const cachePath = await ensureMeshCached(meshUuid, llmesh);
+      const result = await ensureMeshCached(meshUuid, llmesh);
       if (!this.destroyed) {
         this.notified.add(meshUuid);
-        this.onReady(meshUuid, cachePath);
+        this.onReady(meshUuid, result.cachePath, result.isRigged, result.jointNames);
       }
     } catch (err) {
       console.error(`[MeshFetchQueue] Failed ${meshUuid}:`, (err as Error).message || err);

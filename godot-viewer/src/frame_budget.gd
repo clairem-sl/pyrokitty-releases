@@ -72,3 +72,7 @@ const MAX_ACTIVE_LIGHTS: int = 64
 ## Distance beyond which lights are culled, and how often the cull pass runs.
 const LIGHT_CULL_DISTANCE: float = 64.0
 const LIGHT_CULL_INTERVAL: float = 2.0
+
+## Max spot lights that cast shadows (ranked by distance each cull pass).
+## Omni lights never cast shadows (cubemap shadow maps are too expensive).
+const MAX_SHADOW_LIGHTS: int = 4

@@ -274,6 +274,11 @@ export class MetaverseConnection extends EventEmitter {
         return;
       }
 
+      // Server sends out-of-range chat with empty message body — skip it
+      if (!event.message) {
+        return;
+      }
+
       const chatTypeMap: Record<number, 'whisper' | 'normal' | 'shout'> = {
         0: 'whisper',
         1: 'normal',
@@ -285,6 +290,8 @@ export class MetaverseConnection extends EventEmitter {
         [ChatSourceType.Object]: 'object',
         [ChatSourceType.System]: 'system',
       };
+
+      console.log(`[NearbyChat] type=${event.chatType} src=${event.sourceType} from="${event.fromName}" msg="${event.message?.substring(0, 80)}"`);
 
       // Skip our own messages - we already emit them locally in sendNearbyChat()
       // This avoids duplicates while still allowing server confirmation
