@@ -171,6 +171,30 @@ else
     echo "  Renderer up to date, skipping..."
 fi
 
+# 1d: Build map renderer (only if source changed)
+if needs_rebuild "src/map-renderer" "dist/map-renderer" "*.ts*"; then
+    echo "  Building map renderer..."
+    npm run build:map
+else
+    echo "  Map renderer up to date, skipping..."
+fi
+
+# 1e: Build GPU texture compressor (only if source changed)
+if needs_rebuild "src/gpu-compress" "dist/gpu-compress" "*.ts"; then
+    echo "  Building GPU compressor..."
+    npm run build:gpu-compress
+else
+    echo "  GPU compressor up to date, skipping..."
+fi
+
+# 1f: Build sound player (only if source changed)
+if needs_rebuild "src/sound-player" "dist/sound-player" "*.ts"; then
+    echo "  Building sound player..."
+    npm run build:sound-player
+else
+    echo "  Sound player up to date, skipping..."
+fi
+
 # Step 2: Copy viewer to staging
 echo ""
 echo "Step 2: Copying viewer to staging area..."
@@ -222,18 +246,8 @@ GODOT_SRC="$ROOT_DIR/godot-viewer"
 GODOT_STAGING="$ELECTRON_DIR/godot-viewer-staging"
 
 if [ -d "$GODOT_SRC" ]; then
-    NEEDS_GODOT=false
-
-    # Re-stage if forced, staging missing, or any project source file changed
-    GODOT_SENTINEL="$GODOT_STAGING/project.godot"
-    if [ "$FORCE_REBUILD" = true ] || [ ! -f "$GODOT_SENTINEL" ] || \
-       [ -n "$(find "$GODOT_SRC" -maxdepth 2 -type f \( -name "*.gd" -o -name "*.tscn" -o -name "*.gdshader" -o -name "*.tres" -o -name "project.godot" -o -name "godot-version.txt" \) -newer "$GODOT_SENTINEL" 2>/dev/null | head -1)" ]; then
-        NEEDS_GODOT=true
-    fi
-
-    if [ "$NEEDS_GODOT" = true ]; then
-        rm -rf "$GODOT_STAGING"
-        mkdir -p "$GODOT_STAGING"
+    rm -rf "$GODOT_STAGING"
+    mkdir -p "$GODOT_STAGING"
 
         # Copy Godot engine
         echo "  Copying Godot engine..."
@@ -252,15 +266,27 @@ if [ -d "$GODOT_SRC" ]; then
             cp -r "$GODOT_SRC/addons" "$GODOT_STAGING/"
         fi
 
-        # Copy OpenXR action map (required for VR controller bindings)
-        if [ -f "$GODOT_SRC/openxr_action_map.tres" ]; then
-            cp "$GODOT_SRC/openxr_action_map.tres" "$GODOT_STAGING/"
+        # Copy loose project files (icon, shaders, OpenXR action map)
+        for f in icon.png icon.png.import openxr_action_map.tres; do
+            if [ -f "$GODOT_SRC/$f" ]; then
+                cp "$GODOT_SRC/$f" "$GODOT_STAGING/"
+            fi
+        done
+        if [ -d "$GODOT_SRC/shaders" ]; then
+            cp -r "$GODOT_SRC/shaders" "$GODOT_STAGING/"
         fi
 
-        echo "  Godot staging complete: $(du -sh "$GODOT_STAGING" | cut -f1)"
-    else
-        echo "  Godot staging up to date, skipping..."
-    fi
+        # Run headless import so .godot/imported/ gets populated
+        # (OceanFFT compute shaders need this to compile .glsl → SPIR-V)
+        echo "  Running Godot import pass..."
+        GODOT_EXE="$GODOT_STAGING/$GODOT_DIR/${GODOT_DIR}_console.exe"
+        "$GODOT_EXE" --import --path "$GODOT_STAGING" || true
+        printf '\033[0m'
+
+        # Remove editor metadata (contains absolute dev paths)
+        rm -rf "$GODOT_STAGING/.godot/editor"
+
+    echo "  Godot staging complete: $(du -sh "$GODOT_STAGING" | cut -f1)"
 else
     echo "  WARNING: Godot viewer not found at $GODOT_SRC, skipping..."
 fi
@@ -285,9 +311,15 @@ else
     echo "  Voice staging up to date, skipping..."
 fi
 
-# Step 5: Package with electron-builder
+# Step 5: Strip source maps
 echo ""
-echo "Step 5: Packaging with electron-builder..."
+echo "Step 5: Stripping source maps..."
+find "$ELECTRON_DIR/dist" -name "*.map" -delete
+echo "  Done."
+
+# Step 6: Package with electron-builder
+echo ""
+echo "Step 6: Packaging with electron-builder..."
 cd "$ELECTRON_DIR"
 npm run dist
 

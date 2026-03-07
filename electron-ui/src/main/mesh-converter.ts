@@ -95,6 +95,26 @@ function parseSkeletonXml(xml: string): Map<string, SkeletonJoint> {
   return joints;
 }
 
+// --- Extract joint world position from SL row-major IBM ---
+
+/**
+ * Given an SL row-major inverse bind matrix (16 floats), extract the joint's
+ * bind-pose world position in SL coordinates.
+ *
+ * IBM = W^{-1} where W is the joint's world transform.
+ * For a rigid transform W with rotation R and translation t:
+ *   IBM upper-left 3×3 = R^T,  IBM row 3 = -t * R^T
+ * So:  t = -(IBM_row3) * (IBM_upper3x3)^T = -(IBM_row3) * R
+ *   t[i] = -(m[12]*m[i] + m[13]*m[4+i] + m[14]*m[8+i])
+ */
+function worldPosFromIBM(m: number[]): [number, number, number] {
+  return [
+    -(m[12] * m[0] + m[13] * m[4] + m[14] * m[8]),
+    -(m[12] * m[1] + m[13] * m[5] + m[14] * m[9]),
+    -(m[12] * m[2] + m[13] * m[6] + m[14] * m[10]),
+  ];
+}
+
 // --- SL↔Godot coordinate transform for 4×4 inverse bind matrices ---
 
 function transformInverseBindMatrix(slRowMajor: number[]): number[] {
@@ -422,6 +442,24 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
       skinJointToOrdered.set(i, oi >= 0 ? oi : 0);
     }
 
+    // --- Compute world positions for all joints ---
+    // For joints with IBMs, derive from IBM (ensures globalTransform * IBM = I at rest).
+    // For ancestor joints not in the skin, accumulate from avatar_skeleton.xml.
+    const worldPositions = new Map<string, [number, number, number]>();
+    for (const jname of orderedJoints) {
+      const skinIdx = jointNames.indexOf(jname);
+      if (skinIdx >= 0 && skin!.inverseBindMatrix[skinIdx]) {
+        worldPositions.set(jname, worldPosFromIBM(skin!.inverseBindMatrix[skinIdx].all()));
+      } else {
+        // Ancestor: accumulate from skeleton hierarchy
+        const sj = skeleton.get(jname);
+        const pp = sj?.parent && worldPositions.has(sj.parent)
+          ? worldPositions.get(sj.parent)! : [0, 0, 0] as [number, number, number];
+        const lp = sj ? sj.pos : [0, 0, 0] as [number, number, number];
+        worldPositions.set(jname, [pp[0] + lp[0], pp[1] + lp[1], pp[2] + lp[2]]);
+      }
+    }
+
     // Create glTF nodes for each joint
     let skeletonRootIdx = -1;
     for (let i = 0; i < orderedJoints.length; i++) {
@@ -429,10 +467,13 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
       const sj = skeleton.get(jname);
       const node: any = { name: jname };
 
-      // Local position: SL (x,y,z) → Godot (x, z, -y)
-      if (sj) {
-        node.translation = [sj.pos[0], sj.pos[2], -sj.pos[1]];
-      }
+      // Local position derived from world positions (SL coords), then convert to Godot
+      const wp = worldPositions.get(jname)!;
+      const pwp = sj?.parent && worldPositions.has(sj.parent)
+        ? worldPositions.get(sj.parent)! : [0, 0, 0];
+      const lx = wp[0] - pwp[0], ly = wp[1] - pwp[1], lz = wp[2] - pwp[2];
+      // SL (x,y,z) → Godot (x, z, -y)
+      node.translation = [lx, lz, -ly];
 
       // Children in the glTF node
       const childNodeIndices: number[] = [];

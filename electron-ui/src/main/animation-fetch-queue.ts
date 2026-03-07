@@ -1,13 +1,25 @@
 /**
  * animation-fetch-queue.ts — Downloads SL animation assets, parses them,
  * and converts to JSON for Godot to build Animation resources.
+ * Parsed animations are cached to disk as JSON for instant replay on subsequent sessions.
  */
 
 import { AssetType } from '../../node-metaverse/dist/lib';
 import type { Bot } from '../../node-metaverse/dist/lib';
 import { LLAnimation } from '../../node-metaverse/lib/classes/LLAnimation';
+import * as fs from 'fs';
+import * as path from 'path';
+import { app } from 'electron';
 
 const MAX_CONCURRENT = 4;
+
+function getCacheDir(): string {
+  return path.join(app.getPath('userData'), 'asset-cache', 'animations');
+}
+
+function animCachePath(animUuid: string): string {
+  return path.join(getCacheDir(), `${animUuid}.json`);
+}
 
 /** Parsed animation data ready for Godot */
 export interface AnimationData {
@@ -55,12 +67,23 @@ export class AnimationFetchQueue {
   request(animUuid: string, localId: number): void {
     if (this.destroyed || this.failed.has(animUuid)) return;
 
-    // Already parsed — notify immediately
+    // Already in memory — notify immediately
     const cached = this.cache.get(animUuid);
     if (cached) {
       this.onReady(animUuid, cached);
       return;
     }
+
+    // On disk — load into memory and notify
+    try {
+      const diskPath = animCachePath(animUuid);
+      if (fs.existsSync(diskPath)) {
+        const data: AnimationData = JSON.parse(fs.readFileSync(diskPath, 'utf8'));
+        this.cache.set(animUuid, data);
+        this.onReady(animUuid, data);
+        return;
+      }
+    } catch { /* corrupt file — fall through to download */ }
 
     // Already queued or in-flight
     if (this.pending.has(animUuid)) {
@@ -94,6 +117,12 @@ export class AnimationFetchQueue {
       const data = convertAnimation(animUuid, anim);
       if (!this.destroyed) {
         this.cache.set(animUuid, data);
+        // Persist to disk
+        try {
+          const dir = getCacheDir();
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(animCachePath(animUuid), JSON.stringify(data));
+        } catch { /* non-fatal */ }
         this.onReady(animUuid, data);
       }
     } catch (err) {

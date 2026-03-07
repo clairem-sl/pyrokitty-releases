@@ -69,6 +69,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const [chatType, setChatType] = useState<'whisper' | 'normal' | 'shout'>('normal');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(0);
+  const savedChatTypeRef = useRef<'whisper' | 'normal' | 'shout' | null>(null);
+  const overrideKeyRef = useRef<string | null>(null);
 
   // Auto-scroll to bottom — instant for bulk loads, smooth for new messages
   useEffect(() => {
@@ -82,14 +84,41 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     e.preventDefault();
     if (!input.trim()) return;
 
-    onSendMessage(input.trim(), showChatTypes ? chatType : undefined);
+    const text = oocMode ? `(( ${input.trim()} ))` : input.trim();
+    onSendMessage(text, showChatTypes ? chatType : undefined);
     setInput('');
   };
+
+  const [oocMode, setOocMode] = useState(false);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
+    }
+    if (!showChatTypes || overrideKeyRef.current !== null) return;
+    if (e.key === 'Shift') {
+      savedChatTypeRef.current = chatType;
+      overrideKeyRef.current = 'Shift';
+      setChatType('whisper');
+    } else if (e.key === 'Control') {
+      savedChatTypeRef.current = chatType;
+      overrideKeyRef.current = 'Control';
+      setChatType('shout');
+    } else if (e.key === 'Alt') {
+      e.preventDefault();
+      savedChatTypeRef.current = chatType;
+      overrideKeyRef.current = 'Alt';
+      setOocMode(true);
+    }
+  };
+
+  const handleKeyUp = (e: React.KeyboardEvent) => {
+    if (e.key === overrideKeyRef.current) {
+      setChatType(savedChatTypeRef.current!);
+      savedChatTypeRef.current = null;
+      overrideKeyRef.current = null;
+      setOocMode(false);
     }
   };
 
@@ -150,7 +179,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          onKeyUp={handleKeyUp}
+          onBlur={() => {
+            if (overrideKeyRef.current !== null) {
+              setChatType(savedChatTypeRef.current!);
+              savedChatTypeRef.current = null;
+              overrideKeyRef.current = null;
+              setOocMode(false);
+            }
+          }}
+          placeholder={oocMode ? '(( OOC ))' : placeholder}
         />
         <Button type="submit" size="sm">
           Send

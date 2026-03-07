@@ -810,7 +810,8 @@ export class MetaverseConnection extends EventEmitter {
         let distGain = 1;
         if (avatarPos && evt.position) {
           const dx = evt.position.x - avatarPos.x, dy = evt.position.y - avatarPos.y, dz = evt.position.z - avatarPos.z;
-          distGain = Math.max(0, 1 - Math.sqrt(dx * dx + dy * dy + dz * dz) / maxDist);
+          const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          distGain = dist > maxDist ? 0 : 1 / Math.max(1, dist);
         }
         const triggerId = this.nextTriggerId--;
         this.triggerSounds.set(triggerId, { baseGain: evt.gain, position: evt.position });
@@ -826,7 +827,8 @@ export class MetaverseConnection extends EventEmitter {
               const op = this.getObjectWorldPosition(obj);
               if (op) {
                 const dx = op.x - avatarPos.x, dy = op.y - avatarPos.y, dz = op.z - avatarPos.z;
-                distGain = Math.max(0, 1 - Math.sqrt(dx * dx + dy * dy + dz * dz) / maxDist);
+                const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                distGain = dist > maxDist ? 0 : 1 / Math.max(1, dist);
               }
             }
           } catch { /* ok */ }

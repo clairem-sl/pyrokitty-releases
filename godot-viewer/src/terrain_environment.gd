@@ -2,12 +2,15 @@ extends RefCounted
 
 ## Terrain heightmap, water (OceanFFT + flat fallback), underwater fog, and sky/environment.
 
+const Ocean3DScript = preload("res://addons/tessarakkt.oceanfft/components/Ocean3D.gd")
+const QuadTree3DScript = preload("res://addons/tessarakkt.oceanfft/components/QuadTree3D.gd")
+
 var sm  # scene_manager reference
 
 var terrain_node: MeshInstance3D
 var water_node: MeshInstance3D  # flat fallback (only if OceanFFT unavailable)
-var _ocean: Ocean3D = null
-var _ocean_quad_tree: QuadTree3D = null
+var _ocean = null  # Ocean3D
+var _ocean_quad_tree = null  # QuadTree3D
 var _ocean_logged_ready: bool = false
 var _water_height: float = 20.0       # SL water surface Y (Godot coords), set by handle_terrain_ready
 var _camera_underwater: bool = false   # true when camera is below water surface
@@ -145,8 +148,8 @@ func _build_water_plane(water_height: float) -> void:
 		return
 
 	# Create Ocean3D resource (FFT simulation)
-	_ocean = Ocean3D.new()
-	_ocean.fft_resolution = Ocean3D.FFTResolution.FFT_128x128
+	_ocean = Ocean3DScript.new()
+	_ocean.fft_resolution = Ocean3DScript.FFTResolution.FFT_128x128
 	_ocean.horizontal_dimension = 256
 	_ocean.wind_speed = 12.0
 	_ocean.wind_direction_degrees = 45.0
@@ -168,12 +171,13 @@ func _build_water_plane(water_height: float) -> void:
 	mat.set_shader_parameter("refraction_factor_max", 0.15)
 
 	# Create QuadTree3D (LOD mesh tiles)
-	_ocean_quad_tree = qt_scene.instantiate() as QuadTree3D
+	_ocean_quad_tree = qt_scene.instantiate()
 	_ocean_quad_tree.lod_level = 5
 	_ocean_quad_tree.quad_size = 4096
 	_ocean_quad_tree.mesh_vertex_resolution = 64
 	_ocean_quad_tree.morph_range = 0.3
-	_ocean_quad_tree.ranges = [48.0, 96.0, 192.0, 384.0, 768.0, 1536.0]
+	var r: Array[float] = [48.0, 96.0, 192.0, 384.0, 768.0, 1536.0]
+	_ocean_quad_tree.ranges = r
 	_ocean_quad_tree.material = mat
 
 	# Position at water height

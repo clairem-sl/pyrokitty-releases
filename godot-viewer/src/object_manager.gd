@@ -143,12 +143,12 @@ func handle_object_create(msg: Dictionary) -> void:
 		sm.add_child(animesh_node)
 		animesh_node.position = rsi.pos
 		animesh_node.quaternion = rsi.rot
-		# SL uses max scale component as uniform scale for animesh (LLControlAvatar)
-		var max_scl := maxf(rsi.scl.x, maxf(rsi.scl.y, rsi.scl.z))
-		animesh_node.scale = Vector3(max_scl, max_scl, max_scl)
+		# SL ControlAvatar uses mScaleConstraintFixup (default 1.0) — prim scale does NOT
+		# affect the rendered animesh character size. The skeleton is at natural bind-pose size.
+		animesh_node.scale = Vector3.ONE
 		sm.animesh_roots[local_id] = animesh_node
 		sm.animesh_root_for[local_id] = local_id
-		print("[Animesh] Root object %d created (uniform scale %.2f)" % [local_id, max_scl])
+		print("[Animesh] Root object %d created" % local_id)
 		# Retroactively check existing children — they may have arrived before the root
 		# and their cached rigged meshes would have skipped _apply_mesh_to_pending
 		if sm.object_children.has(local_id):
@@ -324,9 +324,7 @@ func _sync_animesh_transform(local_id: int, rsi) -> void:
 		if node and is_instance_valid(node):
 			node.position = rsi.pos
 			node.quaternion = rsi.rot
-			# SL uses max scale component as uniform scale for animesh
-			var max_scl := maxf(rsi.scl.x, maxf(rsi.scl.y, rsi.scl.z))
-			node.scale = Vector3(max_scl, max_scl, max_scl)
+			# Scale stays at Vector3.ONE — SL ControlAvatar doesn't scale by prim size
 
 
 # ─── Animesh ─────────────────────────────────────────
@@ -369,10 +367,8 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	# Create a wrapper node for this child's offset transform
 	var wrapper := Node3D.new()
 	wrapper.name = "rigged_%d" % local_id
-	if local_id != animesh_root_id and sm.child_offset_pos.has(local_id):
-		wrapper.position = sm.child_offset_pos[local_id]
-		wrapper.quaternion = sm.child_offset_rot.get(local_id, Quaternion.IDENTITY)
-	# Don't apply prim scale — rigged mesh size is defined by skeleton bind pose
+	# Don't apply linkset child offset — rigged mesh vertices are in skeleton space,
+	# positioned by bone transforms, not the prim's linkset position.
 	var rsi = sm.objects.get(local_id)
 
 	# Reparent skeleton and mesh_instance out of the generated scene into our wrapper
