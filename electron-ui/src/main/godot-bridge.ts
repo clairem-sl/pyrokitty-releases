@@ -26,6 +26,7 @@ import { MaterialFetchQueue, MaterialOverrideData, TextureTransform } from './ma
 import { AnimationFetchQueue } from './animation-fetch-queue';
 import type { AnimationData } from './animation-fetch-queue';
 import { RegionEnvironment } from '../../node-metaverse/dist/lib/classes/public/RegionEnvironment';
+import { Material } from '../../node-metaverse/dist/lib/classes/public/Material';
 import { LLSD } from '../../node-metaverse/dist/lib/classes/llsd/LLSD';
 import { getSavedBounds, saveExternalBounds } from './window-state-manager';
 
@@ -120,6 +121,16 @@ export class GodotBridge extends EventEmitter {
   private pbrFaceCount = 0; // count of faces with PBR overrides
   private deferredTextures = new Map<number, any>(); // localId → obj reference (for re-fetching textures later)
   private animeshObjects = new Map<string, number>(); // UUID → localId for animesh objects
+  // Legacy material cache (diffuseAlphaMode, normMap, specular from SL's RenderMaterials cap)
+  private legacyMaterialCache = new Map<string, {
+    alphaMode: number; alphaCutoff: number;
+    normMap?: string; normRepeatX?: number; normRepeatY?: number;
+    normOffsetX?: number; normOffsetY?: number; normRotation?: number;
+    specExp?: number; envIntensity?: number;
+  }>();
+  private legacyMaterialPending = new Set<string>(); // materialUUIDs queued for fetch
+  private legacyMaterialFetching = false;
+  private legacyMaterialToFaces = new Map<string, { localId: number; faceIndex: number }[]>(); // materialUUID → faces waiting
   private animeshAnimState = new Map<string, { animId: string; sequenceId: number }[]>(); // UUID → latest animation list (buffered from ObjectAnimation before Godot connects)
   private readonly TEXTURE_FETCH_RANGE = 160; // meters — 128m cull + 32m buffer for large prims
   private envTimer: ReturnType<typeof setInterval> | null = null;
@@ -283,14 +294,30 @@ export class GodotBridge extends EventEmitter {
           ? [rgba.getRed(), rgba.getGreen(), rgba.getBlue(), rgba.getAlpha()]
           : [1, 1, 1, 1];
 
+        // Alpha mode priority: PBR glTF override > legacy material > default (-1)
+        let alphaMode = gltfAlpha.get(i)?.mode ?? -1;
+        let alphaCutoff = gltfAlpha.get(i)?.cutoff ?? 0.5;
+        if (alphaMode === -1) {
+          // No PBR alpha mode — check legacy material
+          const matId = face.materialID?.toString();
+          if (matId && matId !== ZERO) {
+            const cached = this.legacyMaterialCache.get(matId);
+            if (cached) {
+              alphaMode = cached.alphaMode;
+              alphaCutoff = cached.alphaCutoff;
+            }
+            // else: will be fetched later and face re-emitted
+          }
+        }
+
         const faceData: any = {
           index: i,
           textureId,
           color,
           fullBright: (face.material & 0x20) !== 0,
           doubleSided: gltfDS.get(i) ?? defaultDS,
-          alphaMode: gltfAlpha.get(i)?.mode ?? -1, // -1=default, 0=opaque, 1=blend, 2=mask
-          alphaCutoff: gltfAlpha.get(i)?.cutoff ?? 0.5,
+          alphaMode, // -1=default, 0=opaque/none, 1=blend, 2=mask, 3=emissive
+          alphaCutoff,
           repeatU: face.repeatU ?? 1,
           repeatV: face.repeatV ?? 1,
           offsetU: face.offsetU ?? 0,
@@ -320,6 +347,26 @@ export class GodotBridge extends EventEmitter {
           if (pbr.roughnessFactor !== undefined) faceData.roughnessFactor = pbr.roughnessFactor;
           if (pbr.emissiveFactor) faceData.emissiveFactor = pbr.emissiveFactor;
           if (pbr.baseColor) faceData.pbrBaseColor = pbr.baseColor;
+        } else {
+          // Legacy material textures — fill normal/roughness only when no PBR is set
+          const matId = face.materialID?.toString();
+          if (matId && matId !== ZERO) {
+            const cached = this.legacyMaterialCache.get(matId);
+            if (cached) {
+              if (cached.normMap) {
+                faceData.normalTextureId = cached.normMap;
+                textureIdSet.add(cached.normMap);
+              }
+              if (cached.specExp != null) {
+                // Blinn-Phong specExp (0-255) → PBR roughness: high shininess = low roughness
+                faceData.roughnessFactor = 1.0 - cached.specExp / 255;
+              }
+              if (cached.envIntensity != null) {
+                // Environment intensity → metallic approximation
+                faceData.metallicFactor = cached.envIntensity / 255;
+              }
+            }
+          }
         }
 
         faces.push(faceData);
@@ -507,13 +554,14 @@ export class GodotBridge extends EventEmitter {
     }
 
     // Init mesh fetch queue
-    this.meshFetchQueue = new MeshFetchQueue(this.bot, (meshUuid, cachePath, isRigged, jointNames) => {
+    this.meshFetchQueue = new MeshFetchQueue(this.bot, (meshUuid, cachePath, isRigged, jointNames, staticCachePath) => {
       const fwdPath = cachePath.replace(/\\/g, '/');
       const msg: any = { type: 'mesh_ready', meshId: meshUuid, path: fwdPath };
       if (isRigged) {
         msg.isRigged = true;
         msg.jointNames = jointNames;
       }
+      if (staticCachePath) msg.staticPath = staticCachePath.replace(/\\/g, '/');
       this.queueAssetReady(msg);
     });
 
@@ -797,6 +845,116 @@ export class GodotBridge extends EventEmitter {
         list.push({ localId: obj.ID, faceIndex, face, inlineOverride });
 
         this.materialFetchQueue.request(matUuid);
+      }
+    }
+
+    // Queue legacy material fetches for faces with materialID (for diffuseAlphaMode)
+    if (texInfo) {
+      const te = obj.TextureEntry;
+      const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
+      for (let i = 0; i < 8; i++) {
+        const face = te?.faces?.[i] ?? te?.defaultTexture;
+        if (!face) continue;
+        const matId = face.materialID?.toString();
+        if (!matId || matId === ZERO_UUID) continue;
+        if (this.legacyMaterialCache.has(matId)) continue; // already cached
+        // Track which faces need this material
+        let list = this.legacyMaterialToFaces.get(matId);
+        if (!list) {
+          list = [];
+          this.legacyMaterialToFaces.set(matId, list);
+        }
+        list.push({ localId: obj.ID, faceIndex: i });
+        this.legacyMaterialPending.add(matId);
+      }
+      if (this.legacyMaterialPending.size > 0 && !this.legacyMaterialFetching) {
+        this.flushLegacyMaterialFetch();
+      }
+    }
+  }
+
+  /** Batch-fetch legacy materials via RenderMaterials cap */
+  private async flushLegacyMaterialFetch(): Promise<void> {
+    if (this.legacyMaterialFetching || this.legacyMaterialPending.size === 0) return;
+    this.legacyMaterialFetching = true;
+    try {
+      const uuids: Record<string, Material | null> = {};
+      for (const uuid of this.legacyMaterialPending) {
+        uuids[uuid] = null;
+      }
+      this.legacyMaterialPending.clear();
+
+      await this.bot.clientCommands.asset.getMaterials(uuids);
+
+      // Cache results and re-emit face updates
+      const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
+      for (const [uuid, mat] of Object.entries(uuids)) {
+        if (mat) {
+          // SL legacy alpha modes: 0=none(opaque), 1=blend, 2=mask, 3=emissive(opaque)
+          const entry: {
+            alphaMode: number; alphaCutoff: number;
+            normMap?: string; normRepeatX?: number; normRepeatY?: number;
+            normOffsetX?: number; normOffsetY?: number; normRotation?: number;
+            specExp?: number; envIntensity?: number;
+          } = {
+            alphaMode: mat.diffuseAlphaMode ?? -1,
+            alphaCutoff: mat.alphaMaskCutoff != null ? mat.alphaMaskCutoff / 255 : 0.5,
+          };
+          // Legacy normal map
+          const normMap = mat.normMap?.toString();
+          if (normMap && normMap !== ZERO_UUID) {
+            entry.normMap = normMap;
+            entry.normRepeatX = mat.normRepeatX;
+            entry.normRepeatY = mat.normRepeatY;
+            entry.normOffsetX = mat.normOffsetX;
+            entry.normOffsetY = mat.normOffsetY;
+            entry.normRotation = mat.normRotation;
+          }
+          // Blinn-Phong specular → PBR roughness approximation
+          if (mat.specExp != null && mat.specExp > 0) {
+            entry.specExp = mat.specExp;
+          }
+          if (mat.envIntensity != null && mat.envIntensity > 0) {
+            entry.envIntensity = mat.envIntensity;
+          }
+          this.legacyMaterialCache.set(uuid, entry);
+          // Queue normal texture for download
+          if (entry.normMap && this.textureFetchQueue) {
+            this.textureFetchQueue.request(entry.normMap);
+          }
+        }
+        // Re-emit face data for affected objects
+        const entries = this.legacyMaterialToFaces.get(uuid);
+        if (entries) {
+          this.legacyMaterialToFaces.delete(uuid);
+          const byObject = new Map<number, number[]>();
+          for (const { localId, faceIndex } of entries) {
+            if (!this.trackedObjects.has(localId)) continue;
+            let list = byObject.get(localId);
+            if (!list) { list = []; byObject.set(localId, list); }
+            list.push(faceIndex);
+          }
+          for (const [localId, faceIndices] of byObject) {
+            const obj = this.bot.currentRegion?.objects?.getObjectByLocalID(localId);
+            if (!obj) continue;
+            const texInfo = this.getTextureInfo(obj);
+            if (texInfo) {
+              // Re-send only the faces whose alpha mode may have changed
+              const updatedFaces = texInfo.faces.filter(f => faceIndices.includes(f.index));
+              if (updatedFaces.length > 0) {
+                this.send({ type: 'object_update_faces', localId, faces: updatedFaces });
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[GodotBridge] Legacy material fetch failed:', err);
+    } finally {
+      this.legacyMaterialFetching = false;
+      // Fetch any that accumulated while we were busy
+      if (this.legacyMaterialPending.size > 0) {
+        this.flushLegacyMaterialFetch();
       }
     }
   }
@@ -1959,6 +2117,8 @@ export class GodotBridge extends EventEmitter {
       this.animationFetchQueue = null;
     }
     this.materialToFaces.clear();
+    this.legacyMaterialPending.clear();
+    this.legacyMaterialToFaces.clear();
     this.deferredTextures.clear();
     this.animeshObjects.clear();
     this.animeshAnimState.clear();

@@ -10,7 +10,7 @@ import { LLAnimation } from '../../node-metaverse/lib/classes/LLAnimation';
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
-import { getSkeletonHierarchy } from './mesh-converter';
+import { getSkeletonHierarchy, getAttachmentPoints } from './mesh-converter';
 
 const MAX_CONCURRENT = 4;
 
@@ -164,17 +164,18 @@ function convertAnimation(uuid: string, anim: LLAnimation): AnimationData {
   const joints: AnimationJointData[] = [];
   const skeleton = getSkeletonHierarchy();
 
-  // SL's scrubInvalidJoints() silently drops animation keyframes for joint names
-  // not in avatar_skeleton.xml. Custom names like "Left Ear", "Nose", "Pelvis"
-  // resolve to null in SL and get scrubbed. We must match this behavior —
-  // animating custom-named bones causes distortion (wrong parent in hierarchy,
-  // position offsets applied relative to incorrect bone).
+  // SL resolves joint names via getJoint() which finds:
+  // 1. Standard bones (avatar_skeleton.xml)
+  // 2. Collision volumes (avatar_skeleton.xml)
+  // 3. Attachment points (avatar_lad.xml) — e.g., "Left Ear", "Nose", "Tail Base"
+  // Names not found in any of these are scrubbed (initJointNums maps to mPelvis).
+  const attachPoints = getAttachmentPoints();
   let scrubbed: string[] = [];
 
   for (const joint of anim.joints) {
-    if (!skeleton.has(joint.name)) {
+    if (!skeleton.has(joint.name) && !attachPoints.has(joint.name)) {
       scrubbed.push(joint.name);
-      continue; // Skip joints not in avatar_skeleton.xml
+      continue; // Skip joints not resolvable by SL
     }
 
     const rotationKeys: AnimationKeyframe[] = [];

@@ -23,6 +23,8 @@ class RSInstance extends RefCounted:
 	var pos: Vector3 = Vector3.ZERO
 	var rot: Quaternion = Quaternion.IDENTITY
 	var scl: Vector3 = Vector3.ONE
+	var scl_divisor: Vector3 = Vector3.ONE  # Rigged mesh AABB size correction
+	var scl_center: Vector3 = Vector3.ZERO  # Rigged mesh AABB center offset
 	var mesh: Mesh = null
 
 	func _init(scenario: RID, vis_far: float = 128.0, vis_fade: float = 32.0) -> void:
@@ -39,7 +41,11 @@ class RSInstance extends RefCounted:
 		RenderingServer.instance_set_base(rid, m.get_rid())
 
 	func push_transform() -> void:
-		RenderingServer.instance_set_transform(rid, Transform3D(Basis(rot) * Basis.from_scale(scl), pos))
+		var effective_scl: Vector3 = scl / scl_divisor
+		# Center mesh on prim position: subtract scaled AABB center so the mesh
+		# midpoint aligns with the prim origin (SL convention for unrigged meshes)
+		var adjusted_pos: Vector3 = pos - Basis(rot) * (effective_scl * scl_center)
+		RenderingServer.instance_set_transform(rid, Transform3D(Basis(rot) * Basis.from_scale(effective_scl), adjusted_pos))
 
 	func set_material_override(mat: Material) -> void:
 		if mat == null:
@@ -82,6 +88,8 @@ var avatar_material: StandardMaterial3D
 var pending_meshes: Dictionary = {}    # localId (int) -> meshId (String)
 var mesh_cache: Dictionary = {}        # meshId (String) -> Mesh resource
 var mesh_load_failed: Dictionary = {}  # meshId (String) -> bool
+var static_mesh_cache: Dictionary = {} # meshId (String) -> Mesh (no BSM, for non-animesh rigged display)
+var static_mesh_paths: Dictionary = {} # meshId (String) -> GLB path (no BSM variant)
 
 # Texture pipeline
 var texture_cache: Dictionary = {}        # textureId (String) -> ImageTexture

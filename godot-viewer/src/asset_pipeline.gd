@@ -88,12 +88,23 @@ func handle_mesh_ready(msg: Dictionary) -> void:
 	if msg.get("isRigged", false):
 		sm.rigged_mesh_paths[mesh_id] = glb_path
 
+	# Track static GLB path (no BSM, for non-animesh rigged display)
+	var static_path: String = msg.get("staticPath", "")
+	if not static_path.is_empty():
+		sm.static_mesh_paths[mesh_id] = static_path
+
 	# Skip if already cached, in-flight, or previously failed
 	if _shutting_down or sm.mesh_cache.has(mesh_id) or _mesh_in_flight.has(mesh_id) or sm.mesh_load_failed.has(mesh_id):
 		return
 
 	_mesh_in_flight[mesh_id] = true
 	_mesh_queue.append({ "meshId": mesh_id, "path": glb_path })
+	# Also queue static variant if available
+	if not static_path.is_empty() and not sm.static_mesh_cache.has(mesh_id):
+		var static_key: String = mesh_id + ":static"
+		if not _mesh_in_flight.has(static_key):
+			_mesh_in_flight[static_key] = true
+			_mesh_queue.append({ "meshId": static_key, "path": static_path })
 
 
 ## Apply a loaded mesh to all pending objects waiting for it
@@ -116,13 +127,61 @@ func _apply_mesh_to_pending(mesh_id: String) -> void:
 
 		var rsi = sm.objects.get(local_id)
 		if rsi != null:
+			# Non-animesh rigged with static variant: defer to _apply_static_mesh_to_pending
+			if is_rigged and not sm.animesh_root_for.has(local_id) and sm.static_mesh_paths.has(mesh_id):
+				if sm.static_mesh_cache.has(mesh_id):
+					# Static already loaded — apply it now
+					_apply_static_mesh_single(local_id, mesh_id, rsi)
+				else:
+					# Static still loading — track for later
+					if not sm._pending_by_mesh.has(mesh_id + ":static_wait"):
+						sm._pending_by_mesh[mesh_id + ":static_wait"] = []
+					sm._pending_by_mesh[mesh_id + ":static_wait"].append(local_id)
+				continue
+
 			rsi.set_mesh(loaded_mesh)
+			# Rigged non-animesh with identity BSM — still needs AABB correction
+			if is_rigged and not sm.animesh_root_for.has(local_id):
+				var aabb: AABB = loaded_mesh.get_aabb()
+				if aabb.size.x > 0.001 and aabb.size.y > 0.001 and aabb.size.z > 0.001:
+					rsi.scl_divisor = aabb.size
+					rsi.scl_center = aabb.get_center()
+				rsi.push_transform()
 			# Reapply per-face materials now that we have real mesh with proper surfaces
 			if sm.object_faces.has(local_id):
 				rsi.set_material_override(null)
 				apply_face_materials(rsi, local_id, sm.object_faces[local_id])
 			else:
 				rsi.set_material_override(null)
+
+
+## Apply static (no-BSM) mesh to a single non-animesh rigged object
+func _apply_static_mesh_single(local_id: int, mesh_id: String, rsi) -> void:
+	var static_mesh: Mesh = sm.static_mesh_cache[mesh_id]
+	rsi.set_mesh(static_mesh)
+	# No AABB correction needed — static mesh has raw mesh-space vertices,
+	# prim scale applies directly (same as unrigged meshes)
+	rsi.scl_divisor = Vector3.ONE
+	rsi.scl_center = Vector3.ZERO
+	rsi.push_transform()
+	if sm.object_faces.has(local_id):
+		rsi.set_material_override(null)
+		apply_face_materials(rsi, local_id, sm.object_faces[local_id])
+	else:
+		rsi.set_material_override(null)
+
+
+## Apply static mesh to all objects waiting for it
+func _apply_static_mesh_to_pending(mesh_id: String) -> void:
+	var wait_key: String = mesh_id + ":static_wait"
+	if not sm._pending_by_mesh.has(wait_key):
+		return
+	var waiting: Array = sm._pending_by_mesh[wait_key]
+	sm._pending_by_mesh.erase(wait_key)
+	for local_id: int in waiting:
+		var rsi = sm.objects.get(local_id)
+		if rsi != null:
+			_apply_static_mesh_single(local_id, mesh_id, rsi)
 
 
 ## Find the animesh root for a given object (0 if not part of an animesh linkset)
@@ -489,8 +548,14 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 						if m == null:
 							sm.mesh_load_failed[mesh_id] = true
 						else:
-							sm.mesh_cache[mesh_id] = m
-							_apply_mesh_to_pending(mesh_id)
+							# Static variant — store in separate cache, apply to pending
+							if mesh_id.ends_with(":static"):
+								var real_id: String = mesh_id.substr(0, mesh_id.length() - 7)
+								sm.static_mesh_cache[real_id] = m
+								_apply_static_mesh_to_pending(real_id)
+							else:
+								sm.mesh_cache[mesh_id] = m
+								_apply_mesh_to_pending(mesh_id)
 							var _t2 := Time.get_ticks_usec()
 							_fin_mesh_extract_ms += (_t1 - _t0) / 1000.0
 							_fin_mesh_apply_ms += (_t2 - _t1) / 1000.0
@@ -536,20 +601,21 @@ func apply_face_materials(rsi, local_id: int, faces: Array) -> void:
 		var pbr: Dictionary = {}
 		if fi.get("isPBR", false):
 			pbr["isPBR"] = true
-			if fi.has("normalTextureId"):
-				pbr["normalTextureId"] = str(fi["normalTextureId"])
 			if fi.has("ormTextureId"):
 				pbr["ormTextureId"] = str(fi["ormTextureId"])
 			if fi.has("emissiveTextureId"):
 				pbr["emissiveTextureId"] = str(fi["emissiveTextureId"])
-			if fi.has("metallicFactor"):
-				pbr["metallicFactor"] = float(fi["metallicFactor"])
-			if fi.has("roughnessFactor"):
-				pbr["roughnessFactor"] = float(fi["roughnessFactor"])
 			if fi.has("emissiveFactor"):
 				pbr["emissiveFactor"] = fi["emissiveFactor"]
 			if fi.has("pbrBaseColor"):
 				pbr["pbrBaseColor"] = fi["pbrBaseColor"]
+		# Normal map and roughness/metallic — shared between PBR and legacy materials
+		if fi.has("normalTextureId"):
+			pbr["normalTextureId"] = str(fi["normalTextureId"])
+		if fi.has("metallicFactor"):
+			pbr["metallicFactor"] = float(fi["metallicFactor"])
+		if fi.has("roughnessFactor"):
+			pbr["roughnessFactor"] = float(fi["roughnessFactor"])
 
 		if texture_id.is_empty():
 			continue
@@ -636,11 +702,9 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 	var normal_id: String = pbr.get("normalTextureId", "")
 	var orm_id: String = pbr.get("ormTextureId", "")
 	var emissive_id: String = pbr.get("emissiveTextureId", "")
-	var metallic_factor: float = 0.0
-	var roughness_factor: float = 1.0
-	if is_pbr:
-		metallic_factor = float(pbr.get("metallicFactor", 1.0))
-		roughness_factor = float(pbr.get("roughnessFactor", 1.0))
+	# Metallic/roughness: PBR defaults differ from legacy (PBR metallic defaults 1.0)
+	var metallic_factor: float = float(pbr.get("metallicFactor", 1.0 if is_pbr else 0.0))
+	var roughness_factor: float = float(pbr.get("roughnessFactor", 1.0))
 	var emissive_factor: Array = pbr.get("emissiveFactor", [0, 0, 0])
 	# Only include PBR tex IDs in key if they're actually cached (so key changes on arrival)
 	var norm_key: String = ""
@@ -686,8 +750,9 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 	# Planar mapping uses a custom ShaderMaterial that implements SL's planarProjection()
 	if mapping_type == 2:
 		var mat := ShaderMaterial.new()
-		# Pick opaque vs alpha-blend shader variant
-		var use_alpha: bool = resolved_mode == 1 or (resolved_mode == -1 and color[3] < 1.0)
+		# Color alpha (transparency slider) always wins — blend if color[3] < 1.0
+		# Material alpha mode controls TEXTURE alpha interpretation, not color alpha
+		var use_alpha: bool = color[3] < 1.0 or resolved_mode == 1
 		var shader: Shader = PlanarMapAlphaShader if use_alpha else PlanarMapShader
 		if double_sided:
 			shader = _get_double_sided_shader(shader)
@@ -704,7 +769,7 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 		if not use_alpha:
 			if resolved_mode == 2:
 				mat.set_shader_parameter("alpha_scissor_threshold", alpha_cutoff)
-			elif resolved_mode == -1 and color[3] >= 1.0:
+			elif resolved_mode == -1:
 				mat.set_shader_parameter("alpha_scissor_threshold", 0.5)
 		sm.material_cache[key] = mat
 		return mat
@@ -712,8 +777,8 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 	# Texture rotation requires a custom shader (StandardMaterial3D has no rotation property)
 	if abs(tr) > 0.001:
 		var smat := ShaderMaterial.new()
-		# Pick opaque vs alpha-blend shader variant
-		var use_alpha: bool = resolved_mode == 1 or (resolved_mode == -1 and color[3] < 1.0)
+		# Color alpha (transparency slider) always wins — blend if color[3] < 1.0
+		var use_alpha: bool = color[3] < 1.0 or resolved_mode == 1
 		var shader: Shader = StandardUVAlphaShader if use_alpha else StandardUVShader
 		if double_sided:
 			shader = _get_double_sided_shader(shader)
@@ -730,7 +795,7 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 		if not use_alpha:
 			if resolved_mode == 2:
 				smat.set_shader_parameter("alpha_scissor_threshold", alpha_cutoff)
-			elif resolved_mode == -1 and color[3] >= 1.0:
+			elif resolved_mode == -1:
 				smat.set_shader_parameter("alpha_scissor_threshold", 0.5)
 		sm.material_cache[key] = smat
 		return smat
@@ -750,7 +815,13 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 	# Alpha handling (uses resolved_mode — opaque textures promoted to mode 0)
-	if resolved_mode == 0:
+	# Values: -1=default(SL), 0=opaque/none, 1=blend, 2=mask, 3=emissive(opaque)
+	# Color alpha (transparency slider) always wins — SL material alpha mode controls
+	# TEXTURE alpha interpretation, not color alpha.
+	if color[3] < 1.0:
+		# Transparency slider active — always use alpha blending
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	elif resolved_mode == 0 or resolved_mode == 3:
 		# Fully opaque — no transparency pipeline overhead
 		pass
 	elif resolved_mode == 1:
@@ -761,19 +832,20 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 		mat.alpha_scissor_threshold = alpha_cutoff
 	else:
-		# Standard SL (alpha_mode == -1), texture has alpha or color is semi-transparent
-		if color[3] < 1.0:
-			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		else:
-			# Texture has actual alpha channel — scissor for trees, fences, etc.
-			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-			mat.alpha_scissor_threshold = 0.5
+		# Standard SL (alpha_mode == -1), texture has alpha channel
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		mat.alpha_scissor_threshold = 0.5
 
 	# Fullbright = unshaded
 	if full_bright:
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
-	# --- PBR properties ---
+	# --- Normal map (PBR and legacy materials) ---
+	if not norm_key.is_empty():
+		mat.normal_enabled = true
+		mat.normal_texture = sm.texture_cache[normal_id]
+
+	# --- PBR / legacy specular properties ---
 	if is_pbr:
 		mat.metallic = metallic_factor
 		mat.roughness = roughness_factor
@@ -789,11 +861,6 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 			mat.ao_texture = orm_tex
 			mat.ao_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
 
-		# Normal map
-		if not norm_key.is_empty():
-			mat.normal_enabled = true
-			mat.normal_texture = sm.texture_cache[normal_id]
-
 		# Emissive
 		var ef: Array = emissive_factor
 		var has_emission_factor: bool = float(ef[0]) > 0 or float(ef[1]) > 0 or float(ef[2]) > 0
@@ -804,6 +871,10 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 		if not emis_key.is_empty():
 			mat.emission_enabled = true
 			mat.emission_texture = sm.texture_cache[emissive_id]
+	elif pbr.has("roughnessFactor") or pbr.has("metallicFactor"):
+		# Legacy Blinn-Phong specular → PBR approximation
+		mat.metallic = metallic_factor
+		mat.roughness = roughness_factor
 
 	sm.material_cache[key] = mat
 	return mat

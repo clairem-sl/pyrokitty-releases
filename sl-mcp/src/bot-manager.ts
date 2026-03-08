@@ -716,6 +716,7 @@ export class BotManager {
       uuid: o.FullID.toString(),
       name: (o as any).name || '(unknown)',
       position: o.Position ? { x: o.Position.x, y: o.Position.y, z: o.Position.z } : { x: 0, y: 0, z: 0 },
+      scale: o.Scale ? { x: o.Scale.x, y: o.Scale.y, z: o.Scale.z } : undefined,
     }));
   }
 
@@ -739,6 +740,7 @@ export class BotManager {
       uuid: obj.FullID.toString(),
       name: (obj as any).name || '(unknown)',
       position: obj.Position ? { x: obj.Position.x, y: obj.Position.y, z: obj.Position.z } : { x: 0, y: 0, z: 0 },
+      scale: obj.Scale ? { x: obj.Scale.x, y: obj.Scale.y, z: obj.Scale.z } : undefined,
       ...(md ? { mesh: { uuid: md.meshData?.toString(), type: md.type } } : {}),
       ...(sd ? { sculpt: { texture: sd.texture?.toString(), type: sd.type } } : {}),
       ...(emd ? { extendedMesh: { flags: emd.flags } } : {}),

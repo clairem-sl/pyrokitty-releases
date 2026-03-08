@@ -10,7 +10,7 @@ import type { MeshConvertResult } from './mesh-converter';
 
 const MAX_CONCURRENT = 4;
 
-export type MeshReadyCallback = (meshUuid: string, cachePath: string, isRigged?: boolean, jointNames?: string[]) => void;
+export type MeshReadyCallback = (meshUuid: string, cachePath: string, isRigged?: boolean, jointNames?: string[], staticCachePath?: string) => void;
 
 export class MeshFetchQueue {
   private bot: Bot;
@@ -42,7 +42,7 @@ export class MeshFetchQueue {
     if (isMeshCached(meshUuid)) {
       this.notified.add(meshUuid);
       const meta = readMeshMeta(meshUuid);
-      this.onReady(meshUuid, meshCachePath(meshUuid), meta?.isRigged, meta?.jointNames);
+      this.onReady(meshUuid, meshCachePath(meshUuid), meta?.isRigged, meta?.jointNames, meta?.staticCachePath);
       return;
     }
 
@@ -78,7 +78,7 @@ export class MeshFetchQueue {
       const result = await ensureMeshCached(meshUuid, llmesh);
       if (!this.destroyed) {
         this.notified.add(meshUuid);
-        this.onReady(meshUuid, result.cachePath, result.isRigged, result.jointNames);
+        this.onReady(meshUuid, result.cachePath, result.isRigged, result.jointNames, result.staticCachePath);
       }
     } catch (err) {
       console.error(`[MeshFetchQueue] Failed ${meshUuid}:`, (err as Error).message || err);

@@ -69,8 +69,27 @@ func handle_object_create(msg: Dictionary) -> void:
 	var rsi = sm.RSInstance.new(sm._scenario, sm._vis_far, sm._vis_fade)
 
 	if not mesh_id.is_empty() and sm.mesh_cache.has(mesh_id):
-		# Real mesh already loaded — use it
-		rsi.set_mesh(sm.mesh_cache[mesh_id])
+		var is_rigged_non_animesh: bool = sm.rigged_mesh_paths.has(mesh_id) and not msg.get("animesh", false)
+		# Non-animesh rigged: prefer static mesh (no BSM) for correct scale/rotation
+		if is_rigged_non_animesh and sm.static_mesh_cache.has(mesh_id):
+			rsi.set_mesh(sm.static_mesh_cache[mesh_id])
+			# No AABB correction — static mesh is in raw mesh space, prim scale applies directly
+		elif is_rigged_non_animesh and sm.static_mesh_paths.has(mesh_id):
+			# Static variant exists but not loaded yet — use placeholder, wait for static
+			rsi.set_mesh(sm.object_mesh)
+			if not sm._pending_by_mesh.has(mesh_id + ":static_wait"):
+				sm._pending_by_mesh[mesh_id + ":static_wait"] = []
+			sm._pending_by_mesh[mesh_id + ":static_wait"].append(local_id)
+		else:
+			# Animesh, or rigged with identity BSM, or unrigged — use normal mesh
+			var cached_mesh: Mesh = sm.mesh_cache[mesh_id]
+			rsi.set_mesh(cached_mesh)
+			# Rigged non-animesh with identity BSM still needs AABB correction
+			if is_rigged_non_animesh:
+				var aabb: AABB = cached_mesh.get_aabb()
+				if aabb.size.x > 0.001 and aabb.size.y > 0.001 and aabb.size.z > 0.001:
+					rsi.scl_divisor = aabb.size
+					rsi.scl_center = aabb.get_center()
 	elif not mesh_id.is_empty():
 		# Mesh placeholder while waiting for mesh data
 		rsi.set_mesh(sm.object_mesh)
@@ -157,6 +176,9 @@ func handle_object_create(msg: Dictionary) -> void:
 				var child_mid: String = sm.object_mesh_id.get(child_id, "")
 				if not child_mid.is_empty() and sm.mesh_cache.has(child_mid) and sm.rigged_mesh_paths.has(child_mid):
 					_instantiate_animesh_mesh(child_id, child_mid, local_id)
+					# Re-apply face materials — they were applied before MeshInstance3D existed
+					if sm.object_faces.has(child_id) and sm.objects.has(child_id):
+						sm.asset_pipeline.apply_face_materials(sm.objects[child_id], child_id, sm.object_faces[child_id])
 
 	# Track children of animesh roots
 	if parent_id > 0 and sm.animesh_roots.has(parent_id):
@@ -168,6 +190,9 @@ func handle_object_create(msg: Dictionary) -> void:
 		var ar_id: int = sm.animesh_root_for[local_id]
 		if not mesh_id.is_empty() and sm.mesh_cache.has(mesh_id) and sm.rigged_mesh_paths.has(mesh_id):
 			_instantiate_animesh_mesh(local_id, mesh_id, ar_id)
+			# Re-apply face materials — they were applied before MeshInstance3D existed
+			if sm.object_faces.has(local_id):
+				sm.asset_pipeline.apply_face_materials(rsi, local_id, sm.object_faces[local_id])
 
 	# Create light if this object is a light source
 	if msg.has("light") and msg["light"] is Dictionary:
@@ -386,25 +411,69 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	sm.animesh_skeletons[local_id] = skeleton
 	sm.animesh_mesh_instances[local_id] = mesh_instance
 
+	# Double-sided shadow casting reduces shadow acne near deformed joints.
+	# Bone bends create steep surface angles that single-sided bias can't handle.
+	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_DOUBLE_SIDED
+
 	# Hide the RSInstance placeholder (keep it for metadata/transform tracking)
+	# Also disable shadow casting — hidden instances can still cast shadows
 	if rsi != null:
 		RenderingServer.instance_set_visible(rsi.rid, false)
+		RenderingServer.instance_geometry_set_cast_shadows_setting(
+			rsi.rid, RenderingServer.SHADOW_CASTING_SETTING_OFF)
 
 	# If we already have pending animations for this root, apply them
 	if sm.animesh_roots.has(animesh_root_id):
 		_apply_pending_animations(local_id)
 
-	# Log bones with non-identity rest rotations (these need compensation in animation)
-	var non_identity_count: int = 0
-	for bi in range(skeleton.get_bone_count()):
-		var rest_rot: Quaternion = skeleton.get_bone_rest(bi).basis.get_rotation_quaternion()
-		if not rest_rot.is_equal_approx(Quaternion.IDENTITY):
-			non_identity_count += 1
-			if non_identity_count <= 5:  # cap log spam
-				print("[Animesh]   bone %s rest_rot=(%.3f, %.3f, %.3f, %.3f)" % [
-					skeleton.get_bone_name(bi), rest_rot.x, rest_rot.y, rest_rot.z, rest_rot.w])
-	print("[Animesh] Rigged mesh instantiated for object %d (root %d), skeleton bones: %d, non-identity rest: %d" % [
-		local_id, animesh_root_id, skeleton.get_bone_count(), non_identity_count])
+	# Diagnostic: check if rest pose skinning is identity (vertices at bind position)
+	# skin_matrix = bone_global_rest * IBM. Should be identity for correct rest pose.
+	var skin: Skin = mesh_instance.skin if mesh_instance.skin else null
+	if skin == null and mesh_instance.mesh:
+		# Try to get skin from mesh surfaces
+		skin = mesh_instance.get_skin()
+	print("[Animesh-diag] object %d: skeleton bones=%d, skin binds=%s" % [
+		local_id, skeleton.get_bone_count(), str(skin.get_bind_count()) if skin else "NO SKIN"])
+	# Log first 3 bones for quick sanity check
+	for bi in range(min(skeleton.get_bone_count(), 3)):
+		var bone_name: String = skeleton.get_bone_name(bi)
+		var global_rest: Transform3D = skeleton.get_bone_global_rest(bi)
+		print("[Animesh-diag]   bone %d '%s' pos=(%.3f,%.3f,%.3f)" % [
+			bi, bone_name, global_rest.origin.x, global_rest.origin.y, global_rest.origin.z])
+	# Check ALL skin bind poses (IBMs)
+	var fail_count: int = 0
+	if skin:
+		for bind_i in range(skin.get_bind_count()):
+			var bind_bone: int = skin.get_bind_bone(bind_i)
+			var ibm: Transform3D = skin.get_bind_pose(bind_i)
+			var bone_name2: String = skeleton.get_bone_name(bind_bone) if bind_bone >= 0 and bind_bone < skeleton.get_bone_count() else "???"
+			var gr: Transform3D = skeleton.get_bone_global_rest(bind_bone) if bind_bone >= 0 and bind_bone < skeleton.get_bone_count() else Transform3D.IDENTITY
+			var product: Transform3D = gr * ibm
+			var pos_err: float = product.origin.length()
+			var rot_err: float = product.basis.get_rotation_quaternion().angle_to(Quaternion.IDENTITY)
+			var scale_err: Vector3 = product.basis.get_scale() - Vector3.ONE
+			var is_id: bool = pos_err < 0.01 and rot_err < 0.01 and scale_err.length() < 0.01
+			if not is_id:
+				fail_count += 1
+				print("[Animesh-diag]   FAIL bind %d bone=%d '%s' pos_err=%.4f rot_err=%.4f scale_err=(%.3f,%.3f,%.3f)" % [
+					bind_i, bind_bone, bone_name2, pos_err, rot_err,
+					scale_err.x, scale_err.y, scale_err.z])
+		print("[Animesh-diag]   %d/%d binds PASS, %d FAIL" % [
+			skin.get_bind_count() - fail_count, skin.get_bind_count(), fail_count])
+	# Check if initial pose differs from identity (importer may set pose = decomposed(rest))
+	var pose_nonid: int = 0
+	for bi in range(min(skeleton.get_bone_count(), 5)):
+		var p_pos: Vector3 = skeleton.get_bone_pose_position(bi)
+		var p_rot: Quaternion = skeleton.get_bone_pose_rotation(bi)
+		var p_scl: Vector3 = skeleton.get_bone_pose_scale(bi)
+		var is_id_pose: bool = p_pos.length() < 0.001 and p_rot.is_equal_approx(Quaternion.IDENTITY) and (p_scl - Vector3.ONE).length() < 0.001
+		if not is_id_pose:
+			pose_nonid += 1
+		print("[Animesh-diag]   bone %d pose: pos=(%.3f,%.3f,%.3f) rot=(%.3f,%.3f,%.3f,%.3f) scl=(%.2f,%.2f,%.2f) %s" % [
+			bi, p_pos.x, p_pos.y, p_pos.z, p_rot.x, p_rot.y, p_rot.z, p_rot.w,
+			p_scl.x, p_scl.y, p_scl.z, "" if is_id_pose else "NON-IDENTITY"])
+	print("[Animesh] Rigged mesh instantiated for object %d (root %d), skeleton bones: %d" % [
+		local_id, animesh_root_id, skeleton.get_bone_count()])
 
 	# Clean up the now-empty generated scene
 	scene.queue_free()
