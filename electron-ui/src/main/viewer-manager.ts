@@ -282,7 +282,7 @@ export class ViewerManager extends EventEmitter {
 
     console.log(`[ViewerManager] Launching Godot viewer for ${instanceId}`);
 
-    const bridge = new GodotBridge(bot, { vrMode });
+    const bridge = new GodotBridge(bot, { vrMode, objectAnimationBuffer: metaverse.getObjectAnimationBuffer() });
     this.godotBridges.set(instanceId, bridge);
 
     bridge.on('exit', () => {

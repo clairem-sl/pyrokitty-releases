@@ -19,6 +19,7 @@ interface SkeletonJoint {
   name: string;
   parent: string | null;
   pos: [number, number, number];  // local position in SL coords
+  rot: [number, number, number];  // local rotation in SL coords (Euler degrees)
   children: string[];
 }
 
@@ -56,21 +57,25 @@ function parseSkeletonXml(xml: string): Map<string, SkeletonJoint> {
   // Stack-based parser: track parent bone names via nesting depth
   const parentStack: string[] = [];
 
-  // Match <bone ...> (opening, may be self-closing) and </bone> (closing)
-  const tagRegex = /<(\/?)bone\b([^>]*?)(\/?)>/g;
+  // Match <bone ...> and <collision_volume ...> (opening, may be self-closing) and </bone> (closing)
+  // collision_volume tags are always self-closing children of bone tags.
+  const tagRegex = /<(\/?)(bone|collision_volume)\b([^>]*?)(\/?)>/g;
   let match;
   while ((match = tagRegex.exec(xml)) !== null) {
     const isClosing = match[1] === '/';
-    const attrs = match[2];
-    const isSelfClosing = match[3] === '/';
+    const tagName = match[2];
+    const attrs = match[3];
+    const isSelfClosing = match[4] === '/';
 
     if (isClosing) {
+      // Only bone tags have closing tags; collision_volume is always self-closing
       parentStack.pop();
       continue;
     }
 
     const nameMatch = attrs.match(/\bname="([^"]+)"/);
     const posMatch = attrs.match(/\bpos="([^"]+)"/);
+    const rotMatch = attrs.match(/\brot="([^"]+)"/);
     if (!nameMatch) continue;
 
     const name = nameMatch[1];
@@ -81,38 +86,120 @@ function parseSkeletonXml(xml: string): Map<string, SkeletonJoint> {
         pos[0] = parts[0]; pos[1] = parts[1]; pos[2] = parts[2];
       }
     }
+    const rot: [number, number, number] = [0, 0, 0];
+    if (rotMatch) {
+      const parts = rotMatch[1].trim().split(/\s+/).map(Number);
+      if (parts.length >= 3) {
+        rot[0] = parts[0]; rot[1] = parts[1]; rot[2] = parts[2];
+      }
+    }
 
     const parentName = parentStack.length > 0 ? parentStack[parentStack.length - 1] : null;
-    joints.set(name, { name, parent: parentName, pos, children: [] });
+    joints.set(name, { name, parent: parentName, pos, rot, children: [] });
     if (parentName && joints.has(parentName)) {
       joints.get(parentName)!.children.push(name);
     }
 
-    if (!isSelfClosing) {
+    // Only bone tags push onto the parent stack (collision_volume is always self-closing)
+    if (!isSelfClosing && tagName === 'bone') {
       parentStack.push(name);
     }
   }
   return joints;
 }
 
-// --- Extract joint world position from SL row-major IBM ---
+// --- Quaternion helpers ---
 
-/**
- * Given an SL row-major inverse bind matrix (16 floats), extract the joint's
- * bind-pose world position in SL coordinates.
- *
- * IBM = W^{-1} where W is the joint's world transform.
- * For a rigid transform W with rotation R and translation t:
- *   IBM upper-left 3×3 = R^T,  IBM row 3 = -t * R^T
- * So:  t = -(IBM_row3) * (IBM_upper3x3)^T = -(IBM_row3) * R
- *   t[i] = -(m[12]*m[i] + m[13]*m[4+i] + m[14]*m[8+i])
- */
-function worldPosFromIBM(m: number[]): [number, number, number] {
-  return [
-    -(m[12] * m[0] + m[13] * m[4] + m[14] * m[8]),
-    -(m[12] * m[1] + m[13] * m[5] + m[14] * m[9]),
-    -(m[12] * m[2] + m[13] * m[6] + m[14] * m[10]),
-  ];
+type Quat = [number, number, number, number]; // [x, y, z, w]
+
+/** Convert 3×3 rotation matrix (row-major: r00,r01,r02,...) to unit quaternion [x,y,z,w]. */
+function mat3ToQuat(
+  r00: number, r01: number, r02: number,
+  r10: number, r11: number, r12: number,
+  r20: number, r21: number, r22: number,
+): Quat {
+  const trace = r00 + r11 + r22;
+  let x: number, y: number, z: number, w: number;
+  if (trace > 0) {
+    const s = 2 * Math.sqrt(trace + 1);
+    w = 0.25 * s; x = (r21 - r12) / s; y = (r02 - r20) / s; z = (r10 - r01) / s;
+  } else if (r00 > r11 && r00 > r22) {
+    const s = 2 * Math.sqrt(1 + r00 - r11 - r22);
+    w = (r21 - r12) / s; x = 0.25 * s; y = (r01 + r10) / s; z = (r02 + r20) / s;
+  } else if (r11 > r22) {
+    const s = 2 * Math.sqrt(1 + r11 - r00 - r22);
+    w = (r02 - r20) / s; x = (r01 + r10) / s; y = 0.25 * s; z = (r12 + r21) / s;
+  } else {
+    const s = 2 * Math.sqrt(1 + r22 - r00 - r11);
+    w = (r10 - r01) / s; x = (r02 + r20) / s; y = (r12 + r21) / s; z = 0.25 * s;
+  }
+  const len = Math.sqrt(x * x + y * y + z * z + w * w);
+  if (len < 1e-10) return [0, 0, 0, 1];
+  return [x / len, y / len, z / len, w / len];
+}
+
+function isQuatIdentity(q: Quat, eps = 0.001): boolean {
+  return Math.abs(q[0]) < eps && Math.abs(q[1]) < eps &&
+         Math.abs(q[2]) < eps && Math.abs(Math.abs(q[3]) - 1) < eps;
+}
+
+// --- 4×4 matrix helpers (column-major) ---
+
+/** Multiply two column-major 4×4 matrices: result = A * B. */
+function mat4Mul(a: number[], b: number[]): number[] {
+  const r = new Array(16).fill(0);
+  for (let c = 0; c < 4; c++) {
+    for (let row = 0; row < 4; row++) {
+      let sum = 0;
+      for (let k = 0; k < 4; k++) sum += a[k * 4 + row] * b[c * 4 + k];
+      r[c * 4 + row] = sum;
+    }
+  }
+  return r;
+}
+
+/** Invert a column-major 4×4 matrix (general, not just rigid-body). */
+function mat4Inverse(m: number[]): number[] | null {
+  const inv = new Array(16);
+  inv[0]  =  m[5]*m[10]*m[15] - m[5]*m[11]*m[14] - m[9]*m[6]*m[15] + m[9]*m[7]*m[14] + m[13]*m[6]*m[11] - m[13]*m[7]*m[10];
+  inv[4]  = -m[4]*m[10]*m[15] + m[4]*m[11]*m[14] + m[8]*m[6]*m[15] - m[8]*m[7]*m[14] - m[12]*m[6]*m[11] + m[12]*m[7]*m[10];
+  inv[8]  =  m[4]*m[9]*m[15]  - m[4]*m[11]*m[13] - m[8]*m[5]*m[15] + m[8]*m[7]*m[13] + m[12]*m[5]*m[11] - m[12]*m[7]*m[9];
+  inv[12] = -m[4]*m[9]*m[14]  + m[4]*m[10]*m[13] + m[8]*m[5]*m[14] - m[8]*m[6]*m[13] - m[12]*m[5]*m[10] + m[12]*m[6]*m[9];
+  inv[1]  = -m[1]*m[10]*m[15] + m[1]*m[11]*m[14] + m[9]*m[2]*m[15] - m[9]*m[3]*m[14] - m[13]*m[2]*m[11] + m[13]*m[3]*m[10];
+  inv[5]  =  m[0]*m[10]*m[15] - m[0]*m[11]*m[14] - m[8]*m[2]*m[15] + m[8]*m[3]*m[14] + m[12]*m[2]*m[11] - m[12]*m[3]*m[10];
+  inv[9]  = -m[0]*m[9]*m[15]  + m[0]*m[11]*m[13] + m[8]*m[1]*m[15] - m[8]*m[3]*m[13] - m[12]*m[1]*m[11] + m[12]*m[3]*m[9];
+  inv[13] =  m[0]*m[9]*m[14]  - m[0]*m[10]*m[13] - m[8]*m[1]*m[14] + m[8]*m[2]*m[13] + m[12]*m[1]*m[10] - m[12]*m[2]*m[9];
+  inv[2]  =  m[1]*m[6]*m[15]  - m[1]*m[7]*m[14]  - m[5]*m[2]*m[15] + m[5]*m[3]*m[14] + m[13]*m[2]*m[7]  - m[13]*m[3]*m[6];
+  inv[6]  = -m[0]*m[6]*m[15]  + m[0]*m[7]*m[14]  + m[4]*m[2]*m[15] - m[4]*m[3]*m[14] - m[12]*m[2]*m[7]  + m[12]*m[3]*m[6];
+  inv[10] =  m[0]*m[5]*m[15]  - m[0]*m[7]*m[13]  - m[4]*m[1]*m[15] + m[4]*m[3]*m[13] + m[12]*m[1]*m[7]  - m[12]*m[3]*m[5];
+  inv[14] = -m[0]*m[5]*m[14]  + m[0]*m[6]*m[13]  + m[4]*m[1]*m[14] - m[4]*m[2]*m[13] - m[12]*m[1]*m[6]  + m[12]*m[2]*m[5];
+  inv[3]  = -m[1]*m[6]*m[11]  + m[1]*m[7]*m[10]  + m[5]*m[2]*m[11] - m[5]*m[3]*m[10] - m[9]*m[2]*m[7]   + m[9]*m[3]*m[6];
+  inv[7]  =  m[0]*m[6]*m[11]  - m[0]*m[7]*m[10]  - m[4]*m[2]*m[11] + m[4]*m[3]*m[10] + m[8]*m[2]*m[7]   - m[8]*m[3]*m[6];
+  inv[11] = -m[0]*m[5]*m[11]  + m[0]*m[7]*m[9]   + m[4]*m[1]*m[11] - m[4]*m[3]*m[9]  - m[8]*m[1]*m[7]   + m[8]*m[3]*m[5];
+  inv[15] =  m[0]*m[5]*m[10]  - m[0]*m[6]*m[9]   - m[4]*m[1]*m[10] + m[4]*m[2]*m[9]  + m[8]*m[1]*m[6]   - m[8]*m[2]*m[5];
+  const det = m[0]*inv[0] + m[1]*inv[4] + m[2]*inv[8] + m[3]*inv[12];
+  if (Math.abs(det) < 1e-12) return null;
+  const invDet = 1.0 / det;
+  for (let i = 0; i < 16; i++) inv[i] *= invDet;
+  return inv;
+}
+
+/** Decompose a column-major 4×4 matrix into translation, rotation (quat), and scale. */
+function decomposeTRS(m: number[]): { t: [number,number,number]; r: Quat; s: [number,number,number] } {
+  const t: [number,number,number] = [m[12], m[13], m[14]];
+  // Scale = column lengths of upper-left 3×3
+  const sx = Math.sqrt(m[0]*m[0] + m[1]*m[1] + m[2]*m[2]);
+  const sy = Math.sqrt(m[4]*m[4] + m[5]*m[5] + m[6]*m[6]);
+  const sz = Math.sqrt(m[8]*m[8] + m[9]*m[9] + m[10]*m[10]);
+  const s: [number,number,number] = [sx, sy, sz];
+  // Rotation = normalized columns → 3×3 → quaternion
+  const isx = sx > 1e-8 ? 1/sx : 0, isy = sy > 1e-8 ? 1/sy : 0, isz = sz > 1e-8 ? 1/sz : 0;
+  const r = mat3ToQuat(
+    m[0]*isx, m[4]*isy, m[8]*isz,
+    m[1]*isx, m[5]*isy, m[9]*isz,
+    m[2]*isx, m[6]*isy, m[10]*isz,
+  );
+  return { t, r, s };
 }
 
 // --- SL↔Godot coordinate transform for 4×4 inverse bind matrices ---
@@ -416,6 +503,8 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
     }
 
     // Build ordered list: topological order (parents before children)
+    // Process standard bones first, then orphaned (custom names not in XML),
+    // so orphaned bones always come after their inferred parents.
     const orderedJoints: string[] = [];
     const visited = new Set<string>();
     function visit(name: string): void {
@@ -425,7 +514,8 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
       visited.add(name);
       orderedJoints.push(name);
     }
-    for (const jn of usedJoints) visit(jn);
+    for (const jn of usedJoints) { if (skeleton.has(jn)) visit(jn); }
+    for (const jn of usedJoints) { if (!skeleton.has(jn)) visit(jn); }
 
     // Map joint name → glTF node index (offset by 1 since node 0 is the mesh)
     const jointNodeOffset = 1; // joint nodes start at index 1
@@ -442,40 +532,93 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
       skinJointToOrdered.set(i, oi >= 0 ? oi : 0);
     }
 
-    // --- Compute world positions for all joints ---
-    // For joints with IBMs, derive from IBM (ensures globalTransform * IBM = I at rest).
-    // For ancestor joints not in the skin, accumulate from avatar_skeleton.xml.
-    const worldPositions = new Map<string, [number, number, number]>();
+    // --- Compute joint world transforms (column-major 4×4 in Godot/glTF space) ---
+    // For joints with IBMs: JW = inverse(IBM_gltf). Handles rotation AND scale.
+    // For ancestor joints without IBMs: accumulate from avatar_skeleton.xml.
+    const jointWorldTransforms = new Map<string, number[]>(); // col-major 4×4
     for (const jname of orderedJoints) {
       const skinIdx = jointNames.indexOf(jname);
       if (skinIdx >= 0 && skin!.inverseBindMatrix[skinIdx]) {
-        worldPositions.set(jname, worldPosFromIBM(skin!.inverseBindMatrix[skinIdx].all()));
+        const ibmGltf = transformInverseBindMatrix(skin!.inverseBindMatrix[skinIdx].all());
+        const jw = mat4Inverse(ibmGltf);
+        if (jw) {
+          jointWorldTransforms.set(jname, jw);
+        } else {
+          // Singular IBM — fall back to identity
+          jointWorldTransforms.set(jname, [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+        }
       } else {
-        // Ancestor: accumulate from skeleton hierarchy
+        // Ancestor: accumulate position from skeleton hierarchy (identity rotation/scale)
         const sj = skeleton.get(jname);
-        const pp = sj?.parent && worldPositions.has(sj.parent)
-          ? worldPositions.get(sj.parent)! : [0, 0, 0] as [number, number, number];
+        const parentJW = sj?.parent && jointWorldTransforms.has(sj.parent)
+          ? jointWorldTransforms.get(sj.parent)! : [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
         const lp = sj ? sj.pos : [0, 0, 0] as [number, number, number];
-        worldPositions.set(jname, [pp[0] + lp[0], pp[1] + lp[1], pp[2] + lp[2]]);
+        // Local transform = translation only (identity rotation for XML ancestors), SL→Godot
+        const localGodot = [1,0,0,0, 0,1,0,0, 0,0,1,0, lp[0],lp[2],-lp[1],1];
+        jointWorldTransforms.set(jname, mat4Mul(parentJW, localGodot));
+      }
+    }
+
+    // --- Infer parents for orphaned bones (custom names not in skeleton XML) ---
+    // Find nearest standard bone by world position so they follow the correct parent.
+    // Without this, bones like "Left Ear" are root nodes and don't follow head rotation.
+    const orphanParent = new Map<string, string>();
+    for (const jname of orderedJoints) {
+      if (skeleton.has(jname)) continue;
+      const jw = jointWorldTransforms.get(jname);
+      if (!jw) continue;
+      let bestDist = Infinity;
+      let bestParent: string | null = null;
+      for (const candidate of orderedJoints) {
+        if (!skeleton.has(candidate)) continue;
+        const cjw = jointWorldTransforms.get(candidate);
+        if (!cjw) continue;
+        const dx = jw[12] - cjw[12], dy = jw[13] - cjw[13], dz = jw[14] - cjw[14];
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist < bestDist) { bestDist = dist; bestParent = candidate; }
+      }
+      if (bestParent) {
+        orphanParent.set(jname, bestParent);
+        console.log(`[mesh-converter] Orphaned joint "${jname}" → nearest parent "${bestParent}" (dist=${bestDist.toFixed(3)}m)`);
       }
     }
 
     // Create glTF nodes for each joint
+    // Node local transforms are derived from JW (world transform = IBM inverse).
+    // For child joints: Local = JW_parent^{-1} * JW_child. For roots: Local = JW.
     let skeletonRootIdx = -1;
     for (let i = 0; i < orderedJoints.length; i++) {
       const jname = orderedJoints[i];
       const sj = skeleton.get(jname);
       const node: any = { name: jname };
 
-      // Local position derived from world positions (SL coords), then convert to Godot
-      const wp = worldPositions.get(jname)!;
-      const pwp = sj?.parent && worldPositions.has(sj.parent)
-        ? worldPositions.get(sj.parent)! : [0, 0, 0];
-      const lx = wp[0] - pwp[0], ly = wp[1] - pwp[1], lz = wp[2] - pwp[2];
-      // SL (x,y,z) → Godot (x, z, -y)
-      node.translation = [lx, lz, -ly];
+      const jw = jointWorldTransforms.get(jname)!;
+      const parentName = sj?.parent && jointWorldTransforms.has(sj.parent)
+        ? sj.parent : (orphanParent.get(jname) ?? null);
 
-      // Children in the glTF node
+      // Compute local transform (in Godot/glTF space)
+      let localMat: number[];
+      if (parentName) {
+        // Local = JW_parent^{-1} * JW_child
+        const parentJW = jointWorldTransforms.get(parentName)!;
+        const parentInv = mat4Inverse(parentJW);
+        localMat = parentInv ? mat4Mul(parentInv, jw) : jw;
+      } else {
+        localMat = jw;
+      }
+
+      // Decompose local transform into T, R, S
+      const { t, r, s } = decomposeTRS(localMat);
+      node.translation = t;
+      if (!isQuatIdentity(r)) {
+        node.rotation = [r[0], r[1], r[2], r[3]];
+      }
+      const hasScale = Math.abs(s[0]-1) > 0.001 || Math.abs(s[1]-1) > 0.001 || Math.abs(s[2]-1) > 0.001;
+      if (hasScale) {
+        node.scale = s;
+      }
+
+      // Children in the glTF node (standard hierarchy + orphaned bones parented here)
       const childNodeIndices: number[] = [];
       if (sj) {
         for (const childName of sj.children) {
@@ -484,14 +627,19 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
           }
         }
       }
+      orphanParent.forEach((inferredParent, orphanName) => {
+        if (inferredParent === jname && jointNameToNodeIdx.has(orphanName)) {
+          childNodeIndices.push(jointNameToNodeIdx.get(orphanName)!);
+        }
+      });
       if (childNodeIndices.length > 0) {
         node.children = childNodeIndices;
       }
 
       nodes.push(node);
 
-      // Track skeleton root (joint with no parent in our set)
-      if (!sj?.parent || !usedJoints.has(sj.parent)) {
+      // Track skeleton root (joint with no parent — neither XML nor inferred)
+      if (!parentName) {
         if (skeletonRootIdx === -1) skeletonRootIdx = jointNodeOffset + i;
       }
     }

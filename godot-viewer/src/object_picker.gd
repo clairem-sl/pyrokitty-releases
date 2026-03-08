@@ -114,6 +114,113 @@ func _ray_tri(origin: Vector3, dir: Vector3, v0: Vector3, v1: Vector3, v2: Vecto
 	return t
 
 
+## Like _ray_tri but also returns barycentric coords (u, v) for interpolation.
+## Returns { t, u, v } on hit, empty dict on miss.
+func _ray_tri_bary(origin: Vector3, dir: Vector3, v0: Vector3, v1: Vector3, v2: Vector3) -> Dictionary:
+	var e1 := v1 - v0
+	var e2 := v2 - v0
+	var h := dir.cross(e2)
+	var a := e1.dot(h)
+	if absf(a) < 1e-8:
+		return {}
+	var f := 1.0 / a
+	var s := origin - v0
+	var bary_u := f * s.dot(h)
+	if bary_u < 0.0 or bary_u > 1.0:
+		return {}
+	var q := s.cross(e1)
+	var bary_v := f * dir.dot(q)
+	if bary_v < 0.0 or bary_u + bary_v > 1.0:
+		return {}
+	var t := f * e2.dot(q)
+	if t < 1e-6:
+		return {}
+	return { "t": t, "u": bary_u, "v": bary_v }
+
+
+## Detailed raycast returning face index, interpolated UV/normal, and hit position.
+## Returns {} on miss. Positions/normals are in object-local space.
+func pick_object_detailed(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
+	var max_pick_dist := 200.0
+	var candidates: Array = []
+	for id: int in sm.objects:
+		var rsi = sm.objects[id]
+		if rsi.mesh == null:
+			continue
+		if ray_origin.distance_to(rsi.pos) > max_pick_dist:
+			continue
+		var xform := Transform3D(Basis(rsi.rot) * Basis.from_scale(rsi.scl), rsi.pos)
+		var inv := xform.affine_inverse()
+		var local_from := inv * ray_origin
+		var local_dir := (inv.basis * ray_dir).normalized()
+		if rsi.mesh.get_aabb().intersects_ray(local_from, local_dir) != null:
+			candidates.append({ "id": id, "mesh": rsi.mesh, "xform": xform, "inv": inv,
+				"local_from": local_from, "local_dir": local_dir })
+
+	if candidates.size() == 0:
+		return {}
+
+	var best: Dictionary = {}
+	var best_dist: float = INF
+
+	for c: Dictionary in candidates:
+		var mesh: Mesh = c["mesh"]
+		var local_from: Vector3 = c["local_from"]
+		var local_dir: Vector3 = c["local_dir"]
+		var xform: Transform3D = c["xform"]
+
+		for si: int in range(mesh.get_surface_count()):
+			var arrays: Array = mesh.surface_get_arrays(si)
+			if arrays.size() == 0:
+				continue
+			var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			var uvs = arrays[Mesh.ARRAY_TEX_UV]
+			var normals = arrays[Mesh.ARRAY_NORMAL]
+			var indices = arrays[Mesh.ARRAY_INDEX]
+
+			var tri_list: Array[Array] = []
+			if indices != null and indices.size() >= 3:
+				var i := 0
+				while i < indices.size() - 2:
+					tri_list.append([indices[i], indices[i + 1], indices[i + 2]])
+					i += 3
+			elif verts.size() >= 3:
+				var i := 0
+				while i < verts.size() - 2:
+					tri_list.append([i, i + 1, i + 2])
+					i += 3
+
+			for tri: Array in tri_list:
+				var hit := _ray_tri_bary(local_from, local_dir,
+					verts[tri[0]], verts[tri[1]], verts[tri[2]])
+				if hit.is_empty():
+					continue
+				var world_hit: Vector3 = xform * (local_from + local_dir * hit["t"])
+				var dist: float = (xform * local_from).distance_to(world_hit)
+				if dist < best_dist:
+					best_dist = dist
+					var bary_u: float = hit["u"]
+					var bary_v: float = hit["v"]
+					var bary_w: float = 1.0 - bary_u - bary_v
+					var interp_uv := Vector2.ZERO
+					if uvs != null and uvs.size() > tri[2]:
+						interp_uv = uvs[tri[0]] * bary_w + uvs[tri[1]] * bary_u + uvs[tri[2]] * bary_v
+					var interp_normal := Vector3.UP
+					if normals != null and normals.size() > tri[2]:
+						interp_normal = (normals[tri[0]] * bary_w + normals[tri[1]] * bary_u + normals[tri[2]] * bary_v).normalized()
+					var local_hit: Vector3 = local_from + local_dir * hit["t"]
+					best = {
+						"localId": c["id"],
+						"distance": dist,
+						"faceIndex": si,
+						"st": interp_uv,
+						"normal": interp_normal,
+						"hitPosLocal": local_hit,
+					}
+
+	return best
+
+
 ## Return the RenderingServer instance RID for an object (used for highlight overlay).
 func get_object_rid(local_id: int) -> RID:
 	var rsi = sm.objects.get(local_id)

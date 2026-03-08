@@ -65,11 +65,15 @@ export class AnimationFetchQueue {
   get cachedCount(): number { return this.cache.size; }
 
   request(animUuid: string, localId: number): void {
-    if (this.destroyed || this.failed.has(animUuid)) return;
+    if (this.destroyed || this.failed.has(animUuid)) {
+      if (this.failed.has(animUuid)) console.warn(`[AnimFetchQueue] Skipping previously failed ${animUuid.slice(0, 8)} for localId ${localId}`);
+      return;
+    }
 
     // Already in memory — notify immediately
     const cached = this.cache.get(animUuid);
     if (cached) {
+      console.log(`[AnimFetchQueue] Memory cache hit ${animUuid.slice(0, 8)} for localId ${localId} (${cached.joints.length} joints, ${cached.duration.toFixed(1)}s)`);
       this.onReady(animUuid, cached);
       return;
     }
@@ -80,6 +84,8 @@ export class AnimationFetchQueue {
       if (fs.existsSync(diskPath)) {
         const data: AnimationData = JSON.parse(fs.readFileSync(diskPath, 'utf8'));
         this.cache.set(animUuid, data);
+        const posJointsD = data.joints.filter((j: AnimationJointData) => j.positionKeys.length > 0);
+        console.log(`[AnimFetchQueue] Disk cache hit ${animUuid.slice(0, 8)} for localId ${localId} (${data.joints.length} joints, ${data.duration.toFixed(1)}s, ${posJointsD.length} pos joints: ${posJointsD.map((j: AnimationJointData) => `${j.name}(${j.positionKeys.length}k,v=${JSON.stringify(j.positionKeys[0]?.value.map((n: number) => +n.toFixed(3)))})`).join(', ')})`);
         this.onReady(animUuid, data);
         return;
       }
@@ -88,9 +94,11 @@ export class AnimationFetchQueue {
     // Already queued or in-flight
     if (this.pending.has(animUuid)) {
       this.pending.get(animUuid)!.add(localId);
+      console.log(`[AnimFetchQueue] Already queued ${animUuid.slice(0, 8)}, added localId ${localId}`);
       return;
     }
 
+    console.log(`[AnimFetchQueue] Queuing download ${animUuid.slice(0, 8)} for localId ${localId}`);
     this.pending.set(animUuid, new Set([localId]));
     this.queue.push(animUuid);
     this.drain();
@@ -110,11 +118,14 @@ export class AnimationFetchQueue {
 
   private async fetchAndParse(animUuid: string): Promise<void> {
     try {
+      console.log(`[AnimFetchQueue] Downloading ${animUuid.slice(0, 8)}...`);
       const buf = await this.bot.clientCommands.asset.downloadAsset(
         AssetType.Animation, animUuid
       );
+      console.log(`[AnimFetchQueue] Downloaded ${animUuid.slice(0, 8)} (${buf.length} bytes), parsing...`);
       const anim = new LLAnimation(buf);
       const data = convertAnimation(animUuid, anim);
+      console.log(`[AnimFetchQueue] Parsed ${animUuid.slice(0, 8)}: ${data.joints.length} joints, ${data.duration.toFixed(1)}s, loop=${data.loop}, priority=${data.priority}`);
       if (!this.destroyed) {
         this.cache.set(animUuid, data);
         // Persist to disk
@@ -176,6 +187,12 @@ function convertAnimation(uuid: string, anim: LLAnimation): AnimationData {
       rotationKeys,
       positionKeys,
     });
+  }
+
+  // Log joints with position keyframes for debugging
+  const posJoints = joints.filter(j => j.positionKeys.length > 0);
+  if (posJoints.length > 0) {
+    console.log(`[AnimFetch] Animation ${uuid} has position keys on: ${posJoints.map(j => `${j.name}(${j.positionKeys.length}keys, sample=${JSON.stringify(j.positionKeys[0]?.value)})`).join(', ')}`);
   }
 
   return {

@@ -18,6 +18,7 @@ import type { SoundTriggerMessage } from '../../node-metaverse/lib/classes/messa
 import type { AttachedSoundMessage } from '../../node-metaverse/lib/classes/messages/AttachedSound';
 import type { AttachedSoundGainChangeMessage } from '../../node-metaverse/lib/classes/messages/AttachedSoundGainChange';
 import type { PreloadSoundMessage } from '../../node-metaverse/lib/classes/messages/PreloadSound';
+import type { ObjectAnimationMessage } from '../../node-metaverse/lib/classes/messages/ObjectAnimation';
 import { SoundFetchQueue } from './sound-fetch-queue';
 import * as SoundPlayer from './sound-player';
 import {
@@ -120,6 +121,10 @@ export class MetaverseConnection extends EventEmitter {
   private triggerSounds = new Map<number, { baseGain: number; position: { x: number; y: number; z: number } }>(); // triggerId → position + gain
   private nextTriggerId = -1; // negative IDs to avoid collision with object localIds
   private soundDistLogCounter = 0;
+
+  // Buffer ObjectAnimation messages from login time so GodotBridge (started later) can replay them
+  private objectAnimationBuffer = new Map<string, { animId: string; sequenceId: number }[]>(); // senderUUID → anim list
+  private objectAnimationSub: { unsubscribe: () => void } | null = null;
   private static readonly MAX_SOUND_DISTANCE = 50;
 
   constructor(public readonly instanceId: string) {
@@ -211,6 +216,9 @@ export class MetaverseConnection extends EventEmitter {
       // Subscribe to world sound messages (circuit is available after connectToSim)
       this.setupSoundSubscriptions();
 
+      // Buffer ObjectAnimation messages from login time for later GodotBridge replay
+      this.setupObjectAnimationBuffer();
+
       // Resolve display names for all friends in background
       this.resolveDisplayNamesForFriends().catch((err) => {
         console.error('[MetaverseConnection] Error resolving friend display names:', err);
@@ -277,6 +285,10 @@ export class MetaverseConnection extends EventEmitter {
     for (const triggerId of this.triggerSounds.keys()) SoundPlayer.stopAttached(triggerId);
     this.attachedSoundGains.clear();
     this.triggerSounds.clear();
+    // Clean up ObjectAnimation buffer
+    this.objectAnimationSub?.unsubscribe();
+    this.objectAnimationSub = null;
+    this.objectAnimationBuffer.clear();
     // Clean up avatar subscriptions
     this.selfMoveSubscription?.unsubscribe();
     this.selfMoveSubscription = null;
@@ -511,6 +523,9 @@ export class MetaverseConnection extends EventEmitter {
       for (const triggerId of this.triggerSounds.keys()) SoundPlayer.stopAttached(triggerId);
       this.attachedSoundGains.clear();
       this.triggerSounds.clear();
+      this.objectAnimationSub?.unsubscribe();
+      this.objectAnimationSub = null;
+      this.objectAnimationBuffer.clear();
       this.selfMoveSubscription?.unsubscribe();
       this.selfMoveSubscription = null;
       if (this.regionInfoThrottleTimer) {
@@ -645,6 +660,38 @@ export class MetaverseConnection extends EventEmitter {
 
     // Periodically update attached sound volumes based on distance
     this.soundUpdateTimer = setInterval(() => this.updateSoundDistances(), 250);
+  }
+
+  /**
+   * Subscribe to ObjectAnimation circuit messages and buffer them.
+   * Called right after connectToSim() so we capture animation state for animesh
+   * objects that arrive during initial object load — before GodotBridge exists.
+   */
+  private setupObjectAnimationBuffer(): void {
+    try {
+      const circuit = this.bot?.currentRegion?.circuit;
+      if (!circuit) return;
+
+      this.objectAnimationSub = circuit.subscribeToMessages([
+        Message.ObjectAnimation,
+      ], (packet: any) => {
+        const msg = packet.message as ObjectAnimationMessage;
+        const senderUuid = msg.Sender.ID.toString();
+        const animations = msg.AnimationList.map((a: any) => ({
+          animId: a.AnimID.toString(),
+          sequenceId: a.AnimSequenceID,
+        }));
+        this.objectAnimationBuffer.set(senderUuid, animations);
+      });
+      console.log('[MetaverseConnection] Subscribed to ObjectAnimation (buffering for GodotBridge)');
+    } catch {
+      console.warn('[MetaverseConnection] Could not subscribe to ObjectAnimation (circuit not ready)');
+    }
+  }
+
+  /** Returns the buffered ObjectAnimation state for all animesh objects seen since login. */
+  getObjectAnimationBuffer(): Map<string, { animId: string; sequenceId: number }[]> {
+    return this.objectAnimationBuffer;
   }
 
   private getAvatarPosition(): { x: number; y: number; z: number } | null {

@@ -606,7 +606,7 @@ body {
 }
 
 .chat-type-select {
-  width: 80px;
+  width: 90px;
   padding: 8px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);

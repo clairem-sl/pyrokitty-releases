@@ -97,7 +97,9 @@ export class Agent {
     // Animation transition tracking (mirrors Firestorm's FSPreJumpDelayMs)
     private _transitionStartMs: number = 0;
     private _inTransition: boolean = false;
+    private _finishAnimRemaining: number = 0; // send FINISH_ANIM this many more times
     private static readonly TRANSITION_DELAY_MS = 100; // ms before sending FINISH_ANIM
+    private static readonly FINISH_ANIM_REPEATS = 4; // repeat to survive packet loss
     private static readonly TRANSITION_ANIMS = new Set<string>([
         BuiltInAnimations.STANDUP,
         BuiltInAnimations.PRE_JUMP,
@@ -364,16 +366,20 @@ export class Agent {
             this.cameraCenter = selfAvatar.position;
         }
 
-        // If in a transition animation and delay has elapsed, inject FINISH_ANIM once
-        // (mirrors Firestorm's FSPreJumpDelayMs — one-shot, not continuous)
+        // If in a transition animation and delay has elapsed, inject FINISH_ANIM
+        // for several consecutive updates to survive unreliable packet loss.
         let flags = this.controlFlags;
         if (this._inTransition) {
             const elapsed = Date.now() - this._transitionStartMs;
             if (elapsed >= Agent.TRANSITION_DELAY_MS) {
-                flags |= ControlFlags.AGENT_CONTROL_FINISH_ANIM;
-                this._inTransition = false; // one-shot: clear after injecting
-                console.log(`[Agent] Injecting FINISH_ANIM (elapsed=${elapsed}ms, flags=0x${flags.toString(16)})`);
+                this._inTransition = false;
+                this._finishAnimRemaining = Agent.FINISH_ANIM_REPEATS;
+                console.log(`[Agent] Transition done (elapsed=${elapsed}ms) — sending FINISH_ANIM x${Agent.FINISH_ANIM_REPEATS}`);
             }
+        }
+        if (this._finishAnimRemaining > 0) {
+            flags |= ControlFlags.AGENT_CONTROL_FINISH_ANIM;
+            this._finishAnimRemaining--;
         }
 
         const circuit = this.currentRegion.circuit;
@@ -463,6 +469,11 @@ export class Agent {
                     this._inTransition = true;
                     this._transitionStartMs = Date.now();
                     console.log(`[Agent] Transition started — will send FINISH_ANIM after ${Agent.TRANSITION_DELAY_MS}ms`);
+                    // Schedule rapid updates after the delay so FINISH_ANIM is sent
+                    // promptly even when idle (no movement keys pressed).
+                    for (let i = 0; i < Agent.FINISH_ANIM_REPEATS; i++) {
+                        setTimeout(() => this.sendAgentUpdate(), Agent.TRANSITION_DELAY_MS + i * 100);
+                    }
                 } else if (!hasTransition && this._inTransition) {
                     this._inTransition = false;
                     console.log(`[Agent] Transition cleared after ${Date.now() - this._transitionStartMs}ms`);

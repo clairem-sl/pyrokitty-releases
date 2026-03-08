@@ -98,12 +98,17 @@ var _pending_by_mesh: Dictionary = {}     # meshId -> Array[localId]
 # Animesh (rigged mesh with skeleton animation)
 var animesh_roots: Dictionary = {}         # root localId (int) -> Node3D (scene tree parent)
 var animesh_skeletons: Dictionary = {}     # localId (int) -> Skeleton3D
-var animesh_players: Dictionary = {}       # localId (int) -> AnimationPlayer
 var animesh_root_for: Dictionary = {}      # localId (int) -> root localId (maps object to its animesh root)
 var rigged_mesh_paths: Dictionary = {}     # meshId (String) -> GLB path (for generate_scene)
 var animesh_anim_cache: Dictionary = {}    # animId (String) -> Animation resource
+var animesh_anim_data: Dictionary = {}    # animId (String) -> raw Dictionary (with per-joint priorities)
 var animesh_pending_anims: Dictionary = {} # root localId (int) -> Array[animId String] (pending animation IDs)
 var animesh_mesh_instances: Dictionary = {} # localId (int) -> MeshInstance3D (for texture application)
+
+# Manual animation evaluation (replaces AnimationPlayer for correct SL→Godot rotation order)
+# SL: world = local * parent.  Godot: world = parent * local.  Must conjugate per bone.
+var animesh_eval: Dictionary = {}          # root localId -> {time, duration, loop, joints: {name -> {rot_keys, pos_keys}}}
+var animesh_eval_active: bool = false      # true when any animesh has active animation data
 var object_mesh_id: Dictionary = {}        # localId (int) -> meshId (String) — persists after mesh loads
 
 # Prim geometry generator
@@ -191,6 +196,10 @@ func _process(delta: float) -> void:
 
 	# Interpolate moving objects (physical objects with velocity)
 	object_mgr.interpolate_objects(delta)
+
+	# Evaluate animesh animations (manual per-frame, not AnimationPlayer)
+	if animesh_eval_active:
+		object_mgr.process_animesh(delta)
 
 	# Periodic light distance culling sweep
 	light_mgr._light_cull_timer += delta
@@ -283,6 +292,9 @@ func handle_environment_data(msg: Dictionary) -> void:
 # Picking / Debug
 func pick_object(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
 	return object_picker.pick_object(ray_origin, ray_dir)
+
+func pick_object_detailed(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
+	return object_picker.pick_object_detailed(ray_origin, ray_dir)
 
 func get_object_rid(local_id: int) -> RID:
 	return object_picker.get_object_rid(local_id)

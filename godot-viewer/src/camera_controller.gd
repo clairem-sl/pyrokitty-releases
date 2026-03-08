@@ -47,6 +47,8 @@ var last_w_press_time: float = -1.0
 var move_dirty: bool = false
 var send_timer: float = 0.0
 var _dbg_was_moving: bool = false  # for movement freeze diagnostics
+var _pending_cursor_pos: Vector2 = Vector2(-1, -1)  # queued mouse pos for cursor update
+var _cursor_timer: float = 0.0
 
 # VR mode flag — set by main.gd after OpenXR init
 var vr_mode: bool = false
@@ -178,6 +180,15 @@ func _process(delta: float) -> void:
 		move_dirty = false
 		send_timer = 0.05
 
+	# Throttled cursor shape update (~10 Hz)
+	_cursor_timer -= delta
+	if _cursor_timer <= 0.0 and _pending_cursor_pos.x >= 0.0:
+		_cursor_timer = 0.1
+		if not is_butt_grabbing and not _dragging_panel and _is_click_on_self_avatar(_pending_cursor_pos, 0.0):
+			Input.set_default_cursor_shape(Input.CURSOR_MOVE)
+		else:
+			Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+
 
 # Raw key state tracked from events (never missed, even during slow frames)
 var _key_w: bool = false
@@ -269,6 +280,14 @@ func _input(event: InputEvent) -> void:
 
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
+		# Confine mouse to window on any button press to prevent Godot's
+		# broken OLE drag-and-drop from crashing other applications.
+		if mb.pressed and mb.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
+			if Input.mouse_mode == Input.MOUSE_MODE_VISIBLE:
+				Input.mouse_mode = Input.MOUSE_MODE_CONFINED
+		elif not mb.pressed and mb.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
+			if not is_butt_grabbing:
+				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
 				if _tooltip_visible and _is_click_on_drag_bar(mb.position):
@@ -280,6 +299,8 @@ func _input(event: InputEvent) -> void:
 					orbit_hold = false
 					is_butt_grabbing = true
 					Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+				elif not _tooltip_visible:
+					_handle_touch_pick(mb.position)
 			else:
 				_dragging_panel = false
 				if is_butt_grabbing:
@@ -315,6 +336,9 @@ func _input(event: InputEvent) -> void:
 			pitch = clamp(pitch, -PI * 0.49, PI * 0.49)
 			move_dirty = true
 			_update_camera()
+		else:
+			# Update cursor shape based on what's under the mouse (throttled)
+			_pending_cursor_pos = mm.position
 
 
 func _update_camera() -> void:
@@ -339,8 +363,9 @@ func _update_camera() -> void:
 			xr_pose_updated.emit(avatar_point, avatar_yaw)
 
 
-## Check if a screen-space click hits the self avatar's mesh AABB
-func _is_click_on_self_avatar(screen_pos: Vector2) -> bool:
+## Check if a screen-space click hits the self avatar's mesh AABB.
+## grow_amount: extra padding in meters (0.3 for click forgiveness, 0.0 for cursor hover)
+func _is_click_on_self_avatar(screen_pos: Vector2, grow_amount: float = 0.3) -> bool:
 	if scene_manager == null:
 		return false
 	var data: Dictionary = scene_manager.get_self_avatar_click_data()
@@ -348,13 +373,12 @@ func _is_click_on_self_avatar(screen_pos: Vector2) -> bool:
 		return false
 	if is_position_behind(data["position"]):
 		return false
-	# Ray from camera through click position, tested against mesh AABB in local space
 	var ray_from := project_ray_origin(screen_pos)
 	var ray_dir := project_ray_normal(screen_pos)
 	var inv: Transform3D = (data["transform"] as Transform3D).affine_inverse()
 	var local_from := inv * ray_from
 	var local_dir := (inv.basis * ray_dir).normalized()
-	var aabb: AABB = (data["aabb"] as AABB).grow(0.3)  # slightly larger for easier clicking
+	var aabb: AABB = (data["aabb"] as AABB).grow(grow_amount)
 	return aabb.intersects_ray(local_from, local_dir) != null
 
 
@@ -507,6 +531,29 @@ func _handle_debug_pick(screen_pos: Vector2) -> void:
 	_show_debug_tooltip(screen_pos, dist, info, faces)
 	# Request name/description from server (arrives async via object_properties_received)
 	main_node.send_message({ "type": "request_object_properties", "localId": local_id })
+
+
+func _handle_touch_pick(screen_pos: Vector2) -> void:
+	if scene_manager == null:
+		return
+	var ray_from := project_ray_origin(screen_pos)
+	var ray_dir := project_ray_normal(screen_pos)
+	var hit: Dictionary = scene_manager.pick_object_detailed(ray_from, ray_dir)
+	if hit.is_empty():
+		return
+	# Convert object-local vectors from Godot coords (Y-up) to SL coords (Z-up)
+	# Godot (x, y, z) -> SL (x, z, -y)
+	var pos_local: Vector3 = hit["hitPosLocal"]
+	var norm: Vector3 = hit["normal"]
+	var st: Vector2 = hit["st"]
+	main_node.send_message({
+		"type": "object_touch",
+		"localId": hit["localId"],
+		"faceIndex": hit["faceIndex"],
+		"st": { "x": st.x, "y": st.y },
+		"position": { "x": pos_local.x, "y": pos_local.z, "z": -pos_local.y },
+		"normal": { "x": norm.x, "y": norm.z, "z": -norm.y },
+	})
 
 
 const _MAPPING_NAMES: Dictionary = { 0: "default", 2: "planar", 4: "spherical", 6: "cylindrical" }

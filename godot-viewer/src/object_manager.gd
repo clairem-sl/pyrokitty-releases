@@ -379,18 +379,11 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	wrapper.add_child(skeleton)
 	mesh_instance.skeleton = mesh_instance.get_path_to(skeleton)
 
-	# Create AnimationPlayer for this skeleton
-	var player := AnimationPlayer.new()
-	player.name = "AnimPlayer_%d" % local_id
-	wrapper.add_child(player)
-	player.root_node = player.get_path_to(wrapper)
-
 	# Add wrapper to animesh root
 	root_node.add_child(wrapper)
 
 	# Store references
 	sm.animesh_skeletons[local_id] = skeleton
-	sm.animesh_players[local_id] = player
 	sm.animesh_mesh_instances[local_id] = mesh_instance
 
 	# Hide the RSInstance placeholder (keep it for metadata/transform tracking)
@@ -401,8 +394,17 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	if sm.animesh_roots.has(animesh_root_id):
 		_apply_pending_animations(local_id)
 
-	print("[Animesh] Rigged mesh instantiated for object %d (root %d), skeleton bones: %d" % [
-		local_id, animesh_root_id, skeleton.get_bone_count()])
+	# Log bones with non-identity rest rotations (these need compensation in animation)
+	var non_identity_count: int = 0
+	for bi in range(skeleton.get_bone_count()):
+		var rest_rot: Quaternion = skeleton.get_bone_rest(bi).basis.get_rotation_quaternion()
+		if not rest_rot.is_equal_approx(Quaternion.IDENTITY):
+			non_identity_count += 1
+			if non_identity_count <= 5:  # cap log spam
+				print("[Animesh]   bone %s rest_rot=(%.3f, %.3f, %.3f, %.3f)" % [
+					skeleton.get_bone_name(bi), rest_rot.x, rest_rot.y, rest_rot.z, rest_rot.w])
+	print("[Animesh] Rigged mesh instantiated for object %d (root %d), skeleton bones: %d, non-identity rest: %d" % [
+		local_id, animesh_root_id, skeleton.get_bone_count(), non_identity_count])
 
 	# Clean up the now-empty generated scene
 	scene.queue_free()
@@ -423,8 +425,10 @@ func _find_node_of_type(node: Node, type_name: String) -> Node:
 ## Works even if the animesh root node hasn't been created yet (buffered in dictionary).
 func handle_object_animation(msg: Dictionary) -> void:
 	var local_id: int = int(msg.get("localId", 0))
+	var obj_uuid: String = str(msg.get("uuid", ""))
 	var animations: Array = msg.get("animations", [])
 	if local_id == 0 or animations.is_empty():
+		print("[Animesh] handle_object_animation: ignored (localId=%d, anims=%d)" % [local_id, animations.size()])
 		return
 
 	# Store animation IDs for this root (used when skeleton loads later)
@@ -432,11 +436,23 @@ func handle_object_animation(msg: Dictionary) -> void:
 	for a: Dictionary in animations:
 		anim_ids.append(str(a.get("animId", "")))
 	sm.animesh_pending_anims[local_id] = anim_ids
+	print("[Animesh] handle_object_animation: localId=%d uuid=%s anims=%s" % [
+		local_id, obj_uuid.left(8), str(anim_ids.map(func(s: String): return s.left(8)))])
+
+	# Check if this localId is a known animesh root
+	var is_root: bool = sm.animesh_roots.has(local_id)
+	print("[Animesh]   is_known_root=%s, animesh_root_for entries=%d, animesh_skeletons entries=%d" % [
+		str(is_root), sm.animesh_root_for.size(), sm.animesh_skeletons.size()])
 
 	# Apply cached animations to all skeletons under this root
+	var applied_count: int = 0
 	for obj_id: int in sm.animesh_root_for:
-		if sm.animesh_root_for[obj_id] == local_id and sm.animesh_players.has(obj_id):
+		if sm.animesh_root_for[obj_id] == local_id and sm.animesh_skeletons.has(obj_id):
+			print("[Animesh]   Applying to skeleton obj_id=%d" % obj_id)
 			_apply_pending_animations(obj_id)
+			applied_count += 1
+	if applied_count == 0:
+		print("[Animesh]   No skeletons ready yet for root %d (will apply when skeleton loads)" % local_id)
 
 
 ## Handle animation_ready — build Godot Animation resource from keyframe data
@@ -444,55 +460,317 @@ func handle_animation_ready(msg: Dictionary) -> void:
 	var anim_id: String = str(msg.get("animId", ""))
 	var data: Dictionary = msg.get("data", {})
 	if anim_id.is_empty() or data.is_empty():
+		print("[Animesh] handle_animation_ready: ignored (animId=%s, data empty=%s)" % [anim_id.left(8), str(data.is_empty())])
 		return
 
-	# Build and cache the Animation resource
+	# Build and cache the Animation resource + raw data (for priority-based merging)
 	var anim := _build_animation(anim_id, data)
 	if anim == null:
 		return
 	sm.animesh_anim_cache[anim_id] = anim
-	print("[Animesh] Animation %s ready (%.1fs, %d joints, loop=%s)" % [
-		anim_id.left(8), anim.length, data.get("joints", []).size(), str(anim.loop_mode != Animation.LOOP_NONE)])
+	sm.animesh_anim_data[anim_id] = data
+	print("[Animesh] Animation %s ready (%.1fs, %d joints, priority=%d, loop=%s)" % [
+		anim_id.left(8), anim.length, data.get("joints", []).size(),
+		int(data.get("priority", 0)), str(anim.loop_mode != Animation.LOOP_NONE)])
 
-	# Apply to all animesh players that are waiting for this animation
-	for obj_id: int in sm.animesh_players:
+	# Apply to all animesh skeletons that are waiting for this animation
+	for obj_id: int in sm.animesh_skeletons:
 		_apply_pending_animations(obj_id)
 
 
-## Apply any pending animations to a specific animesh object's AnimationPlayer
+## Apply any pending animations to a specific animesh root.
+## Merges all pending animations by per-joint priority and stores merged keyframe data
+## for manual per-frame evaluation (required because SL composes bone rotations as
+## world = local * parent, while Godot uses world = parent * local).
 func _apply_pending_animations(obj_id: int) -> void:
-	var player: AnimationPlayer = sm.animesh_players.get(obj_id)
-	if player == null:
-		return
 	var root_id: int = sm.animesh_root_for.get(obj_id, 0)
 	if root_id == 0:
 		return
 	var pending_anims: Array = sm.animesh_pending_anims.get(root_id, [])
-
-	var skeleton: Skeleton3D = sm.animesh_skeletons.get(obj_id)
-	if skeleton == null:
+	if pending_anims.is_empty():
 		return
-	var skel_name: String = skeleton.name
 
+	# Only need to build eval data once per root (not per child mesh)
+	# Check if any skeleton exists for this root
+	var has_skeleton: bool = false
+	for oid: int in sm.animesh_root_for:
+		if sm.animesh_root_for[oid] == root_id and sm.animesh_skeletons.has(oid):
+			has_skeleton = true
+			break
+	if not has_skeleton:
+		return
+
+	# Collect all available animations with their raw data
+	var available: Array = []
 	for anim_id: String in pending_anims:
-		if not sm.animesh_anim_cache.has(anim_id):
+		if sm.animesh_anim_data.has(anim_id):
+			available.append(sm.animesh_anim_data[anim_id] as Dictionary)
+
+	if available.is_empty():
+		return
+
+	# Build per-joint priority map: joint_name → {priority, data_index}
+	var joint_best: Dictionary = {}
+	for ai in range(available.size()):
+		var data: Dictionary = available[ai]
+		var base_priority: int = int(data.get("priority", 0))
+		var joints: Array = data.get("joints", [])
+		for joint_data: Dictionary in joints:
+			var jname: String = str(joint_data.get("name", ""))
+			if jname.is_empty():
+				continue
+			var jpri: int = int(joint_data.get("priority", base_priority))
+			if not joint_best.has(jname) or jpri >= joint_best[jname]["priority"]:
+				joint_best[jname] = {"priority": jpri, "data_idx": ai, "joint_data": joint_data}
+
+	# Compute merged duration and loop
+	var max_duration: float = 0.0
+	var any_loop: bool = false
+	for data: Dictionary in available:
+		var d: float = float(data.get("duration", 1.0))
+		if d > max_duration:
+			max_duration = d
+		if data.get("loop", false):
+			any_loop = true
+
+	# Build merged joint keyframe map (SL space — NOT coordinate-converted)
+	var merged_joints: Dictionary = {}  # joint_name -> {rot_keys: [{time, x, y, z}], pos_keys: [{time, x, y, z}]}
+	for jname: String in joint_best:
+		var jd: Dictionary = joint_best[jname]["joint_data"]
+		var rot_keys: Array = jd.get("rotationKeys", [])
+		var pos_keys: Array = jd.get("positionKeys", [])
+		merged_joints[jname] = {"rot_keys": rot_keys, "pos_keys": pos_keys}
+
+	# Store eval data for this root
+	sm.animesh_eval[root_id] = {
+		"time": 0.0,
+		"duration": max_duration,
+		"loop": any_loop,
+		"joints": merged_joints,
+	}
+	sm.animesh_eval_active = true
+
+	# Log which animation joints match skeleton bones vs unmatched (check ALL skeletons)
+	var matched: Array = []
+	var all_bone_names: Array = []
+	for obj_id2: int in sm.animesh_root_for:
+		if sm.animesh_root_for[obj_id2] != root_id:
 			continue
-		var src_anim: Animation = sm.animesh_anim_cache[anim_id]
-
-		# Remap track paths to match this skeleton's name
-		var lib: AnimationLibrary
-		if player.has_animation_library(""):
-			lib = player.get_animation_library("")
+		var skel2: Skeleton3D = sm.animesh_skeletons.get(obj_id2)
+		if skel2 == null:
+			continue
+		for bi2 in range(skel2.get_bone_count()):
+			var bn: String = skel2.get_bone_name(bi2)
+			if bn not in all_bone_names:
+				all_bone_names.append(bn)
+	var unmatched: Array = []
+	for jname2: String in merged_joints:
+		if jname2 in all_bone_names:
+			if jname2 not in matched:
+				matched.append(jname2)
 		else:
-			lib = AnimationLibrary.new()
-			player.add_animation_library("", lib)
+			if jname2 not in unmatched:
+				unmatched.append(jname2)
+	print("[Animesh] _apply_pending_animations: root=%d, %d joints merged, duration=%.1fs, loop=%s" % [
+		root_id, merged_joints.size(), max_duration, str(any_loop)])
+	if unmatched.size() > 0:
+		print("[Animesh]   UNMATCHED joints (no skeleton bone): %s" % [str(unmatched)])
+	print("[Animesh]   Matched: %d, Unmatched: %d" % [matched.size(), unmatched.size()])
 
-		var mapped_anim := _remap_animation_tracks(src_anim, skel_name, skeleton)
-		lib.add_animation(anim_id, mapped_anim)
-		player.play(anim_id)
+
+## Per-frame animesh animation evaluation.
+## SL xform.cpp:80: mWorldRotation = mRotation * mParent->getWorldRotation()
+## SL's operator*(a,b) = Hamilton(b*a), so this is Hamilton(parent * local).
+## Godot uses standard Hamilton, so we write: world = parent * local.
+## Then convert SL world to Godot coords and derive pose.
+func process_animesh(delta: float) -> void:
+	for root_id: int in sm.animesh_eval:
+		var eval: Dictionary = sm.animesh_eval[root_id]
+		var duration: float = eval["duration"]
+		if duration <= 0.0:
+			continue
+
+		# Advance time
+		eval["time"] += delta
+		if eval["loop"]:
+			eval["time"] = fmod(eval["time"], duration)
+		else:
+			eval["time"] = minf(eval["time"], duration)
+		var t: float = eval["time"]
+
+		var joints: Dictionary = eval["joints"]  # joint_name -> {rot_keys, pos_keys}
+
+		# Evaluate SL local rotations and positions at current time (SL space, NOT converted)
+		var sl_local_rot: Dictionary = {}  # joint_name -> Quaternion (SL space)
+		var sl_local_pos: Dictionary = {}  # joint_name -> Vector3 (SL space, meters)
+		for jname: String in joints:
+			var jdata: Dictionary = joints[jname]
+			var rot_keys: Array = jdata["rot_keys"]
+			if rot_keys.size() > 0:
+				sl_local_rot[jname] = _interp_sl_rotation(rot_keys, t)
+			var pos_keys: Array = jdata["pos_keys"]
+			if pos_keys.size() > 0:
+				sl_local_pos[jname] = _interp_sl_position(pos_keys, t)
+
+		# For each skeleton under this root, compute and apply bone poses
+		for obj_id: int in sm.animesh_root_for:
+			if sm.animesh_root_for[obj_id] != root_id:
+				continue
+			var skeleton: Skeleton3D = sm.animesh_skeletons.get(obj_id)
+			if skeleton == null:
+				continue
+
+			# Build SL world rotations traversing root → leaf, then derive Godot pose
+			# SL's operator*(a,b) computes Hamilton b*a (reversed from standard).
+			# SL line 80: mWorldRotation = mRotation * mParent->getWorldRotation()
+			#   = Hamilton(parent_world * local)
+			# Godot uses standard Hamilton, so: world = parent_world * local
+			var sl_world: Dictionary = {}  # bone_idx -> Quaternion (SL space)
+			var godot_world: Dictionary = {}  # bone_idx -> Quaternion (Godot space)
+
+			for bi in range(skeleton.get_bone_count()):
+				var bname: String = skeleton.get_bone_name(bi)
+				var parent_bi: int = skeleton.get_bone_parent(bi)
+
+				# SL local rotation: from animation, or rest rotation if not animated
+				var q_sl_local: Quaternion
+				if sl_local_rot.has(bname):
+					q_sl_local = sl_local_rot[bname]
+				else:
+					# Derive SL rest rotation from Godot bone rest transform
+					# Godot→SL coordinate conversion: (x,y,z,w) → (x,-z,y,w)
+					var rest_q: Quaternion = skeleton.get_bone_rest(bi).basis.get_rotation_quaternion()
+					q_sl_local = Quaternion(rest_q.x, -rest_q.z, rest_q.y, rest_q.w)
+
+				# SL world = Hamilton(parent_world * local)
+				# SL writes this as "local * parent" but SL's operator* is reversed.
+				# In Godot (standard Hamilton): world = parent * local
+				var q_sl_parent_world: Quaternion = sl_world.get(parent_bi, Quaternion.IDENTITY)
+				var q_sl_world: Quaternion = q_sl_parent_world * q_sl_local
+				sl_world[bi] = q_sl_world
+
+				# Convert SL world to Godot world: (x,y,z,w) → (x,z,-y,w)
+				var q_godot_world := Quaternion(
+					q_sl_world.x, q_sl_world.z, -q_sl_world.y, q_sl_world.w).normalized()
+				godot_world[bi] = q_godot_world
+
+				# Only set pose if this bone is animated (rotation or position)
+				var has_rot: bool = sl_local_rot.has(bname)
+				var has_pos: bool = sl_local_pos.has(bname)
+				if not has_rot and not has_pos and parent_bi < 0:
+					continue  # Root bone with no animation — leave at rest
+
+				# Derive Godot pose rotation: global = parent_global * rest * pose
+				# → pose = (parent_global * rest)⁻¹ * our_desired_global
+				var parent_godot_world: Quaternion = godot_world.get(parent_bi, Quaternion.IDENTITY)
+				var rest_rot: Quaternion = skeleton.get_bone_rest(bi).basis.get_rotation_quaternion()
+				var combined_inv: Quaternion = (parent_godot_world * rest_rot).inverse()
+				var pose_rot: Quaternion = (combined_inv * q_godot_world).normalized()
+				skeleton.set_bone_pose_rotation(bi, pose_rot)
+
+				# Apply position keyframe as OFFSET from rest.
+				# Animation position values are small offsets (typically <0.03m), not
+				# absolute positions. SL's blendJointStates adds them to the current
+				# joint position (which defaults to the rest position from the skeleton).
+				# Godot's set_bone_pose_position:
+				#   final_local.origin = rest.basis * pose_pos + rest.origin
+				# For offset: desired = rest.origin + offset_godot
+				#   pose_pos = rest.basis.inverse() * offset_godot
+				if has_pos:
+					var sl_pos: Vector3 = sl_local_pos[bname]
+					# SL→Godot position offset: (x,y,z) → (x,z,-y)
+					var offset_godot := Vector3(sl_pos.x, sl_pos.z, -sl_pos.y)
+					var rest_xf: Transform3D = skeleton.get_bone_rest(bi)
+					var pose_pos: Vector3 = rest_xf.basis.inverse() * offset_godot
+					skeleton.set_bone_pose_position(bi, pose_pos)
 
 
-## Remap animation track paths to use the actual skeleton node name and valid bone indices
+
+## Interpolate SL rotation keyframes at time t. Returns SL-space quaternion (w reconstructed).
+func _interp_sl_rotation(keys: Array, t: float) -> Quaternion:
+	if keys.is_empty():
+		return Quaternion.IDENTITY
+
+	# Find bracketing keyframes
+	var k0: Dictionary = keys[0]
+	if keys.size() == 1 or t <= float(k0.get("time", 0.0)):
+		var v: Array = k0.get("value", [0, 0, 0])
+		return _sl_quat_from_xyz(float(v[0]), float(v[1]), float(v[2]))
+
+	var k1: Dictionary = keys[keys.size() - 1]
+	if t >= float(k1.get("time", 0.0)):
+		var v: Array = k1.get("value", [0, 0, 0])
+		return _sl_quat_from_xyz(float(v[0]), float(v[1]), float(v[2]))
+
+	# Binary search for bracketing pair
+	var lo: int = 0
+	var hi: int = keys.size() - 1
+	while hi - lo > 1:
+		var mid: int = (lo + hi) / 2
+		if float(keys[mid].get("time", 0.0)) <= t:
+			lo = mid
+		else:
+			hi = mid
+
+	var t0: float = float(keys[lo].get("time", 0.0))
+	var t1: float = float(keys[hi].get("time", 0.0))
+	var frac: float = (t - t0) / maxf(t1 - t0, 0.0001)
+
+	var v0: Array = keys[lo].get("value", [0, 0, 0])
+	var v1: Array = keys[hi].get("value", [0, 0, 0])
+	var q0: Quaternion = _sl_quat_from_xyz(float(v0[0]), float(v0[1]), float(v0[2]))
+	var q1: Quaternion = _sl_quat_from_xyz(float(v1[0]), float(v1[1]), float(v1[2]))
+
+	return q0.slerp(q1, frac)
+
+
+## Interpolate SL position keyframes at time t. Returns SL-space Vector3 (meters).
+func _interp_sl_position(keys: Array, t: float) -> Vector3:
+	if keys.is_empty():
+		return Vector3.ZERO
+
+	var k0: Dictionary = keys[0]
+	if keys.size() == 1 or t <= float(k0.get("time", 0.0)):
+		var v: Array = k0.get("value", [0, 0, 0])
+		return Vector3(float(v[0]), float(v[1]), float(v[2]))
+
+	var k1: Dictionary = keys[keys.size() - 1]
+	if t >= float(k1.get("time", 0.0)):
+		var v: Array = k1.get("value", [0, 0, 0])
+		return Vector3(float(v[0]), float(v[1]), float(v[2]))
+
+	# Binary search for bracketing pair
+	var lo: int = 0
+	var hi: int = keys.size() - 1
+	while hi - lo > 1:
+		var mid: int = (lo + hi) / 2
+		if float(keys[mid].get("time", 0.0)) <= t:
+			lo = mid
+		else:
+			hi = mid
+
+	var t0: float = float(keys[lo].get("time", 0.0))
+	var t1: float = float(keys[hi].get("time", 0.0))
+	var frac: float = (t - t0) / maxf(t1 - t0, 0.0001)
+
+	var v0: Array = keys[lo].get("value", [0, 0, 0])
+	var v1: Array = keys[hi].get("value", [0, 0, 0])
+	var p0 := Vector3(float(v0[0]), float(v0[1]), float(v0[2]))
+	var p1 := Vector3(float(v1[0]), float(v1[1]), float(v1[2]))
+
+	return p0.lerp(p1, frac)
+
+
+## Reconstruct SL quaternion from xyz components (w = sqrt(1 - x² - y² - z²), always >= 0)
+func _sl_quat_from_xyz(x: float, y: float, z: float) -> Quaternion:
+	var w_sq: float = 1.0 - x * x - y * y - z * z
+	var w: float = sqrt(max(w_sq, 0.0))
+	return Quaternion(x, y, z, w)
+
+
+## Remap animation track paths to use the actual skeleton node name and valid bone indices.
+## Also compensates rotation keyframes for bone rest pose: Godot applies final = rest * pose,
+## but SL animation rotations are absolute, so we set pose = rest^{-1} * desired_rotation.
 func _remap_animation_tracks(src: Animation, skel_name: String, skeleton: Skeleton3D) -> Animation:
 	var anim := src.duplicate()
 	for i in range(anim.get_track_count()):
@@ -502,9 +780,17 @@ func _remap_animation_tracks(src: Animation, skel_name: String, skeleton: Skelet
 		if ":" in path_str:
 			var parts: PackedStringArray = path_str.split(":")
 			var bone_name: String = parts[1]
-			# Verify bone exists in this skeleton
-			if skeleton.find_bone(bone_name) >= 0:
+			var bone_idx: int = skeleton.find_bone(bone_name)
+			if bone_idx >= 0:
 				anim.track_set_path(i, NodePath("%s:%s" % [skel_name, bone_name]))
+				# Compensate rotation tracks for bone rest pose
+				if anim.track_get_type(i) == Animation.TYPE_ROTATION_3D:
+					var rest_rot: Quaternion = skeleton.get_bone_rest(bone_idx).basis.get_rotation_quaternion()
+					if not rest_rot.is_equal_approx(Quaternion.IDENTITY):
+						var inv_rest: Quaternion = rest_rot.inverse()
+						for k in range(anim.track_get_key_count(i)):
+							var q: Quaternion = anim.track_get_key_value(i, k)
+							anim.track_set_key_value(i, k, (inv_rest * q).normalized())
 			else:
 				# Bone not in this skeleton — disable the track
 				anim.track_set_enabled(i, false)
@@ -649,8 +935,6 @@ func _cleanup_object(local_id: int) -> void:
 	# Clean up animesh data
 	if sm.animesh_skeletons.has(local_id):
 		sm.animesh_skeletons.erase(local_id)
-	if sm.animesh_players.has(local_id):
-		sm.animesh_players.erase(local_id)
 	sm.animesh_mesh_instances.erase(local_id)
 	sm.object_mesh_id.erase(local_id)
 	sm.animesh_root_for.erase(local_id)
@@ -660,6 +944,9 @@ func _cleanup_object(local_id: int) -> void:
 			animesh_node.queue_free()
 		sm.animesh_roots.erase(local_id)
 		sm.animesh_pending_anims.erase(local_id)
+		sm.animesh_eval.erase(local_id)
+		if sm.animesh_eval.is_empty():
+			sm.animesh_eval_active = false
 
 	# Clean up all tracking dicts
 	if sm.pending_meshes.has(local_id):

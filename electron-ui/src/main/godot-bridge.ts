@@ -129,11 +129,19 @@ export class GodotBridge extends EventEmitter {
 
   private vrMode: boolean;
 
-  constructor(bot: Bot, options: { vrMode?: boolean } = {}) {
+  constructor(bot: Bot, options: { vrMode?: boolean; objectAnimationBuffer?: Map<string, { animId: string; sequenceId: number }[]> } = {}) {
     super();
     this.bot = bot;
     this.port = 0; // resolved in start()
     this.vrMode = options.vrMode ?? false;
+
+    // Seed from MetaverseConnection's early ObjectAnimation buffer
+    if (options.objectAnimationBuffer) {
+      for (const [uuid, anims] of options.objectAnimationBuffer) {
+        this.animeshAnimState.set(uuid, anims);
+      }
+      console.log(`[GodotBridge] Seeded ${options.objectAnimationBuffer.size} ObjectAnimation entries from login buffer`);
+    }
   }
 
   /** Returns mesh asset UUID if obj is a mesh, else undefined */
@@ -351,9 +359,9 @@ export class GodotBridge extends EventEmitter {
       try { fs.unlinkSync(overridePath); } catch { /* not present, fine */ }
     }
 
-    // Subscribe to ObjectAnimation EARLY — SL sends animation state once when objects
-    // enter the interest list. If we wait until after Godot connects, those initial
-    // messages are lost and animesh objects never start their animations.
+    // Subscribe to live ObjectAnimation messages (handles animations that change after
+    // GodotBridge starts). Initial animation state from login is seeded via the
+    // objectAnimationBuffer passed to the constructor from MetaverseConnection.
     this.subscribeToObjectAnimation();
 
     console.log(`[GodotBridge] Spawning Godot on port ${this.port} — ${godotPath}`);
@@ -448,6 +456,9 @@ export class GodotBridge extends EventEmitter {
                   case 'set_object_description':
                     this.handleSetObjectDescription(msg.localId, msg.description);
                     break;
+                  case 'object_touch':
+                    this.handleObjectTouch(msg);
+                    break;
                   case 'window_bounds':
                     saveExternalBounds('godot', {
                       x: msg.x, y: msg.y,
@@ -525,6 +536,7 @@ export class GodotBridge extends EventEmitter {
 
     // Init animation fetch queue (animesh animation assets → parsed keyframe data)
     this.animationFetchQueue = new AnimationFetchQueue(this.bot, (animUuid, data) => {
+      console.log(`[Animesh] Sending animation_ready to Godot: ${animUuid.slice(0, 8)} (${data.joints.length} joints, ${data.duration.toFixed(1)}s, loop=${data.loop})`);
       this.send({ type: 'animation_ready', animId: animUuid, data });
     });
 
@@ -646,11 +658,16 @@ export class GodotBridge extends EventEmitter {
 
     // Detect animesh: ExtendedMesh with ANIMATED_MESH_ENABLED_FLAG (0x1)
     const isAnimesh = !!(obj.extraParams?.extendedMeshData?.flags & 0x1);
+    const objUuid = obj.FullID?.toString() || '';
+
+    if (isAnimesh) {
+      console.log(`[Animesh] Detected animesh object localId=${obj.ID} uuid=${objUuid} meshId=${meshId || 'none'} parentId=${parentLocalId}`);
+    }
 
     this.send({
       type: 'object_create',
       localId: obj.ID,
-      uuid: obj.FullID?.toString() || '',
+      uuid: objUuid,
       parentId: parentLocalId,
       position: [pos.x, pos.y, pos.z],
       rotation: rot ? [rot.x, rot.y, rot.z, rot.w] : [0, 0, 0, 1],
@@ -665,12 +682,13 @@ export class GodotBridge extends EventEmitter {
       this.objectsWithLights.add(obj.ID);
     }
     if (isAnimesh) {
-      const uuid = obj.FullID?.toString();
+      const uuid = objUuid;
       if (uuid) {
         this.animeshObjects.set(uuid, obj.ID);
         // Replay buffered animation state (ObjectAnimation arrived before sendObject)
         const buffered = this.animeshAnimState.get(uuid);
         if (buffered && buffered.length > 0) {
+          console.log(`[Animesh] Replaying ${buffered.length} buffered animations for ${uuid.slice(0, 8)} localId=${obj.ID}: ${buffered.map(a => a.animId.slice(0, 8)).join(', ')}`);
           this.send({
             type: 'object_animation',
             localId: obj.ID,
@@ -682,6 +700,8 @@ export class GodotBridge extends EventEmitter {
               this.animationFetchQueue.request(a.animId, obj.ID);
             }
           }
+        } else {
+          console.log(`[Animesh] No buffered animations for ${uuid.slice(0, 8)} localId=${obj.ID} (ObjectAnimation not yet received)`);
         }
       }
     }
@@ -1266,12 +1286,15 @@ export class GodotBridge extends EventEmitter {
           sequenceId: a.AnimSequenceID,
         }));
 
+        console.log(`[Animesh] ObjectAnimation received for ${senderUuid.slice(0, 8)}: ${animations.length} anims [${animations.map(a => a.animId.slice(0, 8)).join(', ')}]`);
+
         // Always buffer latest state (sendObject may not have run yet)
         this.animeshAnimState.set(senderUuid, animations);
 
         // If Godot is connected and we know this object, forward immediately
         const localId = this.animeshObjects.get(senderUuid);
         if (localId !== undefined && this.connected) {
+          console.log(`[Animesh] Forwarding ObjectAnimation to Godot for localId=${localId} uuid=${senderUuid.slice(0, 8)}`);
           this.send({
             type: 'object_animation',
             localId,
@@ -1283,6 +1306,8 @@ export class GodotBridge extends EventEmitter {
               this.animationFetchQueue.request(a.animId, localId);
             }
           }
+        } else {
+          console.log(`[Animesh] Buffering ObjectAnimation for ${senderUuid.slice(0, 8)} (known=${localId !== undefined}, connected=${this.connected})`);
         }
       });
       this.subscriptions.push(animSub);
@@ -1839,6 +1864,36 @@ export class GodotBridge extends EventEmitter {
       console.log(`[GodotBridge] Set description on object ${localId}`);
     } catch (e) {
       console.error(`[GodotBridge] set_object_description failed for ${localId}:`, e);
+    }
+  }
+
+  private async handleObjectTouch(msg: any): Promise<void> {
+    try {
+      const region = this.bot.currentRegion;
+      if (!region) return;
+      const localId: number = msg.localId;
+      const obj = region.objects?.getObjectByLocalID(localId);
+      if (!obj) {
+        console.warn(`[GodotBridge] object_touch: object ${localId} not found`);
+        return;
+      }
+      const { Vector3 } = await import('../../node-metaverse/lib/classes/Vector3');
+      const pos = msg.position || {};
+      const norm = msg.normal || {};
+      const st = msg.st || {};
+      const faceIndex: number = msg.faceIndex || 0;
+      const position = new Vector3(pos.x || 0, pos.y || 0, pos.z || 0);
+      const normal = new Vector3(norm.x || 0, norm.y || 0, norm.z || 0);
+      const stCoord = new Vector3(st.x || 0, st.y || 0, 0);
+      const uvCoord = new Vector3(st.x || 0, st.y || 0, 0);
+      const grabOffset = new Vector3(pos.x || 0, pos.y || 0, pos.z || 0);
+      const binormal = Vector3.getZero();
+      await this.bot.clientCommands.region.touchObject(
+        localId, grabOffset, uvCoord, stCoord, faceIndex, position, normal, binormal
+      );
+      console.log(`[GodotBridge] Touched object ${localId} face=${faceIndex} st=(${st.x?.toFixed(2)},${st.y?.toFixed(2)})`);
+    } catch (e) {
+      console.error(`[GodotBridge] object_touch failed for ${msg.localId}:`, e);
     }
   }
 
