@@ -624,10 +624,8 @@ export function llMeshToGlb(mesh: LLMesh, opts?: { skipBsm?: boolean }): Buffer 
       const attachParent = attachPoints.get(jname);
       if (attachParent && jointWorldTransforms.has(attachParent)) {
         orphanParent.set(jname, attachParent);
-        console.log(`[mesh-converter] Attachment point "${jname}" → parent "${attachParent}"`);
       } else {
         orphanParent.set(jname, 'mPelvis');
-        console.log(`[mesh-converter] Unknown joint "${jname}" → mPelvis (fallback)`);
       }
     }
 

@@ -426,53 +426,7 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	if sm.animesh_roots.has(animesh_root_id):
 		_apply_pending_animations(local_id)
 
-	# Diagnostic: check if rest pose skinning is identity (vertices at bind position)
-	# skin_matrix = bone_global_rest * IBM. Should be identity for correct rest pose.
-	var skin: Skin = mesh_instance.skin if mesh_instance.skin else null
-	if skin == null and mesh_instance.mesh:
-		# Try to get skin from mesh surfaces
-		skin = mesh_instance.get_skin()
-	print("[Animesh-diag] object %d: skeleton bones=%d, skin binds=%s" % [
-		local_id, skeleton.get_bone_count(), str(skin.get_bind_count()) if skin else "NO SKIN"])
-	# Log first 3 bones for quick sanity check
-	for bi in range(min(skeleton.get_bone_count(), 3)):
-		var bone_name: String = skeleton.get_bone_name(bi)
-		var global_rest: Transform3D = skeleton.get_bone_global_rest(bi)
-		print("[Animesh-diag]   bone %d '%s' pos=(%.3f,%.3f,%.3f)" % [
-			bi, bone_name, global_rest.origin.x, global_rest.origin.y, global_rest.origin.z])
-	# Check ALL skin bind poses (IBMs)
-	var fail_count: int = 0
-	if skin:
-		for bind_i in range(skin.get_bind_count()):
-			var bind_bone: int = skin.get_bind_bone(bind_i)
-			var ibm: Transform3D = skin.get_bind_pose(bind_i)
-			var bone_name2: String = skeleton.get_bone_name(bind_bone) if bind_bone >= 0 and bind_bone < skeleton.get_bone_count() else "???"
-			var gr: Transform3D = skeleton.get_bone_global_rest(bind_bone) if bind_bone >= 0 and bind_bone < skeleton.get_bone_count() else Transform3D.IDENTITY
-			var product: Transform3D = gr * ibm
-			var pos_err: float = product.origin.length()
-			var rot_err: float = product.basis.get_rotation_quaternion().angle_to(Quaternion.IDENTITY)
-			var scale_err: Vector3 = product.basis.get_scale() - Vector3.ONE
-			var is_id: bool = pos_err < 0.01 and rot_err < 0.01 and scale_err.length() < 0.01
-			if not is_id:
-				fail_count += 1
-				print("[Animesh-diag]   FAIL bind %d bone=%d '%s' pos_err=%.4f rot_err=%.4f scale_err=(%.3f,%.3f,%.3f)" % [
-					bind_i, bind_bone, bone_name2, pos_err, rot_err,
-					scale_err.x, scale_err.y, scale_err.z])
-		print("[Animesh-diag]   %d/%d binds PASS, %d FAIL" % [
-			skin.get_bind_count() - fail_count, skin.get_bind_count(), fail_count])
-	# Check if initial pose differs from identity (importer may set pose = decomposed(rest))
-	var pose_nonid: int = 0
-	for bi in range(min(skeleton.get_bone_count(), 5)):
-		var p_pos: Vector3 = skeleton.get_bone_pose_position(bi)
-		var p_rot: Quaternion = skeleton.get_bone_pose_rotation(bi)
-		var p_scl: Vector3 = skeleton.get_bone_pose_scale(bi)
-		var is_id_pose: bool = p_pos.length() < 0.001 and p_rot.is_equal_approx(Quaternion.IDENTITY) and (p_scl - Vector3.ONE).length() < 0.001
-		if not is_id_pose:
-			pose_nonid += 1
-		print("[Animesh-diag]   bone %d pose: pos=(%.3f,%.3f,%.3f) rot=(%.3f,%.3f,%.3f,%.3f) scl=(%.2f,%.2f,%.2f) %s" % [
-			bi, p_pos.x, p_pos.y, p_pos.z, p_rot.x, p_rot.y, p_rot.z, p_rot.w,
-			p_scl.x, p_scl.y, p_scl.z, "" if is_id_pose else "NON-IDENTITY"])
-	print("[Animesh] Rigged mesh instantiated for object %d (root %d), skeleton bones: %d" % [
+	print("[Animesh] Rigged mesh instantiated for object %d (root %d), bones: %d" % [
 		local_id, animesh_root_id, skeleton.get_bone_count()])
 
 	# Clean up the now-empty generated scene
@@ -497,7 +451,6 @@ func handle_object_animation(msg: Dictionary) -> void:
 	var obj_uuid: String = str(msg.get("uuid", ""))
 	var animations: Array = msg.get("animations", [])
 	if local_id == 0 or animations.is_empty():
-		print("[Animesh] handle_object_animation: ignored (localId=%d, anims=%d)" % [local_id, animations.size()])
 		return
 
 	# Store animation IDs for this root (used when skeleton loads later)
@@ -505,23 +458,11 @@ func handle_object_animation(msg: Dictionary) -> void:
 	for a: Dictionary in animations:
 		anim_ids.append(str(a.get("animId", "")))
 	sm.animesh_pending_anims[local_id] = anim_ids
-	print("[Animesh] handle_object_animation: localId=%d uuid=%s anims=%s" % [
-		local_id, obj_uuid.left(8), str(anim_ids.map(func(s: String): return s.left(8)))])
-
-	# Check if this localId is a known animesh root
-	var is_root: bool = sm.animesh_roots.has(local_id)
-	print("[Animesh]   is_known_root=%s, animesh_root_for entries=%d, animesh_skeletons entries=%d" % [
-		str(is_root), sm.animesh_root_for.size(), sm.animesh_skeletons.size()])
 
 	# Apply cached animations to all skeletons under this root
-	var applied_count: int = 0
 	for obj_id: int in sm.animesh_root_for:
 		if sm.animesh_root_for[obj_id] == local_id and sm.animesh_skeletons.has(obj_id):
-			print("[Animesh]   Applying to skeleton obj_id=%d" % obj_id)
 			_apply_pending_animations(obj_id)
-			applied_count += 1
-	if applied_count == 0:
-		print("[Animesh]   No skeletons ready yet for root %d (will apply when skeleton loads)" % local_id)
 
 
 ## Handle animation_ready — build Godot Animation resource from keyframe data
@@ -529,7 +470,6 @@ func handle_animation_ready(msg: Dictionary) -> void:
 	var anim_id: String = str(msg.get("animId", ""))
 	var data: Dictionary = msg.get("data", {})
 	if anim_id.is_empty() or data.is_empty():
-		print("[Animesh] handle_animation_ready: ignored (animId=%s, data empty=%s)" % [anim_id.left(8), str(data.is_empty())])
 		return
 
 	# Build and cache the Animation resource + raw data (for priority-based merging)
@@ -538,9 +478,6 @@ func handle_animation_ready(msg: Dictionary) -> void:
 		return
 	sm.animesh_anim_cache[anim_id] = anim
 	sm.animesh_anim_data[anim_id] = data
-	print("[Animesh] Animation %s ready (%.1fs, %d joints, priority=%d, loop=%s)" % [
-		anim_id.left(8), anim.length, data.get("joints", []).size(),
-		int(data.get("priority", 0)), str(anim.loop_mode != Animation.LOOP_NONE)])
 
 	# Apply to all animesh skeletons that are waiting for this animation
 	for obj_id: int in sm.animesh_skeletons:
@@ -636,16 +573,6 @@ func _apply_pending_animations(obj_id: int) -> void:
 		else:
 			if jname2 not in unmatched:
 				unmatched.append(jname2)
-	# Collect unique durations for logging
-	var _durations: Dictionary = {}
-	for _jn: String in merged_joints:
-		var _d: float = merged_joints[_jn]["duration"]
-		_durations[_d] = _durations.get(_d, 0) + 1
-	print("[Animesh] _apply_pending_animations: root=%d, %d joints merged, durations=%s" % [
-		root_id, merged_joints.size(), str(_durations)])
-	if unmatched.size() > 0:
-		print("[Animesh]   UNMATCHED joints (no skeleton bone): %s" % [str(unmatched)])
-	print("[Animesh]   Matched: %d, Unmatched: %d" % [matched.size(), unmatched.size()])
 
 
 ## Per-frame animesh animation evaluation.
