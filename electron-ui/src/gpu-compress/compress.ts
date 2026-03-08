@@ -155,7 +155,7 @@ async function compressTexture(req: CompressRequest): Promise<Uint8Array> {
 
   device.queue.writeTexture(
     { texture },
-    rgba,
+    rgba as Uint8Array<ArrayBuffer>,
     { bytesPerRow: width * 4, rowsPerImage: height },
     { width, height },
   );
@@ -245,7 +245,7 @@ async function compressTextureFullPipeline(req: FullCompressRequest): Promise<Fu
 
     device.queue.writeTexture(
       { texture: baseTex },
-      rgba,
+      rgba as Uint8Array<ArrayBuffer>,
       { bytesPerRow: width * 4, rowsPerImage: height },
       { width, height },
     );

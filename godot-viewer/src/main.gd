@@ -308,10 +308,8 @@ func _handle_message(text: String) -> void:
 			scene_manager.set_planar_debug_mode(msg.get("mode", 0))
 		"object_properties":
 			scene_manager.handle_object_properties(msg)
-		"object_animation":
-			scene_manager.handle_object_animation(msg)
-		"animation_ready":
-			scene_manager.handle_animation_ready(msg)
+		"animations_batch":
+			scene_manager.handle_animations_batch(msg)
 		_:
 			push_warning("[Main] Unknown message type: %s" % msg_type)
 

@@ -82,7 +82,7 @@ void vertex() {
 	float normal_height_scale = wave_height_scale / wave_normal_flatness;
 	vec2 e = vec2(0.01, 0.0);
 	vec3 normal = normalize(vec3(
-		get_wave_height(uv_a - e, uv_b - e) * normal_height_scale - get_wave_height(uv_a + e, uv_a + e) * normal_height_scale,
+		get_wave_height(uv_a - e, uv_b - e) * normal_height_scale - get_wave_height(uv_a + e, uv_b + e) * normal_height_scale,
 		2.0 * e.x,
 		get_wave_height(uv_a - e.yx, uv_b - e.yx) * normal_height_scale - get_wave_height(uv_a + e.yx, uv_b + e.yx) * normal_height_scale
 	));

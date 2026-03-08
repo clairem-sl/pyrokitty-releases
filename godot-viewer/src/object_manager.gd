@@ -13,14 +13,34 @@ const INTERP_MAX_TIME: float = 3.0        # Stop extrapolation entirely
 const BLEND_TIME: float = 0.25            # Seconds to blend correction offset to zero
 const BLEND_SNAP_DIST: float = 10.0       # Snap if correction exceeds this (meters)
 
-const _DEBUG_UUID := "bbafd512-4ab8-9878-0e68-eba086760821"
-
 # Self avatar state
 var _first_person_mode: bool = false
 
 
 func _init(scene_manager) -> void:
 	sm = scene_manager
+
+
+## Short UUID for log messages (first 8 chars, or "?" if not found)
+func _uuid_short(local_id: int) -> String:
+	var uuid: String = sm.object_uuid.get(local_id, "")
+	if uuid.is_empty():
+		return "?"
+	return uuid.substr(0, 8)
+
+
+## Check if a localId belongs to the self avatar (is the avatar root or an attachment of it)
+func _is_self_avatar(local_id: int) -> bool:
+	if sm.self_avatar_id.is_empty():
+		return false
+	var self_lid: int = sm.avatar_local_ids.get(sm.self_avatar_id, 0)
+	if self_lid == 0:
+		return false
+	if local_id == self_lid:
+		return true
+	# Check if this object's animesh root is the self avatar
+	var root_id: int = sm.animesh_root_for.get(local_id, 0)
+	return root_id == self_lid
 
 
 # ─── Coordinate Conversion ───────────────────────────
@@ -46,8 +66,6 @@ func handle_object_create(msg: Dictionary) -> void:
 	var local_id: int = int(msg.get("localId", 0))
 	if local_id == 0:
 		return
-	if str(msg.get("uuid", "")) == _DEBUG_UUID:
-		print("[GD ObjDebug] CREATE localId=%d pos=%s existing=%s" % [local_id, str(msg.get("position", [])), str(sm.objects.has(local_id))])
 
 	var parent_id: int = int(msg.get("parentId", 0))
 
@@ -55,9 +73,14 @@ func handle_object_create(msg: Dictionary) -> void:
 	if sm.objects.has(local_id):
 		_cleanup_object(local_id)
 
+	# Store UUID for log correlation
+	var obj_uuid: String = str(msg.get("uuid", ""))
+	if not obj_uuid.is_empty():
+		sm.object_uuid[local_id] = obj_uuid
+
 	# Store object metadata (uuid; name/description arrive later via object_properties)
 	sm.object_meta[local_id] = {
-		"uuid": str(msg.get("uuid", "")),
+		"uuid": obj_uuid,
 		"name": "",
 		"description": "",
 	}
@@ -68,28 +91,36 @@ func handle_object_create(msg: Dictionary) -> void:
 	var shape: Dictionary = msg.get("shape", {})
 	var rsi = sm.RSInstance.new(sm._scenario, sm._vis_far, sm._vis_fade)
 
+	# Will this object be an animesh child? Check early so we can skip RSI mesh for rigged animesh.
+	var will_be_animesh: bool = false
+	if parent_id > 0:
+		if sm.animesh_roots.has(parent_id) or sm.animesh_root_for.has(parent_id):
+			will_be_animesh = true
+
 	if not mesh_id.is_empty() and sm.mesh_cache.has(mesh_id):
-		var is_rigged_non_animesh: bool = sm.rigged_mesh_paths.has(mesh_id) and not msg.get("animesh", false)
-		# Non-animesh rigged: prefer static mesh (no BSM) for correct scale/rotation
-		if is_rigged_non_animesh and sm.static_mesh_cache.has(mesh_id):
-			rsi.set_mesh(sm.static_mesh_cache[mesh_id])
-			# No AABB correction — static mesh is in raw mesh space, prim scale applies directly
-		elif is_rigged_non_animesh and sm.static_mesh_paths.has(mesh_id):
-			# Static variant exists but not loaded yet — use placeholder, wait for static
+		var is_rigged: bool = sm.rigged_mesh_paths.has(mesh_id)
+		# Animesh child with rigged mesh: use placeholder — the real mesh goes on Skeleton3D
+		if is_rigged and will_be_animesh:
 			rsi.set_mesh(sm.object_mesh)
-			if not sm._pending_by_mesh.has(mesh_id + ":static_wait"):
-				sm._pending_by_mesh[mesh_id + ":static_wait"] = []
-			sm._pending_by_mesh[mesh_id + ":static_wait"].append(local_id)
-		else:
-			# Animesh, or rigged with identity BSM, or unrigged — use normal mesh
-			var cached_mesh: Mesh = sm.mesh_cache[mesh_id]
-			rsi.set_mesh(cached_mesh)
-			# Rigged non-animesh with identity BSM still needs AABB correction
-			if is_rigged_non_animesh:
+		elif is_rigged and not msg.get("animesh", false):
+			# Non-animesh rigged: prefer static mesh (no BSM) for correct scale/rotation
+			if sm.static_mesh_cache.has(mesh_id):
+				rsi.set_mesh(sm.static_mesh_cache[mesh_id])
+			elif sm.static_mesh_paths.has(mesh_id):
+				rsi.set_mesh(sm.object_mesh)
+				if not sm._pending_by_mesh.has(mesh_id + ":static_wait"):
+					sm._pending_by_mesh[mesh_id + ":static_wait"] = []
+				sm._pending_by_mesh[mesh_id + ":static_wait"].append(local_id)
+			else:
+				var cached_mesh: Mesh = sm.mesh_cache[mesh_id]
+				rsi.set_mesh(cached_mesh)
 				var aabb: AABB = cached_mesh.get_aabb()
 				if aabb.size.x > 0.001 and aabb.size.y > 0.001 and aabb.size.z > 0.001:
 					rsi.scl_divisor = aabb.size
 					rsi.scl_center = aabb.get_center()
+		else:
+			# Animesh root, or unrigged — use normal mesh
+			rsi.set_mesh(sm.mesh_cache[mesh_id])
 	elif not mesh_id.is_empty():
 		# Mesh placeholder while waiting for mesh data
 		rsi.set_mesh(sm.object_mesh)
@@ -140,6 +171,11 @@ func handle_object_create(msg: Dictionary) -> void:
 			var parent_rsi = sm.objects[parent_id]
 			rsi.pos = parent_rsi.pos + parent_rsi.rot * godot_pos
 			rsi.rot = parent_rsi.rot * godot_rot
+		elif sm.animesh_roots.has(parent_id):
+			# Parent is an avatar or animesh root — use scene tree node transform
+			var root_node: Node3D = sm.animesh_roots[parent_id]
+			rsi.pos = root_node.position + root_node.quaternion * godot_pos
+			rsi.rot = root_node.quaternion * godot_rot
 		else:
 			# Parent hasn't arrived — use offset as-is (will be corrected when parent arrives)
 			rsi.pos = godot_pos
@@ -167,32 +203,49 @@ func handle_object_create(msg: Dictionary) -> void:
 		animesh_node.scale = Vector3.ONE
 		sm.animesh_roots[local_id] = animesh_node
 		sm.animesh_root_for[local_id] = local_id
-		print("[Animesh] Root object %d created" % local_id)
-		# Retroactively check existing children — they may have arrived before the root
-		# and their cached rigged meshes would have skipped _apply_mesh_to_pending
-		if sm.object_children.has(local_id):
-			for child_id: int in sm.object_children[local_id]:
-				sm.animesh_root_for[child_id] = local_id
-				var child_mid: String = sm.object_mesh_id.get(child_id, "")
-				if not child_mid.is_empty() and sm.mesh_cache.has(child_mid) and sm.rigged_mesh_paths.has(child_mid):
-					_instantiate_animesh_mesh(child_id, child_mid, local_id)
-					# Re-apply face materials — they were applied before MeshInstance3D existed
-					if sm.object_faces.has(child_id) and sm.objects.has(child_id):
-						sm.asset_pipeline.apply_face_materials(sm.objects[child_id], child_id, sm.object_faces[child_id])
+		if _is_self_avatar(local_id):
+			print("[SelfAvatar] Animesh root object %d uuid=%s created" % [local_id, _uuid_short(local_id)])
+		# Retroactively register existing children + grandchildren (attachment linksets)
+		_register_animesh_descendants(local_id, local_id)
 
-	# Track children of animesh roots
-	if parent_id > 0 and sm.animesh_roots.has(parent_id):
-		sm.animesh_root_for[local_id] = parent_id
+	# Track children of animesh roots (direct children AND grandchildren of linksets)
+	if parent_id > 0:
+		if sm.animesh_roots.has(parent_id):
+			sm.animesh_root_for[local_id] = parent_id
+		elif sm.animesh_root_for.has(parent_id):
+			# Grandchild — inherit the same animesh root (attachment linkset child)
+			sm.animesh_root_for[local_id] = sm.animesh_root_for[parent_id]
+		else:
+			# Only log for self-avatar attachments — regular linkset children are expected noise
+			var self_lid: int = sm.avatar_local_ids.get(sm.self_avatar_id, 0)
+			if self_lid > 0 and parent_id == self_lid:
+				print("[SelfAvatar] WARNING: obj %d uuid=%s has parentId=%d (self avatar) but NOT an animesh root (animesh_roots has %d entries)" % [local_id, _uuid_short(local_id), parent_id, sm.animesh_roots.size()])
+
+	# [SelfAvatar] log when an attachment is registered for the self avatar
+	if _is_self_avatar(local_id):
+		print("[SelfAvatar] Attachment created: localId=%d uuid=%s meshId=%s parentId=%d" % [local_id, _uuid_short(local_id), mesh_id.substr(0, 8) if not mesh_id.is_empty() else "none", parent_id])
 
 	# If this object has a cached rigged mesh and belongs to an animesh linkset, instantiate now
 	# (bypasses _apply_mesh_to_pending which only runs for uncached meshes)
 	if sm.animesh_root_for.has(local_id):
 		var ar_id: int = sm.animesh_root_for[local_id]
+		var _is_self: bool = _is_self_avatar(local_id)
 		if not mesh_id.is_empty() and sm.mesh_cache.has(mesh_id) and sm.rigged_mesh_paths.has(mesh_id):
+			if _is_self:
+				print("[SelfAvatar] Rigged mesh %s CACHED, instantiating immediately for localId=%d uuid=%s" % [mesh_id.substr(0, 8), local_id, _uuid_short(local_id)])
 			_instantiate_animesh_mesh(local_id, mesh_id, ar_id)
 			# Re-apply face materials — they were applied before MeshInstance3D existed
 			if sm.object_faces.has(local_id):
 				sm.asset_pipeline.apply_face_materials(rsi, local_id, sm.object_faces[local_id])
+		elif not mesh_id.is_empty() and sm.rigged_mesh_paths.has(mesh_id):
+			if _is_self:
+				print("[SelfAvatar] Rigged mesh %s NOT cached yet, will wait for mesh_ready (localId=%d uuid=%s)" % [mesh_id.substr(0, 8), local_id, _uuid_short(local_id)])
+		elif not mesh_id.is_empty():
+			if _is_self:
+				print("[SelfAvatar] Mesh %s not in rigged_mesh_paths yet (localId=%d uuid=%s)" % [mesh_id.substr(0, 8), local_id, _uuid_short(local_id)])
+		else:
+			if _is_self:
+				print("[SelfAvatar] No meshId (prim/sculpt) for localId=%d uuid=%s, animesh root=%d" % [local_id, _uuid_short(local_id), ar_id])
 
 	# Create light if this object is a light source
 	if msg.has("light") and msg["light"] is Dictionary:
@@ -219,10 +272,6 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 		var rsi = sm.objects.get(local_id)
 		if rsi == null:
 			continue
-
-		var _meta: Dictionary = sm.object_meta.get(local_id, {})
-		if _meta.get("uuid", "") == _DEBUG_UUID:
-			print("[GD ObjDebug] UPDATE localId=%d fseq=%s pos=%s vel=%s rsi.pos=%s" % [local_id, str(obj.get("_fseq", "?")), str(obj.get("position", [])), str(obj.get("velocity", [])), str(rsi.pos)])
 
 		# Parse motion data for interpolation
 		var has_motion := false
@@ -354,6 +403,24 @@ func _sync_animesh_transform(local_id: int, rsi) -> void:
 
 # ─── Animesh ─────────────────────────────────────────
 
+## Recursively register all descendants of a parent as animesh children.
+## Handles attachment linksets: root prim is direct child of avatar, child prims
+## are grandchildren but still rig to the same avatar skeleton.
+func _register_animesh_descendants(parent_id: int, root_id: int) -> void:
+	if not sm.object_children.has(parent_id):
+		return
+	for child_id: int in sm.object_children[parent_id]:
+		if not sm.animesh_root_for.has(child_id):
+			sm.animesh_root_for[child_id] = root_id
+			var child_mid: String = sm.object_mesh_id.get(child_id, "")
+			if not child_mid.is_empty() and sm.mesh_cache.has(child_mid) and sm.rigged_mesh_paths.has(child_mid):
+				_instantiate_animesh_mesh(child_id, child_mid, root_id)
+				if sm.object_faces.has(child_id) and sm.objects.has(child_id):
+					sm.asset_pipeline.apply_face_materials(sm.objects[child_id], child_id, sm.object_faces[child_id])
+		# Recurse into grandchildren
+		_register_animesh_descendants(child_id, root_id)
+
+
 ## Instantiate a rigged mesh as Skeleton3D + MeshInstance3D under the animesh root Node3D.
 ## Called from asset_pipeline when a rigged mesh loads for an animesh-related object.
 func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: int) -> void:
@@ -362,11 +429,11 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 		return
 	var glb_path: String = sm.rigged_mesh_paths.get(mesh_id, "")
 	if glb_path.is_empty():
-		push_warning("[Animesh] No GLB path for rigged mesh %s" % mesh_id)
+		push_warning("[Animesh] No GLB path for rigged mesh %s (obj %d uuid=%s)" % [mesh_id, local_id, _uuid_short(local_id)])
 		return
 	var root_node: Node3D = sm.animesh_roots.get(animesh_root_id)
 	if root_node == null:
-		push_warning("[Animesh] No root node for animesh root %d" % animesh_root_id)
+		push_warning("[Animesh] No root node for animesh root %d uuid=%s (obj %d uuid=%s)" % [animesh_root_id, _uuid_short(animesh_root_id), local_id, _uuid_short(local_id)])
 		return
 
 	# Parse GLB and generate full scene tree (includes Skeleton3D + MeshInstance3D)
@@ -374,18 +441,18 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	var state := GLTFState.new()
 	var err := doc.append_from_file(glb_path, state)
 	if err != OK:
-		push_warning("[Animesh] Failed to parse GLB %s: %s" % [glb_path, error_string(err)])
+		push_warning("[Animesh] Failed to parse GLB %s: %s (obj %d uuid=%s)" % [glb_path, error_string(err), local_id, _uuid_short(local_id)])
 		return
 	var scene: Node = doc.generate_scene(state)
 	if scene == null:
-		push_warning("[Animesh] generate_scene returned null for %s" % glb_path)
+		push_warning("[Animesh] generate_scene returned null for %s (obj %d uuid=%s)" % [glb_path, local_id, _uuid_short(local_id)])
 		return
 
 	# Find Skeleton3D and MeshInstance3D in the generated scene tree
 	var skeleton: Skeleton3D = _find_node_of_type(scene, "Skeleton3D")
 	var mesh_instance: MeshInstance3D = _find_node_of_type(scene, "MeshInstance3D")
 	if skeleton == null or mesh_instance == null:
-		push_warning("[Animesh] No Skeleton3D/MeshInstance3D in GLB for object %d" % local_id)
+		push_warning("[Animesh] No Skeleton3D/MeshInstance3D in GLB for object %d uuid=%s" % [local_id, _uuid_short(local_id)])
 		scene.queue_free()
 		return
 
@@ -396,7 +463,10 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	# positioned by bone transforms, not the prim's linkset position.
 	var rsi = sm.objects.get(local_id)
 
-	# Reparent skeleton and mesh_instance out of the generated scene into our wrapper
+	# Reparent skeleton and mesh_instance out of the generated scene into our wrapper.
+	# Clear owner first — generate_scene() sets it, causing warnings on reparent.
+	skeleton.set_owner(null)
+	mesh_instance.set_owner(null)
 	skeleton.get_parent().remove_child(skeleton)
 	if mesh_instance.get_parent() != skeleton:
 		mesh_instance.get_parent().remove_child(mesh_instance)
@@ -410,6 +480,10 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	# Store references
 	sm.animesh_skeletons[local_id] = skeleton
 	sm.animesh_mesh_instances[local_id] = mesh_instance
+	# Maintain per-root skeleton list for fast process_animesh iteration
+	if not sm.animesh_root_skeletons.has(animesh_root_id):
+		sm.animesh_root_skeletons[animesh_root_id] = []
+	sm.animesh_root_skeletons[animesh_root_id].append(skeleton)
 
 	# Double-sided shadow casting reduces shadow acne near deformed joints.
 	# Bone bends create steep surface angles that single-sided bias can't handle.
@@ -426,8 +500,8 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	if sm.animesh_roots.has(animesh_root_id):
 		_apply_pending_animations(local_id)
 
-	print("[Animesh] Rigged mesh instantiated for object %d (root %d), bones: %d" % [
-		local_id, animesh_root_id, skeleton.get_bone_count()])
+	if _is_self_avatar(local_id):
+		print("[SelfAvatar] Rigged mesh instantiated: localId=%d uuid=%s meshId=%s bones=%d" % [local_id, _uuid_short(local_id), mesh_id.substr(0, 8), skeleton.get_bone_count()])
 
 	# Clean up the now-empty generated scene
 	scene.queue_free()
@@ -444,44 +518,52 @@ func _find_node_of_type(node: Node, type_name: String) -> Node:
 	return null
 
 
-## Handle ObjectAnimation message — stores which animations an animesh root should play.
-## Works even if the animesh root node hasn't been created yet (buffered in dictionary).
-func handle_object_animation(msg: Dictionary) -> void:
+## Handle animations_batch — bridge has collected ALL animation data for a root.
+## Contains the full set of animations with their parsed keyframe data.
+## Replaces the old object_animation + avatar_animation + animation_ready flow.
+func handle_animations_batch(msg: Dictionary) -> void:
 	var local_id: int = int(msg.get("localId", 0))
-	var obj_uuid: String = str(msg.get("uuid", ""))
-	var animations: Array = msg.get("animations", [])
+	var msg_uuid: String = str(msg.get("uuid", ""))
+	if not msg_uuid.is_empty() and local_id > 0:
+		sm.object_uuid[local_id] = msg_uuid
+	var animations: Dictionary = msg.get("animations", {})
+	if _is_self_avatar(local_id):
+		print("[SelfAvatar] animations_batch: localId=%d uuid=%s, %d animations, is_animesh_root=%s, has_skeletons=%s" % [
+			local_id, _uuid_short(local_id), animations.size(),
+			str(sm.animesh_roots.has(local_id)),
+			str(sm.animesh_root_skeletons.has(local_id) and sm.animesh_root_skeletons[local_id].size() > 0)])
 	if local_id == 0 or animations.is_empty():
 		return
 
-	# Store animation IDs for this root (used when skeleton loads later)
+	# Cache all animation data and build pending anim list
 	var anim_ids: Array = []
-	for a: Dictionary in animations:
-		anim_ids.append(str(a.get("animId", "")))
+	for anim_id: String in animations:
+		var data: Dictionary = animations[anim_id]
+		if data.is_empty():
+			continue
+		# Build and cache Animation resource + raw data
+		if not sm.animesh_anim_data.has(anim_id):
+			var anim := _build_animation(anim_id, data)
+			if anim != null:
+				sm.animesh_anim_cache[anim_id] = anim
+				sm.animesh_anim_data[anim_id] = data
+		anim_ids.append(anim_id)
+
 	sm.animesh_pending_anims[local_id] = anim_ids
 
-	# Apply cached animations to all skeletons under this root
-	for obj_id: int in sm.animesh_root_for:
-		if sm.animesh_root_for[obj_id] == local_id and sm.animesh_skeletons.has(obj_id):
-			_apply_pending_animations(obj_id)
+	if _is_self_avatar(local_id):
+		print("[SelfAvatar] Animations batch received: localId=%d, %d animations [%s]" % [local_id, anim_ids.size(), ", ".join(anim_ids.map(func(a: String) -> String: return a.substr(0, 8)))])
 
-
-## Handle animation_ready — build Godot Animation resource from keyframe data
-func handle_animation_ready(msg: Dictionary) -> void:
-	var anim_id: String = str(msg.get("animId", ""))
-	var data: Dictionary = msg.get("data", {})
-	if anim_id.is_empty() or data.is_empty():
-		return
-
-	# Build and cache the Animation resource + raw data (for priority-based merging)
-	var anim := _build_animation(anim_id, data)
-	if anim == null:
-		return
-	sm.animesh_anim_cache[anim_id] = anim
-	sm.animesh_anim_data[anim_id] = data
-
-	# Apply to all animesh skeletons that are waiting for this animation
+	# Trigger single rebuild for this root
+	var found_skeleton := false
 	for obj_id: int in sm.animesh_skeletons:
-		_apply_pending_animations(obj_id)
+		if sm.animesh_root_for.get(obj_id, 0) == local_id:
+			found_skeleton = true
+			_apply_pending_animations(obj_id)
+			break
+	if not found_skeleton:
+		if _is_self_avatar(local_id):
+			print("[SelfAvatar] Batch for localId=%d uuid=%s: %d anims cached, but NO skeleton found yet" % [local_id, _uuid_short(local_id), anim_ids.size()])
 
 
 ## Apply any pending animations to a specific animesh root.
@@ -497,23 +579,25 @@ func _apply_pending_animations(obj_id: int) -> void:
 		return
 
 	# Only need to build eval data once per root (not per child mesh)
-	# Check if any skeleton exists for this root
-	var has_skeleton: bool = false
-	for oid: int in sm.animesh_root_for:
-		if sm.animesh_root_for[oid] == root_id and sm.animesh_skeletons.has(oid):
-			has_skeleton = true
-			break
-	if not has_skeleton:
+	var root_skels: Array = sm.animesh_root_skeletons.get(root_id, [])
+	if root_skels.is_empty():
 		return
 
 	# Collect all available animations with their raw data
 	var available: Array = []
+	var missing: int = 0
 	for anim_id: String in pending_anims:
 		if sm.animesh_anim_data.has(anim_id):
 			available.append(sm.animesh_anim_data[anim_id] as Dictionary)
+		else:
+			missing += 1
 
 	if available.is_empty():
+		if _is_self_avatar(root_id):
+			print("[SelfAvatar] _apply_pending root=%d uuid=%s: %d pending, 0 available, %d missing" % [root_id, _uuid_short(root_id), pending_anims.size(), missing])
 		return
+	if _is_self_avatar(root_id):
+		print("[SelfAvatar] _apply_pending root=%d uuid=%s: %d available, %d missing, %d total joints" % [root_id, _uuid_short(root_id), available.size(), missing, available.reduce(func(acc: int, d: Dictionary): return acc + (d.get("joints", []) as Array).size(), 0)])
 
 	# Build per-joint priority map: joint_name → {priority, data_index}
 	var joint_best: Dictionary = {}
@@ -545,41 +629,28 @@ func _apply_pending_animations(obj_id: int) -> void:
 			"loop": src_anim.get("loop", false),
 		}
 
-	# Store eval data for this root — elapsed tracks wall clock, per-joint timing is independent
+	# Store eval data — preserve elapsed time if already running
+	var prev_elapsed: float = 0.0
+	if sm.animesh_eval.has(root_id):
+		prev_elapsed = sm.animesh_eval[root_id].get("elapsed", 0.0)
 	sm.animesh_eval[root_id] = {
-		"elapsed": 0.0,
+		"elapsed": prev_elapsed,
 		"joints": merged_joints,
 	}
 	sm.animesh_eval_active = true
 
-	# Log which animation joints match skeleton bones vs unmatched (check ALL skeletons)
-	var matched: Array = []
-	var all_bone_names: Array = []
-	for obj_id2: int in sm.animesh_root_for:
-		if sm.animesh_root_for[obj_id2] != root_id:
-			continue
-		var skel2: Skeleton3D = sm.animesh_skeletons.get(obj_id2)
-		if skel2 == null:
-			continue
-		for bi2 in range(skel2.get_bone_count()):
-			var bn: String = skel2.get_bone_name(bi2)
-			if bn not in all_bone_names:
-				all_bone_names.append(bn)
-	var unmatched: Array = []
-	for jname2: String in merged_joints:
-		if jname2 in all_bone_names:
-			if jname2 not in matched:
-				matched.append(jname2)
-		else:
-			if jname2 not in unmatched:
-				unmatched.append(jname2)
+	if _is_self_avatar(root_id):
+		print("[SelfAvatar] Animations applied: %d joints merged from %d animations" % [merged_joints.size(), available.size()])
 
 
 ## Per-frame animesh animation evaluation.
+## Evaluates each skeleton independently so all bones get animated regardless
+## of which skeleton they appear in. Different attachments (head, body, boots)
+## have different bone subsets — a single reference skeleton would miss bones
+## that only exist on other skeletons.
 ## SL xform.cpp:80: mWorldRotation = mRotation * mParent->getWorldRotation()
 ## SL's operator*(a,b) = Hamilton(b*a), so this is Hamilton(parent * local).
 ## Godot uses standard Hamilton, so we write: world = parent * local.
-## Then convert SL world to Godot coords and derive pose.
 func process_animesh(delta: float) -> void:
 	for root_id: int in sm.animesh_eval:
 		var eval: Dictionary = sm.animesh_eval[root_id]
@@ -611,79 +682,64 @@ func process_animesh(delta: float) -> void:
 			if pos_keys.size() > 0:
 				sl_local_pos[jname] = _interp_sl_position(pos_keys, t)
 
-		# For each skeleton under this root, compute and apply bone poses
-		for obj_id: int in sm.animesh_root_for:
-			if sm.animesh_root_for[obj_id] != root_id:
-				continue
-			var skeleton: Skeleton3D = sm.animesh_skeletons.get(obj_id)
-			if skeleton == null:
-				continue
+		# Get cached skeleton list for this root (O(1) lookup instead of full scan)
+		var root_skeletons: Array = sm.animesh_root_skeletons.get(root_id, [])
 
-			# Build SL world rotations traversing root → leaf, then derive Godot pose
-			# SL's operator*(a,b) computes Hamilton b*a (reversed from standard).
-			# SL line 80: mWorldRotation = mRotation * mParent->getWorldRotation()
-			#   = Hamilton(parent_world * local)
-			# Godot uses standard Hamilton, so: world = parent_world * local
+		if root_skeletons.is_empty():
+			continue
+
+		# Process each skeleton independently — each attachment (head, body, boots)
+		# has a different subset of SL bones. Computing on just one reference skeleton
+		# would miss bones only present on other skeletons (e.g. head bones missing
+		# if the first skeleton is a boot).
+		for skeleton: Skeleton3D in root_skeletons:
 			var sl_world: Dictionary = {}  # bone_idx -> Quaternion (SL space)
 			var godot_world: Dictionary = {}  # bone_idx -> Quaternion (Godot space)
+			var bone_animated: Dictionary = {}  # bone_idx -> bool
 
 			for bi in range(skeleton.get_bone_count()):
 				var bname: String = skeleton.get_bone_name(bi)
 				var parent_bi: int = skeleton.get_bone_parent(bi)
 
+				var has_rot: bool = sl_local_rot.has(bname)
+				var has_pos: bool = sl_local_pos.has(bname)
+				var parent_was_animated: bool = bone_animated.get(parent_bi, false)
+
+				# Only process bones that have animation data or an animated ancestor
+				if not has_rot and not has_pos and not parent_was_animated:
+					bone_animated[bi] = false
+					continue  # No animation influence — leave at rest pose
+
+				bone_animated[bi] = has_rot or has_pos or parent_was_animated
+
 				# SL local rotation: from animation, or rest rotation if not animated
 				var q_sl_local: Quaternion
-				if sl_local_rot.has(bname):
+				if has_rot:
 					q_sl_local = sl_local_rot[bname]
 				else:
-					# Derive SL rest rotation from Godot bone rest transform
-					# Godot→SL coordinate conversion: (x,y,z,w) → (x,-z,y,w)
-					var rest_q: Quaternion = skeleton.get_bone_rest(bi).basis.get_rotation_quaternion()
+					var rest_q: Quaternion = skeleton.get_bone_rest(bi).basis.orthonormalized().get_rotation_quaternion()
 					q_sl_local = Quaternion(rest_q.x, -rest_q.z, rest_q.y, rest_q.w)
 
-				# SL world = Hamilton(parent_world * local)
-				# SL writes this as "local * parent" but SL's operator* is reversed.
-				# In Godot (standard Hamilton): world = parent * local
 				var q_sl_parent_world: Quaternion = sl_world.get(parent_bi, Quaternion.IDENTITY)
 				var q_sl_world: Quaternion = q_sl_parent_world * q_sl_local
 				sl_world[bi] = q_sl_world
 
-				# Convert SL world to Godot world: (x,y,z,w) → (x,z,-y,w)
 				var q_godot_world := Quaternion(
 					q_sl_world.x, q_sl_world.z, -q_sl_world.y, q_sl_world.w).normalized()
 				godot_world[bi] = q_godot_world
 
-				# Only set pose if this bone is animated (rotation or position)
-				var has_rot: bool = sl_local_rot.has(bname)
-				var has_pos: bool = sl_local_pos.has(bname)
-				if not has_rot and not has_pos and parent_bi < 0:
-					continue  # Root bone with no animation — leave at rest
-
-				# Derive Godot pose rotation: global = parent_global * rest * pose
-				# → pose = (parent_global * rest)⁻¹ * our_desired_global
+				# Derive Godot pose rotation
 				var parent_godot_world: Quaternion = godot_world.get(parent_bi, Quaternion.IDENTITY)
-				var rest_rot: Quaternion = skeleton.get_bone_rest(bi).basis.get_rotation_quaternion()
+				var rest_rot: Quaternion = skeleton.get_bone_rest(bi).basis.orthonormalized().get_rotation_quaternion()
 				var combined_inv: Quaternion = (parent_godot_world * rest_rot).inverse()
 				var pose_rot: Quaternion = (combined_inv * q_godot_world).normalized()
 				skeleton.set_bone_pose_rotation(bi, pose_rot)
 
-				# Apply position keyframe as OFFSET from rest.
-				# Animation position values are small offsets (typically <0.03m), not
-				# absolute positions. SL's blendJointStates adds them to the current
-				# joint position (which defaults to the rest position from the skeleton).
-				# Godot's set_bone_pose_position:
-				#   final_local.origin = rest.basis * pose_pos + rest.origin
-				# For offset: desired = rest.origin + offset_godot
-				#   pose_pos = rest.basis.inverse() * offset_godot
 				if has_pos:
 					var sl_pos: Vector3 = sl_local_pos[bname]
-					# SL→Godot position offset: (x,y,z) → (x,z,-y)
 					var offset_godot := Vector3(sl_pos.x, sl_pos.z, -sl_pos.y)
 					var rest_xf: Transform3D = skeleton.get_bone_rest(bi)
-					# Use rotation-only basis (strip scale) to avoid collision volume
-					# IBM scale amplification. CV bones have 10-20x scale in rest.basis
-					# from their inverse bind matrices.
-					var rot_basis := Basis(rest_xf.basis.get_rotation_quaternion())
+					var rot_basis := Basis(rest_xf.basis.orthonormalized().get_rotation_quaternion())
 					var pose_pos: Vector3 = rot_basis.inverse() * offset_godot
 					skeleton.set_bone_pose_position(bi, pose_pos)
 
@@ -788,7 +844,7 @@ func _remap_animation_tracks(src: Animation, skel_name: String, skeleton: Skelet
 				anim.track_set_path(i, NodePath("%s:%s" % [skel_name, bone_name]))
 				# Compensate rotation tracks for bone rest pose
 				if anim.track_get_type(i) == Animation.TYPE_ROTATION_3D:
-					var rest_rot: Quaternion = skeleton.get_bone_rest(bone_idx).basis.get_rotation_quaternion()
+					var rest_rot: Quaternion = skeleton.get_bone_rest(bone_idx).basis.orthonormalized().get_rotation_quaternion()
 					if not rest_rot.is_equal_approx(Quaternion.IDENTITY):
 						var inv_rest: Quaternion = rest_rot.inverse()
 						for k in range(anim.track_get_key_count(i)):
@@ -937,6 +993,11 @@ func _cleanup_object(local_id: int) -> void:
 
 	# Clean up animesh data
 	if sm.animesh_skeletons.has(local_id):
+		# Remove from per-root skeleton list
+		var skel: Skeleton3D = sm.animesh_skeletons[local_id]
+		var ar_id: int = sm.animesh_root_for.get(local_id, 0)
+		if ar_id > 0 and sm.animesh_root_skeletons.has(ar_id):
+			sm.animesh_root_skeletons[ar_id].erase(skel)
 		sm.animesh_skeletons.erase(local_id)
 	sm.animesh_mesh_instances.erase(local_id)
 	sm.object_mesh_id.erase(local_id)
@@ -948,6 +1009,7 @@ func _cleanup_object(local_id: int) -> void:
 		sm.animesh_roots.erase(local_id)
 		sm.animesh_pending_anims.erase(local_id)
 		sm.animesh_eval.erase(local_id)
+		sm.animesh_root_skeletons.erase(local_id)
 		if sm.animesh_eval.is_empty():
 			sm.animesh_eval_active = false
 
@@ -971,6 +1033,7 @@ func _cleanup_object(local_id: int) -> void:
 		sm.pending_textures.erase(local_id)
 	sm.object_faces.erase(local_id)
 	sm.object_meta.erase(local_id)
+	sm.object_uuid.erase(local_id)
 	sm.child_offset_pos.erase(local_id)
 	sm.child_offset_rot.erase(local_id)
 	sm.pending_children.erase(local_id)
@@ -1040,13 +1103,22 @@ func handle_avatar_create(msg: Dictionary) -> void:
 	var avatar_id: String = msg.get("id", "")
 	if avatar_id.is_empty():
 		return
+	var local_id: int = int(msg.get("localId", 0))
 
 	# Remove existing if duplicate
 	if sm.avatars.has(avatar_id):
 		sm.avatars[avatar_id].destroy()
 		sm.avatar_targets.erase(avatar_id)
+		# Clean up old skeleton root if present
+		var old_lid: int = sm.avatar_local_ids.get(avatar_id, 0)
+		if old_lid > 0 and sm.animesh_roots.has(old_lid):
+			var old_node: Node3D = sm.animesh_roots[old_lid]
+			if old_node and is_instance_valid(old_node):
+				old_node.queue_free()
+			sm.animesh_roots.erase(old_lid)
 
 	var rsi = sm.RSInstance.new(sm._scenario, sm._vis_far, sm._vis_fade)
+	# Small blue placeholder so we can see avatar position while attachments load
 	rsi.set_mesh(sm.avatar_mesh)
 	rsi.set_material_override(sm.avatar_material)
 
@@ -1065,6 +1137,36 @@ func handle_avatar_create(msg: Dictionary) -> void:
 
 	# Initialize interpolation target at current position (no lerp on first frame)
 	sm.avatar_targets[avatar_id] = { "pos": godot_pos, "rot": godot_rot, "vel": Vector3.ZERO }
+
+	# Create skeleton root for this avatar (same as animesh root).
+	# Avatar attachments arrive as objects with parentId = this localId.
+	if local_id > 0:
+		sm.avatar_local_ids[avatar_id] = local_id
+		sm.object_uuid[local_id] = avatar_id
+		var avatar_node := Node3D.new()
+		avatar_node.name = "avatar_%d" % local_id
+		sm.add_child(avatar_node)
+		avatar_node.position = godot_pos
+		avatar_node.quaternion = godot_rot
+		avatar_node.scale = Vector3.ONE
+		sm.animesh_roots[local_id] = avatar_node
+		if avatar_id == sm.self_avatar_id:
+			print("[SelfAvatar] === Skeleton root created: localId=%d (animesh_roots now has %d entries) ===" % [local_id, sm.animesh_roots.size()])
+
+		# Resolve pending children that arrived before this avatar —
+		# fix their world positions
+		if sm.pending_children.has(local_id):
+			for child_id: int in sm.pending_children[local_id]:
+				if sm.objects.has(child_id) and sm.child_offset_pos.has(child_id):
+					var child_rsi = sm.objects[child_id]
+					child_rsi.pos = avatar_node.position + avatar_node.quaternion * sm.child_offset_pos[child_id]
+					child_rsi.rot = avatar_node.quaternion * sm.child_offset_rot[child_id]
+					child_rsi.push_transform()
+			sm.pending_children.erase(local_id)
+
+		# Register ALL descendants (children, grandchildren, etc.) as animesh children.
+		# Handles attachment linksets where child prims also need skeleton rigging.
+		_register_animesh_descendants(local_id, local_id)
 
 	if avatar_id == sm.self_avatar_id:
 		sm.self_avatar_moved.emit(rsi.pos)
@@ -1139,6 +1241,14 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 		sm.avatars[avatar_id].destroy()
 		sm.avatars.erase(avatar_id)
 		sm.avatar_targets.erase(avatar_id)
+		# Clean up skeleton root
+		var av_lid: int = sm.avatar_local_ids.get(avatar_id, 0)
+		if av_lid > 0 and sm.animesh_roots.has(av_lid):
+			var node: Node3D = sm.animesh_roots[av_lid]
+			if node and is_instance_valid(node):
+				node.queue_free()
+			sm.animesh_roots.erase(av_lid)
+		sm.avatar_local_ids.erase(avatar_id)
 
 
 # ─── Interpolation ───────────────────────────────────
@@ -1179,9 +1289,37 @@ func interpolate_avatars(delta: float) -> void:
 
 		rsi.push_transform()
 
+		# Sync avatar skeleton root Node3D with RSInstance position
+		var av_lid: int = sm.avatar_local_ids.get(avatar_id, 0)
+		if av_lid > 0 and sm.animesh_roots.has(av_lid):
+			var node: Node3D = sm.animesh_roots[av_lid]
+			if node and is_instance_valid(node):
+				node.position = rsi.pos
+				node.quaternion = rsi.rot
+			# Update ALL attachment child RSInstance positions so they follow the avatar.
+			# Rigged MeshInstance3Ds follow via scene tree, but their hidden RSIs and
+			# any non-rigged attachments need explicit repositioning.
+			_update_children_world_pos(av_lid, rsi.pos, rsi.rot)
+
 		# Emit camera follow signal for self avatar
 		if avatar_id == sm.self_avatar_id:
 			sm.self_avatar_moved.emit(rsi.pos)
+
+
+## Recursively reposition all children of a parent to follow it.
+## Used for avatar attachments and their sub-linksets.
+func _update_children_world_pos(parent_id: int, parent_pos: Vector3, parent_rot: Quaternion) -> void:
+	if not sm.object_children.has(parent_id):
+		return
+	for child_id: int in sm.object_children[parent_id]:
+		var child_rsi = sm.objects.get(child_id)
+		if child_rsi == null or not sm.child_offset_pos.has(child_id):
+			continue
+		child_rsi.pos = parent_pos + parent_rot * sm.child_offset_pos[child_id]
+		child_rsi.rot = parent_rot * sm.child_offset_rot[child_id]
+		child_rsi.push_transform()
+		# Recurse into grandchildren (attachment linksets)
+		_update_children_world_pos(child_id, child_rsi.pos, child_rsi.rot)
 
 
 ## Smoothly move objects with velocity toward their targets each frame.

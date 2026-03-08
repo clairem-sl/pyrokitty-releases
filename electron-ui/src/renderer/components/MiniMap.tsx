@@ -166,11 +166,11 @@ export const MiniMap: React.FC<MiniMapProps> = ({
               <div
                 className="mini-map-avatar-tooltip self-tooltip"
                 style={{ color: MAP_COLORS.SELF, ...tooltipStyle(
-                  (regionInfo.agentPosition.x / 256) * 100,
-                  ((256 - regionInfo.agentPosition.y) / 256) * 100
+                  (regionInfo.agentPosition!.x / 256) * 100,
+                  ((256 - regionInfo.agentPosition!.y) / 256) * 100
                 ) }}
               >
-                You<br />({Math.round(regionInfo.agentPosition.z)}m)
+                You<br />({Math.round(regionInfo.agentPosition!.z)}m)
               </div>
             )}
           </div>

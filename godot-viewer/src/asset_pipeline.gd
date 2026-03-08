@@ -57,6 +57,11 @@ var MESH_MAX_IN_FLIGHT: int = FrameBudget.MESH_MAX_IN_FLIGHT
 var _texture_opaque: Dictionary = {}
 var _material_lookups: int = 0   # total calls to _get_or_create_material (lifetime)
 
+# Initial loading mode: skip time budget and process all pending textures/meshes.
+# Auto-exits when queues drain. Avoids trickle-loading on first region entry.
+var _initial_loading: bool = true
+var _initial_load_start_ms: float = 0.0
+
 # Placeholder material cache: "colorhex_fb_ds" -> StandardMaterial3D
 var _placeholder_cache: Dictionary = {}
 
@@ -87,6 +92,17 @@ func handle_mesh_ready(msg: Dictionary) -> void:
 	# Track rigged mesh GLB paths for animesh scene instantiation
 	if msg.get("isRigged", false):
 		sm.rigged_mesh_paths[mesh_id] = glb_path
+		# Check how many pending objects need this rigged mesh
+		var waiting: int = 0
+		var self_waiting: bool = false
+		if sm._pending_by_mesh.has(mesh_id):
+			waiting = sm._pending_by_mesh[mesh_id].size()
+			for lid: int in sm._pending_by_mesh[mesh_id]:
+				if sm.object_mgr._is_self_avatar(lid):
+					self_waiting = true
+					break
+		if self_waiting:
+			print("[SelfAvatar] Rigged mesh ready: meshId=%s (%d objects waiting)" % [mesh_id.substr(0, 8), waiting])
 
 	# Track static GLB path (no BSM, for non-animesh rigged display)
 	var static_path: String = msg.get("staticPath", "")
@@ -121,19 +137,26 @@ func _apply_mesh_to_pending(mesh_id: String) -> void:
 		# Check if this object belongs to an animesh linkset and the mesh is rigged
 		var animesh_root_id: int = _get_animesh_root(local_id)
 		if animesh_root_id > 0 and is_rigged:
+			if sm.object_mgr._is_self_avatar(local_id):
+				print("[SelfAvatar] Applying rigged mesh: localId=%d uuid=%s meshId=%s → root %d uuid=%s" % [local_id, sm.object_uuid.get(local_id, "?").substr(0, 8), mesh_id.substr(0, 8), animesh_root_id, sm.object_uuid.get(animesh_root_id, "?").substr(0, 8)])
 			sm.object_mgr._instantiate_animesh_mesh(local_id, mesh_id, animesh_root_id)
-			# Fall through — still set RSI mesh (for surface count) and apply face materials
-			# (apply_face_materials will also target the animesh MeshInstance3D)
+			# Apply face materials to the animesh MeshInstance3D (not the RSI)
+			if sm.object_faces.has(local_id):
+				var rsi_for_faces = sm.objects.get(local_id)
+				if rsi_for_faces != null:
+					apply_face_materials(rsi_for_faces, local_id, sm.object_faces[local_id])
+			continue  # Don't touch RSI — animesh mesh is on the Skeleton3D, not the RSI
+		elif is_rigged:
+			if sm.object_mgr._is_self_avatar(local_id):
+				print("[SelfAvatar] Rigged mesh %s for localId=%d uuid=%s but NOT animesh (root=%d)" % [mesh_id.substr(0, 8), local_id, sm.object_uuid.get(local_id, "?").substr(0, 8), animesh_root_id])
 
 		var rsi = sm.objects.get(local_id)
 		if rsi != null:
 			# Non-animesh rigged with static variant: defer to _apply_static_mesh_to_pending
 			if is_rigged and not sm.animesh_root_for.has(local_id) and sm.static_mesh_paths.has(mesh_id):
 				if sm.static_mesh_cache.has(mesh_id):
-					# Static already loaded — apply it now
 					_apply_static_mesh_single(local_id, mesh_id, rsi)
 				else:
-					# Static still loading — track for later
 					if not sm._pending_by_mesh.has(mesh_id + ":static_wait"):
 						sm._pending_by_mesh[mesh_id + ":static_wait"] = []
 					sm._pending_by_mesh[mesh_id + ":static_wait"].append(local_id)
@@ -188,9 +211,15 @@ func _apply_static_mesh_to_pending(mesh_id: String) -> void:
 func _get_animesh_root(local_id: int) -> int:
 	if sm.animesh_roots.has(local_id):
 		return local_id
+	# Check animesh_root_for first (handles grandchildren of attachment linksets)
+	if sm.animesh_root_for.has(local_id):
+		return sm.animesh_root_for[local_id]
+	# Walk up parent chain
 	var parent_id: int = sm.object_parent.get(local_id, 0)
 	if sm.animesh_roots.has(parent_id):
 		return parent_id
+	if sm.animesh_root_for.has(parent_id):
+		return sm.animesh_root_for[parent_id]
 	return 0
 
 
@@ -399,6 +428,8 @@ func _apply_texture_to_pending(texture_id: String) -> void:
 				var ami: MeshInstance3D = sm.animesh_mesh_instances.get(local_id)
 				if ami and ami.mesh and face_idx < ami.mesh.get_surface_count():
 					ami.set_surface_override_material(face_idx, mat)
+				if sm.object_mgr._is_self_avatar(local_id):
+					print("[SelfAvatar] Texture applied: localId=%d uuid=%s face=%d textureId=%s" % [local_id, sm.object_uuid.get(local_id, "?").substr(0, 8), face_idx, texture_id.substr(0, 8)])
 
 		# Check if this face still has uncached textures
 		var still_pending := false
@@ -457,14 +488,30 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 		_texture_results.clear()
 	_texture_results_lock.unlock()
 
+	# Submit queued mesh work to WorkerThreadPool (before early return so work starts)
+	if _mesh_queue.size() > 0:
+		_submit_mesh_tasks()
+
 	var has_textures := tex_batch.size() > 0
 	var has_meshes := not _mesh_tasks.is_empty()
+
+	# Auto-exit initial loading when all queues are drained or after 30s hard cap
+	var _initial_elapsed_ms := (Time.get_ticks_usec() / 1000.0) - _initial_load_start_ms if _initial_load_start_ms > 0.0 else 0.0
+	if _initial_loading and (_initial_elapsed_ms > 30000.0 or (not has_textures and not has_meshes and _mesh_queue.is_empty())):
+		_initial_loading = false
+		if _initial_load_start_ms > 0.0:
+			var total_ms := (Time.get_ticks_usec() / 1000.0) - _initial_load_start_ms
+			print("[AssetPipeline] Initial load complete in %.0fms (tex: %d, mesh: %d)" % [
+				total_ms, _tex_finalized_count, _mesh_finalized_count])
+
 	if not has_textures and not has_meshes:
 		return
 
-	# Submit queued mesh work to WorkerThreadPool
-	if _mesh_queue.size() > 0:
-		_submit_mesh_tasks()
+	# Initial loading mode: large budget (~50ms/frame) so Godot still renders
+	# at ~15-20fps while the world loads in quickly. Scene_manager drives fog reveal.
+	var is_initial: bool = _initial_loading and not vr_mode
+	if is_initial and _initial_load_start_ms == 0.0:
+		_initial_load_start_ms = Time.get_ticks_usec() / 1000.0
 
 	# Adaptive budget: use whatever time remains before the frame deadline.
 	var frame_start_ms := (Time.get_ticks_usec() / 1000.0) - (delta * 1000.0)
@@ -472,7 +519,9 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 	var elapsed_ms := now_ms - frame_start_ms
 	var remaining_ms := target_frame_ms - elapsed_ms
 	var budget_ms: float
-	if vr_mode:
+	if is_initial:
+		budget_ms = 50.0  # ~15-20fps during initial load
+	elif vr_mode:
 		# In VR, never do finalization on an already-late frame — the deadline
 		# is missed, adding more CPU work only makes the next frame late too.
 		budget_ms = clampf(remaining_ms, 0.0, FrameBudget.MIN_FINALIZE_MS)
@@ -578,6 +627,11 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 func apply_face_materials(rsi, local_id: int, faces: Array) -> void:
 	rsi.set_material_override(null)
 	var surface_count: int = rsi.mesh.get_surface_count() if rsi.mesh else 0
+	# For animesh objects, the real mesh is on the MeshInstance3D, not the RSI (which has a placeholder box).
+	# Use the animesh mesh's surface count so we don't skip faces beyond the placeholder's 1 surface.
+	var ami: MeshInstance3D = sm.animesh_mesh_instances.get(local_id)
+	if ami and ami.mesh:
+		surface_count = maxi(surface_count, ami.mesh.get_surface_count())
 	var pending: Array = []
 
 	for fi: Dictionary in faces:
@@ -647,7 +701,6 @@ func apply_face_materials(rsi, local_id: int, faces: Array) -> void:
 			mat = _make_placeholder_material(color, full_bright, double_sided)
 		rsi.set_surface_material(face_idx, mat)
 		# Also apply to animesh MeshInstance3D if this object has one
-		var ami: MeshInstance3D = sm.animesh_mesh_instances.get(local_id)
 		if ami and ami.mesh and face_idx < ami.mesh.get_surface_count():
 			ami.set_surface_override_material(face_idx, mat)
 
@@ -674,6 +727,10 @@ func apply_face_materials(rsi, local_id: int, faces: Array) -> void:
 
 		if has_pending:
 			pending.append(pending_info)
+
+	if sm.object_mgr._is_self_avatar(local_id):
+		var applied_count: int = faces.size() - pending.size()
+		print("[SelfAvatar] Face materials: localId=%d uuid=%s — %d faces total, %d applied now, %d pending textures" % [local_id, sm.object_uuid.get(local_id, "?").substr(0, 8), faces.size(), applied_count, pending.size()])
 
 	if pending.size() > 0:
 		sm.pending_textures[local_id] = pending

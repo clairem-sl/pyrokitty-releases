@@ -50,6 +50,14 @@ var _dbg_was_moving: bool = false  # for movement freeze diagnostics
 var _pending_cursor_pos: Vector2 = Vector2(-1, -1)  # queued mouse pos for cursor update
 var _cursor_timer: float = 0.0
 
+# ALT-orbit camera (SL-style focus orbit)
+var is_alt_orbiting: bool = false  # True while ALT + left-drag
+var alt_focus_hold: bool = false   # True after alt-orbit release, until movement/ESC
+var alt_focus_point: Vector3 = Vector3.ZERO
+var alt_yaw: float = 0.0
+var alt_pitch: float = 0.4
+var alt_distance: float = 10.0
+
 # VR mode flag — set by main.gd after OpenXR init
 var vr_mode: bool = false
 # Last values sent to XROrigin3D — only update when they change beyond threshold
@@ -97,6 +105,9 @@ func _notification(what: int) -> void:
 		_key_e = false
 		_key_c = false
 		_key_shift = false
+		if is_alt_orbiting:
+			is_alt_orbiting = false
+			alt_focus_hold = true
 		var had_movement := move_forward or move_backward or turn_left \
 			or turn_right or strafe_left or strafe_right or jump or crouch
 		move_forward = false
@@ -117,10 +128,6 @@ func set_vr_mode(enabled: bool) -> void:
 	vr_mode = enabled
 	if enabled:
 		self.current = false  # XRCamera3D takes over rendering
-		# Apply stopped-quality shadows (4 cascades, 100m) as the baseline.
-		# The movement throttle will still switch to cheap shadows while walking.
-		# _set_shadow_quality(false)
-
 		# In VR the keyboard movement throttle never fires (no W/A/S/D),
 		# so fix shadows at a cheap level for the entire session.
 		_set_shadow_quality_vr()
@@ -142,7 +149,7 @@ func _on_self_avatar_moved(pos: Vector3) -> void:
 
 func _process(delta: float) -> void:
 	# Smooth position follow
-	if has_target:
+	if has_target and not is_alt_orbiting and not alt_focus_hold:
 		target_point = target_point.lerp(avatar_point, clamp(follow_smoothing * delta, 0.0, 1.0))
 
 	# A/D rotate the avatar (camera follows so it stays behind)
@@ -162,7 +169,7 @@ func _process(delta: float) -> void:
 		scene_manager.set_self_avatar_yaw(avatar_yaw)
 
 	# Camera springs back behind avatar when not butt-grabbing and not holding orbit
-	if not is_butt_grabbing and not orbit_hold:
+	if not is_butt_grabbing and not orbit_hold and not is_alt_orbiting and not alt_focus_hold:
 		var yaw_diff := angle_difference(yaw, avatar_yaw)
 		yaw += yaw_diff * clamp(camera_return_speed * delta, 0.0, 1.0)
 
@@ -252,9 +259,10 @@ func _input(event: InputEvent) -> void:
 			crouch = _key_c
 			move_dirty = true
 			# Any movement key releases the orbit hold and resets pitch
-			if orbit_hold and (move_forward or move_backward or turn_left \
+			if (orbit_hold or alt_focus_hold) and (move_forward or move_backward or turn_left \
 				or turn_right or strafe_left or strafe_right):
 				orbit_hold = false
+				alt_focus_hold = false
 				pitch = default_pitch
 				_update_camera()
 
@@ -262,6 +270,12 @@ func _input(event: InputEvent) -> void:
 		if ke.keycode == KEY_ESCAPE and ke.pressed and not ke.echo:
 			if _tooltip_visible:
 				_hide_debug_tooltip()
+			elif is_alt_orbiting or alt_focus_hold:
+				is_alt_orbiting = false
+				alt_focus_hold = false
+				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+				pitch = default_pitch
+				_update_camera()
 			elif orbit_hold or is_butt_grabbing:
 				orbit_hold = false
 				is_butt_grabbing = false
@@ -286,7 +300,7 @@ func _input(event: InputEvent) -> void:
 			if Input.mouse_mode == Input.MOUSE_MODE_VISIBLE:
 				Input.mouse_mode = Input.MOUSE_MODE_CONFINED
 		elif not mb.pressed and mb.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
-			if not is_butt_grabbing:
+			if not is_butt_grabbing and not is_alt_orbiting:
 				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
@@ -295,6 +309,8 @@ func _input(event: InputEvent) -> void:
 					_drag_offset = mb.position - _tooltip_panel.global_position
 				elif _tooltip_visible and not _is_click_on_panel(mb.position):
 					_hide_debug_tooltip()
+				elif not _tooltip_visible and Input.is_key_pressed(KEY_ALT):
+					_start_alt_orbit(mb.position)
 				elif not _tooltip_visible and _is_click_on_self_avatar(mb.position):
 					orbit_hold = false
 					is_butt_grabbing = true
@@ -303,7 +319,11 @@ func _input(event: InputEvent) -> void:
 					_handle_touch_pick(mb.position)
 			else:
 				_dragging_panel = false
-				if is_butt_grabbing:
+				if is_alt_orbiting:
+					alt_focus_hold = true
+					is_alt_orbiting = false
+					Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+				elif is_butt_grabbing:
 					orbit_hold = true  # Hold camera angle until movement key pressed
 					Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 				is_butt_grabbing = false
@@ -327,6 +347,24 @@ func _input(event: InputEvent) -> void:
 		var mm := event as InputEventMouseMotion
 		if _dragging_panel:
 			_tooltip_panel.global_position = mm.position - _drag_offset
+		elif is_alt_orbiting:
+			var ctrl_held := Input.is_key_pressed(KEY_CTRL)
+			var shift_held := Input.is_key_pressed(KEY_SHIFT)
+			if ctrl_held and shift_held:
+				# Truck and pedestal — pan the focus point
+				var cam_right := global_transform.basis.x
+				var cam_up := global_transform.basis.y
+				alt_focus_point += (-cam_right * mm.relative.x + cam_up * mm.relative.y) * alt_distance * 0.002
+			elif ctrl_held:
+				# Orbit: yaw from X, pitch from Y
+				alt_yaw -= mm.relative.x * orbit_speed
+				alt_pitch -= mm.relative.y * orbit_speed
+				alt_pitch = clamp(alt_pitch, -PI * 0.49, PI * 0.49)
+			else:
+				# ALT only: yaw from X, zoom from Y
+				alt_yaw -= mm.relative.x * orbit_speed
+				alt_distance = clamp(alt_distance + mm.relative.y * alt_distance * 0.005, min_distance, max_distance)
+			_update_camera()
 		elif is_butt_grabbing:
 			# Butt-grab: X rotates avatar yaw, Y adjusts camera pitch
 			var yaw_delta := mm.relative.x * orbit_speed
@@ -341,14 +379,58 @@ func _input(event: InputEvent) -> void:
 			_pending_cursor_pos = mm.position
 
 
-func _update_camera() -> void:
-	var offset := Vector3.ZERO
-	offset.x = distance * cos(pitch) * sin(yaw)
-	offset.y = distance * sin(pitch)
-	offset.z = distance * cos(pitch) * cos(yaw)
+func _start_alt_orbit(screen_pos: Vector2) -> void:
+	var ray_from := project_ray_origin(screen_pos)
+	var ray_dir := project_ray_normal(screen_pos)
+	# Try object pick first
+	var hit: Dictionary = scene_manager.pick_object(ray_from, ray_dir) if scene_manager else {}
+	if not hit.is_empty():
+		alt_focus_point = ray_from + ray_dir * hit["distance"]
+	else:
+		alt_focus_point = _ray_ground_intersect(ray_from, ray_dir)
+	# Compute orbit params from current camera position relative to focus
+	var delta_vec := global_position - alt_focus_point
+	alt_distance = max(min_distance, delta_vec.length())
+	alt_pitch = asin(clamp(delta_vec.y / alt_distance, -1.0, 1.0))
+	alt_yaw = atan2(delta_vec.x, delta_vec.z)
+	is_alt_orbiting = true
+	alt_focus_hold = false
+	orbit_hold = false
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
-	global_position = target_point + offset
-	look_at(target_point, Vector3.UP)
+
+func _ray_ground_intersect(ray_origin: Vector3, ray_dir: Vector3) -> Vector3:
+	var ground_y := avatar_point.y
+	if abs(ray_dir.y) > 0.001:
+		var t := (ground_y - ray_origin.y) / ray_dir.y
+		if t > 0.0 and t < 500.0:
+			return ray_origin + ray_dir * t
+	return ray_origin + ray_dir * 50.0
+
+
+func _update_camera() -> void:
+	var focus: Vector3
+	var cam_yaw: float
+	var cam_pitch: float
+	var cam_dist: float
+	if is_alt_orbiting or alt_focus_hold:
+		focus = alt_focus_point
+		cam_yaw = alt_yaw
+		cam_pitch = alt_pitch
+		cam_dist = alt_distance
+	else:
+		focus = target_point
+		cam_yaw = yaw
+		cam_pitch = pitch
+		cam_dist = distance
+
+	var offset := Vector3.ZERO
+	offset.x = cam_dist * cos(cam_pitch) * sin(cam_yaw)
+	offset.y = cam_dist * sin(cam_pitch)
+	offset.z = cam_dist * cos(cam_pitch) * cos(cam_yaw)
+
+	global_position = focus + offset
+	look_at(focus, Vector3.UP)
 
 	# Let the VR rig know where the avatar is so it can position the HMD origin.
 	# Only emit when position or yaw actually changed — moving XROrigin3D every

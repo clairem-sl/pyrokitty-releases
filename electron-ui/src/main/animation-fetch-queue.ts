@@ -6,7 +6,7 @@
 
 import { AssetType } from '../../node-metaverse/dist/lib';
 import type { Bot } from '../../node-metaverse/dist/lib';
-import { LLAnimation } from '../../node-metaverse/lib/classes/LLAnimation';
+import { LLAnimation } from '../../node-metaverse/dist/lib/classes/LLAnimation';
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
@@ -64,6 +64,26 @@ export class AnimationFetchQueue {
   get activeCount(): number { return this.active; }
   get failedCount(): number { return this.failed.size; }
   get cachedCount(): number { return this.cache.size; }
+
+  /** Check if animation data is available (memory or disk cache) without triggering a fetch */
+  getCached(animUuid: string): AnimationData | null {
+    const mem = this.cache.get(animUuid);
+    if (mem) return mem;
+    try {
+      const diskPath = animCachePath(animUuid);
+      if (fs.existsSync(diskPath)) {
+        const data: AnimationData = JSON.parse(fs.readFileSync(diskPath, 'utf8'));
+        this.cache.set(animUuid, data);
+        return data;
+      }
+    } catch { /* corrupt */ }
+    return null;
+  }
+
+  /** Check if an animation has failed to fetch */
+  hasFailed(animUuid: string): boolean {
+    return this.failed.has(animUuid);
+  }
 
   request(animUuid: string, localId: number): void {
     if (this.destroyed || this.failed.has(animUuid)) {

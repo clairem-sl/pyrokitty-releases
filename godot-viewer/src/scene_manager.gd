@@ -70,6 +70,7 @@ var self_avatar_id: String = ""
 # Interpolation targets
 var avatar_targets: Dictionary = {}   # avatarId -> { pos, rot, vel, age }
 var object_targets: Dictionary = {}   # localId -> { pos, rot, vel, accel, angVel, age, blend_offset, blend_time }
+var avatar_local_ids: Dictionary = {} # avatarId (String) -> localId (int) for skeleton root routing
 
 # Linkset tracking (flat hierarchy — no Godot node parenting to avoid scale inheritance)
 var pending_children: Dictionary = {}   # parentLocalId -> Array[childLocalId]
@@ -112,12 +113,14 @@ var animesh_anim_cache: Dictionary = {}    # animId (String) -> Animation resour
 var animesh_anim_data: Dictionary = {}    # animId (String) -> raw Dictionary (with per-joint priorities)
 var animesh_pending_anims: Dictionary = {} # root localId (int) -> Array[animId String] (pending animation IDs)
 var animesh_mesh_instances: Dictionary = {} # localId (int) -> MeshInstance3D (for texture application)
+var animesh_root_skeletons: Dictionary = {} # root localId (int) -> Array[Skeleton3D] (fast per-root iteration)
 
 # Manual animation evaluation (replaces AnimationPlayer for correct SL→Godot rotation order)
 # SL: world = local * parent.  Godot: world = parent * local.  Must conjugate per bone.
 var animesh_eval: Dictionary = {}          # root localId -> {time, duration, loop, joints: {name -> {rot_keys, pos_keys}}}
 var animesh_eval_active: bool = false      # true when any animesh has active animation data
 var object_mesh_id: Dictionary = {}        # localId (int) -> meshId (String) — persists after mesh loads
+var object_uuid: Dictionary = {}           # localId (int) -> UUID (String) — for log correlation
 
 # Prim geometry generator
 var prim_generator: RefCounted
@@ -132,6 +135,11 @@ var _vis_fade: float = FrameBudget.VISIBILITY_FADE_MARGIN
 # Periodic stats reporting
 var _stats_timer: float = 0.0
 const STATS_INTERVAL: float = 10.0
+
+# Loading fog reveal
+var _loading_fog_density: float = 0.15   # starting fog density
+const _LOADING_FOG_START_DENSITY: float = 0.15
+const _LOADING_FOG_FADE_SPEED: float = 0.08  # density units/sec after loading ends
 
 # ─── Sub-managers ────────────────────────────────────
 
@@ -156,7 +164,7 @@ func _ready() -> void:
 	object_mesh.size = Vector3(0.5, 0.5, 0.5)
 
 	avatar_mesh = BoxMesh.new()
-	avatar_mesh.size = Vector3(0.5, 1.8, 0.5)  # Roughly avatar shaped
+	avatar_mesh.size = Vector3(0.3, 1.4, 0.3)  # Small placeholder so rigged attachments are visible
 
 	# Gray material for objects
 	object_material = StandardMaterial3D.new()
@@ -178,6 +186,16 @@ func _ready() -> void:
 
 	asset_pipeline.start_threads()
 
+	# Start with loading fog
+	var world_env: WorldEnvironment = get_node_or_null("../WorldEnvironment")
+	if world_env and world_env.environment:
+		var env := world_env.environment
+		env.fog_enabled = true
+		env.fog_density = _LOADING_FOG_START_DENSITY
+		env.fog_light_color = Color(0.0, 0.0, 0.0)
+		env.fog_light_energy = 0.0
+		env.fog_aerial_perspective = 0.5
+
 
 func _process(delta: float) -> void:
 	# Periodic VRAM / scene stats (skipped in VR — no console visible, avoid driver stalls)
@@ -195,6 +213,19 @@ func _process(delta: float) -> void:
 			objects.size(), avatars.size(), light_mgr._light_count, light_mgr._object_light_data.size(),
 			texture_cache.size(), material_cache.size(), mesh_cache.size(),
 			Engine.get_frames_per_second()])
+		# Avatar pipeline summary
+		var n_skel: int = animesh_skeletons.size()
+		var n_roots: int = animesh_roots.size()
+		var n_root_for: int = animesh_root_for.size()
+		var n_eval: int = animesh_eval.size()
+		var n_rigged_paths: int = rigged_mesh_paths.size()
+		var n_pending_anims: int = animesh_pending_anims.size()
+		# Self-avatar skeleton breakdown only
+		var self_lid: int = avatar_local_ids.get(self_avatar_id, 0)
+		if self_lid > 0 and animesh_root_skeletons.has(self_lid):
+			var self_skels: Array = animesh_root_skeletons[self_lid]
+			print("[SelfAvatar] roots=%d | skeletons=%d (self: %d) | eval=%d | rigged_paths=%d" % [
+				n_roots, n_skel, self_skels.size(), n_eval, n_rigged_paths])
 
 	# Terrain/water/sky processing
 	terrain_env.process(delta)
@@ -217,6 +248,33 @@ func _process(delta: float) -> void:
 
 	# Submit queued mesh work to WorkerThreadPool + finalize textures/meshes
 	asset_pipeline.finalize_frame(delta, _vr_mode, _target_frame_ms)
+
+	# Loading fog reveal: thick fog that expands as textures/meshes finalize
+	if asset_pipeline._initial_loading or _loading_fog_density > 0.0:
+		_update_loading_fog(delta)
+
+
+func _update_loading_fog(delta: float) -> void:
+	var world_env: WorldEnvironment = get_node_or_null("../WorldEnvironment")
+	if world_env == null or world_env.environment == null:
+		return
+	var env := world_env.environment
+
+	if asset_pipeline._initial_loading:
+		# During loading: reduce density as items finalize (progress-based)
+		var done: int = asset_pipeline._tex_finalized_count + asset_pipeline._mesh_finalized_count
+		# Ramp from full density → half over the first ~200 items
+		var progress: float = clampf(float(done) / 200.0, 0.0, 1.0)
+		_loading_fog_density = lerpf(_LOADING_FOG_START_DENSITY, _LOADING_FOG_START_DENSITY * 0.4, progress)
+	else:
+		# Loading done: fade fog out smoothly
+		_loading_fog_density = maxf(0.0, _loading_fog_density - _LOADING_FOG_FADE_SPEED * delta)
+		if _loading_fog_density <= 0.001:
+			_loading_fog_density = 0.0
+			env.fog_enabled = false
+			return
+
+	env.fog_density = _loading_fog_density
 
 
 # ─── Public API (delegates to sub-managers) ──────────
@@ -277,11 +335,8 @@ func set_first_person_mode(enabled: bool) -> void:
 	object_mgr.set_first_person_mode(enabled)
 
 # Animesh
-func handle_object_animation(msg: Dictionary) -> void:
-	object_mgr.handle_object_animation(msg)
-
-func handle_animation_ready(msg: Dictionary) -> void:
-	object_mgr.handle_animation_ready(msg)
+func handle_animations_batch(msg: Dictionary) -> void:
+	object_mgr.handle_animations_batch(msg)
 
 # Assets
 func handle_mesh_ready(msg: Dictionary) -> void:

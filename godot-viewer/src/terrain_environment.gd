@@ -226,7 +226,14 @@ func _update_underwater_fog() -> void:
 		env.fog_density = 0.12
 		env.fog_light_energy = 0.6
 	else:
-		env.fog_enabled = false
+		# Reset underwater fog color back to defaults
+		env.fog_light_color = Color.WHITE
+		env.fog_light_energy = 1.0
+		if sm._loading_fog_density > 0.0:
+			# Loading fog still active — restore its density
+			env.fog_density = sm._loading_fog_density
+		else:
+			env.fog_enabled = false
 
 
 func _build_flat_water(water_height: float) -> void:

@@ -395,23 +395,82 @@ SL linksets have independent scale per prim — parent scale does NOT affect chi
 - [x] Strafing (Q/E keys)
 - [x] Avatar interpolation (smooth lerp/slerp with velocity extrapolation)
 - [x] Physics object interpolation (velocity/acceleration extrapolation with blend correction)
-- [ ] Minimap or coordinate display
-- [ ] Teleport support (region crossing, teleport to coordinates)
+- [x] Teleport support (via minimap and world map)
+- [ ] Coordinate display
+- [ ] Region crossing
 - **Victory:** Can navigate a region freely
 
-### M6 — Avatars
-- [ ] Avatar capsule/placeholder at correct positions (currently boxes)
-- [ ] Display names
-- [ ] Skeleton + mesh rigging
-- [ ] Bake textures for appearance
-- [ ] Basic animations
-- **Victory:** See other avatars moving around
+### M6 — Avatars (mesh body focus, no legacy system avatar)
+
+Modern SL avatars are a skeleton + pile of rigged mesh attachments + baked textures.
+Reuses existing animesh pipeline (skeleton, bone eval, GLB rigged mesh).
+Shape sliders deferred to Phase 2 — default skeleton shape is acceptable for first pass.
+
+**Other viewers to study:** Crystal Frost, SL mobile viewer, LibreMetaverse — may have
+pre-extracted shape param tables or simplified appearance pipelines.
+
+#### Phase 1 — Skeleton + Attachments (IN PROGRESS)
+- [x] Create skeleton root Node3D per avatar in `handle_avatar_create` (registered in `animesh_roots`)
+- [x] Route rigged mesh attachments to avatar skeleton (parentId = avatarLocalId → animesh pipeline)
+- [x] Track attachments via `Avatar.getAttachments()` + `onAttachmentAdded` subscription
+- [x] HUD attachment filtering (points 34-41 skipped via `isHudAttachment()`)
+- [x] Avatar animations: `subscribeToAvatarAnimation()` forwards AvatarAnimation circuit messages
+- [x] Attachment linkset child prims: grandchildren registered via `_register_animesh_descendants()`
+- [x] Non-rigged attachment positions follow avatar (recursive `_update_children_world_pos()`)
+- [x] Compute-once bone eval: reference skeleton computes poses, others get cached results by bone name
+- [x] Per-root skeleton list cache (`animesh_root_skeletons`) for O(1) process_animesh lookup
+- [x] Animation batching: bridge-side dedup + batch (`updateAnimSet` → `animations_batch` message). Replaces old 3-message flow. System animations (STAND, WALK) are regular server assets, not packaged.
+- [x] Initial snapshot attachment routing: `getObjectsByParent(avatarLocalId)` instead of relying on `getAllObjects()` which only returns root parents
+- [x] Blue box avatar placeholder (smaller 0.3x1.4x0.3 so rigged attachments visible around it)
+- [x] RSI fall-through fix: `_apply_mesh_to_pending` now `continue`s after animesh instantiation instead of setting rigged mesh on RSI (was rendering a second giant unskinned copy)
+- [x] Object creation: animesh children with rigged meshes get placeholder box on RSI, not the rigged mesh
+- [x] Non-animated bone fix: bones without animation keyframes skip pose computation instead of lossy SL↔Godot round-trip (was distorting collision volume bones)
+- [ ] **BUG: Giant heads** — Head attachment root prim UUID `da211b7c-8f3d-df3e-d176-f39ca5b4a2b3`, child mesh prim `2306d424-fb38-2389-b2a1-161400df7c0e`. Neither UUID appears in bridge or Godot logs — node-metaverse doesn't have them in its object store. The head that IS rendering comes from attachment point 2 (skull), objects like 653391379/380/381 with mesh UUIDs f017afae/5af14003/02637ddf (54/54/28 bones). These meshes span the FULL skeleton (pelvis to toes, including collision volume bones HEAD, NECK, CHEST etc). Ruled out causes: (1) RSI fall-through rendering unskinned copy — fixed, head still giant. (2) Non-animated bone rest pose distortion — fixed, head still giant. (3) Missing attachments — our avatar gets 10 non-HUD attachments, 26 rigged meshes instantiated, 5 animations applied. Pipeline is working. **Still unsolved.** Likely cause: BSM (Bind Shape Matrix) scale in the GLB, or the MeshInstance3D under Skeleton3D rendering at wrong transform. Need to inspect actual vertex positions / AABB of the instantiated head MeshInstance3D vs what SL expects.
+- [ ] **BUG: Animation jitter** — reduced by batching but not eliminated. Avatar still sideways on first load.
+- [ ] **BUG: Standing T-pose** — rest pose is T-pose for joints not covered by active animations.
+- [ ] **BUG: Textures missing** — need BoM Phase 2 for real textures.
+- [ ] **NOTE: `onAttachmentAdded` never fires** — zero events for ANY avatar in logs. All attachments come from `getAttachments()` at avatar creation time or `getObjectsByParent()` in rescan. Late-arriving attachments via subscription path are not working.
+- [ ] **NOTE: Diagnostic logging active** — `[AvatarDebug]` lines in object_manager.gd, asset_pipeline.gd, scene_manager.gd, godot-bridge.ts. Remove when bugs are resolved.
+- [ ] Display names (floating labels above avatar)
+- [ ] Send attachment point info for non-rigged attachment bone positioning
+- [ ] Clean up debug logging in asset_pipeline.gd and object_manager.gd
+- **Victory:** Avatars render as their actual mesh body + clothes + hair on default skeleton
+
+#### Phase 2 — Bakes on Mesh (BoM)
+- [ ] Parse baked texture UUIDs from `AvatarAppearance` message TextureEntry (faces 0-10)
+- [ ] BoM substitution: detect 11 magic bake UUIDs on attachment faces, replace with actual baked texture
+- [ ] Send baked texture UUIDs to Godot per avatar, fetch/decode/apply them
+- [ ] Handle `AvatarAppearance` updates (outfit changes mid-session)
+- **Victory:** Mesh bodies show correct skin/makeup/tattoo layers
+
+#### Phase 3 — Shape Sliders
+- [ ] Parse `param_skeleton` sections from `avatar_lad.xml` (~30 skeleton-affecting params)
+- [ ] Or pre-extract to JSON (see `scripts/content_tools/skel_tool.py` for reference parser)
+- [ ] Apply visual param values (0-255) → bone position offsets + scale changes
+- [ ] Handle driver params (primary params that control secondary params)
+- [ ] Send shape data to Godot per avatar from `AvatarAppearance.VisualParam[]`
+- **Victory:** Avatars have correct height, proportions, body shape
+
+#### BoM Magic UUIDs (for reference)
+```
+IMG_USE_BAKED_HEAD      5a9f4a74-30f2-821c-b88d-70499d3e7183
+IMG_USE_BAKED_UPPER     ae2de45c-d252-50b8-5c6e-19f39ce79317
+IMG_USE_BAKED_LOWER     24daea5f-0539-cfcf-047f-fbc40b2786ba
+IMG_USE_BAKED_EYES      52cc6bb6-2ee5-e632-d3ad-50197b1dcb8a
+IMG_USE_BAKED_SKIRT     43529ce8-7faa-ad92-165a-bc4078371687
+IMG_USE_BAKED_HAIR      09aac1fb-6bce-0bee-7d44-caac6dbb6c63
+IMG_USE_BAKED_LEFTARM   ff62763f-d60a-9855-890b-0c96f8f8cd98
+IMG_USE_BAKED_LEFTLEG   8e915e25-31d1-cc95-ae08-d58a47488251
+IMG_USE_BAKED_AUX1      9742065b-19b5-297c-858a-29711d539043
+IMG_USE_BAKED_AUX2      03642e83-2bd1-4eb9-34b4-4c47ed586d2d
+IMG_USE_BAKED_AUX3      edd51b77-fc10-ce7a-4b3d-011dfc349e4f
+```
 
 ### M7 — Interaction (partially done)
 - [x] Right-click object picking with raycast
 - [x] Debug inspector panel (object name, description, geometry info)
 - [x] Object name/description editing via inspector
-- [ ] Touch objects (trigger script events)
+- [x] Basic touch (click to trigger script events)
 - [ ] Sit on objects
 - [ ] Object hover highlight
 - **Victory:** Can interact with the world
@@ -427,7 +486,7 @@ SL linksets have independent scale per prim — parent scale does NOT affect chi
 - [ ] Windlight/EEP day cycle animation
 - [ ] Shadows + lighting improvements
 - [ ] Draw distance / LOD tuning
-- [ ] Rigged mesh support
+- [x] Animesh rigged mesh support (non-avatar rigged objects)
 - [ ] Distance-based texture fetch priority
 - [ ] Texture LOD / mipmap size selection
 - [ ] Underwater view (camera below water surface)

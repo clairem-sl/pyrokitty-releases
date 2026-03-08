@@ -145,12 +145,12 @@ parentPort!.on('message', async (msg: { id: number; j2cBuffer: Buffer; mode?: 'w
       const { rgbaPixels, width, height } = await decodeWasmRaw(buf);
       parentPort!.postMessage(
         { id: msg.id, rgbaPixels, width, height },
-        [rgbaPixels.buffer],
+        [rgbaPixels.buffer as ArrayBuffer],
       );
     } else {
       // Default: WebP output for disk cache / Godot fallback
       const webpBuf = (!USE_WASM && opjPath) ? await decodeNative(buf) : await decodeWasm(buf);
-      parentPort!.postMessage({ id: msg.id, webpBuf }, [webpBuf.buffer]);
+      parentPort!.postMessage({ id: msg.id, webpBuf }, [webpBuf.buffer as ArrayBuffer]);
     }
   } catch (err) {
     parentPort!.postMessage({ id: msg.id, error: (err as Error).message || String(err) });

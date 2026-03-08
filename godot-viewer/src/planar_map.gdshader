@@ -67,7 +67,6 @@ void vertex() {
 	// Offset + re-center
 	uv += vec2(offset_u + 0.5, offset_v + 0.5);
 
-	// planar_uv = uv;
 	planar_uv = vec2(uv.x, 1.0 - uv.y);  // SL → Godot UV convention (V=0 at top)
 	debug_sl_normal = sl_n;
 	debug_binormal = binormal;
