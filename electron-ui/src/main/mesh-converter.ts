@@ -25,7 +25,7 @@ interface SkeletonJoint {
 
 let skeletonCache: Map<string, SkeletonJoint> | null = null;
 
-function getSkeletonHierarchy(): Map<string, SkeletonJoint> {
+export function getSkeletonHierarchy(): Map<string, SkeletonJoint> {
   if (skeletonCache) return skeletonCache;
 
   // Find avatar_skeleton.xml — try electron-ui/viewer/character/ first
@@ -107,6 +107,7 @@ function parseSkeletonXml(xml: string): Map<string, SkeletonJoint> {
   }
   return joints;
 }
+
 
 // --- Quaternion helpers ---
 

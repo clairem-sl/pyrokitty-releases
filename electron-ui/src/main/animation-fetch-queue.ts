@@ -10,6 +10,7 @@ import { LLAnimation } from '../../node-metaverse/lib/classes/LLAnimation';
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
+import { getSkeletonHierarchy } from './mesh-converter';
 
 const MAX_CONCURRENT = 4;
 
@@ -161,8 +162,21 @@ export class AnimationFetchQueue {
  */
 function convertAnimation(uuid: string, anim: LLAnimation): AnimationData {
   const joints: AnimationJointData[] = [];
+  const skeleton = getSkeletonHierarchy();
+
+  // SL's scrubInvalidJoints() silently drops animation keyframes for joint names
+  // not in avatar_skeleton.xml. Custom names like "Left Ear", "Nose", "Pelvis"
+  // resolve to null in SL and get scrubbed. We must match this behavior —
+  // animating custom-named bones causes distortion (wrong parent in hierarchy,
+  // position offsets applied relative to incorrect bone).
+  let scrubbed: string[] = [];
 
   for (const joint of anim.joints) {
+    if (!skeleton.has(joint.name)) {
+      scrubbed.push(joint.name);
+      continue; // Skip joints not in avatar_skeleton.xml
+    }
+
     const rotationKeys: AnimationKeyframe[] = [];
     for (const kf of joint.rotationKeyframes) {
       rotationKeys.push({
@@ -187,6 +201,10 @@ function convertAnimation(uuid: string, anim: LLAnimation): AnimationData {
       rotationKeys,
       positionKeys,
     });
+  }
+
+  if (scrubbed.length > 0) {
+    console.log(`[AnimFetch] Animation ${uuid.slice(0, 8)}: scrubbed ${scrubbed.length} invalid joints: ${scrubbed.join(', ')}`);
   }
 
   // Log joints with position keyframes for debugging

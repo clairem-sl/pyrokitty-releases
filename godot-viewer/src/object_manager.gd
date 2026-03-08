@@ -523,29 +523,25 @@ func _apply_pending_animations(obj_id: int) -> void:
 			if not joint_best.has(jname) or jpri >= joint_best[jname]["priority"]:
 				joint_best[jname] = {"priority": jpri, "data_idx": ai, "joint_data": joint_data}
 
-	# Compute merged duration and loop
-	var max_duration: float = 0.0
-	var any_loop: bool = false
-	for data: Dictionary in available:
-		var d: float = float(data.get("duration", 1.0))
-		if d > max_duration:
-			max_duration = d
-		if data.get("loop", false):
-			any_loop = true
-
 	# Build merged joint keyframe map (SL space — NOT coordinate-converted)
-	var merged_joints: Dictionary = {}  # joint_name -> {rot_keys: [{time, x, y, z}], pos_keys: [{time, x, y, z}]}
+	# Each joint tracks which animation it came from (for independent loop timing).
+	var merged_joints: Dictionary = {}  # joint_name -> {rot_keys, pos_keys, duration, loop}
 	for jname: String in joint_best:
 		var jd: Dictionary = joint_best[jname]["joint_data"]
+		var ai: int = joint_best[jname]["data_idx"]
+		var src_anim: Dictionary = available[ai]
 		var rot_keys: Array = jd.get("rotationKeys", [])
 		var pos_keys: Array = jd.get("positionKeys", [])
-		merged_joints[jname] = {"rot_keys": rot_keys, "pos_keys": pos_keys}
+		merged_joints[jname] = {
+			"rot_keys": rot_keys,
+			"pos_keys": pos_keys,
+			"duration": float(src_anim.get("duration", 1.0)),
+			"loop": src_anim.get("loop", false),
+		}
 
-	# Store eval data for this root
+	# Store eval data for this root — elapsed tracks wall clock, per-joint timing is independent
 	sm.animesh_eval[root_id] = {
-		"time": 0.0,
-		"duration": max_duration,
-		"loop": any_loop,
+		"elapsed": 0.0,
 		"joints": merged_joints,
 	}
 	sm.animesh_eval_active = true
@@ -571,8 +567,13 @@ func _apply_pending_animations(obj_id: int) -> void:
 		else:
 			if jname2 not in unmatched:
 				unmatched.append(jname2)
-	print("[Animesh] _apply_pending_animations: root=%d, %d joints merged, duration=%.1fs, loop=%s" % [
-		root_id, merged_joints.size(), max_duration, str(any_loop)])
+	# Collect unique durations for logging
+	var _durations: Dictionary = {}
+	for _jn: String in merged_joints:
+		var _d: float = merged_joints[_jn]["duration"]
+		_durations[_d] = _durations.get(_d, 0) + 1
+	print("[Animesh] _apply_pending_animations: root=%d, %d joints merged, durations=%s" % [
+		root_id, merged_joints.size(), str(_durations)])
 	if unmatched.size() > 0:
 		print("[Animesh]   UNMATCHED joints (no skeleton bone): %s" % [str(unmatched)])
 	print("[Animesh]   Matched: %d, Unmatched: %d" % [matched.size(), unmatched.size()])
@@ -586,25 +587,27 @@ func _apply_pending_animations(obj_id: int) -> void:
 func process_animesh(delta: float) -> void:
 	for root_id: int in sm.animesh_eval:
 		var eval: Dictionary = sm.animesh_eval[root_id]
-		var duration: float = eval["duration"]
-		if duration <= 0.0:
-			continue
 
-		# Advance time
-		eval["time"] += delta
-		if eval["loop"]:
-			eval["time"] = fmod(eval["time"], duration)
-		else:
-			eval["time"] = minf(eval["time"], duration)
-		var t: float = eval["time"]
+		# Advance wall-clock elapsed time
+		eval["elapsed"] += delta
+		var elapsed: float = eval["elapsed"]
 
-		var joints: Dictionary = eval["joints"]  # joint_name -> {rot_keys, pos_keys}
+		var joints: Dictionary = eval["joints"]  # joint_name -> {rot_keys, pos_keys, duration, loop}
 
-		# Evaluate SL local rotations and positions at current time (SL space, NOT converted)
+		# Evaluate SL local rotations and positions (SL space, NOT converted).
+		# Each joint loops independently at its own animation's duration.
 		var sl_local_rot: Dictionary = {}  # joint_name -> Quaternion (SL space)
 		var sl_local_pos: Dictionary = {}  # joint_name -> Vector3 (SL space, meters)
 		for jname: String in joints:
 			var jdata: Dictionary = joints[jname]
+			var jdur: float = jdata["duration"]
+			if jdur <= 0.0:
+				continue
+			var t: float
+			if jdata["loop"]:
+				t = fmod(elapsed, jdur)
+			else:
+				t = minf(elapsed, jdur)
 			var rot_keys: Array = jdata["rot_keys"]
 			if rot_keys.size() > 0:
 				sl_local_rot[jname] = _interp_sl_rotation(rot_keys, t)
@@ -681,7 +684,11 @@ func process_animesh(delta: float) -> void:
 					# SL→Godot position offset: (x,y,z) → (x,z,-y)
 					var offset_godot := Vector3(sl_pos.x, sl_pos.z, -sl_pos.y)
 					var rest_xf: Transform3D = skeleton.get_bone_rest(bi)
-					var pose_pos: Vector3 = rest_xf.basis.inverse() * offset_godot
+					# Use rotation-only basis (strip scale) to avoid collision volume
+					# IBM scale amplification. CV bones have 10-20x scale in rest.basis
+					# from their inverse bind matrices.
+					var rot_basis := Basis(rest_xf.basis.get_rotation_quaternion())
+					var pose_pos: Vector3 = rot_basis.inverse() * offset_godot
 					skeleton.set_bone_pose_position(bi, pose_pos)
 
 
