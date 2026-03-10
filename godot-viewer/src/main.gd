@@ -51,8 +51,6 @@ func _ready() -> void:
 	# Parse command-line args
 	var args := OS.get_cmdline_user_args()
 	var vr_requested := false
-	var restore_pos := Vector2i.MIN
-	var restore_size := Vector2i.ZERO
 	for i in range(args.size()):
 		if args[i].begins_with("--ws-port="):
 			ws_port = int(args[i].split("=")[1])
@@ -60,20 +58,9 @@ func _ready() -> void:
 			ws_port = int(args[i + 1])
 		elif args[i] == "--vr":
 			vr_requested = true
-		elif args[i].begins_with("--window-position="):
-			var parts := args[i].split("=")[1].split(",")
-			if parts.size() == 2:
-				restore_pos = Vector2i(int(parts[0]), int(parts[1]))
-		elif args[i].begins_with("--window-size="):
-			var parts := args[i].split("=")[1].split(",")
-			if parts.size() == 2:
-				restore_size = Vector2i(int(parts[0]), int(parts[1]))
-
-	# Apply saved window bounds
-	if restore_size.x > 100 and restore_size.y > 100:
-		DisplayServer.window_set_size(restore_size)
-	if restore_pos != Vector2i.MIN:
-		DisplayServer.window_set_position(restore_pos)
+	# Window size/position is now handled by Godot's built-in --resolution and
+	# --position engine args (passed before -- by godot-bridge.ts), so the window
+	# appears at the correct size/position before the scene loads.
 
 	# Main._ready() runs after all children's _ready(), so camera_controller
 	# and xr_rig are already initialised by the time we reach here.
@@ -310,6 +297,10 @@ func _handle_message(text: String) -> void:
 			scene_manager.handle_object_properties(msg)
 		"animations_batch":
 			scene_manager.handle_animations_batch(msg)
+		"sitting_state":
+			var camera_ctrl := get_node_or_null("Camera3D")
+			if camera_ctrl and camera_ctrl.has_method("set_sitting"):
+				camera_ctrl.set_sitting(msg.get("sitting", false))
 		_:
 			push_warning("[Main] Unknown message type: %s" % msg_type)
 

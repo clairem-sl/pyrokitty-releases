@@ -9,10 +9,13 @@ import { ObjectDeselectMessage } from '../../node-metaverse/dist/lib/classes/mes
 import { SetAlwaysRunMessage } from '../../node-metaverse/dist/lib/classes/messages/SetAlwaysRun';
 import type { SendFn } from './godot-bridge-types';
 
+const CLICK_ACTION_SIT = 1;
+
 export class GodotInputHandler {
   private _dbgMoving = false;
   private _dbgAgentNullAt = 0;
   private _lastRunning = false;
+  private _sittingOnLocalId = 0;
 
   constructor(private bot: Bot, private send: SendFn) {}
 
@@ -191,6 +194,18 @@ export class GodotInputHandler {
     }
   }
 
+  handleStandUp(): void {
+    this.bot.clientCommands.movement.stand();
+    this._sittingOnLocalId = 0;
+    this.send({ type: 'sitting_state', sitting: false });
+    console.log('[GodotBridge] Stood up');
+  }
+
+  /** Called by GodotBridge when server confirms a ParentID change on the self avatar. */
+  setSittingState(sitting: boolean, seatLocalId: number): void {
+    this._sittingOnLocalId = sitting ? seatLocalId : 0;
+  }
+
   async handleObjectTouch(msg: any): Promise<void> {
     try {
       const region = this.bot.currentRegion;
@@ -201,6 +216,18 @@ export class GodotInputHandler {
         console.warn(`[GodotBridge] object_touch: object ${localId} not found`);
         return;
       }
+
+      // If the object's default action is SIT and we're not already sitting on it, sit.
+      if (obj.ClickAction === CLICK_ACTION_SIT && this._sittingOnLocalId !== localId) {
+        const { UUID } = await import('../../node-metaverse/lib/classes/UUID');
+        const { Vector3 } = await import('../../node-metaverse/lib/classes/Vector3');
+        const targetUuid = new UUID(obj.FullID.toString());
+        await this.bot.clientCommands.movement.sitOnObject(targetUuid, Vector3.getZero());
+        this._sittingOnLocalId = localId;
+        console.log(`[GodotBridge] Sat on object ${localId} (ClickAction=Sit)`);
+        return;
+      }
+
       const { Vector3 } = await import('../../node-metaverse/lib/classes/Vector3');
       const pos = msg.position || {};
       const norm = msg.normal || {};

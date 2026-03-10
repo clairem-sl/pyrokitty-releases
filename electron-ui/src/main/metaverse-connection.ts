@@ -13,6 +13,9 @@ import { ChatSourceType } from '../../node-metaverse/dist/lib/enums/ChatSourceTy
 import { InstantMessageEventFlags } from '../../node-metaverse/dist/lib/enums/InstantMessageEventFlags';
 import { RightsFlags } from '../../node-metaverse/dist/lib/enums/RightsFlags';
 import { Message } from '../../node-metaverse/dist/lib/enums/Message';
+import { TextureEntry } from '../../node-metaverse/dist/lib/classes/TextureEntry';
+import type { AvatarAppearanceMessage } from '../../node-metaverse/dist/lib/classes/messages/AvatarAppearance';
+import { BAKE_CHANNEL_TO_TE_FACE } from './godot-bridge-types';
 import { SoundFlags } from '../../node-metaverse/dist/lib/enums/SoundFlags';
 import type { SoundTriggerMessage } from '../../node-metaverse/dist/lib/classes/messages/SoundTrigger';
 import type { AttachedSoundMessage } from '../../node-metaverse/dist/lib/classes/messages/AttachedSound';
@@ -125,6 +128,10 @@ export class MetaverseConnection extends EventEmitter {
   // Buffer ObjectAnimation messages from login time so GodotBridge (started later) can replay them
   private objectAnimationBuffer = new Map<string, { animId: string; sequenceId: number }[]>(); // senderUUID → anim list
   private objectAnimationSub: { unsubscribe: () => void } | null = null;
+
+  // Buffer AvatarAppearance bake textures from login time (arrive before GodotBridge subscribes)
+  private avatarAppearanceBuffer = new Map<string, string[]>(); // avatarUUID → 11 bake texture UUIDs
+  private avatarAppearanceSub: { unsubscribe: () => void } | null = null;
   private static readonly MAX_SOUND_DISTANCE = 50;
 
   constructor(public readonly instanceId: string) {
@@ -216,8 +223,9 @@ export class MetaverseConnection extends EventEmitter {
       // Subscribe to world sound messages (circuit is available after connectToSim)
       this.setupSoundSubscriptions();
 
-      // Buffer ObjectAnimation messages from login time for later GodotBridge replay
+      // Buffer ObjectAnimation + AvatarAppearance messages from login time for later GodotBridge replay
       this.setupObjectAnimationBuffer();
+      this.setupAvatarAppearanceBuffer();
 
       // Resolve display names for all friends in background
       this.resolveDisplayNamesForFriends().catch((err) => {
@@ -285,10 +293,13 @@ export class MetaverseConnection extends EventEmitter {
     for (const triggerId of this.triggerSounds.keys()) SoundPlayer.stopAttached(triggerId);
     this.attachedSoundGains.clear();
     this.triggerSounds.clear();
-    // Clean up ObjectAnimation buffer
+    // Clean up ObjectAnimation + AvatarAppearance buffers
     this.objectAnimationSub?.unsubscribe();
     this.objectAnimationSub = null;
     this.objectAnimationBuffer.clear();
+    this.avatarAppearanceSub?.unsubscribe();
+    this.avatarAppearanceSub = null;
+    this.avatarAppearanceBuffer.clear();
     // Clean up avatar subscriptions
     this.selfMoveSubscription?.unsubscribe();
     this.selfMoveSubscription = null;
@@ -526,6 +537,9 @@ export class MetaverseConnection extends EventEmitter {
       this.objectAnimationSub?.unsubscribe();
       this.objectAnimationSub = null;
       this.objectAnimationBuffer.clear();
+      this.avatarAppearanceSub?.unsubscribe();
+      this.avatarAppearanceSub = null;
+      this.avatarAppearanceBuffer.clear();
       this.selfMoveSubscription?.unsubscribe();
       this.selfMoveSubscription = null;
       if (this.regionInfoThrottleTimer) {
@@ -692,6 +706,51 @@ export class MetaverseConnection extends EventEmitter {
   /** Returns the buffered ObjectAnimation state for all animesh objects seen since login. */
   getObjectAnimationBuffer(): Map<string, { animId: string; sequenceId: number }[]> {
     return this.objectAnimationBuffer;
+  }
+
+  /**
+   * Subscribe to AvatarAppearance circuit messages and buffer bake textures.
+   * Called right after connectToSim() so we capture bake data that arrives
+   * during initial load — before GodotBridge/AvatarManager exists.
+   */
+  private setupAvatarAppearanceBuffer(): void {
+    try {
+      const circuit = this.bot?.currentRegion?.circuit;
+      if (!circuit) return;
+
+      this.avatarAppearanceSub = circuit.subscribeToMessages([
+        Message.AvatarAppearance,
+      ], (packet: any) => {
+        try {
+          const msg = packet.message as AvatarAppearanceMessage;
+          const avatarId = msg.Sender.ID.toString();
+          const teBuf = msg.ObjectData.TextureEntry;
+          const te = TextureEntry.from(teBuf);
+          const bakes: string[] = [];
+          for (let ch = 0; ch < 11; ch++) {
+            const teFace = BAKE_CHANNEL_TO_TE_FACE[ch];
+            const face = te.faces[teFace] ?? te.defaultTexture;
+            bakes.push(face?.textureID?.toString() || '');
+          }
+          this.avatarAppearanceBuffer.set(avatarId, bakes);
+
+          // Diagnostic: log parsed bake info
+          const uniqueBakes = new Set(bakes.filter(b => b && b !== '00000000-0000-0000-0000-000000000000'));
+          const filled = bakes.map((uuid, i) => (uuid && uuid !== '00000000-0000-0000-0000-000000000000') ? `${['HEAD','UPPER','LOWER','EYES','SKIRT','HAIR','LARM','LLEG','AUX1','AUX2','AUX3'][i]}=${uuid.slice(0, 8)}` : null).filter(Boolean);
+          console.log(`[BoM-Buffer] AvatarAppearance ${avatarId.slice(0, 8)}: ${uniqueBakes.size} unique bakes — ${filled.join(', ')}`);
+        } catch (err) {
+          console.warn('[BoM-Buffer] Parse error:', (err as Error).message);
+        }
+      });
+      console.log('[MetaverseConnection] Subscribed to AvatarAppearance (buffering bakes for GodotBridge)');
+    } catch {
+      console.warn('[MetaverseConnection] Could not subscribe to AvatarAppearance (circuit not ready)');
+    }
+  }
+
+  /** Returns buffered AvatarAppearance bake textures. avatarUUID → 11 bake UUIDs. */
+  getAvatarAppearanceBuffer(): Map<string, string[]> {
+    return this.avatarAppearanceBuffer;
   }
 
   private getAvatarPosition(): { x: number; y: number; z: number } | null {

@@ -18,6 +18,7 @@ import { app } from 'electron';
 import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import type { Bot } from '../../node-metaverse/dist/lib';
+import { Message } from '../../node-metaverse/dist/lib/enums/Message';
 import type { Subscription } from 'rxjs';
 import { MeshFetchQueue } from './mesh-fetch-queue';
 import { TextureFetchQueue } from './texture-fetch-queue';
@@ -54,31 +55,25 @@ function findFreePort(startPort: number): Promise<number> {
   });
 }
 
+// In dev mode __dirname is dist/main/, godot-viewer is at ../../.. (project root)
+function getGodotViewerRoot(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'godot-viewer')
+    : path.join(__dirname, '..', '..', '..', 'godot-viewer');
+}
+
 function getGodotDir(): string {
-  const appRoot = app.getAppPath();
-  const versionFile = app.isPackaged
-    ? path.join(process.resourcesPath, 'godot-viewer', 'godot-version.txt')
-    : path.join(appRoot, '..', 'godot-viewer', 'godot-version.txt');
+  const versionFile = path.join(getGodotViewerRoot(), 'godot-version.txt');
   return fs.readFileSync(versionFile, 'utf8').trim();
 }
 
 function getGodotPath(): string {
   const dir = getGodotDir();
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'godot-viewer', dir, `${dir}.exe`);
-  } else {
-    const appRoot = app.getAppPath();
-    return path.join(appRoot, '..', 'godot-viewer', dir, `${dir}.exe`);
-  }
+  return path.join(getGodotViewerRoot(), dir, `${dir}.exe`);
 }
 
 function getProjectPath(): string {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'godot-viewer');
-  } else {
-    const appRoot = app.getAppPath();
-    return path.join(appRoot, '..', 'godot-viewer');
-  }
+  return getGodotViewerRoot();
 }
 
 function getCacheDirBase(): string {
@@ -121,7 +116,7 @@ export class GodotBridge extends EventEmitter {
   private lastGodotStats: any = null;
   private killSweepTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(bot: Bot, options: { vrMode?: boolean; objectAnimationBuffer?: Map<string, { animId: string; sequenceId: number }[]> } = {}) {
+  constructor(bot: Bot, options: { vrMode?: boolean; objectAnimationBuffer?: Map<string, { animId: string; sequenceId: number }[]>; avatarAppearanceBuffer?: Map<string, string[]> } = {}) {
     super();
     this.bot = bot;
     this.port = 0;
@@ -142,10 +137,17 @@ export class GodotBridge extends EventEmitter {
       this.avatarLocalIds, this.animationManager,
     );
     this.avatarManager.setObjectSender(this.objectSender);
+    this.objectSender.setAvatarManager(this.avatarManager);
+    this.materialPipeline.setAvatarManager(this.avatarManager);
 
     // Seed from MetaverseConnection's early ObjectAnimation buffer
     if (options.objectAnimationBuffer) {
       this.animationManager.seedObjectAnimationBuffer(options.objectAnimationBuffer);
+    }
+
+    // Seed from MetaverseConnection's early AvatarAppearance buffer
+    if (options.avatarAppearanceBuffer && options.avatarAppearanceBuffer.size > 0) {
+      this.avatarManager.seedBakedTextures(options.avatarAppearanceBuffer);
     }
   }
 
@@ -172,25 +174,33 @@ export class GodotBridge extends EventEmitter {
       try { fs.unlinkSync(overridePath); } catch { /* not present, fine */ }
     }
 
-    // Subscribe to animation messages early
+    // Subscribe to animation + appearance messages early
     const objAnimSub = this.animationManager.subscribeToObjectAnimation();
     if (objAnimSub) this.subscriptions.push(objAnimSub);
     const avatarAnimSub = this.animationManager.subscribeToAvatarAnimation();
     if (avatarAnimSub) this.subscriptions.push(avatarAnimSub);
+    const appearanceSub = this.avatarManager.subscribeToAvatarAppearance();
+    if (appearanceSub) this.subscriptions.push(appearanceSub);
 
     console.log(`[GodotBridge] Spawning Godot on port ${this.port} — ${godotPath}`);
 
     const userArgs = [`--ws-port=${this.port}`];
     if (this.vrMode) userArgs.push('--vr');
 
+    // Pass saved window bounds as engine args (before --) so the window
+    // appears at the correct size/position immediately, avoiding a visible
+    // resize flash. Godot processes --resolution and --position before
+    // creating the window, unlike user args which are only available in _ready().
+    const engineArgs: string[] = [];
     const savedBounds = getSavedBounds('godot');
     if (savedBounds) {
-      userArgs.push(`--window-position=${savedBounds.x},${savedBounds.y}`);
-      userArgs.push(`--window-size=${savedBounds.width},${savedBounds.height}`);
+      engineArgs.push('--resolution', `${savedBounds.width}x${savedBounds.height}`);
+      engineArgs.push('--position', `${savedBounds.x},${savedBounds.y}`);
     }
 
     this.process = spawn(godotPath, [
       '--path', projectPath,
+      ...engineArgs,
       '--', ...userArgs,
     ], {
       detached: false,
@@ -324,6 +334,7 @@ export class GodotBridge extends EventEmitter {
     // Wire fetch queues to sub-modules
     this.materialPipeline.initQueues(materialFetchQueue, this.textureFetchQueue);
     this.animationManager.initFetchQueue(animationFetchQueue);
+    this.avatarManager.initBom(this.materialPipeline, this.textureFetchQueue);
 
     this.environmentMgr = new GodotEnvironmentManager(this.bot, (msg) => this.send(msg));
 
@@ -367,6 +378,9 @@ export class GodotBridge extends EventEmitter {
         break;
       case 'object_touch':
         this.inputHandler.handleObjectTouch(msg);
+        break;
+      case 'stand_up':
+        this.inputHandler.handleStandUp();
         break;
       case 'window_bounds':
         saveExternalBounds('godot', {
@@ -445,6 +459,71 @@ export class GodotBridge extends EventEmitter {
     // Terse + full updates
     const updateSubs = this.updateCoalescer!.subscribe(events);
     this.subscriptions.push(...updateSubs);
+
+    // Self-avatar sit detection via AvatarSitResponse (onObjectUpdatedEvent is not fired
+    // for avatars when ParentID > 0, so we must use the circuit message directly).
+    // Standing is detected via onObjectUpdatedEvent which DOES fire when ParentID → 0.
+    let selfAvatarSeatLocalId = 0;
+
+    const circuit = this.bot.currentRegion?.circuit;
+    if (circuit) {
+      const sitResponseSub = circuit.subscribeToMessages([Message.AvatarSitResponse], (packet: any) => {
+        try {
+          const msg = packet.message;
+          const seatUuid: string = msg.SitObject.ID.toString();
+          const sitPos = msg.SitTransform.SitPosition;
+          const sitRot = msg.SitTransform.SitRotation;
+
+          const region = this.bot.currentRegion;
+          if (!region) return;
+
+          let seatLocalId = 0;
+          try {
+            seatLocalId = region.objects.getObjectByUUID(seatUuid).ID;
+          } catch {
+            console.warn(`[GodotBridge] AvatarSitResponse: seat ${seatUuid.slice(0, 8)} not in object store`);
+            return;
+          }
+
+          selfAvatarSeatLocalId = seatLocalId;
+          this.inputHandler.setSittingState(true, seatLocalId);
+          this.send({ type: 'sitting_state', sitting: true });
+
+          // Push avatar into the correct seated position immediately.
+          const selfId = this.bot.agent?.agentID?.toString();
+          if (selfId) {
+            this.send({
+              type: 'avatar_update',
+              id: selfId,
+              position: [sitPos.x, sitPos.y, sitPos.z],
+              rotation: [sitRot.x, sitRot.y, sitRot.z, sitRot.w],
+              parentId: seatLocalId,
+            });
+          }
+          console.log(`[GodotBridge] AvatarSitResponse: seated on ${seatUuid.slice(0, 8)} localId=${seatLocalId} offset=(${sitPos.x.toFixed(2)},${sitPos.y.toFixed(2)},${sitPos.z.toFixed(2)})`);
+        } catch (e) {
+          console.error('[GodotBridge] AvatarSitResponse handler error:', e);
+        }
+      });
+      this.subscriptions.push(sitResponseSub);
+    }
+
+    // Standing detection: onObjectUpdatedEvent DOES fire for the avatar when ParentID → 0.
+    const selfStandSub = events.onObjectUpdatedEvent.subscribe((event: any) => {
+      const obj = event.object;
+      if (obj.PCode !== 47) return;
+      const avatarId = obj.FullID?.toString();
+      if (!avatarId) return;
+      const selfId = this.bot.agent?.agentID?.toString();
+      if (!selfId || avatarId !== selfId) return;
+      if ((obj.ParentID || 0) !== 0 || selfAvatarSeatLocalId === 0) return;
+
+      selfAvatarSeatLocalId = 0;
+      this.inputHandler.setSittingState(false, 0);
+      this.send({ type: 'sitting_state', sitting: false });
+      console.log('[GodotBridge] Self avatar stood up (ParentID → 0)');
+    });
+    this.subscriptions.push(selfStandSub);
 
     // Avatar enter
     const avatarEnterSub = events.onAvatarEnteredRegion.subscribe((avatar) => {

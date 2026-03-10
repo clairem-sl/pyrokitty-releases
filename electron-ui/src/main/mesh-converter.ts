@@ -21,6 +21,7 @@ interface SkeletonJoint {
   pos: [number, number, number];  // local position in SL coords
   rot: [number, number, number];  // local rotation in SL coords (Euler degrees)
   children: string[];
+  isCollisionVolume: boolean;
 }
 
 let skeletonCache: Map<string, SkeletonJoint> | null = null;
@@ -130,7 +131,7 @@ function parseSkeletonXml(xml: string): Map<string, SkeletonJoint> {
     }
 
     const parentName = parentStack.length > 0 ? parentStack[parentStack.length - 1] : null;
-    joints.set(name, { name, parent: parentName, pos, rot, children: [] });
+    joints.set(name, { name, parent: parentName, pos, rot, children: [], isCollisionVolume: tagName === 'collision_volume' });
     if (parentName && joints.has(parentName)) {
       joints.get(parentName)!.children.push(name);
     }
@@ -144,6 +145,22 @@ function parseSkeletonXml(xml: string): Map<string, SkeletonJoint> {
 }
 
 // --- 4×4 matrix helpers (column-major) ---
+
+/**
+ * Strip scale from the upper-3×3 of a column-major 4×4 matrix, preserving rotation and translation.
+ * Matches Firestorm's skeleton approach: bone hierarchy uses pure rotation + translation (no scale).
+ * IBMs in the skin accessor are unchanged — they handle scale via vertex skinning math.
+ */
+function mat4NormalizeRotation(m: number[]): number[] {
+  const r = [...m];
+  // Normalize each column of the 3×3 rotation submatrix
+  for (let col = 0; col < 3; col++) {
+    const base = col * 4;
+    const len = Math.sqrt(r[base]*r[base] + r[base+1]*r[base+1] + r[base+2]*r[base+2]);
+    if (len > 1e-9) { r[base] /= len; r[base+1] /= len; r[base+2] /= len; }
+  }
+  return r;
+}
 
 /** Multiply two column-major 4×4 matrices: result = A * B. */
 function mat4Mul(a: number[], b: number[]): number[] {
@@ -657,12 +674,14 @@ export function llMeshToGlb(mesh: LLMesh, opts?: { skipBsm?: boolean }): Buffer 
         localMat = jw;
       }
 
-      // Write local transform as matrix (not TRS) to avoid lossy decomposition.
-      // Collision volume bones have non-uniform scale in their IBMs, so
-      // local = inv(parentJW) * childJW contains shear terms that TRS can't represent.
-      // glTF node.matrix preserves the exact transform; Godot's Transform3D(Basis)
-      // handles shear correctly.
-      node.matrix = localMat;
+      // Write local transform as matrix (not TRS).
+      // For standard skeleton bones: strip scale to match Firestorm's approach — SL bone
+      // hierarchy is pure rotation + translation. Scale in IBMs belongs to vertex skinning
+      // math only. Stripping scale fixes half t-pose from rest.basis scale in pose derivation.
+      // For collision volume bones: keep IBM-derived scale intact. Their vertices have IBMs
+      // that cancel exactly that scale; normalizing would catastrophically distort those vertices.
+      const isCollVol = sj?.isCollisionVolume ?? false;
+      node.matrix = isCollVol ? localMat : mat4NormalizeRotation(localMat);
 
       // Children in the glTF node (standard hierarchy + orphaned bones parented here)
       const childNodeIndices: number[] = [];

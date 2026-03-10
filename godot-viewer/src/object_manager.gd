@@ -191,22 +191,35 @@ func handle_object_create(msg: Dictionary) -> void:
 	rsi.push_transform()
 	sm.objects[local_id] = rsi
 
-	# Animesh root detection — create a Node3D in the scene tree for skeleton parenting
+	# Animesh root detection — create a Node3D in the scene tree for skeleton parenting.
+	# Worn animesh (child of avatar) uses the AVATAR's skeleton and root, matching SL behavior
+	# where the ControlAvatar for a worn animesh shares the avatar's skeleton.
 	if msg.get("animesh", false):
-		var animesh_node := Node3D.new()
-		animesh_node.name = "animesh_%d" % local_id
-		sm.add_child(animesh_node)
-		animesh_node.position = rsi.pos
-		animesh_node.quaternion = rsi.rot
-		# SL ControlAvatar uses mScaleConstraintFixup (default 1.0) — prim scale does NOT
-		# affect the rendered animesh character size. The skeleton is at natural bind-pose size.
-		animesh_node.scale = Vector3.ONE
-		sm.animesh_roots[local_id] = animesh_node
-		sm.animesh_root_for[local_id] = local_id
-		if _is_self_avatar(local_id):
-			print("[SelfAvatar] Animesh root object %d uuid=%s created" % [local_id, _uuid_short(local_id)])
-		# Retroactively register existing children + grandchildren (attachment linksets)
-		_register_animesh_descendants(local_id, local_id)
+		if parent_id > 0 and sm.animesh_roots.has(parent_id):
+			# Worn animesh attachment — use avatar's animesh root and shared skeleton
+			sm.animesh_root_for[local_id] = parent_id
+			print("[Animesh] Worn animesh %d uuid=%s → using avatar root %d" % [local_id, _uuid_short(local_id), parent_id])
+		else:
+			# Standalone animesh object (rezzed on ground) — own root + skeleton
+			var animesh_node := Node3D.new()
+			animesh_node.name = "animesh_%d" % local_id
+			sm.add_child(animesh_node)
+			animesh_node.position = rsi.pos
+			animesh_node.quaternion = rsi.rot
+			# SL ControlAvatar uses mScaleConstraintFixup (default 1.0) — prim scale does NOT
+			# affect the rendered animesh character size. The skeleton is at natural bind-pose size.
+			animesh_node.scale = Vector3.ONE
+			sm.animesh_roots[local_id] = animesh_node
+			sm.animesh_root_for[local_id] = local_id
+			# Create shared skeleton for non-avatar animesh objects too
+			if not sm.animesh_shared_skeleton.has(local_id):
+				var shared_skel: Skeleton3D = sm.skeleton_builder.create_shared_skeleton()
+				animesh_node.add_child(shared_skel)
+				sm.animesh_shared_skeleton[local_id] = shared_skel
+			if _is_self_avatar(local_id):
+				print("[SelfAvatar] Animesh root object %d uuid=%s created" % [local_id, _uuid_short(local_id)])
+			# Retroactively register existing children + grandchildren (attachment linksets)
+			_register_animesh_descendants(local_id, local_id)
 
 	# Track children of animesh roots (direct children AND grandchildren of linksets)
 	if parent_id > 0:
@@ -386,6 +399,8 @@ func _update_children_transforms(parent_id: int) -> void:
 			child_rsi.pos = parent_rsi.pos + parent_rsi.rot * sm.child_offset_pos[child_id]
 			child_rsi.rot = parent_rsi.rot * sm.child_offset_rot[child_id]
 			child_rsi.push_transform()
+			# Sync animesh root Node3D for child animesh objects
+			_sync_animesh_transform(child_id, child_rsi)
 			# Move child's light with it
 			if sm.light_mgr.object_lights.has(child_id):
 				sm.light_mgr.update_light_transform(child_id, child_rsi)
@@ -421,22 +436,27 @@ func _register_animesh_descendants(parent_id: int, root_id: int) -> void:
 		_register_animesh_descendants(child_id, root_id)
 
 
-## Instantiate a rigged mesh as Skeleton3D + MeshInstance3D under the animesh root Node3D.
-## Called from asset_pipeline when a rigged mesh loads for an animesh-related object.
+## Instantiate a rigged mesh under the shared skeleton for this animesh root.
+## Extracts MeshInstance3D + Skin from the GLB, discards the per-mesh Skeleton3D,
+## and binds the mesh to the shared skeleton via Godot's SkinReference system.
 func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: int) -> void:
 	# Guard against double instantiation (can be called from cache hit + _apply_mesh_to_pending)
-	if sm.animesh_skeletons.has(local_id):
+	if sm.animesh_mesh_instances.has(local_id):
 		return
 	var glb_path: String = sm.rigged_mesh_paths.get(mesh_id, "")
 	if glb_path.is_empty():
 		push_warning("[Animesh] No GLB path for rigged mesh %s (obj %d uuid=%s)" % [mesh_id, local_id, _uuid_short(local_id)])
 		return
-	var root_node: Node3D = sm.animesh_roots.get(animesh_root_id)
-	if root_node == null:
-		push_warning("[Animesh] No root node for animesh root %d uuid=%s (obj %d uuid=%s)" % [animesh_root_id, _uuid_short(animesh_root_id), local_id, _uuid_short(local_id)])
+	# Hybrid approach: shared skeleton for animation eval, per-mesh skeleton for rendering.
+	# We still need the shared skeleton to exist (for process_animesh to evaluate poses).
+	if not sm.animesh_shared_skeleton.has(animesh_root_id):
+		push_warning("[Animesh] No shared skeleton for root %d uuid=%s (obj %d uuid=%s)" % [animesh_root_id, _uuid_short(animesh_root_id), local_id, _uuid_short(local_id)])
+		return
+	var animesh_root: Node3D = sm.animesh_roots.get(animesh_root_id)
+	if animesh_root == null:
 		return
 
-	# Parse GLB and generate full scene tree (includes Skeleton3D + MeshInstance3D)
+	# Parse GLB and generate full scene tree (includes per-mesh Skeleton3D + MeshInstance3D)
 	var doc := GLTFDocument.new()
 	var state := GLTFState.new()
 	var err := doc.append_from_file(glb_path, state)
@@ -448,62 +468,67 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 		push_warning("[Animesh] generate_scene returned null for %s (obj %d uuid=%s)" % [glb_path, local_id, _uuid_short(local_id)])
 		return
 
-	# Find Skeleton3D and MeshInstance3D in the generated scene tree
-	var skeleton: Skeleton3D = _find_node_of_type(scene, "Skeleton3D")
 	var mesh_instance: MeshInstance3D = _find_node_of_type(scene, "MeshInstance3D")
-	if skeleton == null or mesh_instance == null:
-		push_warning("[Animesh] No Skeleton3D/MeshInstance3D in GLB for object %d uuid=%s" % [local_id, _uuid_short(local_id)])
+	if mesh_instance == null:
+		push_warning("[Animesh] No MeshInstance3D in GLB for object %d uuid=%s" % [local_id, _uuid_short(local_id)])
 		scene.queue_free()
 		return
 
-	# Create a wrapper node for this child's offset transform
-	var wrapper := Node3D.new()
-	wrapper.name = "rigged_%d" % local_id
-	# Don't apply linkset child offset — rigged mesh vertices are in skeleton space,
-	# positioned by bone transforms, not the prim's linkset position.
-	var rsi = sm.objects.get(local_id)
+	var glb_skel: Skeleton3D = _find_node_of_type(scene, "Skeleton3D") as Skeleton3D
+	if glb_skel == null:
+		push_warning("[Animesh] No Skeleton3D in GLB for object %d uuid=%s" % [local_id, _uuid_short(local_id)])
+		scene.queue_free()
+		return
 
-	# Reparent skeleton and mesh_instance out of the generated scene into our wrapper.
-	# Clear owner first — generate_scene() sets it, causing warnings on reparent.
-	skeleton.set_owner(null)
-	mesh_instance.set_owner(null)
-	skeleton.get_parent().remove_child(skeleton)
-	if mesh_instance.get_parent() != skeleton:
-		mesh_instance.get_parent().remove_child(mesh_instance)
-		skeleton.add_child(mesh_instance)
-	wrapper.add_child(skeleton)
-	mesh_instance.skeleton = mesh_instance.get_path_to(skeleton)
+	# Populate skin bind names from GLB skeleton (Godot glTF importer may use indices only)
+	var skin: Skin = mesh_instance.skin
+	if skin != null:
+		for i in range(skin.get_bind_count()):
+			if skin.get_bind_name(i).is_empty():
+				var bidx: int = skin.get_bind_bone(i)
+				if bidx >= 0 and bidx < glb_skel.get_bone_count():
+					skin.set_bind_name(i, glb_skel.get_bone_name(bidx))
 
-	# Add wrapper to animesh root
-	root_node.add_child(wrapper)
+	# Hybrid approach: keep the GLB's own Skeleton3D for rendering.
+	# The mesh stays bound to its own skeleton (IBMs match rest transforms).
+	# Animation poses are propagated from the shared skeleton in process_animesh.
+	glb_skel.set_owner(null)
+	glb_skel.get_parent().remove_child(glb_skel)
+	glb_skel.name = "skel_%d" % local_id
+	animesh_root.add_child(glb_skel)
+	# MeshInstance3D stays as child of glb_skel — already correctly skinned to it
 
 	# Store references
-	sm.animesh_skeletons[local_id] = skeleton
 	sm.animesh_mesh_instances[local_id] = mesh_instance
-	# Maintain per-root skeleton list for fast process_animesh iteration
-	if not sm.animesh_root_skeletons.has(animesh_root_id):
-		sm.animesh_root_skeletons[animesh_root_id] = []
-	sm.animesh_root_skeletons[animesh_root_id].append(skeleton)
+	sm.animesh_mesh_skeletons[local_id] = glb_skel
 
-	# Double-sided shadow casting reduces shadow acne near deformed joints.
-	# Bone bends create steep surface angles that single-sided bias can't handle.
+	# Double-sided shadow casting reduces shadow acne near deformed joints
 	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_DOUBLE_SIDED
 
 	# Hide the RSInstance placeholder (keep it for metadata/transform tracking)
-	# Also disable shadow casting — hidden instances can still cast shadows
+	var rsi = sm.objects.get(local_id)
 	if rsi != null:
 		RenderingServer.instance_set_visible(rsi.rid, false)
 		RenderingServer.instance_geometry_set_cast_shadows_setting(
 			rsi.rid, RenderingServer.SHADOW_CASTING_SETTING_OFF)
+
+	# Hide the avatar placeholder (blue box) once first rigged mesh appears
+	for av_id: String in sm.avatar_local_ids:
+		if sm.avatar_local_ids[av_id] == animesh_root_id and sm.avatars.has(av_id):
+			var av_rsi = sm.avatars[av_id]
+			RenderingServer.instance_set_visible(av_rsi.rid, false)
+			RenderingServer.instance_geometry_set_cast_shadows_setting(
+				av_rsi.rid, RenderingServer.SHADOW_CASTING_SETTING_OFF)
+			break
 
 	# If we already have pending animations for this root, apply them
 	if sm.animesh_roots.has(animesh_root_id):
 		_apply_pending_animations(local_id)
 
 	if _is_self_avatar(local_id):
-		print("[SelfAvatar] Rigged mesh instantiated: localId=%d uuid=%s meshId=%s bones=%d" % [local_id, _uuid_short(local_id), mesh_id.substr(0, 8), skeleton.get_bone_count()])
+		print("[SelfAvatar] Rigged mesh instantiated (hybrid): localId=%d meshId=%s bones=%d" % [local_id, mesh_id.substr(0, 8), glb_skel.get_bone_count()])
 
-	# Clean up the now-empty generated scene
+	# Free the now-empty GLB scene root (skeleton + mesh have been reparented out)
 	scene.queue_free()
 
 
@@ -528,10 +553,10 @@ func handle_animations_batch(msg: Dictionary) -> void:
 		sm.object_uuid[local_id] = msg_uuid
 	var animations: Dictionary = msg.get("animations", {})
 	if _is_self_avatar(local_id):
-		print("[SelfAvatar] animations_batch: localId=%d uuid=%s, %d animations, is_animesh_root=%s, has_skeletons=%s" % [
+		print("[SelfAvatar] animations_batch: localId=%d uuid=%s, %d animations, is_animesh_root=%s, has_shared_skel=%s" % [
 			local_id, _uuid_short(local_id), animations.size(),
 			str(sm.animesh_roots.has(local_id)),
-			str(sm.animesh_root_skeletons.has(local_id) and sm.animesh_root_skeletons[local_id].size() > 0)])
+			str(sm.animesh_shared_skeleton.has(local_id))])
 	if local_id == 0 or animations.is_empty():
 		return
 
@@ -541,29 +566,29 @@ func handle_animations_batch(msg: Dictionary) -> void:
 		var data: Dictionary = animations[anim_id]
 		if data.is_empty():
 			continue
-		# Build and cache Animation resource + raw data
 		if not sm.animesh_anim_data.has(anim_id):
-			var anim := _build_animation(anim_id, data)
-			if anim != null:
-				sm.animesh_anim_cache[anim_id] = anim
-				sm.animesh_anim_data[anim_id] = data
+			sm.animesh_anim_data[anim_id] = data
 		anim_ids.append(anim_id)
 
-	sm.animesh_pending_anims[local_id] = anim_ids
+	# Route animations to the correct root (worn animesh → avatar root)
+	var anim_root: int = sm.animesh_root_for.get(local_id, local_id)
+	if anim_root != local_id:
+		# Worn animesh: store separately so avatar batch updates don't overwrite
+		sm.animesh_worn_anims[anim_root] = sm.animesh_worn_anims.get(anim_root, []) as Array
+		for aid: String in anim_ids:
+			if not (sm.animesh_worn_anims[anim_root] as Array).has(aid):
+				(sm.animesh_worn_anims[anim_root] as Array).append(aid)
+	else:
+		sm.animesh_pending_anims[local_id] = anim_ids
 
-	if _is_self_avatar(local_id):
-		print("[SelfAvatar] Animations batch received: localId=%d, %d animations [%s]" % [local_id, anim_ids.size(), ", ".join(anim_ids.map(func(a: String) -> String: return a.substr(0, 8)))])
+	if _is_self_avatar(local_id) or _is_self_avatar(anim_root):
+		print("[SelfAvatar] Animations batch received: localId=%d root=%d, %d animations [%s]" % [local_id, anim_root, anim_ids.size(), ", ".join(anim_ids.map(func(a: String) -> String: return a.substr(0, 8)))])
 
-	# Trigger single rebuild for this root
-	var found_skeleton := false
-	for obj_id: int in sm.animesh_skeletons:
-		if sm.animesh_root_for.get(obj_id, 0) == local_id:
-			found_skeleton = true
-			_apply_pending_animations(obj_id)
-			break
-	if not found_skeleton:
-		if _is_self_avatar(local_id):
-			print("[SelfAvatar] Batch for localId=%d uuid=%s: %d anims cached, but NO skeleton found yet" % [local_id, _uuid_short(local_id), anim_ids.size()])
+	# Trigger rebuild if shared skeleton exists for the root
+	if sm.animesh_shared_skeleton.has(anim_root):
+		_apply_pending_animations(anim_root)
+	elif _is_self_avatar(anim_root):
+		print("[SelfAvatar] Batch for root=%d: %d anims cached, but NO shared skeleton yet" % [anim_root, anim_ids.size()])
 
 
 ## Apply any pending animations to a specific animesh root.
@@ -571,16 +596,20 @@ func handle_animations_batch(msg: Dictionary) -> void:
 ## for manual per-frame evaluation (required because SL composes bone rotations as
 ## world = local * parent, while Godot uses world = parent * local).
 func _apply_pending_animations(obj_id: int) -> void:
-	var root_id: int = sm.animesh_root_for.get(obj_id, 0)
+	var root_id: int = sm.animesh_root_for.get(obj_id, obj_id)
 	if root_id == 0:
 		return
-	var pending_anims: Array = sm.animesh_pending_anims.get(root_id, [])
+	# Combine root's own animations with worn animesh animations
+	var pending_anims: Array = sm.animesh_pending_anims.get(root_id, []).duplicate()
+	var worn: Array = sm.animesh_worn_anims.get(root_id, [])
+	for aid: String in worn:
+		if not pending_anims.has(aid):
+			pending_anims.append(aid)
 	if pending_anims.is_empty():
 		return
 
-	# Only need to build eval data once per root (not per child mesh)
-	var root_skels: Array = sm.animesh_root_skeletons.get(root_id, [])
-	if root_skels.is_empty():
+	# Need shared skeleton to exist
+	if not sm.animesh_shared_skeleton.has(root_id):
 		return
 
 	# Collect all available animations with their raw data
@@ -682,67 +711,84 @@ func process_animesh(delta: float) -> void:
 			if pos_keys.size() > 0:
 				sl_local_pos[jname] = _interp_sl_position(pos_keys, t)
 
-		# Get cached skeleton list for this root (O(1) lookup instead of full scan)
-		var root_skeletons: Array = sm.animesh_root_skeletons.get(root_id, [])
-
-		if root_skeletons.is_empty():
+		# Hybrid approach: evaluate SL world rotations on the shared skeleton (all 159 bones),
+		# then propagate poses to each per-mesh skeleton using ITS rest transforms.
+		var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(root_id)
+		if shared_skel == null:
 			continue
 
-		# Process each skeleton independently — each attachment (head, body, boots)
-		# has a different subset of SL bones. Computing on just one reference skeleton
-		# would miss bones only present on other skeletons (e.g. head bones missing
-		# if the first skeleton is a boot).
-		for skeleton: Skeleton3D in root_skeletons:
-			var sl_world: Dictionary = {}  # bone_idx -> Quaternion (SL space)
-			var godot_world: Dictionary = {}  # bone_idx -> Quaternion (Godot space)
-			var bone_animated: Dictionary = {}  # bone_idx -> bool
+		# Compute SL/Godot world rotations for ALL bones (by name, skeleton-independent)
+		var sl_world_by_name: Dictionary = {}    # bname -> Quaternion (SL space)
+		var godot_world_by_name: Dictionary = {} # bname -> Quaternion (Godot space)
 
-			for bi in range(skeleton.get_bone_count()):
-				var bname: String = skeleton.get_bone_name(bi)
-				var parent_bi: int = skeleton.get_bone_parent(bi)
+		for bi in range(shared_skel.get_bone_count()):
+			var bname: String = shared_skel.get_bone_name(bi)
+			var parent_bi: int = shared_skel.get_bone_parent(bi)
 
-				var has_rot: bool = sl_local_rot.has(bname)
-				var has_pos: bool = sl_local_pos.has(bname)
-				var parent_was_animated: bool = bone_animated.get(parent_bi, false)
+			# SL local rotation: from animation keyframes or default rest rotation
+			var q_sl_local: Quaternion
+			if sl_local_rot.has(bname):
+				q_sl_local = sl_local_rot[bname]
+			else:
+				# Standard bones: rest rot = identity → SL local = identity
+				# Collision volumes: rest has rotation from XML → convert Godot→SL
+				var rest_q: Quaternion = shared_skel.get_bone_rest(bi).basis.orthonormalized().get_rotation_quaternion()
+				q_sl_local = Quaternion(rest_q.x, -rest_q.z, rest_q.y, rest_q.w)
 
-				# Only process bones that have animation data or an animated ancestor
-				if not has_rot and not has_pos and not parent_was_animated:
-					bone_animated[bi] = false
-					continue  # No animation influence — leave at rest pose
+			var parent_bname: String = ""
+			if parent_bi >= 0:
+				parent_bname = shared_skel.get_bone_name(parent_bi)
+			var q_sl_parent: Quaternion = sl_world_by_name.get(parent_bname, Quaternion.IDENTITY)
+			var q_sl_world: Quaternion = q_sl_parent * q_sl_local
+			sl_world_by_name[bname] = q_sl_world
 
-				bone_animated[bi] = has_rot or has_pos or parent_was_animated
+			var q_godot_world := Quaternion(
+				q_sl_world.x, q_sl_world.z, -q_sl_world.y, q_sl_world.w).normalized()
+			godot_world_by_name[bname] = q_godot_world
 
-				# SL local rotation: from animation, or rest rotation if not animated
-				var q_sl_local: Quaternion
-				if has_rot:
-					q_sl_local = sl_local_rot[bname]
-				else:
-					var rest_q: Quaternion = skeleton.get_bone_rest(bi).basis.orthonormalized().get_rotation_quaternion()
-					q_sl_local = Quaternion(rest_q.x, -rest_q.z, rest_q.y, rest_q.w)
+		# Propagate poses to each per-mesh skeleton for this root
+		for mesh_lid: int in sm.animesh_mesh_skeletons:
+			if sm.animesh_root_for.get(mesh_lid, 0) != root_id:
+				continue
+			var mesh_skel: Skeleton3D = sm.animesh_mesh_skeletons[mesh_lid]
+			if mesh_skel == null or not is_instance_valid(mesh_skel):
+				continue
+			_apply_world_to_mesh_skeleton(mesh_skel, godot_world_by_name, sl_local_pos)
 
-				var q_sl_parent_world: Quaternion = sl_world.get(parent_bi, Quaternion.IDENTITY)
-				var q_sl_world: Quaternion = q_sl_parent_world * q_sl_local
-				sl_world[bi] = q_sl_world
 
-				var q_godot_world := Quaternion(
-					q_sl_world.x, q_sl_world.z, -q_sl_world.y, q_sl_world.w).normalized()
-				godot_world[bi] = q_godot_world
 
-				# Derive Godot pose rotation
-				var parent_godot_world: Quaternion = godot_world.get(parent_bi, Quaternion.IDENTITY)
-				var rest_rot: Quaternion = skeleton.get_bone_rest(bi).basis.orthonormalized().get_rotation_quaternion()
-				var combined_inv: Quaternion = (parent_godot_world * rest_rot).inverse()
-				var pose_rot: Quaternion = (combined_inv * q_godot_world).normalized()
-				skeleton.set_bone_pose_rotation(bi, pose_rot)
+## Apply Godot world rotations (from shared skeleton evaluation) to a per-mesh skeleton.
+## Each bone's pose is derived relative to the mesh skeleton's own rest transforms,
+## so vertices render correctly (mesh IBMs match mesh skeleton rests).
+func _apply_world_to_mesh_skeleton(mesh_skel: Skeleton3D, godot_world: Dictionary, sl_local_pos: Dictionary) -> void:
+	for bi in range(mesh_skel.get_bone_count()):
+		var bname: String = mesh_skel.get_bone_name(bi)
+		if not godot_world.has(bname):
+			continue  # bone not in animation evaluation → stays at rest
 
-				if has_pos:
-					var sl_pos: Vector3 = sl_local_pos[bname]
-					var offset_godot := Vector3(sl_pos.x, sl_pos.z, -sl_pos.y)
-					var rest_xf: Transform3D = skeleton.get_bone_rest(bi)
-					var rot_basis := Basis(rest_xf.basis.orthonormalized().get_rotation_quaternion())
-					var pose_pos: Vector3 = rot_basis.inverse() * offset_godot
-					skeleton.set_bone_pose_position(bi, pose_pos)
+		var q_gw: Quaternion = godot_world[bname]
 
+		# Get parent's Godot world rotation (by name, from the shared skeleton evaluation)
+		var parent_bi: int = mesh_skel.get_bone_parent(bi)
+		var parent_gw: Quaternion = Quaternion.IDENTITY
+		if parent_bi >= 0:
+			var parent_bname: String = mesh_skel.get_bone_name(parent_bi)
+			parent_gw = godot_world.get(parent_bname, Quaternion.IDENTITY)
+
+		# Derive pose rotation: pose = inv(parent_world * rest) * world
+		var rest_rot: Quaternion = mesh_skel.get_bone_rest(bi).basis.orthonormalized().get_rotation_quaternion()
+		var combined_inv: Quaternion = (parent_gw * rest_rot).inverse()
+		var pose_rot: Quaternion = (combined_inv * q_gw).normalized()
+		mesh_skel.set_bone_pose_rotation(bi, pose_rot)
+
+		# Position keyframes: SL-space offset converted to mesh skeleton's bone space
+		if sl_local_pos.has(bname):
+			var sl_pos: Vector3 = sl_local_pos[bname]
+			var offset_godot := Vector3(sl_pos.x, sl_pos.z, -sl_pos.y)
+			var rest_xf: Transform3D = mesh_skel.get_bone_rest(bi)
+			var rot_basis := Basis(rest_xf.basis.orthonormalized().get_rotation_quaternion())
+			var pose_pos: Vector3 = rot_basis.inverse() * offset_godot
+			mesh_skel.set_bone_pose_position(bi, pose_pos)
 
 
 ## Interpolate SL rotation keyframes at time t. Returns SL-space quaternion (w reconstructed).
@@ -825,84 +871,6 @@ func _sl_quat_from_xyz(x: float, y: float, z: float) -> Quaternion:
 	var w_sq: float = 1.0 - x * x - y * y - z * z
 	var w: float = sqrt(max(w_sq, 0.0))
 	return Quaternion(x, y, z, w)
-
-
-## Remap animation track paths to use the actual skeleton node name and valid bone indices.
-## Also compensates rotation keyframes for bone rest pose: Godot applies final = rest * pose,
-## but SL animation rotations are absolute, so we set pose = rest^{-1} * desired_rotation.
-func _remap_animation_tracks(src: Animation, skel_name: String, skeleton: Skeleton3D) -> Animation:
-	var anim := src.duplicate()
-	for i in range(anim.get_track_count()):
-		var path: NodePath = anim.track_get_path(i)
-		var path_str: String = str(path)
-		# Track paths are "Skeleton3D:bone_name" — replace skeleton name
-		if ":" in path_str:
-			var parts: PackedStringArray = path_str.split(":")
-			var bone_name: String = parts[1]
-			var bone_idx: int = skeleton.find_bone(bone_name)
-			if bone_idx >= 0:
-				anim.track_set_path(i, NodePath("%s:%s" % [skel_name, bone_name]))
-				# Compensate rotation tracks for bone rest pose
-				if anim.track_get_type(i) == Animation.TYPE_ROTATION_3D:
-					var rest_rot: Quaternion = skeleton.get_bone_rest(bone_idx).basis.orthonormalized().get_rotation_quaternion()
-					if not rest_rot.is_equal_approx(Quaternion.IDENTITY):
-						var inv_rest: Quaternion = rest_rot.inverse()
-						for k in range(anim.track_get_key_count(i)):
-							var q: Quaternion = anim.track_get_key_value(i, k)
-							anim.track_set_key_value(i, k, (inv_rest * q).normalized())
-			else:
-				# Bone not in this skeleton — disable the track
-				anim.track_set_enabled(i, false)
-	return anim
-
-
-## Build a Godot Animation resource from parsed SL animation keyframe data
-func _build_animation(anim_id: String, data: Dictionary) -> Animation:
-	var anim := Animation.new()
-	var duration: float = float(data.get("duration", 1.0))
-	anim.length = duration
-	if data.get("loop", false):
-		anim.loop_mode = Animation.LOOP_LINEAR
-
-	var joints: Array = data.get("joints", [])
-	for joint_data: Dictionary in joints:
-		var joint_name: String = str(joint_data.get("name", ""))
-		if joint_name.is_empty():
-			continue
-
-		# Rotation track
-		var rot_keys: Array = joint_data.get("rotationKeys", [])
-		if rot_keys.size() > 0:
-			var track_idx := anim.add_track(Animation.TYPE_ROTATION_3D)
-			anim.track_set_path(track_idx, NodePath("Skeleton3D:%s" % joint_name))
-			anim.track_set_interpolation_type(track_idx, Animation.INTERPOLATION_LINEAR)
-			for kf: Dictionary in rot_keys:
-				var t: float = float(kf.get("time", 0.0))
-				var v: Array = kf.get("value", [0, 0, 0])
-				# SL: xyz are quaternion components in [-1,1], reconstruct w
-				var sx: float = float(v[0])
-				var sy: float = float(v[1])
-				var sz: float = float(v[2])
-				var w_sq: float = 1.0 - sx * sx - sy * sy - sz * sz
-				var sw: float = sqrt(max(w_sq, 0.0))
-				# SL->Godot quaternion: (x,y,z,w) -> (x,z,-y,w)
-				var q := Quaternion(sx, sz, -sy, sw).normalized()
-				anim.rotation_track_insert_key(track_idx, t, q)
-
-		# Position track
-		var pos_keys: Array = joint_data.get("positionKeys", [])
-		if pos_keys.size() > 0:
-			var track_idx := anim.add_track(Animation.TYPE_POSITION_3D)
-			anim.track_set_path(track_idx, NodePath("Skeleton3D:%s" % joint_name))
-			anim.track_set_interpolation_type(track_idx, Animation.INTERPOLATION_LINEAR)
-			for kf: Dictionary in pos_keys:
-				var t: float = float(kf.get("time", 0.0))
-				var v: Array = kf.get("value", [0, 0, 0])
-				# SL->Godot position: (x,y,z) -> (x,z,-y)
-				var gp := Vector3(float(v[0]), float(v[2]), -float(v[1]))
-				anim.position_track_insert_key(track_idx, t, gp)
-
-	return anim
 
 
 ## Handle face updates from material asset fetch (PBR materials resolved after initial object_create)
@@ -991,15 +959,17 @@ func _cleanup_object(local_id: int) -> void:
 	sm.light_mgr._object_light_data.erase(local_id)
 	sm.object_targets.erase(local_id)
 
-	# Clean up animesh data
-	if sm.animesh_skeletons.has(local_id):
-		# Remove from per-root skeleton list
-		var skel: Skeleton3D = sm.animesh_skeletons[local_id]
-		var ar_id: int = sm.animesh_root_for.get(local_id, 0)
-		if ar_id > 0 and sm.animesh_root_skeletons.has(ar_id):
-			sm.animesh_root_skeletons[ar_id].erase(skel)
-		sm.animesh_skeletons.erase(local_id)
-	sm.animesh_mesh_instances.erase(local_id)
+	# Clean up animesh mesh instance and per-mesh skeleton
+	if sm.animesh_mesh_instances.has(local_id):
+		var ami: MeshInstance3D = sm.animesh_mesh_instances[local_id]
+		if ami and is_instance_valid(ami):
+			ami.queue_free()
+		sm.animesh_mesh_instances.erase(local_id)
+	if sm.animesh_mesh_skeletons.has(local_id):
+		var mskel: Skeleton3D = sm.animesh_mesh_skeletons[local_id]
+		if mskel and is_instance_valid(mskel):
+			mskel.queue_free()  # also frees child MeshInstance3D
+		sm.animesh_mesh_skeletons.erase(local_id)
 	sm.object_mesh_id.erase(local_id)
 	sm.animesh_root_for.erase(local_id)
 	if sm.animesh_roots.has(local_id):
@@ -1007,9 +977,10 @@ func _cleanup_object(local_id: int) -> void:
 		if animesh_node and is_instance_valid(animesh_node):
 			animesh_node.queue_free()
 		sm.animesh_roots.erase(local_id)
+		sm.animesh_shared_skeleton.erase(local_id)
 		sm.animesh_pending_anims.erase(local_id)
+		sm.animesh_worn_anims.erase(local_id)
 		sm.animesh_eval.erase(local_id)
-		sm.animesh_root_skeletons.erase(local_id)
 		if sm.animesh_eval.is_empty():
 			sm.animesh_eval_active = false
 
@@ -1150,8 +1121,12 @@ func handle_avatar_create(msg: Dictionary) -> void:
 		avatar_node.quaternion = godot_rot
 		avatar_node.scale = Vector3.ONE
 		sm.animesh_roots[local_id] = avatar_node
+		# Create shared skeleton from avatar_skeleton.xml (ONE per avatar)
+		var shared_skel: Skeleton3D = sm.skeleton_builder.create_shared_skeleton()
+		avatar_node.add_child(shared_skel)
+		sm.animesh_shared_skeleton[local_id] = shared_skel
 		if avatar_id == sm.self_avatar_id:
-			print("[SelfAvatar] === Skeleton root created: localId=%d (animesh_roots now has %d entries) ===" % [local_id, sm.animesh_roots.size()])
+			print("[SelfAvatar] === Skeleton root created: localId=%d bones=%d ===" % [local_id, shared_skel.get_bone_count()])
 
 		# Resolve pending children that arrived before this avatar —
 		# fix their world positions
@@ -1194,32 +1169,44 @@ func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
 	var rsi = sm.avatars.get(avatar_id)
 
 	if data.has("position"):
-		var godot_pos := sl_to_godot_pos(data["position"])
-		godot_pos.y += 0.9
+		var raw_pos := sl_to_godot_pos(data["position"])
+		var seat_id: int = int(data.get("parentId", 0))
+		var seat_rsi = sm.objects.get(seat_id) if seat_id > 0 else null
 
-		# Blend offset = current visual position minus new server position
+		var godot_pos: Vector3
+		var godot_rot: Quaternion
+		if seat_rsi != null:
+			# Sitting: position and rotation are in the seat's local space.
+			# World = seat_pos + seat_rot * local_offset (same as child prims).
+			godot_pos = seat_rsi.pos + seat_rsi.rot * raw_pos
+			if data.has("rotation"):
+				godot_rot = seat_rsi.rot * sl_to_godot_quat(data["rotation"])
+			else:
+				godot_rot = rsi.rot if rsi else Quaternion.IDENTITY
+		else:
+			godot_pos = raw_pos
+			godot_pos.y += 0.9
+			if data.has("rotation"):
+				godot_rot = sl_to_godot_quat(data["rotation"])
+			else:
+				godot_rot = rsi.rot if rsi else Quaternion.IDENTITY
+
+		# Snap when sitting (no blend) — sit position is server-authoritative.
 		var blend_offset := Vector3.ZERO
-		if rsi:
+		if seat_rsi == null and rsi:
 			blend_offset = rsi.pos - godot_pos
 			if blend_offset.length() > AVATAR_MAX_INTERP_DIST:
-				blend_offset = Vector3.ZERO  # too far, snap
+				blend_offset = Vector3.ZERO
 
 		if rsi:
 			rsi.pos = godot_pos
+			rsi.rot = godot_rot
 
 		var target: Dictionary = {}
 		target["pos"] = godot_pos
+		target["rot"] = godot_rot
 		target["blend_offset"] = blend_offset
 		target["blend_time"] = 0.0
-		if data.has("rotation"):
-			var r := sl_to_godot_quat(data["rotation"])
-			target["rot"] = r
-			if rsi:
-				rsi.rot = r
-		elif rsi:
-			target["rot"] = rsi.rot
-		else:
-			target["rot"] = Quaternion.IDENTITY
 		if data.has("velocity"):
 			var sl_vel: Array = data["velocity"]
 			target["vel"] = Vector3(sl_vel[0], sl_vel[2], -sl_vel[1])
@@ -1244,10 +1231,22 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 		# Clean up skeleton root
 		var av_lid: int = sm.avatar_local_ids.get(avatar_id, 0)
 		if av_lid > 0 and sm.animesh_roots.has(av_lid):
+			# Clean up per-mesh skeletons belonging to this avatar
+			var to_erase: Array = []
+			for mesh_lid: int in sm.animesh_mesh_skeletons:
+				if sm.animesh_root_for.get(mesh_lid, 0) == av_lid:
+					to_erase.append(mesh_lid)
+			for mesh_lid: int in to_erase:
+				sm.animesh_mesh_skeletons.erase(mesh_lid)
+				sm.animesh_mesh_instances.erase(mesh_lid)
 			var node: Node3D = sm.animesh_roots[av_lid]
 			if node and is_instance_valid(node):
-				node.queue_free()
+				node.queue_free()  # Also frees shared skeleton + per-mesh skeletons + meshes
 			sm.animesh_roots.erase(av_lid)
+			sm.animesh_shared_skeleton.erase(av_lid)
+			sm.animesh_eval.erase(av_lid)
+			sm.animesh_pending_anims.erase(av_lid)
+			sm.animesh_worn_anims.erase(av_lid)
 		sm.avatar_local_ids.erase(avatar_id)
 
 
@@ -1318,6 +1317,8 @@ func _update_children_world_pos(parent_id: int, parent_pos: Vector3, parent_rot:
 		child_rsi.pos = parent_pos + parent_rot * sm.child_offset_pos[child_id]
 		child_rsi.rot = parent_rot * sm.child_offset_rot[child_id]
 		child_rsi.push_transform()
+		# Sync animesh root Node3D for child animesh objects (e.g. tail attached to avatar)
+		_sync_animesh_transform(child_id, child_rsi)
 		# Recurse into grandchildren (attachment linksets)
 		_update_children_world_pos(child_id, child_rsi.pos, child_rsi.rot)
 

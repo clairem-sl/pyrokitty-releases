@@ -12,6 +12,7 @@ const LightManagerScript = preload("res://src/light_manager.gd")
 const AssetPipelineScript = preload("res://src/asset_pipeline.gd")
 const TerrainEnvironmentScript = preload("res://src/terrain_environment.gd")
 const ObjectPickerScript = preload("res://src/object_picker.gd")
+const SkeletonBuilderScript = preload("res://src/skeleton_builder.gd")
 
 signal self_avatar_moved(pos: Vector3)
 signal object_properties_received(local_id: int, name: String, description: String)
@@ -106,14 +107,17 @@ var _pending_by_mesh: Dictionary = {}     # meshId -> Array[localId]
 
 # Animesh (rigged mesh with skeleton animation)
 var animesh_roots: Dictionary = {}         # root localId (int) -> Node3D (scene tree parent)
-var animesh_skeletons: Dictionary = {}     # localId (int) -> Skeleton3D
+var animesh_shared_skeleton: Dictionary = {} # root localId (int) -> Skeleton3D (ONE per avatar, from XML)
+var animesh_mesh_skeletons: Dictionary = {}  # localId (int) -> Skeleton3D (per-mesh skeleton from GLB, for rendering)
 var animesh_root_for: Dictionary = {}      # localId (int) -> root localId (maps object to its animesh root)
 var rigged_mesh_paths: Dictionary = {}     # meshId (String) -> GLB path (for generate_scene)
-var animesh_anim_cache: Dictionary = {}    # animId (String) -> Animation resource
 var animesh_anim_data: Dictionary = {}    # animId (String) -> raw Dictionary (with per-joint priorities)
 var animesh_pending_anims: Dictionary = {} # root localId (int) -> Array[animId String] (pending animation IDs)
+var animesh_worn_anims: Dictionary = {}   # root localId (int) -> Array[animId String] (from worn animesh attachments)
 var animesh_mesh_instances: Dictionary = {} # localId (int) -> MeshInstance3D (for texture application)
-var animesh_root_skeletons: Dictionary = {} # root localId (int) -> Array[Skeleton3D] (fast per-root iteration)
+
+# Skeleton builder — parses avatar_skeleton.xml once, creates shared skeletons
+var skeleton_builder: RefCounted
 
 # Manual animation evaluation (replaces AnimationPlayer for correct SL→Godot rotation order)
 # SL: world = local * parent.  Godot: world = parent * local.  Must conjugate per bone.
@@ -177,6 +181,10 @@ func _ready() -> void:
 	# Prim geometry generator
 	prim_generator = PrimMeshGeneratorScript.new()
 
+	# Skeleton builder — parse avatar_skeleton.xml once
+	skeleton_builder = SkeletonBuilderScript.new()
+	skeleton_builder.load_from_xml("res://data/avatar_skeleton.xml")
+
 	# Initialize sub-managers
 	object_mgr = ObjectManagerScript.new(self)
 	light_mgr = LightManagerScript.new(self)
@@ -214,18 +222,16 @@ func _process(delta: float) -> void:
 			texture_cache.size(), material_cache.size(), mesh_cache.size(),
 			Engine.get_frames_per_second()])
 		# Avatar pipeline summary
-		var n_skel: int = animesh_skeletons.size()
+		var n_shared: int = animesh_shared_skeleton.size()
 		var n_roots: int = animesh_roots.size()
-		var n_root_for: int = animesh_root_for.size()
 		var n_eval: int = animesh_eval.size()
 		var n_rigged_paths: int = rigged_mesh_paths.size()
-		var n_pending_anims: int = animesh_pending_anims.size()
-		# Self-avatar skeleton breakdown only
+		var n_meshes: int = animesh_mesh_instances.size()
 		var self_lid: int = avatar_local_ids.get(self_avatar_id, 0)
-		if self_lid > 0 and animesh_root_skeletons.has(self_lid):
-			var self_skels: Array = animesh_root_skeletons[self_lid]
-			print("[SelfAvatar] roots=%d | skeletons=%d (self: %d) | eval=%d | rigged_paths=%d" % [
-				n_roots, n_skel, self_skels.size(), n_eval, n_rigged_paths])
+		if self_lid > 0 and animesh_shared_skeleton.has(self_lid):
+			var skel: Skeleton3D = animesh_shared_skeleton[self_lid]
+			print("[SelfAvatar] roots=%d | shared_skels=%d | eval=%d | rigged_meshes=%d | bones=%d" % [
+				n_roots, n_shared, n_eval, n_meshes, skel.get_bone_count()])
 
 	# Terrain/water/sky processing
 	terrain_env.process(delta)

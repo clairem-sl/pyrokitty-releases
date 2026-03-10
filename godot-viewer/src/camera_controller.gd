@@ -72,6 +72,9 @@ const XR_YAW_THRESHOLD: float = 0.001  # ~0.06 degrees
 @onready var scene_manager: Node3D = get_node("../SceneManager")
 
 # Inspector panel
+var _stand_layer: CanvasLayer
+var _stand_button: Button
+
 var _tooltip_layer: CanvasLayer
 var _tooltip_panel: PanelContainer
 var _tooltip_tabs: TabContainer
@@ -91,6 +94,7 @@ func _ready() -> void:
 	if scene_manager:
 		scene_manager.self_avatar_moved.connect(_on_self_avatar_moved)
 		scene_manager.object_properties_received.connect(_on_object_properties_received)
+	_create_stand_button()
 	_create_debug_tooltip()
 	_update_camera()
 
@@ -291,6 +295,13 @@ func _input(event: InputEvent) -> void:
 			always_run = not always_run
 			move_dirty = true
 			print("[CameraCtrl] Ctrl+R → always_run=%s" % always_run)
+		# Stand up: Ctrl+Alt+S or Alt+Shift+S (matches Firestorm)
+		if ke.keycode == KEY_S and ke.pressed and not ke.echo:
+			var ctrl := Input.is_key_pressed(KEY_CTRL)
+			var alt := Input.is_key_pressed(KEY_ALT)
+			var shift := Input.is_key_pressed(KEY_SHIFT)
+			if (ctrl and alt) or (alt and shift):
+				main_node.send_message({"type": "stand_up"})
 
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
@@ -356,9 +367,9 @@ func _input(event: InputEvent) -> void:
 				var cam_up := global_transform.basis.y
 				alt_focus_point += (-cam_right * mm.relative.x + cam_up * mm.relative.y) * alt_distance * 0.002
 			elif ctrl_held:
-				# Orbit: yaw from X, pitch from Y
+				# Orbit: yaw from X, pitch from Y (inverted Y matches SL convention)
 				alt_yaw -= mm.relative.x * orbit_speed
-				alt_pitch -= mm.relative.y * orbit_speed
+				alt_pitch += mm.relative.y * orbit_speed
 				alt_pitch = clamp(alt_pitch, -PI * 0.49, PI * 0.49)
 			else:
 				# ALT only: yaw from X, zoom from Y
@@ -477,6 +488,53 @@ func _make_tab_label() -> RichTextLabel:
 	label.add_theme_font_size_override("normal_font_size", 12)
 	label.add_theme_font_size_override("bold_font_size", 12)
 	return label
+
+
+func _create_stand_button() -> void:
+	_stand_layer = CanvasLayer.new()
+	_stand_layer.layer = 99
+	add_child(_stand_layer)
+
+	_stand_button = Button.new()
+	_stand_button.text = "Stand Up"
+	_stand_button.visible = false
+	_stand_button.custom_minimum_size = Vector2(120, 36)
+	# Anchor bottom-center, 20px above bottom edge
+	_stand_button.anchor_left = 0.5
+	_stand_button.anchor_right = 0.5
+	_stand_button.anchor_top = 1.0
+	_stand_button.anchor_bottom = 1.0
+	_stand_button.offset_left = -60
+	_stand_button.offset_right = 60
+	_stand_button.offset_top = -56
+	_stand_button.offset_bottom = -20
+
+	var normal_style := StyleBoxFlat.new()
+	normal_style.bg_color = Color(0.15, 0.15, 0.15, 0.90)
+	normal_style.corner_radius_top_left = 4
+	normal_style.corner_radius_top_right = 4
+	normal_style.corner_radius_bottom_left = 4
+	normal_style.corner_radius_bottom_right = 4
+	var hover_style := normal_style.duplicate() as StyleBoxFlat
+	hover_style.bg_color = Color(0.25, 0.25, 0.25, 0.95)
+	var press_style := normal_style.duplicate() as StyleBoxFlat
+	press_style.bg_color = Color(0.10, 0.10, 0.10, 0.95)
+	_stand_button.add_theme_stylebox_override("normal", normal_style)
+	_stand_button.add_theme_stylebox_override("hover", hover_style)
+	_stand_button.add_theme_stylebox_override("pressed", press_style)
+	_stand_button.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0))
+	_stand_button.add_theme_font_size_override("font_size", 14)
+	_stand_button.pressed.connect(_on_stand_button_pressed)
+	_stand_layer.add_child(_stand_button)
+
+
+func set_sitting(sitting: bool) -> void:
+	if _stand_button:
+		_stand_button.visible = sitting
+
+
+func _on_stand_button_pressed() -> void:
+	main_node.send_message({"type": "stand_up"})
 
 
 func _create_debug_tooltip() -> void:

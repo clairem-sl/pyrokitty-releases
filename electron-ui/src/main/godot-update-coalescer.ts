@@ -70,6 +70,7 @@ export class GodotUpdateCoalescer {
             ...(pos ? { position: [pos.x, pos.y, pos.z] } : {}),
             ...(rot ? { rotation: [rot.x, rot.y, rot.z, rot.w] } : {}),
             ...(vel ? { velocity: [vel.x, vel.y, vel.z] } : {}),
+            parentId: obj.ParentID || 0,
           });
           if (!this.avatarUpdateTimer) {
             this.avatarUpdateTimer = setTimeout(() => {

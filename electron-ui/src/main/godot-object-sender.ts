@@ -13,8 +13,9 @@ import type { SculptFetchQueue } from './sculpt-fetch-queue';
 import type { GodotUpdateCoalescer } from './godot-update-coalescer';
 import type { GodotMaterialPipeline } from './godot-material-pipeline';
 import type { GodotAnimationManager } from './godot-animation-manager';
+import type { GodotAvatarManager } from './godot-avatar-manager';
 import type { SendFn } from './godot-bridge-types';
-import { isHudAttachment } from './godot-bridge-types';
+import { isHudAttachment, BAKE_MAGIC_UUIDS, BAKE_CHANNEL_NAMES, ZERO_UUID } from './godot-bridge-types';
 
 export class GodotObjectSender {
   private deferredTextures = new Map<number, any>();
@@ -25,6 +26,7 @@ export class GodotObjectSender {
   private sculptFetchQueue: SculptFetchQueue | null = null;
   private textureFetchQueue: TextureFetchQueue | null = null;
   private updateCoalescer: GodotUpdateCoalescer | null = null;
+  private avatarManager: GodotAvatarManager | null = null;
 
   // Self-avatar tracking for [SelfAvatar] logging
   selfAvatarLocalId: number = 0;
@@ -40,6 +42,11 @@ export class GodotObjectSender {
     private materialPipeline: GodotMaterialPipeline,
     private animationManager: GodotAnimationManager,
   ) {}
+
+  /** Late-bind avatar manager to break circular dependency */
+  setAvatarManager(mgr: GodotAvatarManager): void {
+    this.avatarManager = mgr;
+  }
 
   initQueues(
     meshFetchQueue: MeshFetchQueue,
@@ -146,6 +153,55 @@ export class GodotObjectSender {
     const sculptInfo = this.getSculptInfo(obj);
     const sculpt_meshId = sculptInfo ? sculptMeshId(sculptInfo.textureUuid, sculptInfo.sculptType) : undefined;
     const texInfo = this.materialPipeline.getTextureInfo(obj);
+
+    // BoM: substitute magic bake UUIDs with actual baked textures for avatar attachments
+    if (texInfo && parentLocalId > 0 && this.avatarManager) {
+      const avatarId = this.avatarManager.findOwnerAvatar(parentLocalId);
+      if (avatarId) {
+        let hasBakeUuids = false;
+        for (const face of texInfo.faces) {
+          if (BAKE_MAGIC_UUIDS.has(face.textureId)) {
+            hasBakeUuids = true;
+            break;
+          }
+        }
+        if (hasBakeUuids) {
+          // Track this object for re-emit when bakes arrive/change
+          this.avatarManager.trackBakeObject(avatarId, obj.ID);
+
+          const bakes = this.avatarManager.getBakedTextures(avatarId);
+          if (bakes) {
+            let subCount = 0;
+            for (const face of texInfo.faces) {
+              const channel = BAKE_MAGIC_UUIDS.get(face.textureId);
+              if (channel !== undefined) {
+                const bakedUuid = bakes[channel];
+                if (bakedUuid && bakedUuid !== ZERO_UUID) {
+                  face.textureId = bakedUuid;
+                  face._isBake = true;
+                  face._bakeAvatarUuid = avatarId;
+                  face._bakeChannel = channel;
+                  subCount++;
+                }
+              }
+            }
+            if (subCount > 0) {
+              console.log(`[BoM] localId=${obj.ID}: substituted ${subCount} faces for avatar ${avatarId.slice(0, 8)}, first bake=${texInfo.faces[0]?.textureId?.slice(0, 8)}`);
+            }
+            // Rebuild textureIds after substitution
+            const idSet = new Set<string>();
+            for (const face of texInfo.faces) {
+              idSet.add(face.textureId);
+              if (face.normalTextureId) idSet.add(face.normalTextureId);
+              if (face.ormTextureId) idSet.add(face.ormTextureId);
+              if (face.emissiveTextureId) idSet.add(face.emissiveTextureId);
+            }
+            texInfo.textureIds = Array.from(idSet);
+          }
+        }
+      }
+    }
+
     const lightInfo = this.getLightInfo(obj);
 
     const shapeParams = (!meshId && !sculptInfo) ? {
@@ -264,6 +320,18 @@ export class GodotObjectSender {
 
     if (!skipTextures) {
       this.materialPipeline.fetchTexturesForObject(obj, texInfo);
+    } else if (texInfo) {
+      // Check if this deferred object had BoM textures that won't be fetched
+      for (const face of texInfo.faces) {
+        if (face.textureId && !BAKE_MAGIC_UUIDS.has(face.textureId)) {
+          // Check if this was a substituted bake by looking at the avatar manager
+          const avatarId = this.avatarManager?.findOwnerAvatar(parentLocalId);
+          if (avatarId && this.avatarManager?.getBakedTextures(avatarId)) {
+            console.log(`[BoM] DEFERRED: localId=${obj.ID} baked texture ${face.textureId.slice(0, 8)} deferred (skipTextures=true)`);
+            break;
+          }
+        }
+      }
     }
   }
 
@@ -405,6 +473,7 @@ export class GodotObjectSender {
             this.textureUpdateSubs.get(localId)?.unsubscribe();
             this.textureUpdateSubs.delete(localId);
             this.animationManager.cleanupLocalId(localId);
+            this.avatarManager?.removeBakeObject(localId);
           }
         } catch {
           this.send({ type: 'object_kill', localId });
@@ -412,6 +481,7 @@ export class GodotObjectSender {
           this.textureUpdateSubs.get(localId)?.unsubscribe();
           this.textureUpdateSubs.delete(localId);
           this.animationManager.cleanupLocalId(localId);
+          this.avatarManager?.removeBakeObject(localId);
         }
       }
     } catch { /* bot may be disconnected */ }
@@ -446,6 +516,29 @@ export class GodotObjectSender {
         if (dist <= this.TEXTURE_FETCH_RANGE) {
           this.deferredTextures.delete(localId);
           const texInfo = this.materialPipeline.getTextureInfo(live);
+
+          // Re-apply BoM substitution (texInfo has original magic UUIDs from the live object)
+          if (texInfo && live.ParentID > 0 && this.avatarManager) {
+            const avatarId = this.avatarManager.findOwnerAvatar(live.ParentID);
+            if (avatarId) {
+              const bakes = this.avatarManager.getBakedTextures(avatarId);
+              if (bakes) {
+                for (const face of texInfo.faces) {
+                  const channel = BAKE_MAGIC_UUIDS.get(face.textureId);
+                  if (channel !== undefined) {
+                    const bakedUuid = bakes[channel];
+                    if (bakedUuid && bakedUuid !== ZERO_UUID) {
+                      face.textureId = bakedUuid;
+                      face._isBake = true;
+                      face._bakeAvatarUuid = avatarId;
+                      face._bakeChannel = channel;
+                    }
+                  }
+                }
+              }
+            }
+          }
+
           this.materialPipeline.fetchTexturesForObject(live, texInfo);
           promoted++;
         }

@@ -80,11 +80,30 @@ async function decodeWasm(j2cBuffer: Buffer): Promise<Buffer> {
 
     const frameInfo = decoder.getFrameInfo();
     const { width, height, componentCount } = frameInfo;
+    if (!width || !height || !componentCount) {
+      throw new Error(`J2C decode returned invalid frameInfo: ${width}x${height} ch=${componentCount} (input=${j2cBuffer.length} bytes, hdr=${j2cBuffer.slice(0,12).toString('hex')})`);
+    }
     const decodedView = decoder.getDecodedBuffer(); // view into WASM memory
-    const pixels = Buffer.from(decodedView);         // copy OUT of WASM heap
+    let pixels = Buffer.from(decodedView);           // copy OUT of WASM heap
+
+    // SL bake textures have 5 components (RGBA + bump). Sharp only handles 1-4.
+    // Strip extra components down to RGBA.
+    let channels = componentCount;
+    if (componentCount > 4) {
+      const pixelCount = width * height;
+      const rgba = Buffer.allocUnsafe(pixelCount * 4);
+      for (let i = 0; i < pixelCount; i++) {
+        rgba[i * 4]     = pixels[i * componentCount];
+        rgba[i * 4 + 1] = pixels[i * componentCount + 1];
+        rgba[i * 4 + 2] = pixels[i * componentCount + 2];
+        rgba[i * 4 + 3] = pixels[i * componentCount + 3];
+      }
+      pixels = rgba;
+      channels = 4;
+    }
 
     return await sharp(pixels, {
-      raw: { width, height, channels: componentCount as 1 | 2 | 3 | 4 },
+      raw: { width, height, channels: channels as 1 | 2 | 3 | 4 },
     }).webp({ quality: 80 }).toBuffer();
   } finally {
     decoder.delete(); // free WASM memory
@@ -105,13 +124,28 @@ async function decodeWasmRaw(j2cBuffer: Buffer): Promise<{ rgbaPixels: Buffer; w
 
     const frameInfo = decoder.getFrameInfo();
     const { width, height, componentCount } = frameInfo;
+    if (!width || !height || !componentCount) {
+      throw new Error(`J2C decode returned invalid frameInfo: ${width}x${height} ch=${componentCount} (input=${j2cBuffer.length} bytes, hdr=${j2cBuffer.slice(0,12).toString('hex')})`);
+    }
     const decodedView = decoder.getDecodedBuffer();
     const pixels = Buffer.from(decodedView);
 
     // Fast path: pad RGB→RGBA or pass through RGBA without sharp overhead
     let rgbaPixels: Buffer;
-    if (componentCount === 4) {
-      rgbaPixels = pixels;
+    if (componentCount >= 4) {
+      // 4 channels = RGBA. 5+ channels (SL bakes have 5 = RGBA+bump): take first 4.
+      if (componentCount === 4) {
+        rgbaPixels = pixels;
+      } else {
+        const pixelCount = width * height;
+        rgbaPixels = Buffer.allocUnsafe(pixelCount * 4);
+        for (let i = 0; i < pixelCount; i++) {
+          rgbaPixels[i * 4]     = pixels[i * componentCount];
+          rgbaPixels[i * 4 + 1] = pixels[i * componentCount + 1];
+          rgbaPixels[i * 4 + 2] = pixels[i * componentCount + 2];
+          rgbaPixels[i * 4 + 3] = pixels[i * componentCount + 3];
+        }
+      }
     } else if (componentCount === 3) {
       const pixelCount = width * height;
       rgbaPixels = Buffer.allocUnsafe(pixelCount * 4);
@@ -122,9 +156,9 @@ async function decodeWasmRaw(j2cBuffer: Buffer): Promise<{ rgbaPixels: Buffer; w
         rgbaPixels[i * 4 + 3] = 255;
       }
     } else {
-      // Grayscale or exotic channel counts — fall back to sharp
+      // Grayscale (1-2 channels) — fall back to sharp
       rgbaPixels = await sharp(pixels, {
-        raw: { width, height, channels: componentCount as 1 | 2 | 3 | 4 },
+        raw: { width, height, channels: componentCount as 1 | 2 },
       }).ensureAlpha().raw().toBuffer();
     }
 

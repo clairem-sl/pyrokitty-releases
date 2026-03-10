@@ -32,13 +32,23 @@ export class TextureEntry
         do
         {
             b = buf.readUInt8(result.pos);
-            result.faceBits = (result.faceBits << 7) | (b & 0x7F);
+            // Use multiplication instead of << to avoid 32-bit truncation.
+            // SL TextureEntry face indices go up to 45 (TEX_AUX3_BAKED),
+            // requiring ~46 bits — well within JS Number's 53-bit safe range
+            // but beyond the 32-bit limit of bitwise operators.
+            result.faceBits = result.faceBits * 128 + (b & 0x7F);
             result.bitfieldSize += 7;
             result.pos++;
         }
         while ((b & 0x80) !== 0);
         result.result = (result.faceBits !== 0);
         return result;
+    }
+
+    /** Check if a specific bit is set in a number (works beyond 32-bit range) */
+    private static hasBit(value: number, bit: number): boolean
+    {
+        return Math.floor(value / (2 ** bit)) % 2 === 1;
     }
 
     public static getFaceBitfieldBuffer(bitfield: number): Buffer
@@ -98,9 +108,9 @@ export class TextureEntry
                     {
                         const uuid = new UUID(buf, i);
                         i += 16;
-                        for (let face = 0, bit = 1; face < result.bitfieldSize; face++, bit <<= 1)
+                        for (let face = 0; face < result.bitfieldSize; face++)
                         {
-                            if ((result.faceBits & bit) !== 0)
+                            if (TextureEntry.hasBit(result.faceBits, face))
                             {
                                 te.createFace(face);
                                 te.faces[face].textureID = uuid;
@@ -125,9 +135,9 @@ export class TextureEntry
                     {
                         const tmpColor = new Color4(buf, i, true);
                         i += 4;
-                        for (let face = 0, bit = 1; face < result.bitfieldSize; face++, bit <<= 1)
+                        for (let face = 0; face < result.bitfieldSize; face++)
                         {
-                            if ((result.faceBits & bit) !== 0)
+                            if (TextureEntry.hasBit(result.faceBits, face))
                             {
                                 te.createFace(face);
                                 te.faces[face].rgba = tmpColor;
@@ -152,9 +162,9 @@ export class TextureEntry
                     {
                         const tmpFloat = buf.readFloatLE(i);
                         i += 4;
-                        for (let face = 0, bit = 1; face < result.bitfieldSize; face++, bit <<= 1)
+                        for (let face = 0; face < result.bitfieldSize; face++)
                         {
-                            if ((result.faceBits & bit) !== 0)
+                            if (TextureEntry.hasBit(result.faceBits, face))
                             {
                                 te.createFace(face);
                                 te.faces[face].repeatU = tmpFloat;
@@ -179,9 +189,9 @@ export class TextureEntry
                     {
                         const tmpFloat = buf.readFloatLE(i);
                         i += 4;
-                        for (let face = 0, bit = 1; face < result.bitfieldSize; face++, bit <<= 1)
+                        for (let face = 0; face < result.bitfieldSize; face++)
                         {
-                            if ((result.faceBits & bit) !== 0)
+                            if (TextureEntry.hasBit(result.faceBits, face))
                             {
                                 te.createFace(face);
                                 te.faces[face].repeatV = tmpFloat;
@@ -206,9 +216,9 @@ export class TextureEntry
                     {
                         const tmpFloat = Utils.ReadOffsetFloat(buf, i);
                         i += 2;
-                        for (let face = 0, bit = 1; face < result.bitfieldSize; face++, bit <<= 1)
+                        for (let face = 0; face < result.bitfieldSize; face++)
                         {
-                            if ((result.faceBits & bit) !== 0)
+                            if (TextureEntry.hasBit(result.faceBits, face))
                             {
                                 te.createFace(face);
                                 te.faces[face].offsetU = tmpFloat;
@@ -233,9 +243,9 @@ export class TextureEntry
                     {
                         const tmpFloat = Utils.ReadOffsetFloat(buf, i);
                         i += 2;
-                        for (let face = 0, bit = 1; face < result.bitfieldSize; face++, bit <<= 1)
+                        for (let face = 0; face < result.bitfieldSize; face++)
                         {
-                            if ((result.faceBits & bit) !== 0)
+                            if (TextureEntry.hasBit(result.faceBits, face))
                             {
                                 te.createFace(face);
                                 te.faces[face].offsetV = tmpFloat;
@@ -260,9 +270,9 @@ export class TextureEntry
                     {
                         const tmpFloat = Utils.ReadRotationFloat(buf, i);
                         i += 2;
-                        for (let face = 0, bit = 1; face < result.bitfieldSize; face++, bit <<= 1)
+                        for (let face = 0; face < result.bitfieldSize; face++)
                         {
-                            if ((result.faceBits & bit) !== 0)
+                            if (TextureEntry.hasBit(result.faceBits, face))
                             {
                                 te.createFace(face);
                                 te.faces[face].rotation = tmpFloat;
@@ -285,9 +295,9 @@ export class TextureEntry
                     if (!done)
                     {
                         const tmpByte = buf[i++];
-                        for (let face = 0, bit = 1; face < result.bitfieldSize; face++, bit <<= 1)
+                        for (let face = 0; face < result.bitfieldSize; face++)
                         {
-                            if ((result.faceBits & bit) !== 0)
+                            if (TextureEntry.hasBit(result.faceBits, face))
                             {
                                 te.createFace(face);
                                 te.faces[face].material = tmpByte;
@@ -310,9 +320,9 @@ export class TextureEntry
                     if (!done)
                     {
                         const tmpByte = buf[i++];
-                        for (let face = 0, bit = 1; face < result.bitfieldSize; face++, bit <<= 1)
+                        for (let face = 0; face < result.bitfieldSize; face++)
                         {
-                            if ((result.faceBits & bit) !== 0)
+                            if (TextureEntry.hasBit(result.faceBits, face))
                             {
                                 te.createFace(face);
                                 te.faces[face].media = tmpByte;
@@ -335,9 +345,9 @@ export class TextureEntry
                     if (!done)
                     {
                         const tmpFloat = Utils.ReadGlowFloat(buf, i++);
-                        for (let face = 0, bit = 1; face < result.bitfieldSize; face++, bit <<= 1)
+                        for (let face = 0; face < result.bitfieldSize; face++)
                         {
-                            if ((result.faceBits & bit) !== 0)
+                            if (TextureEntry.hasBit(result.faceBits, face))
                             {
                                 te.createFace(face);
                                 te.faces[face].glow = tmpFloat;

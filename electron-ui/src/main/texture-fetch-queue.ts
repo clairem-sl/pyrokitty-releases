@@ -18,6 +18,12 @@ const MAX_CONCURRENT_DOWNLOADS = 16;
 // Zero UUID — skip these
 const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
 
+// Bake channel names used in appearance service URLs (index = channel)
+const BAKE_CHANNEL_URL_NAMES = [
+  'head', 'upper', 'lower', 'eyes', 'skirt', 'hair',
+  'leftarm', 'leftleg', 'aux1', 'aux2', 'aux3',
+];
+
 export type TextureReadyCallback = (textureUuid: string, cachePath: string) => void;
 
 function getCacheDir(): string {
@@ -67,6 +73,8 @@ export class TextureFetchQueue {
   private gpuQueue: GpuCompressQueue;
   private _gpuCompressCount = 0;
   private _webpFallbackCount = 0;
+  // Bake texture metadata: textureUuid → { avatarUuid, channel }
+  private bakeInfo = new Map<string, { avatarUuid: string; channel: number }>();
 
   constructor(bot: Bot, onReady: TextureReadyCallback) {
     this.bot = bot;
@@ -109,6 +117,33 @@ export class TextureFetchQueue {
     this.drain();
   }
 
+  /** Request a baked texture — uses appearance service URL instead of ViewerAsset */
+  requestBake(textureUuid: string, localId: number, avatarUuid: string, channel: number): void {
+    if (this.destroyed || this.failed.has(textureUuid)) return;
+    if (!textureUuid || textureUuid === ZERO_UUID) return;
+    if (this.notified.has(textureUuid)) return;
+
+    if (isTextureCached(textureUuid)) {
+      this.notified.add(textureUuid);
+      this.onReady(textureUuid, resolvedCachePath(textureUuid));
+      return;
+    }
+
+    // Store bake metadata for the download path
+    if (!this.bakeInfo.has(textureUuid)) {
+      this.bakeInfo.set(textureUuid, { avatarUuid, channel });
+    }
+
+    if (this.pending.has(textureUuid)) {
+      this.pending.get(textureUuid)!.add(localId);
+      return;
+    }
+
+    this.pending.set(textureUuid, new Set([localId]));
+    this.queue.push(textureUuid);
+    this.drain();
+  }
+
   private drain(): void {
     while (this.active < MAX_CONCURRENT_DOWNLOADS && this.queue.length > 0 && !this.destroyed) {
       const textureUuid = this.queue.shift()!;
@@ -123,10 +158,21 @@ export class TextureFetchQueue {
 
   private async fetchAndDecode(textureUuid: string): Promise<void> {
     try {
-      // Download on main thread (network-bound)
-      const j2cBuf = await this.bot.clientCommands.asset.downloadAsset(
-        AssetType.Texture, textureUuid
-      );
+      let j2cBuf: Buffer;
+
+      // Check if this is a baked texture — use appearance service URL
+      const bake = this.bakeInfo.get(textureUuid);
+      if (bake) {
+        j2cBuf = await this.downloadBakeTexture(textureUuid, bake.avatarUuid, bake.channel);
+        this.bakeInfo.delete(textureUuid);
+        console.log(`[BoM] Downloaded bake ${textureUuid.slice(0,8)}: ${j2cBuf.length} bytes`);
+      } else {
+        // Regular texture: download via ViewerAsset
+        j2cBuf = await this.bot.clientCommands.asset.downloadAsset(
+          AssetType.Texture, textureUuid
+        );
+      }
+
       if (!j2cBuf || j2cBuf.length < 12) {
         console.warn(`[TextureFetchQueue] Skipping ${textureUuid}: empty or too small (${j2cBuf?.length ?? 0} bytes)`);
         this.failed.add(textureUuid);
@@ -168,6 +214,42 @@ export class TextureFetchQueue {
       console.error(`[TextureFetchQueue] Failed ${textureUuid}: ${msg}`);
       this.failed.add(textureUuid);
     }
+  }
+
+  /** Download a baked texture from the appearance service */
+  private async downloadBakeTexture(textureUuid: string, avatarUuid: string, channel: number): Promise<Buffer> {
+    const serviceUrl = this.bot.agent?.agentAppearanceService;
+    if (!serviceUrl) {
+      throw new Error('No agentAppearanceService URL available');
+    }
+
+    const channelName = BAKE_CHANNEL_URL_NAMES[channel];
+    if (!channelName) {
+      throw new Error(`Invalid bake channel index: ${channel}`);
+    }
+
+    // URL format: {appearance_service_url}texture/{avatarUUID}/{channelName}/{textureUUID}
+    const url = `${serviceUrl}texture/${avatarUuid}/${channelName}/${textureUuid}`;
+    console.log(`[BoM] Fetching bake: ${url}`);
+
+    const { net } = require('electron');
+    return new Promise<Buffer>((resolve, reject) => {
+      const request = net.request({ url, method: 'GET' });
+      request.setHeader('Accept', 'image/x-j2c');
+
+      const chunks: Buffer[] = [];
+      request.on('response', (response: any) => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`Bake fetch ${response.statusCode} for ${url}`));
+          return;
+        }
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on('end', () => resolve(Buffer.concat(chunks)));
+        response.on('error', (err: Error) => reject(err));
+      });
+      request.on('error', (err: Error) => reject(err));
+      request.end();
+    });
   }
 
   destroy(): void {

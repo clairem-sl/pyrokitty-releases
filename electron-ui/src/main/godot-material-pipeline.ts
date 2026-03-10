@@ -7,8 +7,9 @@ import type { Bot } from '../../node-metaverse/dist/lib';
 import { Material } from '../../node-metaverse/dist/lib/classes/public/Material';
 import type { MaterialFetchQueue, MaterialOverrideData, TextureTransform } from './material-fetch-queue';
 import type { TextureFetchQueue } from './texture-fetch-queue';
+import type { GodotAvatarManager } from './godot-avatar-manager';
 import type { SendFn } from './godot-bridge-types';
-import { WATER_EXCLUSION_TEXTURES, ZERO_UUID } from './godot-bridge-types';
+import { WATER_EXCLUSION_TEXTURES, ZERO_UUID, BAKE_MAGIC_UUIDS } from './godot-bridge-types';
 
 export class GodotMaterialPipeline {
   private materialToFaces = new Map<string, { localId: number; faceIndex: number; face: any; inlineOverride: any }[]>();
@@ -25,6 +26,7 @@ export class GodotMaterialPipeline {
 
   private materialFetchQueue: MaterialFetchQueue | null = null;
   private textureFetchQueue: TextureFetchQueue | null = null;
+  private avatarManager: GodotAvatarManager | null = null;
 
   constructor(
     private bot: Bot,
@@ -35,6 +37,10 @@ export class GodotMaterialPipeline {
   initQueues(materialFetchQueue: MaterialFetchQueue, textureFetchQueue: TextureFetchQueue): void {
     this.materialFetchQueue = materialFetchQueue;
     this.textureFetchQueue = textureFetchQueue;
+  }
+
+  setAvatarManager(mgr: GodotAvatarManager): void {
+    this.avatarManager = mgr;
   }
 
   /** Extract per-face texture info from a GameObject (up to 8 faces) */
@@ -217,9 +223,15 @@ export class GodotMaterialPipeline {
 
     if (texInfo && this.textureFetchQueue) {
       for (const face of texInfo.faces) {
-        if (materialFaceIndices.has(face.index)) continue;
-        if (face.textureId && !WATER_EXCLUSION_TEXTURES.has(face.textureId)) {
-          this.textureFetchQueue.request(face.textureId, obj.ID);
+        // Skip faces covered by PBR materials — UNLESS it's a substituted bake texture.
+        // Baked textures are the actual content; PBR just specifies rendering properties.
+        if (materialFaceIndices.has(face.index) && !face._isBake) continue;
+        if (face.textureId && !WATER_EXCLUSION_TEXTURES.has(face.textureId) && !BAKE_MAGIC_UUIDS.has(face.textureId)) {
+          if (face._isBake && face._bakeAvatarUuid != null && face._bakeChannel != null) {
+            this.textureFetchQueue.requestBake(face.textureId, obj.ID, face._bakeAvatarUuid, face._bakeChannel);
+          } else {
+            this.textureFetchQueue.request(face.textureId, obj.ID);
+          }
         }
         if (face.normalTextureId) this.textureFetchQueue.request(face.normalTextureId, obj.ID);
         if (face.ormTextureId) this.textureFetchQueue.request(face.ormTextureId, obj.ID);
@@ -333,6 +345,8 @@ export class GodotMaterialPipeline {
             if (texInfo) {
               const updatedFaces = texInfo.faces.filter(f => faceIndices.includes(f.index));
               if (updatedFaces.length > 0) {
+                // Re-apply BoM substitution since getTextureInfo reads original magic UUIDs
+                this.substituteBakeUuids(updatedFaces, localId);
                 this.send({ type: 'object_update_faces', localId, faces: updatedFaces });
               }
             }
@@ -403,9 +417,39 @@ export class GodotMaterialPipeline {
         ? [rgba.getRed(), rgba.getGreen(), rgba.getBlue(), rgba.getAlpha()]
         : [1, 1, 1, 1];
 
+      // Resolve final textureId — substitute magic bake UUIDs if needed
+      let resolvedTextureId = baseColorTextureId || face?.textureID?.toString() || '';
+      let isBake = false;
+      let bakeAvatarUuid: string | undefined;
+      let bakeChannel: number | undefined;
+      if (BAKE_MAGIC_UUIDS.has(resolvedTextureId) && this.avatarManager) {
+        try {
+          const obj = this.bot.currentRegion?.objects?.getObjectByLocalID(localId);
+          if (obj?.ParentID) {
+            const avatarId = this.avatarManager.findOwnerAvatar(obj.ParentID);
+            if (avatarId) {
+              const bakes = this.avatarManager.getBakedTextures(avatarId);
+              const channel = BAKE_MAGIC_UUIDS.get(resolvedTextureId);
+              if (bakes && channel !== undefined) {
+                const bakedUuid = bakes[channel];
+                if (bakedUuid && bakedUuid !== ZERO_UUID) {
+                  resolvedTextureId = bakedUuid;
+                  isBake = true;
+                  bakeAvatarUuid = avatarId;
+                  bakeChannel = channel;
+                }
+              }
+            }
+          }
+        } catch { /* object may not exist */ }
+      }
+
       const faceData: any = {
         index: faceIndex,
-        textureId: baseColorTextureId || face?.textureID?.toString() || '',
+        textureId: resolvedTextureId,
+        _isBake: isBake,
+        _bakeAvatarUuid: bakeAvatarUuid,
+        _bakeChannel: bakeChannel,
         color: legacyColor,
         fullBright: face ? (face.material & 0x20) !== 0 : false,
         doubleSided: doubleSided ?? false,
@@ -428,8 +472,13 @@ export class GodotMaterialPipeline {
 
       this.pbrFaceCount++;
 
-      if (baseColorTextureId && this.textureFetchQueue) {
-        this.textureFetchQueue.request(baseColorTextureId, localId);
+      // Fetch the resolved texture (may be substituted bake UUID)
+      if (resolvedTextureId && !BAKE_MAGIC_UUIDS.has(resolvedTextureId) && this.textureFetchQueue) {
+        if (isBake && faceData._bakeAvatarUuid && faceData._bakeChannel != null) {
+          this.textureFetchQueue.requestBake(resolvedTextureId, localId, faceData._bakeAvatarUuid, faceData._bakeChannel);
+        } else {
+          this.textureFetchQueue.request(resolvedTextureId, localId);
+        }
       }
       if (normalTextureId && this.textureFetchQueue) {
         this.textureFetchQueue.request(normalTextureId, localId);
@@ -459,12 +508,43 @@ export class GodotMaterialPipeline {
     if (!this.trackedObjects.has(obj.ID)) return;
     const texInfo = this.getTextureInfo(obj);
     if (!texInfo) return;
+    // Re-apply BoM substitution since getTextureInfo reads original magic UUIDs
+    this.substituteBakeUuids(texInfo.faces, obj.ID);
     this.send({
       type: 'object_update_faces',
       localId: obj.ID,
       faces: texInfo.faces,
     });
     this.fetchTexturesForObject(obj, texInfo);
+  }
+
+  /**
+   * Substitute magic bake UUIDs in face data with actual baked texture UUIDs.
+   * Must be called on any face data re-read from live objects before sending to Godot.
+   */
+  private substituteBakeUuids(faces: any[], localId: number): void {
+    if (!this.avatarManager) return;
+    try {
+      const obj = this.bot.currentRegion?.objects?.getObjectByLocalID(localId);
+      if (!obj?.ParentID) return;
+      const avatarId = this.avatarManager.findOwnerAvatar(obj.ParentID);
+      if (!avatarId) return;
+      const bakes = this.avatarManager.getBakedTextures(avatarId);
+      if (!bakes) return;
+
+      for (const face of faces) {
+        const channel = BAKE_MAGIC_UUIDS.get(face.textureId);
+        if (channel !== undefined) {
+          const bakedUuid = bakes[channel];
+          if (bakedUuid && bakedUuid !== ZERO_UUID) {
+            face.textureId = bakedUuid;
+            face._isBake = true;
+            face._bakeAvatarUuid = avatarId;
+            face._bakeChannel = channel;
+          }
+        }
+      }
+    } catch { /* object may not exist */ }
   }
 
   get totalPbrFaceCount(): number {

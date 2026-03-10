@@ -12,6 +12,12 @@ import { InventoryFolder } from '../../node-metaverse/dist/lib/classes/Inventory
 import { initGpuCompressWindow, destroyGpuCompressWindow } from './gpu-compress-window';
 import { getSavedBounds, trackWindow } from './window-state-manager';
 
+// Ensure consistent userData path in dev mode (npx electron defaults to "Electron")
+app.setName('pyrokitty-ui');
+if (!app.isPackaged) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'pyrokitty-ui'));
+}
+
 function getIconPath(filename: string): string {
   const iconsDir = app.isPackaged
     ? path.join(process.resourcesPath, 'icons')
@@ -154,6 +160,42 @@ async function createWindow(): Promise<void> {
   // Open DevTools in development
   if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools();
+  }
+
+  // Auto-login for automated testing: AUTO_LOGIN=accountId or AUTO_LOGIN=1 (first account)
+  const autoLogin = process.env.AUTO_LOGIN;
+  if (autoLogin) {
+    setTimeout(async () => {
+      try {
+        const accounts = accountManager.getAllAccounts();
+        const account = autoLogin === '1'
+          ? accounts[0]
+          : accounts.find(a => a.id === autoLogin || a.firstName.toLowerCase() === autoLogin.toLowerCase());
+        if (account) {
+          console.log(`[AutoLogin] Launching ${account.firstName} ${account.lastName}...`);
+          await viewerManager.launchViewer(account.id, account.password, { launchViewer: false });
+          console.log('[AutoLogin] Login complete');
+          // Auto-launch Godot viewer after a brief delay
+          const instances = viewerManager.getInstances();
+          if (instances.length > 0) {
+            const inst = instances[0];
+            setTimeout(async () => {
+              try {
+                console.log('[AutoLogin] Launching Godot viewer...');
+                await viewerManager.launchGodotViewerForInstance(inst.id);
+                console.log('[AutoLogin] Godot viewer launched');
+              } catch (e: any) {
+                console.error('[AutoLogin] Godot launch failed:', e.message);
+              }
+            }, 5000);
+          }
+        } else {
+          console.warn(`[AutoLogin] Account not found: ${autoLogin}`);
+        }
+      } catch (e: any) {
+        console.error('[AutoLogin] Failed:', e.message);
+      }
+    }, 2000);
   }
 
   // Hide to tray instead of closing

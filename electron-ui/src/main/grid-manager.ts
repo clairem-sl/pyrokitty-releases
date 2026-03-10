@@ -4,7 +4,11 @@ import { app } from 'electron';
 import { Grid } from '../shared/types';
 
 function getGridsFilePath(): string {
-  return path.join(app.getAppPath(), 'data', 'grids.json');
+  // In dev mode __dirname is dist/main/, grids.json is at electron-ui/data/
+  const dataDir = app.isPackaged
+    ? path.join(app.getAppPath(), 'data')
+    : path.join(__dirname, '..', '..', 'data');
+  return path.join(dataDir, 'grids.json');
 }
 
 export class GridManager {
