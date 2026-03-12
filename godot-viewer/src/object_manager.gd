@@ -16,6 +16,10 @@ const BLEND_SNAP_DIST: float = 10.0       # Snap if correction exceeds this (met
 # Self avatar state
 var _first_person_mode: bool = false
 
+# CV bone SL-space rest rotations — cached from skeleton_builder.
+# Used as fallback for unanimated CV bones in animation evaluation.
+var _sl_cv_rest_rotations: Dictionary = {}
+
 # Attachment point ID → bone name (from avatar_lad.xml)
 # IDs 31-38 are HUDs (filtered out on the bridge side, never sent to Godot)
 const ATTACH_POINT_BONES: Dictionary = {
@@ -607,6 +611,8 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 		print("[JointOverride] No overrides for mesh %s — skipping" % mesh_id.substr(0, 8))
 
 	# Duplicate skin and remap bone indices to shared skeleton order.
+	# Bones not in the shared skeleton (e.g. attachment point joints like "Pelvis",
+	# "Mouth") are added dynamically with rest transforms from the GLB skeleton.
 	var orig_skin: Skin = mesh_instance.skin
 
 	if orig_skin != null:
@@ -617,11 +623,28 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 				var bone_name: String = glb_skeleton.get_bone_name(glb_bi)
 				var shared_bi: int = shared_skel.find_bone(bone_name)
 				if shared_bi < 0:
+					# Case-insensitive fallback
 					var lower: String = bone_name.to_lower()
 					for sbi in range(shared_skel.get_bone_count()):
 						if shared_skel.get_bone_name(sbi).to_lower() == lower:
 							shared_bi = sbi
 							break
+				if shared_bi < 0:
+					# Bone not in shared skeleton — add it dynamically.
+					# This handles attachment point joints (e.g. "Pelvis", "Mouth")
+					# that content creators rig vertices to. The GLB has the correct
+					# rest transform (derived from IBM in mesh-converter.ts).
+					shared_bi = shared_skel.add_bone(bone_name)
+					var glb_rest: Transform3D = glb_skeleton.get_bone_rest(glb_bi)
+					shared_skel.set_bone_rest(shared_bi, glb_rest)
+					# Parent to the GLB bone's parent in the shared skeleton
+					var glb_parent_bi: int = glb_skeleton.get_bone_parent(glb_bi)
+					if glb_parent_bi >= 0:
+						var parent_name: String = glb_skeleton.get_bone_name(glb_parent_bi)
+						var shared_parent_bi: int = shared_skel.find_bone(parent_name)
+						if shared_parent_bi >= 0:
+							shared_skel.set_bone_parent(shared_bi, shared_parent_bi)
+					print("[Animesh] Added missing bone '%s' (idx %d) to shared skeleton" % [bone_name, shared_bi])
 				if shared_bi >= 0:
 					new_skin.set_bind_bone(i, shared_bi)
 		mesh_instance.skin = new_skin
@@ -678,7 +701,7 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 ## DEBUG: Place a colored sphere on each bone. Uses plain Node3D (not BoneAttachment3D)
 ## because BoneAttachment3D reads global pose before our manual set_bone_pose calls.
 ## Markers are positioned each frame in _update_debug_bone_markers() after animation eval.
-## Red = standard bones, Green = collision volumes.
+## Red = standard bones, Green = collision volumes (detected by UPPER_CASE name convention).
 func _debug_visualize_skeleton(skel: Skeleton3D) -> void:
 	var sphere_mesh := SphereMesh.new()
 	sphere_mesh.radius = 0.03
@@ -695,13 +718,12 @@ func _debug_visualize_skeleton(skel: Skeleton3D) -> void:
 	var count: int = 0
 	for bi in range(skel.get_bone_count()):
 		var bname: String = skel.get_bone_name(bi)
-		var global_rest: Transform3D = _get_bone_global_rest_xf(skel, bi)
 
 		var mi := MeshInstance3D.new()
 		mi.name = "dbg_bone_%s" % bname
 		mi.mesh = sphere_mesh
-		var basis_det: float = absf(global_rest.basis.determinant())
-		var is_cv: bool = absf(basis_det - 1.0) > 0.1
+		# CVs use UPPER_CASE names; standard bones use mCamelCase or lowercase
+		var is_cv: bool = bname == bname.to_upper() and not bname.begins_with("m")
 		mi.material_override = mat_cv if is_cv else mat_standard
 		mi.top_level = true  # Use world-space transform (not relative to skeleton)
 		skel.add_child(mi)
@@ -1123,6 +1145,10 @@ func _safe_basis_rotation(b: Basis) -> Quaternion:
 ## Each skeleton is evaluated independently so its IBM-derived rest transforms
 ## stay consistent with the world rotations (avoids XML vs GLB rest mismatch).
 func _evaluate_skeleton_animation(skeleton: Skeleton3D, sl_local_rot: Dictionary, sl_local_pos: Dictionary) -> void:
+	# Lazy-init CV rest rotations cache
+	if _sl_cv_rest_rotations.is_empty():
+		_sl_cv_rest_rotations = sm.skeleton_builder.get_sl_rest_rotations()
+
 	var sl_world: Dictionary = {}     # bone_idx -> Quaternion (SL space)
 	var godot_world: Dictionary = {}  # bone_idx -> Quaternion (Godot space)
 	var bone_animated: Dictionary = {}  # bone_idx -> bool
@@ -1133,22 +1159,27 @@ func _evaluate_skeleton_animation(skeleton: Skeleton3D, sl_local_rot: Dictionary
 
 		var has_rot: bool = sl_local_rot.has(bname)
 		var has_pos: bool = sl_local_pos.has(bname)
+		var has_cv_rest: bool = _sl_cv_rest_rotations.has(bname)
 		var parent_was_animated: bool = bone_animated.get(parent_bi, false)
 
-		# Only process bones that have animation data or an animated ancestor
-		if not has_rot and not has_pos and not parent_was_animated:
+		# Only process bones that have animation data, CV rest rotation, or an animated ancestor
+		if not has_rot and not has_pos and not has_cv_rest and not parent_was_animated:
 			bone_animated[bi] = false
 			continue  # No animation influence — leave at rest pose
 
-		bone_animated[bi] = has_rot or has_pos or parent_was_animated
+		bone_animated[bi] = has_rot or has_pos or has_cv_rest or parent_was_animated
 
-		# SL local rotation: from animation, or rest rotation if not animated
+		# SL local rotation: from animation, or CV rest rotation if this is an
+		# unanimated collision volume, or Identity for standard bones.
+		# CV rest rotations are NOT in the Godot rest transforms (translation-only)
+		# but must still participate in the SL rotation chain so children are correct.
 		var q_sl_local: Quaternion
 		if has_rot:
 			q_sl_local = sl_local_rot[bname]
+		elif has_cv_rest:
+			q_sl_local = _sl_cv_rest_rotations[bname]
 		else:
-			var rest_q: Quaternion = _safe_basis_rotation(skeleton.get_bone_rest(bi).basis)
-			q_sl_local = Quaternion(rest_q.x, -rest_q.z, rest_q.y, rest_q.w)
+			q_sl_local = Quaternion.IDENTITY
 
 		var q_sl_parent_world: Quaternion = sl_world.get(parent_bi, Quaternion.IDENTITY)
 		var q_sl_world: Quaternion = q_sl_parent_world * q_sl_local
@@ -1158,20 +1189,19 @@ func _evaluate_skeleton_animation(skeleton: Skeleton3D, sl_local_rot: Dictionary
 			q_sl_world.x, q_sl_world.z, -q_sl_world.y, q_sl_world.w).normalized()
 		godot_world[bi] = q_godot_world
 
-		# Derive Godot pose rotation
+		# Derive Godot pose rotation (rest basis is Identity, so just undo parent)
 		var parent_godot_world: Quaternion = godot_world.get(parent_bi, Quaternion.IDENTITY)
-		var rest_rot: Quaternion = _safe_basis_rotation(skeleton.get_bone_rest(bi).basis)
-		var combined_inv: Quaternion = (parent_godot_world * rest_rot).inverse()
-		var pose_rot: Quaternion = (combined_inv * q_godot_world).normalized()
+		var pose_rot: Quaternion = (parent_godot_world.inverse() * q_godot_world).normalized()
 		skeleton.set_bone_pose_rotation(bi, pose_rot)
 
 		if has_pos:
+			# SL position keyframes are ABSOLUTE joint positions (replace, not add).
+			# Godot's pose position is additive on rest, so subtract rest origin
+			# to convert: local_origin = rest_origin + (absolute - rest_origin) = absolute.
 			var sl_pos: Vector3 = sl_local_pos[bname]
-			var offset_godot := Vector3(sl_pos.x, sl_pos.z, -sl_pos.y)
-			var rest_xf: Transform3D = skeleton.get_bone_rest(bi)
-			var rot_basis := Basis(_safe_basis_rotation(rest_xf.basis))
-			var pose_pos: Vector3 = rot_basis.inverse() * offset_godot
-			skeleton.set_bone_pose_position(bi, pose_pos)
+			var absolute_godot := Vector3(sl_pos.x, sl_pos.z, -sl_pos.y)
+			var rest_origin: Vector3 = skeleton.get_bone_rest(bi).origin
+			skeleton.set_bone_pose_position(bi, absolute_godot - rest_origin)
 
 	# Compute and apply global pose overrides (same as marker code).
 	# Godot's internal pose_global doesn't include rest transforms when we set

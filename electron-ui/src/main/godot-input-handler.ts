@@ -238,8 +238,8 @@ export class GodotInputHandler {
 
       // If the object's default action is SIT and we're not already sitting on it, sit.
       if (obj.ClickAction === CLICK_ACTION_SIT && this._sittingOnLocalId !== localId) {
-        const { UUID } = await import('../../node-metaverse/lib/classes/UUID');
-        const { Vector3 } = await import('../../node-metaverse/lib/classes/Vector3');
+        const { UUID } = await import('../../node-metaverse/dist/lib/classes/UUID');
+        const { Vector3 } = await import('../../node-metaverse/dist/lib/classes/Vector3');
         const targetUuid = new UUID(obj.FullID.toString());
         await this.bot.clientCommands.movement.sitOnObject(targetUuid, Vector3.getZero());
         this._sittingOnLocalId = localId;

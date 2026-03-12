@@ -181,7 +181,7 @@ function convertAnimation(uuid: string, anim: LLAnimation): AnimationData {
   // 3. Attachment points (avatar_lad.xml) — e.g., "Left Ear", "Nose", "Tail Base"
   // Names not found in any of these are scrubbed (initJointNums maps to mPelvis).
   const attachPoints = getAttachmentPoints();
-  let scrubbed: string[] = [];
+  const scrubbed: string[] = [];
 
   for (const joint of anim.joints) {
     if (!skeleton.has(joint.name) && !attachPoints.has(joint.name)) {

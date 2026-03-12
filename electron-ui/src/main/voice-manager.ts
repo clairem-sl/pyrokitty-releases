@@ -221,7 +221,7 @@ export class VoiceManager extends EventEmitter {
             const parcel = region.parcels?.[pid];
             const flags = parcel?.ParcelFlags ?? 0;
             const allowVoice = !!(flags & (1 << 29));       // AllowVoiceChat
-            const useEstate  = !!(flags & (1 << 30));        // UseEstateVoiceChan
+            const useEstate = !!(flags & (1 << 30));        // UseEstateVoiceChan
             console.log(`[VoiceManager] Parcel "${parcel?.Name}" localID=${pid}, allowVoice=${allowVoice}, useEstate=${useEstate}`);
             if (!allowVoice) {
               console.warn('[VoiceManager] Voice disabled on this parcel');
@@ -377,7 +377,7 @@ export class VoiceManager extends EventEmitter {
       try {
         const event = JSON.parse(line) as VoiceEvent;
         this.handleEvent(event);
-      } catch (error) {
+      } catch {
         console.warn(`[VoiceManager] Failed to parse event: ${line}`);
       }
     }
@@ -430,59 +430,59 @@ export class VoiceManager extends EventEmitter {
 
     this.positionInterval = setInterval(() => {
       try {
-      if (!this.process || !bot?.currentRegion) return;
+        if (!this.process || !bot?.currentRegion) return;
 
-      const agentId = bot.agentID?.()?.toString?.();
-      if (!agentId) return;
+        const agentId = bot.agentID?.()?.toString?.();
+        if (!agentId) return;
 
-      const self = bot.currentRegion.agents?.get(agentId);
-      if (!self) return;
+        const self = bot.currentRegion.agents?.get(agentId);
+        if (!self) return;
 
-      const pos = self.position;
-      const rot = self.rotation;
-      const regionName = bot.currentRegion?.regionName || '';
+        const pos = self.position;
+        const rot = self.rotation;
+        const regionName = bot.currentRegion?.regionName || '';
 
-      if (this._posLogCount < 3) {
-        const gx = regionOffsetX + (pos?.x || 0);
-        const gy = regionOffsetY + (pos?.y || 0);
-        console.log(`[VoiceManager] Position: local=(${pos?.x?.toFixed(1)},${pos?.y?.toFixed(1)},${pos?.z?.toFixed(1)}), global=(${gx.toFixed(0)},${gy.toFixed(0)}), region=${regionName}`);
-        this._posLogCount++;
-      }
+        if (this._posLogCount < 3) {
+          const gx = regionOffsetX + (pos?.x || 0);
+          const gy = regionOffsetY + (pos?.y || 0);
+          console.log(`[VoiceManager] Position: local=(${pos?.x?.toFixed(1)},${pos?.y?.toFixed(1)},${pos?.z?.toFixed(1)}), global=(${gx.toFixed(0)},${gy.toFixed(0)}), region=${regionName}`);
+          this._posLogCount++;
+        }
 
-      if (pos && (pos.x !== 0 || pos.y !== 0)) {
-        // Get parcel local ID from position, respecting UseEstateVoiceChan flag
-        let parcelLocalId = -1;
-        try {
-          const region = bot.currentRegion;
-          if (region?.parcelMap) {
-            const px = Math.floor(pos.x / 4);
-            const py = Math.floor(pos.y / 4);
-            if (py >= 0 && py < 64 && px >= 0 && px < 64) {
-              const pid = region.parcelMap[py]?.[px];
-              if (pid !== undefined && pid > 0) {
-                const parcel = region.parcels?.[pid];
-                const flags = parcel?.ParcelFlags ?? 0;
-                const useEstate = !!(flags & (1 << 30));
-                parcelLocalId = useEstate ? -1 : pid;
+        if (pos && (pos.x !== 0 || pos.y !== 0)) {
+          // Get parcel local ID from position, respecting UseEstateVoiceChan flag
+          let parcelLocalId = -1;
+          try {
+            const region = bot.currentRegion;
+            if (region?.parcelMap) {
+              const px = Math.floor(pos.x / 4);
+              const py = Math.floor(pos.y / 4);
+              if (py >= 0 && py < 64 && px >= 0 && px < 64) {
+                const pid = region.parcelMap[py]?.[px];
+                if (pid !== undefined && pid > 0) {
+                  const parcel = region.parcels?.[pid];
+                  const flags = parcel?.ParcelFlags ?? 0;
+                  const useEstate = !!(flags & (1 << 30));
+                  parcelLocalId = useEstate ? -1 : pid;
+                }
               }
             }
-          }
-        } catch { /* ignore */ }
+          } catch { /* ignore */ }
 
-        // Send global coordinates (region origin + local offset) to match LibreMetaverse behavior
-        this.sendCommand({
-          cmd: 'updatePosition',
-          position: [
-            regionOffsetX + (pos.x || 0),
-            regionOffsetY + (pos.y || 0),
-            pos.z || 0,
-          ],
-          rotation: [rot?.x || 0, rot?.y || 0, rot?.z || 0, rot?.w || 1],
-          regionName,
-          parcelLocalId,
-        });
-      }
-      } catch (e) {
+          // Send global coordinates (region origin + local offset) to match LibreMetaverse behavior
+          this.sendCommand({
+            cmd: 'updatePosition',
+            position: [
+              regionOffsetX + (pos.x || 0),
+              regionOffsetY + (pos.y || 0),
+              pos.z || 0,
+            ],
+            rotation: [rot?.x || 0, rot?.y || 0, rot?.z || 0, rot?.w || 1],
+            regionName,
+            parcelLocalId,
+          });
+        }
+      } catch {
         // Bot may have been kicked — currentRegion getter throws. Stop polling.
         this.stopPositionUpdates();
       }

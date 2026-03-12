@@ -93,7 +93,7 @@ export class ViewerConnection extends EventEmitter {
     }
 
     // Reject all pending requests
-    for (const [reqid, pending] of this.pendingRequests) {
+    for (const [_reqid, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
       pending.reject(new Error('Disconnected'));
     }

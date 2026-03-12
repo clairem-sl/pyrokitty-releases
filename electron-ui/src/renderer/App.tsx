@@ -14,7 +14,7 @@ import { Account, IPC_CHANNELS } from '../shared/types';
 type View = 'account' | 'add-account';
 
 export const App: React.FC = () => {
-  const { grids, getGrid } = useGrids();
+  const { grids } = useGrids();
   const { accounts, addAccount, updateAccount, removeAccount, getAccount } = useAccounts();
   const { instances, launchViewer, launchViewerForInstance, launchGodotViewerForInstance, stopViewer, getInstanceForAccount, isRunning } = useViewers();
 

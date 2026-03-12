@@ -129,7 +129,7 @@ export class GodotAvatarManager {
     try {
       const parent = this.bot.currentRegion.objects.getObjectByLocalID(parentLocalId);
       if (parent?.ParentID) return this.findOwnerAvatar(parent.ParentID, depth + 1);
-    } catch {}
+    } catch { /* empty */ }
     return undefined;
   }
 

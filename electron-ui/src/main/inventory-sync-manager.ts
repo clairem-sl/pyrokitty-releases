@@ -116,6 +116,8 @@ export class InventorySyncManager {
   isBackendValid(): boolean {
     if (this.adapter) return true;
     if (this.bot) {
+      // throws if this.bot is undefined
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
       try { this.bot.clientCommands; return true; } catch { return false; }
     }
     return false;

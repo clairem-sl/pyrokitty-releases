@@ -52,6 +52,7 @@ export class GodotMaterialPipeline {
       isPBR?: boolean; normalTextureId?: string; ormTextureId?: string; emissiveTextureId?: string;
       metallicFactor?: number; roughnessFactor?: number; emissiveFactor?: number[];
       pbrBaseColor?: number[];
+      _isBake?: boolean; _bakeAvatarUuid?: string; _bakeChannel?: number;
     }[];
     textureIds: string[];
   } | undefined {

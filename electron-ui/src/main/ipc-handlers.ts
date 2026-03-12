@@ -42,6 +42,8 @@ function getOrCreateSyncManager(instanceId: string, mainWindow: BrowserWindow): 
   const metaverse = metaverseConnectionManager.get(instanceId);
   const bot = metaverse?.getBot();
   if (!bot) return null;
+  // throws if this.bot is undefined
+  // eslint-disable-next-line @typescript-eslint/no-unused-expressions
   try { bot.clientCommands; } catch { return null; }
 
   const manager = new InventorySyncManager(bot, instance.accountId, onProgress);
@@ -255,13 +257,11 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     // Pick first connected metaverse instance
     const instances = viewerManager.getInstances();
     let bot: any = null;
-    let instanceId: string | undefined;
     for (const inst of instances) {
       if (inst.connectionState !== 'metaverse_connected' && inst.connectionState !== 'viewer_connected') continue;
       const metaverse = metaverseConnectionManager.get(inst.id);
       if (!metaverse) continue;
       bot = metaverse.getBot();
-      if (bot) { instanceId = inst.id; break; }
     }
     if (!bot) return { error: 'Not connected — no active metaverse instance found' };
     try {

@@ -254,29 +254,29 @@ function mat4Inverse(m: number[]): number[] | null {
   const m02 = m[8], m12 = m[9], m22 = m[10], m32 = m[11];
   const m03 = m[12], m13 = m[13], m23 = m[14], m33 = m[15];
 
-  const b00 = m00*m11 - m01*m10, b01 = m00*m12 - m02*m10;
-  const b02 = m00*m13 - m03*m10, b03 = m01*m12 - m02*m11;
-  const b04 = m01*m13 - m03*m11, b05 = m02*m13 - m03*m12;
-  const b06 = m20*m31 - m21*m30, b07 = m20*m32 - m22*m30;
-  const b08 = m20*m33 - m23*m30, b09 = m21*m32 - m22*m31;
-  const b10 = m21*m33 - m23*m31, b11 = m22*m33 - m23*m32;
-  const det = b00*b11 - b01*b10 + b02*b09 + b03*b08 - b04*b07 + b05*b06;
+  const b00 = m00 * m11 - m01 * m10, b01 = m00 * m12 - m02 * m10;
+  const b02 = m00 * m13 - m03 * m10, b03 = m01 * m12 - m02 * m11;
+  const b04 = m01 * m13 - m03 * m11, b05 = m02 * m13 - m03 * m12;
+  const b06 = m20 * m31 - m21 * m30, b07 = m20 * m32 - m22 * m30;
+  const b08 = m20 * m33 - m23 * m30, b09 = m21 * m32 - m22 * m31;
+  const b10 = m21 * m33 - m23 * m31, b11 = m22 * m33 - m23 * m32;
+  const det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
   if (Math.abs(det) < 1e-12) return null;
   const id = 1 / det;
   return [
-    ( m11*b11 - m12*b10 + m13*b09)*id, (-m10*b11 + m12*b08 - m13*b07)*id,
-    ( m10*b10 - m11*b08 + m13*b06)*id, (-m10*b09 + m11*b07 - m12*b06)*id,
-    (-m01*b11 + m02*b10 - m03*b09)*id, ( m00*b11 - m02*b08 + m03*b07)*id,
-    (-m00*b10 + m01*b08 - m03*b06)*id, ( m00*b09 - m01*b07 + m02*b06)*id,
-    ( m31*b05 - m32*b04 + m33*b03)*id, (-m30*b05 + m32*b02 - m33*b01)*id,
-    ( m30*b04 - m31*b02 + m33*b00)*id, (-m30*b03 + m31*b01 - m32*b00)*id,
-    (-m21*b05 + m22*b04 - m23*b03)*id, ( m20*b05 - m22*b02 + m23*b01)*id,
-    (-m20*b04 + m21*b02 - m23*b00)*id, ( m20*b03 - m21*b01 + m22*b00)*id,
+    (m11 * b11 - m12 * b10 + m13 * b09) * id, (-m10 * b11 + m12 * b08 - m13 * b07) * id,
+    (m10 * b10 - m11 * b08 + m13 * b06) * id, (-m10 * b09 + m11 * b07 - m12 * b06) * id,
+    (-m01 * b11 + m02 * b10 - m03 * b09) * id, (m00 * b11 - m02 * b08 + m03 * b07) * id,
+    (-m00 * b10 + m01 * b08 - m03 * b06) * id, (m00 * b09 - m01 * b07 + m02 * b06) * id,
+    (m31 * b05 - m32 * b04 + m33 * b03) * id, (-m30 * b05 + m32 * b02 - m33 * b01) * id,
+    (m30 * b04 - m31 * b02 + m33 * b00) * id, (-m30 * b03 + m31 * b01 - m32 * b00) * id,
+    (-m21 * b05 + m22 * b04 - m23 * b03) * id, (m20 * b05 - m22 * b02 + m23 * b01) * id,
+    (-m20 * b04 + m21 * b02 - m23 * b00) * id, (m20 * b03 - m21 * b01 + m22 * b00) * id,
   ];
 }
 
 function mat4FromTranslation(tx: number, ty: number, tz: number): number[] {
-  return [1,0,0,0, 0,1,0,0, 0,0,1,0, tx,ty,tz,1];
+  return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, tx, ty, tz, 1];
 }
 
 /**
@@ -381,9 +381,9 @@ function applyBSM(
   px: number, py: number, pz: number, bsm: number[]
 ): [number, number, number] {
   return [
-    bsm[0]*px + bsm[4]*py + bsm[8]*pz + bsm[12],
-    bsm[1]*px + bsm[5]*py + bsm[9]*pz + bsm[13],
-    bsm[2]*px + bsm[6]*py + bsm[10]*pz + bsm[14],
+    bsm[0] * px + bsm[4] * py + bsm[8] * pz + bsm[12],
+    bsm[1] * px + bsm[5] * py + bsm[9] * pz + bsm[13],
+    bsm[2] * px + bsm[6] * py + bsm[10] * pz + bsm[14],
   ];
 }
 
@@ -395,9 +395,9 @@ function applyBSM(
 function applyBSMNormal(
   nx: number, ny: number, nz: number, invT3x3: number[]
 ): [number, number, number] {
-  const ox = invT3x3[0]*nx + invT3x3[1]*ny + invT3x3[2]*nz;
-  const oy = invT3x3[3]*nx + invT3x3[4]*ny + invT3x3[5]*nz;
-  const oz = invT3x3[6]*nx + invT3x3[7]*ny + invT3x3[8]*nz;
+  const ox = invT3x3[0] * nx + invT3x3[1] * ny + invT3x3[2] * nz;
+  const oy = invT3x3[3] * nx + invT3x3[4] * ny + invT3x3[5] * nz;
+  const oz = invT3x3[6] * nx + invT3x3[7] * ny + invT3x3[8] * nz;
   return normalizeVec3(ox, oy, oz);
 }
 
@@ -411,15 +411,15 @@ function computeInvTranspose3x3(m: number[]): number[] {
   const d = m[1], e = m[5], f = m[9];
   const g = m[2], h = m[6], i = m[10];
 
-  const det = a*(e*i - f*h) - b*(d*i - f*g) + c*(d*h - e*g);
-  if (Math.abs(det) < 1e-12) return [1,0,0, 0,1,0, 0,0,1];
+  const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+  if (Math.abs(det) < 1e-12) return [1, 0, 0, 0, 1, 0, 0, 0, 1];
   const id = 1 / det;
 
   // inverse-transpose = cofactor matrix / det
   return [
-    (e*i - f*h)*id, (d*i - f*g)*(-id), (d*h - e*g)*id,
-    (b*i - c*h)*(-id), (a*i - c*g)*id, (a*h - b*g)*(-id),
-    (b*f - c*e)*id, (a*f - c*d)*(-id), (a*e - b*d)*id,
+    (e * i - f * h) * id, (d * i - f * g) * (-id), (d * h - e * g) * id,
+    (b * i - c * h) * (-id), (a * i - c * g) * id, (a * h - b * g) * (-id),
+    (b * f - c * e) * id, (a * f - c * d) * (-id), (a * e - b * d) * id,
   ];
 }
 
@@ -573,7 +573,6 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
   const skin = mesh.skin;
   const isRigged = !!(skin && skin.jointNames.length > 0 &&
     submeshes.some(s => s.weights && s.weights.length > 0));
-  const jointNames: string[] = isRigged ? skin!.jointNames : [];
 
   // --- BSM extraction (column-major from node-metaverse) ---
   const bsmColMaj: number[] | null = (isRigged && skin?.bindShapeMatrix)
@@ -597,7 +596,7 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
 
   for (const sub of submeshes) {
     if (sub.noGeometry || !sub.position || sub.position.length === 0 ||
-        !sub.triangleList || sub.triangleList.length === 0) continue;
+      !sub.triangleList || sub.triangleList.length === 0) continue;
 
     const vertCount = sub.position.length;
     const idxCount = sub.triangleList.length;
@@ -785,6 +784,36 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
       }
     }
 
+    // --- Build raw IBM lookup for CV fixup ---
+    // CV bones may have different scale/rotation than XML defaults.  The raw IBMs
+    // encode the content creator's actual bind-pose transforms.  For CVs without
+    // alt IBM overrides we derive the local transform from the raw IBM so the
+    // blenderFixJoint fixup exactly cancels the IBM's rotation/scale.
+    const rawIBMByName = new Map<string, number[]>();
+    for (let i = 0; i < resolvedJointNames.length; i++) {
+      if (i < skin!.inverseBindMatrix.length) {
+        rawIBMByName.set(resolvedJointNames[i], skin!.inverseBindMatrix[i].all());
+      }
+    }
+
+    // Helper: world position of a bone via translation-only parent chain (SL space).
+    // Standard bones have identity rotation & unit scale so world = sum of positions.
+    const worldPosCache = new Map<string, [number, number, number]>();
+    const getWorldPos = (name: string): [number, number, number] => {
+      const cached = worldPosCache.get(name);
+      if (cached) return cached;
+      const sj = skeleton.get(name);
+      if (!sj) return [0, 0, 0];
+      if (!sj.parent) {
+        worldPosCache.set(name, sj.pos);
+        return sj.pos;
+      }
+      const pw = getWorldPos(sj.parent);
+      const wp: [number, number, number] = [pw[0] + sj.pos[0], pw[1] + sj.pos[1], pw[2] + sj.pos[2]];
+      worldPosCache.set(name, wp);
+      return wp;
+    };
+
     // --- Build joint nodes with Blender compat ---
     const jointContexts = new Map<string, JointContext>();
     const jointNodeIdxMap = new Map<string, number>();
@@ -803,6 +832,22 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
 
       // Compute joint's local TRS matrix in SL space
       let jMat = jointMatrix(skelJoint);
+
+      // For CV bones: the raw IBM may encode different scale/rotation than the XML
+      // defaults (content creator's actual bind pose).  Derive the local transform
+      // from inverse(rawIBM) so the fixup exactly cancels the IBM's rotation/scale.
+      // CVs are always leaf nodes so this doesn't affect any other bone.
+      if (skelJoint.isCollisionVolume && !jointOverrides.has(name) && rawIBMByName.has(name)) {
+        const rawIBM = rawIBMByName.get(name)!;
+        const worldXf = mat4Inverse(rawIBM);
+        if (worldXf) {
+          // Parent world = sum of translations (standard bones have no rot/scale)
+          const parentName = skelJoint.parent;
+          const pw = parentName ? getWorldPos(parentName) : [0, 0, 0] as [number, number, number];
+          const invParent = mat4FromTranslation(-pw[0], -pw[1], -pw[2]);
+          jMat = mat4Mul(invParent, worldXf);
+        }
+      }
 
       // Apply alt_inverse_bind_matrix translation override (Hippolyzer approach)
       const override = jointOverrides.get(name);
@@ -842,7 +887,11 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
     visitJoint('mPelvis');
     for (const jname of requiredJoints) visitJoint(jname);
 
-    // Handle orphaned joints (not in skeleton XML — attachment points or unknowns)
+    // Handle orphaned joints (not in skeleton XML — attachment points or unknowns).
+    // Attachment point names (e.g. "Pelvis", "Mouth") are valid independent joints
+    // in SL — they are NOT merged with their parent bone. Firestorm's joint map
+    // keeps them as separate entries: joint_map["Pelvis"] = "Pelvis".
+    // We derive their local transform from inverse(IBM) so skinning math works out.
     for (const jname of resolvedJointNames) {
       if (jointNodeIdxMap.has(jname)) continue;
       // Find parent: attachment point → its skeleton joint, else Armature
@@ -850,16 +899,37 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
       const parentNodeIdx = (attachParent && jointNodeIdxMap.has(attachParent))
         ? jointNodeIdxMap.get(attachParent)! : armatureIdx;
 
+      // Derive local transform from the raw IBM for this joint.
+      // The IBM encodes where the content creator placed this joint in world space:
+      //   jointWorld = inverse(IBM)
+      //   localTransform = inverse(parentWorld) * jointWorld
+      const jointIdx = resolvedJointNames.indexOf(jname);
+      const rawIBM = (jointIdx >= 0 && jointIdx < skin!.inverseBindMatrix.length)
+        ? skin!.inverseBindMatrix[jointIdx].all() : null;
+      let jMat = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+      if (rawIBM) {
+        const worldXf = mat4Inverse(rawIBM);
+        if (worldXf) {
+          // Get parent world position in SL space
+          const parentBone = attachParent || null;
+          const pw = parentBone ? getWorldPos(parentBone) : [0, 0, 0] as [number, number, number];
+          const invParent = mat4FromTranslation(-pw[0], -pw[1], -pw[2]);
+          jMat = mat4Mul(invParent, worldXf);
+        }
+      }
+
+      // Blender compat: split into translation-only node + fixup (same as skeleton joints)
+      const { translationOnly, fixup } = blenderFixJoint(jMat);
+      const gltfNodeMatrix = slToGltfMatrix(translationOnly);
+
       const nodeIdx = nodes.length;
-      // Identity local transform (orphan sits at parent's position)
-      nodes.push({ name: jname, children: [] as number[] });
+      nodes.push({ name: jname, matrix: gltfNodeMatrix, children: [] as number[] });
       jointNodeIdxMap.set(jname, nodeIdx);
       orderedJoints.push(jname);
-      // Use identity fixup for orphans
       jointContexts.set(jname, {
         nodeIdx,
-        origMatrix: [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1],
-        fixupMatrix: [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1],
+        origMatrix: jMat,
+        fixupMatrix: fixup,
       });
 
       // Wire orphan to parent

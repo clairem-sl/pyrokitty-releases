@@ -501,7 +501,7 @@ export class GodotBridge extends EventEmitter {
 
           let seatLocalId = 0;
           try {
-            seatLocalId = region.objects.getObjectByUUID(seatUuid).ID;
+            seatLocalId = region.objects.getObjectByUUID(seatUuid as any).ID;
           } catch {
             console.warn(`[GodotBridge] AvatarSitResponse: seat ${seatUuid.slice(0, 8)} not in object store`);
             return;

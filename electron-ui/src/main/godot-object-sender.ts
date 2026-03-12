@@ -15,7 +15,7 @@ import type { GodotMaterialPipeline } from './godot-material-pipeline';
 import type { GodotAnimationManager } from './godot-animation-manager';
 import type { GodotAvatarManager } from './godot-avatar-manager';
 import type { SendFn } from './godot-bridge-types';
-import { isHudAttachment, BAKE_MAGIC_UUIDS, BAKE_CHANNEL_NAMES, ZERO_UUID } from './godot-bridge-types';
+import { isHudAttachment, BAKE_MAGIC_UUIDS, ZERO_UUID } from './godot-bridge-types';
 
 export class GodotObjectSender {
   private deferredTextures = new Map<number, any>();
@@ -41,7 +41,7 @@ export class GodotObjectSender {
     private avatarLocalIds: Map<string, number>,
     private materialPipeline: GodotMaterialPipeline,
     private animationManager: GodotAnimationManager,
-  ) {}
+  ) { }
 
   /** Late-bind avatar manager to break circular dependency */
   setAvatarManager(mgr: GodotAvatarManager): void {
@@ -498,7 +498,7 @@ export class GodotObjectSender {
       const objectStore = this.bot.currentRegion.objects;
       let promoted = 0;
 
-      for (const [localId, obj] of this.deferredTextures) {
+      for (const [localId, _obj] of this.deferredTextures) {
         let live: any;
         try {
           live = objectStore.getObjectByLocalID(localId);

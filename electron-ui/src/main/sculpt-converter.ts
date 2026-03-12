@@ -73,8 +73,8 @@ async function decodeJ2kToRaw(j2cBuffer: Buffer): Promise<{ pixels: Buffer; widt
     const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
     return { pixels: data, width: info.width, height: info.height, channels: info.channels };
   } finally {
-    try { fs.unlinkSync(j2kFile); } catch {}
-    try { fs.unlinkSync(pngFile); } catch {}
+    try { fs.unlinkSync(j2kFile); } catch { /* empty */ }
+    try { fs.unlinkSync(pngFile); } catch { /* empty */ }
   }
 }
 

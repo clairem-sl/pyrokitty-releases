@@ -77,42 +77,37 @@ func create_shared_skeleton() -> Skeleton3D:
 
 		var rest := Transform3D()
 		# SL pos (x,y,z) → Godot (x,z,-y)
+		# All bones use translation-only rests (Identity basis + position).
+		# CV rotation/scale is baked into the GLB IBMs via Hippolyzer-style fixup.
 		var sp: Vector3 = bone_data["pos"]
 		rest.origin = Vector3(sp.x, sp.z, -sp.y)
-
-		if bone_data["is_cv"]:
-			# Collision volumes have rotation (Euler degrees) and non-uniform scale
-			var sr: Vector3 = bone_data["rot"]  # degrees in SL XYZ
-			var ss: Vector3 = bone_data["scale"]
-			rest.basis = _sl_cv_basis(sr, ss)
-
 		skel.set_bone_rest(idx, rest)
 
 	return skel
 
 
-## Build basis for a collision volume from SL Euler rotation (degrees) and scale.
-## SL rotation is XYZ Euler in degrees. SL scale (sx,sy,sz) → Godot (sx,sz,sy).
-func _sl_cv_basis(rot_deg: Vector3, scl: Vector3) -> Basis:
-	# Convert SL Euler degrees to radians
-	var rx := deg_to_rad(rot_deg.x)
-	var ry := deg_to_rad(rot_deg.y)
-	var rz := deg_to_rad(rot_deg.z)
-
-	# SL rotation axes: X stays X, Y→Z, Z→-Y (same as position)
-	# Build rotation in Godot space: rotate around remapped axes
-	# SL Euler XYZ → Godot: rotate X by rx, then Godot-Z by ry, then Godot-(-Y) by rz
-	# Which is: Rx(rx) * Rz(ry) * Ry(-rz)
-	var basis := Basis.IDENTITY
-	basis = basis.rotated(Vector3.RIGHT, rx)       # SL X → Godot X
-	basis = basis.rotated(Vector3.BACK, ry)        # SL Y → Godot Z
-	basis = basis.rotated(Vector3.DOWN, rz)        # SL Z → Godot -Y
-
-	# Apply scale: SL (sx,sy,sz) → Godot (sx,sz,sy)
-	var godot_scale := Vector3(scl.x, scl.z, scl.y)
-	basis = basis.scaled(godot_scale)
-
-	return basis
+## Returns {bone_name: Quaternion} of SL-space rest rotations for CV bones.
+## Non-CV bones and CVs with zero rotation are omitted (implicitly Identity).
+## Used by animation evaluation as the fallback rotation for unanimated CV bones,
+## since their rest transforms are now translation-only (rotation baked into IBMs).
+func get_sl_rest_rotations() -> Dictionary:
+	var result := {}
+	for bone_data: Dictionary in _bones:
+		if not bone_data["is_cv"]:
+			continue
+		var rot_deg: Vector3 = bone_data["rot"]
+		if rot_deg.is_zero_approx():
+			continue
+		# Build SL-space rotation from Euler angles (degrees XYZ order)
+		var rx := deg_to_rad(rot_deg.x)
+		var ry := deg_to_rad(rot_deg.y)
+		var rz := deg_to_rad(rot_deg.z)
+		var basis_sl := Basis.IDENTITY
+		basis_sl = basis_sl.rotated(Vector3(1, 0, 0), rx)
+		basis_sl = basis_sl.rotated(Vector3(0, 1, 0), ry)
+		basis_sl = basis_sl.rotated(Vector3(0, 0, 1), rz)
+		result[bone_data["name"]] = basis_sl.get_rotation_quaternion()
+	return result
 
 
 func _parse_vec3(s: String) -> Vector3:

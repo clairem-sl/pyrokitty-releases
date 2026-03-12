@@ -185,7 +185,7 @@ export class GodotAnimationManager {
     const uuid = this.getUuidForLocalId(localId);
     // Check if this is the self avatar
     let isSelf = false;
-    try { isSelf = (uuid === this.bot.agent?.agentID?.toString()); } catch {}
+    try { isSelf = (uuid === this.bot.agent?.agentID?.toString()); } catch { /* empty */ }
     console.log(`[Animesh] Batch ready for localId=${localId} uuid=${uuid.slice(0, 8)}: ${Object.keys(allData).map(id => id.slice(0, 8)).join(', ')}`);
     if (isSelf) {
       const animSummary = Object.entries(allData).map(([id, d]: [string, any]) =>

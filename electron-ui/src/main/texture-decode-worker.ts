@@ -52,8 +52,8 @@ async function decodeNative(j2cBuffer: Buffer): Promise<Buffer> {
     });
     return await sharp(pngFile).webp({ quality: 80 }).toBuffer();
   } finally {
-    try { fs.unlinkSync(j2kFile); } catch {}
-    try { fs.unlinkSync(pngFile); } catch {}
+    try { fs.unlinkSync(j2kFile); } catch { /* empty */ }
+    try { fs.unlinkSync(pngFile); } catch { /* empty */ }
   }
 }
 
@@ -63,7 +63,6 @@ let wasmModule: any = null;
 
 async function loadWasmDecoder() {
   if (wasmModule) return;
-  // @ts-ignore — CJS default export
   const mod = (await import('@abasb75/jpeg2000-decoder')).default;
   wasmModule = await mod.OpenJPEGWASM();
 }
