@@ -8,7 +8,12 @@ Run tests (headless, no window):
 cd godot-viewer && GODOT=$(cat godot-version.txt | tr -d '[:space:]') && ./$GODOT/${GODOT}_console.exe --headless --quit-after 5 --scene tests/test_prim_mesh.tscn
 ```
 
-## Building (Windows)
+Test run with window:
+```bash
+cd /c/DeeDrive/dev/phoenix-firestorm/electron-ui && AUTO_LOGIN=1 npm start &>/dev/null
+```
+
+## Building Firestorm (Windows)
 
 Configure (with debug symbols for crash analysis)
 `SKIP_NSIS=1 autobuild configure -A 64 -c ReleaseFS_open -- --chan PyroKitty --avx2 --jobs 1 --fmodstudio --package -DLL_TESTS:BOOL=FALSE -DSKIP_DEBUG_SYMBOLS:BOOL=FALSE`
@@ -27,42 +32,6 @@ Build errors are also written to: `build-vc170-64/logs/FirestormBuild_win-64.err
 PDB output: `build-vc170-64/newview/Release/firestorm-bin.pdb`
 WER crash dumps: `C:\Users\callcolor\AppData\Local\CrashDumps\`
 
-## Building (Linux via Podman)
-
-Uses `Containerfile.linux-build` + `scripts/build-linux-podman.sh`. Runs inside an Ubuntu 22.04 container; no Linux machine needed.
-
-**One-time setup:**
-
-```bash
-# Ensure podman machine is running
-podman machine start
-
-# Build the container image (once, or after Containerfile changes)
-scripts/build-linux-podman.sh --build-image
-```
-
-**Build:**
-
-```bash
-scripts/build-linux-podman.sh            # configure + build (first time)
-scripts/build-linux-podman.sh build      # incremental build only (subsequent)
-scripts/build-linux-podman.sh configure  # re-configure only
-```
-
-Output: `dist/linux/Phoenix-FirestormOS-PyroKitty_AVX2-*.tar.xz`
-
-**Key details:**
-
-- Build dir lives in Podman named volume `pyrokitty-linux-build-cache` (native Linux ext4, not NTFS) — required to avoid autobuild package conflict bugs on NTFS mounts
-- Package cache in `pyrokitty-autobuild-cache` — packages don't re-download on incremental builds
-- Config: `ReleaseFS_open` (no KDU/FMOD), AVX2, 8 jobs
-- WSL2 memory set to 24GB via `~/.wslconfig`
-- `fs-build-variables` repo expected at `../fs-build-variables`
-
-## Start
-
-Start the viewer `./build-vc170-64/newview/Release/firestorm-bin.exe`
-Note: LEAP support was re-enabled in `llappviewer.cpp` (search for `<FS:Pyrokitty>`). The original Firestorm code had it commented out.
 
 ## Compile node-metaverse
 
@@ -70,7 +39,7 @@ Note: LEAP support was re-enabled in `llappviewer.cpp` (search for `<FS:Pyrokitt
 cd ./electron-ui/node-metaverse && npm run build
 ```
 
-## External Login Mode
+## Firestorm External Login Mode
 
 Launch viewer in external login mode (waits for session handoff via WebSocket):
 
@@ -84,17 +53,6 @@ Test the handoff with node_metaverse:
 cd electron-ui && npx tsx scripts/test-viewer-handoff.ts
 ```
 
-**Status:** Working. 3D world renders, avatar appearance loads, inventory fetches via background fetch. See `docs/PYROKITTY-CHANGES.md` section 7.
-
-## Inventory Maintenance
-
-Fix duplicate system folders (common in old/merged accounts):
-
-```bash
-cd electron-ui && npx tsx scripts/fix-inventory-duplicates.ts --dry-run  # Check first
-cd electron-ui && npx tsx scripts/fix-inventory-duplicates.ts            # Actually fix
-```
-
 ## Test Accounts
 
 See `electron-ui/data/accounts.json` for login credentials (BonnieBelle81, BonnieBelle82, ostiabs).
@@ -103,9 +61,14 @@ See `electron-ui/data/accounts.json` for login credentials (BonnieBelle81, Bonni
 
 See `docs/architecture/` for system documentation and performance optimizations.
 
+## Avatar Rendering Changelog
+
+See `AVATAR_CHANGELOG.md` for a history of avatar rendering changes, what was tried, and outcomes. **Update this file whenever making avatar rendering changes.**
+
 ## Logs
 
-- **Viewer**: `C:\Users\callcolor\AppData\Roaming\PyroKitty_x64\logs\PyroKitty.log`
+- **Firestorm Viewer**: `C:\Users\callcolor\AppData\Roaming\PyroKitty_x64\logs\PyroKitty.log`
+- **Godot Viewer**: `C:\Users\callcolor\AppData\Roaming\pyrokitty-ui\pyrokitty.log`
 - **Electron main process + voice sidecar**: `C:\Users\callcolor\AppData\Roaming\pyrokitty-ui\pyrokitty.log` (tee'd from console.log/warn/error; voice lines prefixed `[VoiceSidecar]`)
 
 ## Voice Sidecar

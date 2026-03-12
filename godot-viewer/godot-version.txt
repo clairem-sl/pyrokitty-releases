@@ -1,1 +1,1 @@
-Godot_v4.4-stable_win64
+Godot_v4.7-dev2_mono_win64

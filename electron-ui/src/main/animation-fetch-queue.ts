@@ -144,7 +144,7 @@ export class AnimationFetchQueue {
         try {
           const dir = getCacheDir();
           fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(animCachePath(animUuid), JSON.stringify(data));
+          fs.writeFileSync(animCachePath(animUuid), JSON.stringify(data, null, 2));
         } catch { /* non-fatal */ }
         this.onReady(animUuid, data);
       }

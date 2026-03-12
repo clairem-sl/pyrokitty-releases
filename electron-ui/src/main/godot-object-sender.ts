@@ -269,6 +269,7 @@ export class GodotObjectSender {
       ...(texInfo ? { faces: texInfo.faces } : {}),
       ...(lightInfo ? { light: lightInfo } : {}),
       ...(isAnimesh ? { animesh: true } : {}),
+      ...(obj.attachmentPoint > 0 ? { attachmentPoint: obj.attachmentPoint } : {}),
     });
     if (lightInfo) {
       this.updateCoalescer?.trackLight(obj.ID);

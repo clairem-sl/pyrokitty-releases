@@ -16,6 +16,91 @@ const BLEND_SNAP_DIST: float = 10.0       # Snap if correction exceeds this (met
 # Self avatar state
 var _first_person_mode: bool = false
 
+# Attachment point ID → bone name (from avatar_lad.xml)
+# IDs 31-38 are HUDs (filtered out on the bridge side, never sent to Godot)
+const ATTACH_POINT_BONES: Dictionary = {
+	1: "mChest",          # Chest
+	2: "mHead",           # Skull
+	3: "mCollarLeft",     # Left Shoulder
+	4: "mCollarRight",    # Right Shoulder
+	5: "mWristLeft",      # Left Hand
+	6: "mWristRight",     # Right Hand
+	7: "mFootLeft",       # Left Foot
+	8: "mFootRight",      # Right Foot
+	9: "mChest",          # Spine (Back)
+	10: "mPelvis",        # Pelvis
+	11: "mHead",          # Mouth
+	12: "mHead",          # Chin
+	13: "mHead",          # Left Ear
+	14: "mHead",          # Right Ear
+	15: "mEyeLeft",       # Left Eyeball
+	16: "mEyeRight",      # Right Eyeball
+	17: "mHead",          # Nose
+	18: "mShoulderRight",  # R Upper Arm
+	19: "mElbowRight",    # R Forearm
+	20: "mShoulderLeft",  # L Upper Arm
+	21: "mElbowLeft",     # L Forearm
+	22: "mHipRight",      # Right Hip
+	23: "mHipRight",      # R Upper Leg
+	24: "mKneeRight",     # R Lower Leg
+	25: "mHipLeft",       # Left Hip
+	26: "mHipLeft",       # L Upper Leg
+	27: "mKneeLeft",      # L Lower Leg
+	28: "mPelvis",        # Stomach
+	29: "mTorso",         # Left Pec
+	30: "mTorso",         # Right Pec
+	39: "mNeck",          # Neck
+	40: "mRoot",          # Avatar Center
+	41: "mHandRing1Left",  # Left Ring Finger
+	42: "mHandRing1Right", # Right Ring Finger
+	43: "mTail1",         # Tail Base
+	44: "mTail6",         # Tail Tip
+	45: "mWing4Left",     # Left Wing
+	46: "mWing4Right",    # Right Wing
+	47: "mFaceJaw",       # Jaw
+	48: "mFaceEar1Left",  # Alt Left Ear
+	49: "mFaceEar1Right", # Alt Right Ear
+	50: "mFaceEyeAltLeft",  # Alt Left Eye
+	51: "mFaceEyeAltRight", # Alt Right Eye
+	52: "mFaceTongueTip", # Tongue
+	53: "mGroin",         # Groin
+	54: "mHindLimb4Left", # Left Hind Foot
+	55: "mHindLimb4Right", # Right Hind Foot
+}
+
+# Attachment point local offsets relative to the bone (from avatar_lad.xml).
+# Stored as SL-space position (x=fwd, y=left, z=up) and Euler degrees (roll, pitch, yaw).
+# Only entries with non-zero pos or rot are included — all others are identity.
+const ATTACH_POINT_OFFSETS: Dictionary = {
+	1:  {"pos": Vector3(0.15, 0.0, -0.1),    "rot": Vector3(0, 90, 90)},   # Chest
+	2:  {"pos": Vector3(0.0, 0.0, 0.15),     "rot": Vector3(0, 0, 90)},    # Skull
+	3:  {"pos": Vector3(0.0, 0.0, 0.08),     "rot": Vector3(0, 0, 0)},     # Left Shoulder
+	4:  {"pos": Vector3(0.0, 0.0, 0.08),     "rot": Vector3(0, 0, 0)},     # Right Shoulder
+	5:  {"pos": Vector3(0.0, 0.08, -0.02),   "rot": Vector3(0, 0, 0)},     # Left Hand
+	6:  {"pos": Vector3(0.0, -0.08, -0.02),  "rot": Vector3(0, 0, 0)},     # Right Hand
+	9:  {"pos": Vector3(-0.15, 0.0, -0.1),   "rot": Vector3(0, -90, 90)},  # Spine
+	10: {"pos": Vector3(0.0, 0.0, -0.15),    "rot": Vector3(0, 0, 0)},     # Pelvis
+	11: {"pos": Vector3(0.12, 0.0, 0.001),   "rot": Vector3(0, 0, 0)},     # Mouth
+	12: {"pos": Vector3(0.12, 0.0, -0.04),   "rot": Vector3(0, 0, 0)},     # Chin
+	13: {"pos": Vector3(0.015, 0.08, 0.017), "rot": Vector3(0, 0, 0)},     # Left Ear
+	14: {"pos": Vector3(0.015, -0.08, 0.017),"rot": Vector3(0, 0, 0)},     # Right Ear
+	17: {"pos": Vector3(0.1, 0.0, 0.05),     "rot": Vector3(0, 0, 0)},     # Nose
+	18: {"pos": Vector3(0.01, -0.13, 0.01),  "rot": Vector3(0, 0, 0)},     # R Upper Arm
+	19: {"pos": Vector3(0.0, -0.12, 0.0),    "rot": Vector3(0, 0, 0)},     # R Forearm
+	20: {"pos": Vector3(0.01, 0.15, -0.01),  "rot": Vector3(0, 0, 0)},     # L Upper Arm
+	21: {"pos": Vector3(0.0, 0.113, 0.0),    "rot": Vector3(0, 0, 0)},     # L Forearm
+	23: {"pos": Vector3(-0.017, 0.041, -0.310),  "rot": Vector3(0, 0, 0)}, # R Upper Leg
+	24: {"pos": Vector3(-0.044, -0.007, -0.262), "rot": Vector3(0, 0, 0)}, # R Lower Leg
+	26: {"pos": Vector3(-0.019, -0.034, -0.310), "rot": Vector3(0, 0, 0)}, # L Upper Leg
+	27: {"pos": Vector3(-0.044, -0.007, -0.261), "rot": Vector3(0, 0, 0)}, # L Lower Leg
+	28: {"pos": Vector3(0.092, 0.0, 0.088),  "rot": Vector3(0, 0, 0)},     # Stomach
+	29: {"pos": Vector3(0.104, 0.082, 0.247),"rot": Vector3(0, 0, 0)},     # Left Pec
+	30: {"pos": Vector3(0.104, -0.082, 0.247),"rot": Vector3(0, 0, 0)},    # Right Pec
+	41: {"pos": Vector3(-0.006, 0.019, -0.002),"rot": Vector3(0, 0, 0)},   # Left Ring Finger
+	42: {"pos": Vector3(-0.006, -0.019, -0.002),"rot": Vector3(0, 0, 0)},  # Right Ring Finger
+	44: {"pos": Vector3(-0.025, 0.0, 0.0),   "rot": Vector3(0, 0, 0)},     # Tail Tip
+}
+
 
 func _init(scene_manager) -> void:
 	sm = scene_manager
@@ -103,21 +188,13 @@ func handle_object_create(msg: Dictionary) -> void:
 		if is_rigged and will_be_animesh:
 			rsi.set_mesh(sm.object_mesh)
 		elif is_rigged and not msg.get("animesh", false):
-			# Non-animesh rigged: prefer static mesh (no BSM) for correct scale/rotation
-			if sm.static_mesh_cache.has(mesh_id):
-				rsi.set_mesh(sm.static_mesh_cache[mesh_id])
-			elif sm.static_mesh_paths.has(mesh_id):
-				rsi.set_mesh(sm.object_mesh)
-				if not sm._pending_by_mesh.has(mesh_id + ":static_wait"):
-					sm._pending_by_mesh[mesh_id + ":static_wait"] = []
-				sm._pending_by_mesh[mesh_id + ":static_wait"].append(local_id)
-			else:
-				var cached_mesh: Mesh = sm.mesh_cache[mesh_id]
-				rsi.set_mesh(cached_mesh)
-				var aabb: AABB = cached_mesh.get_aabb()
-				if aabb.size.x > 0.001 and aabb.size.y > 0.001 and aabb.size.z > 0.001:
-					rsi.scl_divisor = aabb.size
-					rsi.scl_center = aabb.get_center()
+			# Non-animesh rigged: use cached mesh with AABB correction for prim scale
+			var cached_mesh: Mesh = sm.mesh_cache[mesh_id]
+			rsi.set_mesh(cached_mesh)
+			var aabb: AABB = cached_mesh.get_aabb()
+			if aabb.size.x > 0.001 and aabb.size.y > 0.001 and aabb.size.z > 0.001:
+				rsi.scl_divisor = aabb.size
+				rsi.scl_center = aabb.get_center()
 		else:
 			# Animesh root, or unrigged — use normal mesh
 			rsi.set_mesh(sm.mesh_cache[mesh_id])
@@ -161,6 +238,9 @@ func handle_object_create(msg: Dictionary) -> void:
 		sm.object_parent[local_id] = parent_id
 		sm.child_offset_pos[local_id] = godot_pos
 		sm.child_offset_rot[local_id] = godot_rot
+		var _dbg_ap: int = msg.get("attachmentPoint", 0)
+		if _dbg_ap > 0:
+			print("[AttachDebug] localId=%d attachPt=%d offset_pos=%s offset_rot=%s" % [local_id, _dbg_ap, godot_pos, godot_rot])
 
 		if not sm.object_children.has(parent_id):
 			sm.object_children[parent_id] = []
@@ -174,8 +254,27 @@ func handle_object_create(msg: Dictionary) -> void:
 		elif sm.animesh_roots.has(parent_id):
 			# Parent is an avatar or animesh root — use scene tree node transform
 			var root_node: Node3D = sm.animesh_roots[parent_id]
-			rsi.pos = root_node.position + root_node.quaternion * godot_pos
-			rsi.rot = root_node.quaternion * godot_rot
+			# If this attachment has a bone, use bone position for initial placement.
+			# Shared skeleton has joint position overrides from mesh IBMs applied.
+			var _ap: int = msg.get("attachmentPoint", 0)
+			var _bn: String = ATTACH_POINT_BONES.get(_ap, "") if _ap > 0 else ""
+			if not _bn.is_empty() and sm.animesh_shared_skeleton.has(parent_id):
+				var _ss: Skeleton3D = sm.animesh_shared_skeleton[parent_id]
+				var _bi: int = _ss.find_bone(_bn)
+				if _bi >= 0:
+					var _bpos: Vector3 = _get_bone_global_rest_pos(_ss, _bi)
+					var _bp: Vector3 = root_node.position + root_node.quaternion * _bpos
+					var _bg: Transform3D = _ss.get_bone_global_rest(_bi)
+					var _br: Quaternion = root_node.quaternion * _bg.basis.orthonormalized().get_rotation_quaternion()
+					var _ap_xf: Array = _get_ap_world_transform(_ap, _bp, _br)
+					rsi.pos = _ap_xf[0] + _ap_xf[1] * godot_pos
+					rsi.rot = _ap_xf[2] * godot_rot
+				else:
+					rsi.pos = root_node.position + root_node.quaternion * godot_pos
+					rsi.rot = root_node.quaternion * godot_rot
+			else:
+				rsi.pos = root_node.position + root_node.quaternion * godot_pos
+				rsi.rot = root_node.quaternion * godot_rot
 		else:
 			# Parent hasn't arrived — use offset as-is (will be corrected when parent arrives)
 			rsi.pos = godot_pos
@@ -190,6 +289,26 @@ func handle_object_create(msg: Dictionary) -> void:
 
 	rsi.push_transform()
 	sm.objects[local_id] = rsi
+
+	# Track attachment point bone for non-rigged attachments that follow skeleton bones.
+	# Only store if the bone actually exists in the shared skeleton (mRoot doesn't — it's
+	# not a real skeleton bone, just the avatar root. Those fall through to normal positioning).
+	var attach_point: int = msg.get("attachmentPoint", 0)
+	if attach_point > 0 and parent_id > 0 and sm.animesh_roots.has(parent_id):
+		var bone_name: String = ATTACH_POINT_BONES.get(attach_point, "")
+		if not bone_name.is_empty() and sm.animesh_shared_skeleton.has(parent_id):
+			var _ss: Skeleton3D = sm.animesh_shared_skeleton[parent_id]
+			var _bi: int = _ss.find_bone(bone_name)
+			if _bi >= 0:
+				sm.attach_bone[local_id] = bone_name
+				sm.attach_point_id[local_id] = attach_point
+				print("[AttachBone] localId=%d uuid=%s → bone=%s (attachPt=%d) parent=%d" % [local_id, _uuid_short(local_id), bone_name, attach_point, parent_id])
+			else:
+				print("[AttachBone] localId=%d bone=%s NOT FOUND in skeleton (attachPt=%d)" % [local_id, bone_name, attach_point])
+		elif bone_name.is_empty():
+			print("[AttachBone] localId=%d unknown attachmentPoint=%d" % [local_id, attach_point])
+	elif attach_point > 0 and parent_id > 0:
+		print("[AttachBone] localId=%d attachPt=%d but parent %d not in animesh_roots" % [local_id, attach_point, parent_id])
 
 	# Animesh root detection — create a Node3D in the scene tree for skeleton parenting.
 	# Worn animesh (child of avatar) uses the AVATAR's skeleton and root, matching SL behavior
@@ -211,7 +330,8 @@ func handle_object_create(msg: Dictionary) -> void:
 			animesh_node.scale = Vector3.ONE
 			sm.animesh_roots[local_id] = animesh_node
 			sm.animesh_root_for[local_id] = local_id
-			# Create shared skeleton for non-avatar animesh objects too
+			# Create shared skeleton — ALL meshes bind to this one skeleton (no per-mesh skeletons).
+			# Added to scene tree as parent of MeshInstance3D nodes (Godot's expected pattern).
 			if not sm.animesh_shared_skeleton.has(local_id):
 				var shared_skel: Skeleton3D = sm.skeleton_builder.create_shared_skeleton()
 				animesh_node.add_child(shared_skel)
@@ -437,8 +557,9 @@ func _register_animesh_descendants(parent_id: int, root_id: int) -> void:
 
 
 ## Instantiate a rigged mesh under the shared skeleton for this animesh root.
-## Extracts MeshInstance3D + Skin from the GLB, discards the per-mesh Skeleton3D,
-## and binds the mesh to the shared skeleton via Godot's SkinReference system.
+## Extracts MeshInstance3D from the GLB, applies joint position overrides from the
+## GLB skeleton to the shared skeleton, and binds the mesh to the shared skeleton.
+## The GLB's per-mesh Skeleton3D is discarded — only the shared skeleton is used.
 func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: int) -> void:
 	# Guard against double instantiation (can be called from cache hit + _apply_mesh_to_pending)
 	if sm.animesh_mesh_instances.has(local_id):
@@ -447,16 +568,16 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	if glb_path.is_empty():
 		push_warning("[Animesh] No GLB path for rigged mesh %s (obj %d uuid=%s)" % [mesh_id, local_id, _uuid_short(local_id)])
 		return
-	# Hybrid approach: shared skeleton for animation eval, per-mesh skeleton for rendering.
-	# We still need the shared skeleton to exist (for process_animesh to evaluate poses).
-	if not sm.animesh_shared_skeleton.has(animesh_root_id):
-		push_warning("[Animesh] No shared skeleton for root %d uuid=%s (obj %d uuid=%s)" % [animesh_root_id, _uuid_short(animesh_root_id), local_id, _uuid_short(local_id)])
+	var root_node: Node3D = sm.animesh_roots.get(animesh_root_id)
+	if root_node == null:
+		push_warning("[Animesh] No root node for animesh root %d uuid=%s (obj %d uuid=%s)" % [animesh_root_id, _uuid_short(animesh_root_id), local_id, _uuid_short(local_id)])
 		return
-	var animesh_root: Node3D = sm.animesh_roots.get(animesh_root_id)
-	if animesh_root == null:
+	var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(animesh_root_id)
+	if shared_skel == null:
+		push_warning("[Animesh] No shared skeleton for animesh root %d (obj %d uuid=%s)" % [animesh_root_id, local_id, _uuid_short(local_id)])
 		return
 
-	# Parse GLB and generate full scene tree (includes per-mesh Skeleton3D + MeshInstance3D)
+	# Parse GLB and generate full scene tree (includes Skeleton3D + MeshInstance3D)
 	var doc := GLTFDocument.new()
 	var state := GLTFState.new()
 	var err := doc.append_from_file(glb_path, state)
@@ -468,39 +589,52 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 		push_warning("[Animesh] generate_scene returned null for %s (obj %d uuid=%s)" % [glb_path, local_id, _uuid_short(local_id)])
 		return
 
+	# Find Skeleton3D and MeshInstance3D in the generated scene tree
+	var glb_skeleton: Skeleton3D = _find_node_of_type(scene, "Skeleton3D")
 	var mesh_instance: MeshInstance3D = _find_node_of_type(scene, "MeshInstance3D")
-	if mesh_instance == null:
-		push_warning("[Animesh] No MeshInstance3D in GLB for object %d uuid=%s" % [local_id, _uuid_short(local_id)])
+	if glb_skeleton == null or mesh_instance == null:
+		push_warning("[Animesh] No Skeleton3D/MeshInstance3D in GLB for object %d uuid=%s" % [local_id, _uuid_short(local_id)])
 		scene.queue_free()
 		return
 
-	var glb_skel: Skeleton3D = _find_node_of_type(scene, "Skeleton3D") as Skeleton3D
-	if glb_skel == null:
-		push_warning("[Animesh] No Skeleton3D in GLB for object %d uuid=%s" % [local_id, _uuid_short(local_id)])
-		scene.queue_free()
-		return
+	# Apply joint position overrides from GLB skeleton to shared skeleton.
+	# Override list comes from mesh_ready message, stored on scene_manager.
+	var override_joints: Array = sm.mesh_joint_overrides.get(mesh_id, [])
+	if override_joints.size() > 0:
+		print("[JointOverride] Applying %d overrides for mesh %s" % [override_joints.size(), mesh_id.substr(0, 8)])
+		_apply_joint_overrides(glb_skeleton, shared_skel, override_joints)
+	else:
+		print("[JointOverride] No overrides for mesh %s — skipping" % mesh_id.substr(0, 8))
 
-	# Populate skin bind names from GLB skeleton (Godot glTF importer may use indices only)
-	var skin: Skin = mesh_instance.skin
-	if skin != null:
-		for i in range(skin.get_bind_count()):
-			if skin.get_bind_name(i).is_empty():
-				var bidx: int = skin.get_bind_bone(i)
-				if bidx >= 0 and bidx < glb_skel.get_bone_count():
-					skin.set_bind_name(i, glb_skel.get_bone_name(bidx))
+	# Duplicate skin and remap bone indices to shared skeleton order.
+	var orig_skin: Skin = mesh_instance.skin
 
-	# Hybrid approach: keep the GLB's own Skeleton3D for rendering.
-	# The mesh stays bound to its own skeleton (IBMs match rest transforms).
-	# Animation poses are propagated from the shared skeleton in process_animesh.
-	glb_skel.set_owner(null)
-	glb_skel.get_parent().remove_child(glb_skel)
-	glb_skel.name = "skel_%d" % local_id
-	animesh_root.add_child(glb_skel)
-	# MeshInstance3D stays as child of glb_skel — already correctly skinned to it
+	if orig_skin != null:
+		var new_skin: Skin = orig_skin.duplicate()
+		for i in range(new_skin.get_bind_count()):
+			var glb_bi: int = new_skin.get_bind_bone(i)
+			if glb_bi >= 0 and glb_bi < glb_skeleton.get_bone_count():
+				var bone_name: String = glb_skeleton.get_bone_name(glb_bi)
+				var shared_bi: int = shared_skel.find_bone(bone_name)
+				if shared_bi < 0:
+					var lower: String = bone_name.to_lower()
+					for sbi in range(shared_skel.get_bone_count()):
+						if shared_skel.get_bone_name(sbi).to_lower() == lower:
+							shared_bi = sbi
+							break
+				if shared_bi >= 0:
+					new_skin.set_bind_bone(i, shared_bi)
+		mesh_instance.skin = new_skin
 
-	# Store references
+	# Reparent mesh under shared skeleton
+	mesh_instance.set_owner(null)
+	mesh_instance.get_parent().remove_child(mesh_instance)
+	shared_skel.add_child(mesh_instance)
+	mesh_instance.transform = Transform3D.IDENTITY  # Reset local transform
+	mesh_instance.skeleton = mesh_instance.get_path_to(shared_skel)
+
+	# Store reference
 	sm.animesh_mesh_instances[local_id] = mesh_instance
-	sm.animesh_mesh_skeletons[local_id] = glb_skel
 
 	# Double-sided shadow casting reduces shadow acne near deformed joints
 	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_DOUBLE_SIDED
@@ -526,10 +660,81 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 		_apply_pending_animations(local_id)
 
 	if _is_self_avatar(local_id):
-		print("[SelfAvatar] Rigged mesh instantiated (hybrid): localId=%d meshId=%s bones=%d" % [local_id, mesh_id.substr(0, 8), glb_skel.get_bone_count()])
+		print("[SelfAvatar] Rigged mesh instantiated: localId=%d meshId=%s shared_bones=%d" % [local_id, mesh_id.substr(0, 8), shared_skel.get_bone_count()])
 
-	# Free the now-empty GLB scene root (skeleton + mesh have been reparented out)
+	# Debug: visualize skeleton once per root (check for existing markers)
+	var already_has_markers: bool = false
+	for child in shared_skel.get_children():
+		if child.name.begins_with("dbg_bone_"):
+			already_has_markers = true
+			break
+	if not already_has_markers:
+		_debug_visualize_skeleton(shared_skel)
+
+	# Free the GLB scene (GLB skeleton + any remaining nodes)
 	scene.queue_free()
+
+
+## DEBUG: Place a colored sphere on each bone. Uses plain Node3D (not BoneAttachment3D)
+## because BoneAttachment3D reads global pose before our manual set_bone_pose calls.
+## Markers are positioned each frame in _update_debug_bone_markers() after animation eval.
+## Red = standard bones, Green = collision volumes.
+func _debug_visualize_skeleton(skel: Skeleton3D) -> void:
+	var sphere_mesh := SphereMesh.new()
+	sphere_mesh.radius = 0.03
+	sphere_mesh.height = 0.06
+
+	var mat_standard := StandardMaterial3D.new()
+	mat_standard.albedo_color = Color(1.0, 0.2, 0.2)  # Red
+	mat_standard.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	var mat_cv := StandardMaterial3D.new()
+	mat_cv.albedo_color = Color(0.2, 1.0, 0.2)  # Green
+	mat_cv.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	var count: int = 0
+	for bi in range(skel.get_bone_count()):
+		var bname: String = skel.get_bone_name(bi)
+		var global_rest: Transform3D = _get_bone_global_rest_xf(skel, bi)
+
+		var mi := MeshInstance3D.new()
+		mi.name = "dbg_bone_%s" % bname
+		mi.mesh = sphere_mesh
+		var basis_det: float = absf(global_rest.basis.determinant())
+		var is_cv: bool = absf(basis_det - 1.0) > 0.1
+		mi.material_override = mat_cv if is_cv else mat_standard
+		mi.top_level = true  # Use world-space transform (not relative to skeleton)
+		skel.add_child(mi)
+		count += 1
+
+	print("[DebugSkel] Placed %d bone markers on skeleton (%d bones)" % [count, skel.get_bone_count()])
+
+
+## Update debug bone marker positions after animation evaluation.
+## Called from process_animesh() so markers reflect the current frame's poses.
+func _update_debug_bone_markers(skel: Skeleton3D) -> void:
+	var skel_global: Transform3D = skel.global_transform
+	for child in skel.get_children():
+		if not child.name.begins_with("dbg_bone_"):
+			continue
+		var bname: String = child.name.substr(9)  # Strip "dbg_bone_" prefix
+		var bi: int = skel.find_bone(bname)
+		if bi < 0:
+			continue
+		# Compute bone global transform manually (rest * pose through parent chain)
+		var chain: Array[int] = []
+		var cur: int = bi
+		while cur >= 0:
+			chain.append(cur)
+			cur = skel.get_bone_parent(cur)
+		chain.reverse()
+		var bone_xf := Transform3D.IDENTITY
+		for idx: int in chain:
+			var rest_xf: Transform3D = skel.get_bone_rest(idx)
+			var pose_rot: Quaternion = skel.get_bone_pose_rotation(idx)
+			var pose_pos: Vector3 = skel.get_bone_pose_position(idx)
+			bone_xf = bone_xf * rest_xf * Transform3D(Basis(pose_rot), pose_pos)
+		child.global_position = (skel_global * bone_xf).origin
 
 
 ## Find the first node of a given class in the scene tree (recursive DFS)
@@ -673,10 +878,7 @@ func _apply_pending_animations(obj_id: int) -> void:
 
 
 ## Per-frame animesh animation evaluation.
-## Evaluates each skeleton independently so all bones get animated regardless
-## of which skeleton they appear in. Different attachments (head, body, boots)
-## have different bone subsets — a single reference skeleton would miss bones
-## that only exist on other skeletons.
+## All meshes bind to the shared skeleton — one evaluation pass per avatar/animesh root.
 ## SL xform.cpp:80: mWorldRotation = mRotation * mParent->getWorldRotation()
 ## SL's operator*(a,b) = Hamilton(b*a), so this is Hamilton(parent * local).
 ## Godot uses standard Hamilton, so we write: world = parent * local.
@@ -711,84 +913,268 @@ func process_animesh(delta: float) -> void:
 			if pos_keys.size() > 0:
 				sl_local_pos[jname] = _interp_sl_position(pos_keys, t)
 
-		# Hybrid approach: evaluate SL world rotations on the shared skeleton (all 159 bones),
-		# then propagate poses to each per-mesh skeleton using ITS rest transforms.
+		# Evaluate on shared skeleton — all meshes bind to it via Godot skinning
 		var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(root_id)
-		if shared_skel == null:
+		if shared_skel != null:
+			_evaluate_skeleton_animation(shared_skel, sl_local_rot, sl_local_pos)
+			_update_bone_attachments(root_id, shared_skel)
+			_update_debug_bone_markers(shared_skel)
+
+
+
+## Update non-rigged avatar attachments to follow their attachment bone each frame.
+## Uses the shared skeleton (which has joint position overrides from mesh IBMs applied).
+## Since all meshes bind to the shared skeleton, bone transforms are read directly
+## from it — no per-mesh skeleton search needed.
+func _update_bone_attachments(root_id: int, shared_skel: Skeleton3D) -> void:
+	if not sm.object_children.has(root_id):
+		return
+	var root_node: Node3D = sm.animesh_roots.get(root_id)
+	if root_node == null or not is_instance_valid(root_node):
+		return
+	for child_id: int in sm.object_children[root_id]:
+		if not sm.attach_bone.has(child_id):
+			continue
+		# Skip rigged mesh attachments — they follow the skeleton via skinning
+		if sm.animesh_mesh_instances.has(child_id):
+			continue
+		var child_rsi = sm.objects.get(child_id)
+		if child_rsi == null:
+			continue
+		var bone_name: String = sm.attach_bone[child_id]
+
+		var bi: int = shared_skel.find_bone(bone_name)
+		if bi < 0:
 			continue
 
-		# Compute SL/Godot world rotations for ALL bones (by name, skeleton-independent)
-		var sl_world_by_name: Dictionary = {}    # bname -> Quaternion (SL space)
-		var godot_world_by_name: Dictionary = {} # bname -> Quaternion (Godot space)
+		# Compute bone global transform from shared skeleton (rest * pose through parent chain)
+		var chain: Array[int] = []
+		var cur: int = bi
+		while cur >= 0:
+			chain.append(cur)
+			cur = shared_skel.get_bone_parent(cur)
+		chain.reverse()
 
-		for bi in range(shared_skel.get_bone_count()):
-			var bname: String = shared_skel.get_bone_name(bi)
-			var parent_bi: int = shared_skel.get_bone_parent(bi)
+		var bone_global_xf := Transform3D.IDENTITY
+		for idx: int in chain:
+			var rest_xf: Transform3D = shared_skel.get_bone_rest(idx)
+			var pose_rot: Quaternion = shared_skel.get_bone_pose_rotation(idx)
+			var pose_pos: Vector3 = shared_skel.get_bone_pose_position(idx)
+			bone_global_xf = bone_global_xf * rest_xf * Transform3D(Basis(pose_rot), pose_pos)
 
-			# SL local rotation: from animation keyframes or default rest rotation
-			var q_sl_local: Quaternion
-			if sl_local_rot.has(bname):
-				q_sl_local = sl_local_rot[bname]
-			else:
-				# Standard bones: rest rot = identity → SL local = identity
-				# Collision volumes: rest has rotation from XML → convert Godot→SL
-				var rest_q: Quaternion = shared_skel.get_bone_rest(bi).basis.orthonormalized().get_rotation_quaternion()
-				q_sl_local = Quaternion(rest_q.x, -rest_q.z, rest_q.y, rest_q.w)
+		var bone_pos: Vector3 = bone_global_xf.origin
+		var bone_rot: Quaternion = bone_global_xf.basis.orthonormalized().get_rotation_quaternion()
 
-			var parent_bname: String = ""
-			if parent_bi >= 0:
-				parent_bname = shared_skel.get_bone_name(parent_bi)
-			var q_sl_parent: Quaternion = sl_world_by_name.get(parent_bname, Quaternion.IDENTITY)
-			var q_sl_world: Quaternion = q_sl_parent * q_sl_local
-			sl_world_by_name[bname] = q_sl_world
+		# Debug: log once per child
+		if not sm._attach_bone_logged.has(child_id):
+			sm._attach_bone_logged[child_id] = true
+			var _dbg_offset_pos: Vector3 = sm.child_offset_pos.get(child_id, Vector3.ZERO)
+			var _dbg_ap_id: int = sm.attach_point_id.get(child_id, 0)
+			print("[AttachBone] child=%d bone=%s bone_pos=%s offset_pos=%s ap=%d root=%d" % [child_id, bone_name, bone_pos, _dbg_offset_pos, _dbg_ap_id, root_id])
 
-			var q_godot_world := Quaternion(
-				q_sl_world.x, q_sl_world.z, -q_sl_world.y, q_sl_world.w).normalized()
-			godot_world_by_name[bname] = q_godot_world
-
-		# Propagate poses to each per-mesh skeleton for this root
-		for mesh_lid: int in sm.animesh_mesh_skeletons:
-			if sm.animesh_root_for.get(mesh_lid, 0) != root_id:
-				continue
-			var mesh_skel: Skeleton3D = sm.animesh_mesh_skeletons[mesh_lid]
-			if mesh_skel == null or not is_instance_valid(mesh_skel):
-				continue
-			_apply_world_to_mesh_skeleton(mesh_skel, godot_world_by_name, sl_local_pos)
+		var bone_world_pos: Vector3 = root_node.position + root_node.quaternion * bone_pos
+		var bone_world_rot: Quaternion = root_node.quaternion * bone_rot
+		var ap_id: int = sm.attach_point_id.get(child_id, 0)
+		var ap_xf: Array = _get_ap_world_transform(ap_id, bone_world_pos, bone_world_rot)
+		var offset_pos: Vector3 = sm.child_offset_pos.get(child_id, Vector3.ZERO)
+		var offset_rot: Quaternion = sm.child_offset_rot.get(child_id, Quaternion.IDENTITY)
+		child_rsi.pos = ap_xf[0] + ap_xf[1] * offset_pos
+		child_rsi.rot = ap_xf[2] * offset_rot
+		child_rsi.push_transform()
+		_sync_animesh_transform(child_id, child_rsi)
+		if sm.light_mgr.object_lights.has(child_id):
+			sm.light_mgr.update_light_transform(child_id, child_rsi)
+		if sm.object_children.has(child_id):
+			_update_children_world_pos(child_id, child_rsi.pos, child_rsi.rot)
 
 
+## Compute the world rotation of an attachment point given the bone's world rotation.
+## Returns [_, _, ap_world_rot] (only index [2] is used — the AP world orientation).
+## ap_xf[2] = bone_world_rot * ap_rot_godot, used for child_offset_rot orientation.
+## NOTE: Position is NOT derived here. SL network sends child positions in avatar-root-local
+## space (already includes AP height). Position = root_node.pos + root_node.rot * child_offset.
+func _get_ap_world_transform(ap_id: int, bone_world_pos: Vector3, bone_world_rot: Quaternion) -> Array:
+	if ap_id <= 0 or not ATTACH_POINT_OFFSETS.has(ap_id):
+		return [bone_world_pos, bone_world_rot, bone_world_rot]
+	var ap_data: Dictionary = ATTACH_POINT_OFFSETS[ap_id]
+	var sl_pos: Vector3 = ap_data["pos"]
+	var sl_euler: Vector3 = ap_data["rot"]
+	var ap_pos_godot := Vector3(sl_pos.x, sl_pos.z, -sl_pos.y)
+	var ap_rot_godot: Quaternion = _sl_euler_to_godot_quat(sl_euler.x, sl_euler.y, sl_euler.z)
+	var ap_world_pos: Vector3 = bone_world_pos + bone_world_rot * ap_pos_godot
+	var ap_world_rot: Quaternion = bone_world_rot * ap_rot_godot
+	return [ap_world_pos, bone_world_rot, ap_world_rot]
 
-## Apply Godot world rotations (from shared skeleton evaluation) to a per-mesh skeleton.
-## Each bone's pose is derived relative to the mesh skeleton's own rest transforms,
-## so vertices render correctly (mesh IBMs match mesh skeleton rests).
-func _apply_world_to_mesh_skeleton(mesh_skel: Skeleton3D, godot_world: Dictionary, sl_local_pos: Dictionary) -> void:
-	for bi in range(mesh_skel.get_bone_count()):
-		var bname: String = mesh_skel.get_bone_name(bi)
-		if not godot_world.has(bname):
-			continue  # bone not in animation evaluation → stays at rest
 
-		var q_gw: Quaternion = godot_world[bname]
+## Convert SL Euler angles (roll, pitch, yaw in degrees, ZYX order) to a Godot quaternion.
+## Matches LLQuaternion::setQuat(roll, pitch, yaw) used by the LL viewer for attachment point rotations.
+func _sl_euler_to_godot_quat(roll_deg: float, pitch_deg: float, yaw_deg: float) -> Quaternion:
+	if roll_deg == 0.0 and pitch_deg == 0.0 and yaw_deg == 0.0:
+		return Quaternion.IDENTITY
+	var r: float = deg_to_rad(roll_deg) * 0.5
+	var p: float = deg_to_rad(pitch_deg) * 0.5
+	var y: float = deg_to_rad(yaw_deg) * 0.5
+	var sr := sin(r); var cr := cos(r)
+	var sp := sin(p); var cp := cos(p)
+	var sy := sin(y); var cy := cos(y)
+	var sl_x: float = sr * cp * cy - cr * sp * sy
+	var sl_y: float = cr * sp * cy + sr * cp * sy
+	var sl_z: float = cr * cp * sy - sr * sp * cy
+	var sl_w: float = cr * cp * cy + sr * sp * sy
+	return Quaternion(sl_x, sl_z, -sl_y, sl_w).normalized()
 
-		# Get parent's Godot world rotation (by name, from the shared skeleton evaluation)
-		var parent_bi: int = mesh_skel.get_bone_parent(bi)
-		var parent_gw: Quaternion = Quaternion.IDENTITY
+
+## Get a bone's accumulated global rest position by walking the parent chain.
+func _get_bone_global_rest_pos(skel: Skeleton3D, bi: int) -> Vector3:
+	return _get_bone_global_rest_xf(skel, bi).origin
+
+
+## Get a bone's accumulated global rest transform by walking the parent chain.
+func _get_bone_global_rest_xf(skel: Skeleton3D, bi: int) -> Transform3D:
+	var global_xf := Transform3D.IDENTITY
+	var chain: Array[int] = []
+	var cur: int = bi
+	while cur >= 0:
+		chain.append(cur)
+		cur = skel.get_bone_parent(cur)
+	chain.reverse()
+	for idx: int in chain:
+		global_xf = global_xf * skel.get_bone_rest(idx)
+	return global_xf
+
+
+## Apply joint position overrides from a GLB skeleton to the shared skeleton.
+## Only overrides joints in override_joints list (from mesh extras.jointOverrides).
+## Computes bone world transforms from the GLB skeleton's rest hierarchy,
+## then derives matching local rest transforms for the shared skeleton's hierarchy.
+## Last mesh to set a bone wins (same as SL/Firestorm).
+func _apply_joint_overrides(glb_skel: Skeleton3D, shared_skel: Skeleton3D, override_joints: Array) -> void:
+	# Build a set for fast lookup
+	var override_set: Dictionary = {}
+	for jname in override_joints:
+		override_set[jname] = true
+
+	# Compute world rest transforms from GLB skeleton
+	var glb_world: Dictionary = {}  # bone_name -> Transform3D
+	for bi in range(glb_skel.get_bone_count()):
+		var bname: String = glb_skel.get_bone_name(bi)
+		var parent_bi: int = glb_skel.get_bone_parent(bi)
+		var rest: Transform3D = glb_skel.get_bone_rest(bi)
 		if parent_bi >= 0:
-			var parent_bname: String = mesh_skel.get_bone_name(parent_bi)
-			parent_gw = godot_world.get(parent_bname, Quaternion.IDENTITY)
+			var parent_name: String = glb_skel.get_bone_name(parent_bi)
+			glb_world[bname] = glb_world.get(parent_name, Transform3D.IDENTITY) * rest
+		else:
+			glb_world[bname] = rest
 
-		# Derive pose rotation: pose = inv(parent_world * rest) * world
-		var rest_rot: Quaternion = mesh_skel.get_bone_rest(bi).basis.orthonormalized().get_rotation_quaternion()
-		var combined_inv: Quaternion = (parent_gw * rest_rot).inverse()
-		var pose_rot: Quaternion = (combined_inv * q_gw).normalized()
-		mesh_skel.set_bone_pose_rotation(bi, pose_rot)
+	# Apply overrides only for listed joints (process in bone index order = parent-first)
+	var override_count: int = 0
+	for bi in range(shared_skel.get_bone_count()):
+		var bname: String = shared_skel.get_bone_name(bi)
+		if not override_set.has(bname):
+			continue
+		if not glb_world.has(bname):
+			continue
 
-		# Position keyframes: SL-space offset converted to mesh skeleton's bone space
-		if sl_local_pos.has(bname):
+		var target_world: Transform3D = glb_world[bname]
+		var parent_bi: int = shared_skel.get_bone_parent(bi)
+
+		var parent_world: Transform3D = Transform3D.IDENTITY
+		if parent_bi >= 0:
+			parent_world = _get_bone_global_rest_xf(shared_skel, parent_bi)
+
+		var local_rest: Transform3D = parent_world.affine_inverse() * target_world
+		shared_skel.set_bone_rest(bi, local_rest)
+		override_count += 1
+
+	if override_count > 0:
+		print("[JointOverride] Applied %d/%d bone overrides from GLB → shared skeleton" % [override_count, override_set.size()])
+
+## Convert a Basis to its rotation quaternion safely.
+## Returns IDENTITY if the basis is degenerate (zero or near-zero columns from
+## collision volume IBM scale amplification or failed matrix inversion in GLB export).
+func _safe_basis_rotation(b: Basis) -> Quaternion:
+	var on := b.orthonormalized()
+	# orthonormalized() returns zero columns if input columns are zero-length.
+	# det of a valid rotation matrix is 1; degenerate result is near 0.
+	if absf(on.determinant()) < 0.5:
+		return Quaternion.IDENTITY
+	return on.get_rotation_quaternion()
+
+
+
+## Evaluate SL animation on a skeleton using its own rest transforms.
+## Computes SL world rotations from animation keyframes + skeleton rest poses,
+## converts to Godot space, and derives per-bone pose rotations.
+## Each skeleton is evaluated independently so its IBM-derived rest transforms
+## stay consistent with the world rotations (avoids XML vs GLB rest mismatch).
+func _evaluate_skeleton_animation(skeleton: Skeleton3D, sl_local_rot: Dictionary, sl_local_pos: Dictionary) -> void:
+	var sl_world: Dictionary = {}     # bone_idx -> Quaternion (SL space)
+	var godot_world: Dictionary = {}  # bone_idx -> Quaternion (Godot space)
+	var bone_animated: Dictionary = {}  # bone_idx -> bool
+
+	for bi in range(skeleton.get_bone_count()):
+		var bname: String = skeleton.get_bone_name(bi)
+		var parent_bi: int = skeleton.get_bone_parent(bi)
+
+		var has_rot: bool = sl_local_rot.has(bname)
+		var has_pos: bool = sl_local_pos.has(bname)
+		var parent_was_animated: bool = bone_animated.get(parent_bi, false)
+
+		# Only process bones that have animation data or an animated ancestor
+		if not has_rot and not has_pos and not parent_was_animated:
+			bone_animated[bi] = false
+			continue  # No animation influence — leave at rest pose
+
+		bone_animated[bi] = has_rot or has_pos or parent_was_animated
+
+		# SL local rotation: from animation, or rest rotation if not animated
+		var q_sl_local: Quaternion
+		if has_rot:
+			q_sl_local = sl_local_rot[bname]
+		else:
+			var rest_q: Quaternion = _safe_basis_rotation(skeleton.get_bone_rest(bi).basis)
+			q_sl_local = Quaternion(rest_q.x, -rest_q.z, rest_q.y, rest_q.w)
+
+		var q_sl_parent_world: Quaternion = sl_world.get(parent_bi, Quaternion.IDENTITY)
+		var q_sl_world: Quaternion = q_sl_parent_world * q_sl_local
+		sl_world[bi] = q_sl_world
+
+		var q_godot_world := Quaternion(
+			q_sl_world.x, q_sl_world.z, -q_sl_world.y, q_sl_world.w).normalized()
+		godot_world[bi] = q_godot_world
+
+		# Derive Godot pose rotation
+		var parent_godot_world: Quaternion = godot_world.get(parent_bi, Quaternion.IDENTITY)
+		var rest_rot: Quaternion = _safe_basis_rotation(skeleton.get_bone_rest(bi).basis)
+		var combined_inv: Quaternion = (parent_godot_world * rest_rot).inverse()
+		var pose_rot: Quaternion = (combined_inv * q_godot_world).normalized()
+		skeleton.set_bone_pose_rotation(bi, pose_rot)
+
+		if has_pos:
 			var sl_pos: Vector3 = sl_local_pos[bname]
 			var offset_godot := Vector3(sl_pos.x, sl_pos.z, -sl_pos.y)
-			var rest_xf: Transform3D = mesh_skel.get_bone_rest(bi)
-			var rot_basis := Basis(rest_xf.basis.orthonormalized().get_rotation_quaternion())
+			var rest_xf: Transform3D = skeleton.get_bone_rest(bi)
+			var rot_basis := Basis(_safe_basis_rotation(rest_xf.basis))
 			var pose_pos: Vector3 = rot_basis.inverse() * offset_godot
-			mesh_skel.set_bone_pose_position(bi, pose_pos)
+			skeleton.set_bone_pose_position(bi, pose_pos)
+
+	# Compute and apply global pose overrides (same as marker code).
+	# Godot's internal pose_global doesn't include rest transforms when we set
+	# bone poses manually after the skeleton update step. Override with our own
+	# correctly computed values so the skin pipeline uses them.
+	var bone_globals: Array[Transform3D] = []
+	bone_globals.resize(skeleton.get_bone_count())
+	for bi in range(skeleton.get_bone_count()):
+		var rest_xf: Transform3D = skeleton.get_bone_rest(bi)
+		var pose_rot: Quaternion = skeleton.get_bone_pose_rotation(bi)
+		var pose_pos: Vector3 = skeleton.get_bone_pose_position(bi)
+		var local_xf: Transform3D = rest_xf * Transform3D(Basis(pose_rot), pose_pos)
+		var parent_bi: int = skeleton.get_bone_parent(bi)
+		if parent_bi >= 0:
+			bone_globals[bi] = bone_globals[parent_bi] * local_xf
+		else:
+			bone_globals[bi] = local_xf
+		skeleton.set_bone_global_pose_override(bi, bone_globals[bi], 1.0, true)
 
 
 ## Interpolate SL rotation keyframes at time t. Returns SL-space quaternion (w reconstructed).
@@ -959,18 +1345,14 @@ func _cleanup_object(local_id: int) -> void:
 	sm.light_mgr._object_light_data.erase(local_id)
 	sm.object_targets.erase(local_id)
 
-	# Clean up animesh mesh instance and per-mesh skeleton
+	# Clean up animesh mesh instance (child of shared skeleton, freed individually)
 	if sm.animesh_mesh_instances.has(local_id):
 		var ami: MeshInstance3D = sm.animesh_mesh_instances[local_id]
 		if ami and is_instance_valid(ami):
 			ami.queue_free()
 		sm.animesh_mesh_instances.erase(local_id)
-	if sm.animesh_mesh_skeletons.has(local_id):
-		var mskel: Skeleton3D = sm.animesh_mesh_skeletons[local_id]
-		if mskel and is_instance_valid(mskel):
-			mskel.queue_free()  # also frees child MeshInstance3D
-		sm.animesh_mesh_skeletons.erase(local_id)
 	sm.object_mesh_id.erase(local_id)
+	sm.attach_bone.erase(local_id)
 	sm.animesh_root_for.erase(local_id)
 	if sm.animesh_roots.has(local_id):
 		var animesh_node: Node3D = sm.animesh_roots[local_id]
@@ -980,6 +1362,7 @@ func _cleanup_object(local_id: int) -> void:
 		sm.animesh_shared_skeleton.erase(local_id)
 		sm.animesh_pending_anims.erase(local_id)
 		sm.animesh_worn_anims.erase(local_id)
+		sm.bone_global_overrides.erase(local_id)
 		sm.animesh_eval.erase(local_id)
 		if sm.animesh_eval.is_empty():
 			sm.animesh_eval_active = false
@@ -1095,7 +1478,7 @@ func handle_avatar_create(msg: Dictionary) -> void:
 
 	var pos: Array = msg.get("position", [128, 128, 25])
 	var godot_pos := sl_to_godot_pos(pos)
-	godot_pos.y += 0.9
+	print("[AvatarHeight] raw_sl_pos=%s godot_pos=%s" % [pos, godot_pos])
 	rsi.pos = godot_pos
 
 	var godot_rot := Quaternion.IDENTITY
@@ -1185,7 +1568,6 @@ func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
 				godot_rot = rsi.rot if rsi else Quaternion.IDENTITY
 		else:
 			godot_pos = raw_pos
-			godot_pos.y += 0.9
 			if data.has("rotation"):
 				godot_rot = sl_to_godot_quat(data["rotation"])
 			else:
@@ -1231,13 +1613,12 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 		# Clean up skeleton root
 		var av_lid: int = sm.avatar_local_ids.get(avatar_id, 0)
 		if av_lid > 0 and sm.animesh_roots.has(av_lid):
-			# Clean up per-mesh skeletons belonging to this avatar
+			# Clean up mesh instance references (nodes freed when avatar_node is queue_freed)
 			var to_erase: Array = []
-			for mesh_lid: int in sm.animesh_mesh_skeletons:
+			for mesh_lid: int in sm.animesh_mesh_instances:
 				if sm.animesh_root_for.get(mesh_lid, 0) == av_lid:
 					to_erase.append(mesh_lid)
 			for mesh_lid: int in to_erase:
-				sm.animesh_mesh_skeletons.erase(mesh_lid)
 				sm.animesh_mesh_instances.erase(mesh_lid)
 			var node: Node3D = sm.animesh_roots[av_lid]
 			if node and is_instance_valid(node):
@@ -1299,6 +1680,10 @@ func interpolate_avatars(delta: float) -> void:
 			# Rigged MeshInstance3Ds follow via scene tree, but their hidden RSIs and
 			# any non-rigged attachments need explicit repositioning.
 			_update_children_world_pos(av_lid, rsi.pos, rsi.rot)
+			# Bone-tracked attachments need skeleton-relative positioning every frame,
+			# even before animations load (rest pose has bone positions from XML).
+			if sm.animesh_shared_skeleton.has(av_lid):
+				_update_bone_attachments(av_lid, sm.animesh_shared_skeleton[av_lid])
 
 		# Emit camera follow signal for self avatar
 		if avatar_id == sm.self_avatar_id:
@@ -1311,6 +1696,9 @@ func _update_children_world_pos(parent_id: int, parent_pos: Vector3, parent_rot:
 	if not sm.object_children.has(parent_id):
 		return
 	for child_id: int in sm.object_children[parent_id]:
+		# Skip bone-tracked attachments — _update_bone_attachments handles them each frame
+		if sm.attach_bone.has(child_id) and sm.animesh_roots.has(parent_id):
+			continue
 		var child_rsi = sm.objects.get(child_id)
 		if child_rsi == null or not sm.child_offset_pos.has(child_id):
 			continue

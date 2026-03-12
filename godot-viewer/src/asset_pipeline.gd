@@ -92,6 +92,13 @@ func handle_mesh_ready(msg: Dictionary) -> void:
 	# Track rigged mesh GLB paths for animesh scene instantiation
 	if msg.get("isRigged", false):
 		sm.rigged_mesh_paths[mesh_id] = glb_path
+		var overrides: Array = msg.get("jointOverrides", [])
+		if overrides.size() > 0:
+			sm.mesh_joint_overrides[mesh_id] = overrides
+			print("[AssetPipeline] Stored %d joint overrides for mesh %s" % [overrides.size(), mesh_id.substr(0, 8)])
+		var msg_keys: Array = msg.keys()
+		if msg.get("isRigged", false):
+			print("[AssetPipeline] mesh_ready keys for %s: %s" % [mesh_id.substr(0, 8), str(msg_keys)])
 		# Check how many pending objects need this rigged mesh
 		var waiting: int = 0
 		var self_waiting: bool = false
@@ -104,23 +111,12 @@ func handle_mesh_ready(msg: Dictionary) -> void:
 		if self_waiting:
 			print("[SelfAvatar] Rigged mesh ready: meshId=%s (%d objects waiting)" % [mesh_id.substr(0, 8), waiting])
 
-	# Track static GLB path (no BSM, for non-animesh rigged display)
-	var static_path: String = msg.get("staticPath", "")
-	if not static_path.is_empty():
-		sm.static_mesh_paths[mesh_id] = static_path
-
 	# Skip if already cached, in-flight, or previously failed
 	if _shutting_down or sm.mesh_cache.has(mesh_id) or _mesh_in_flight.has(mesh_id) or sm.mesh_load_failed.has(mesh_id):
 		return
 
 	_mesh_in_flight[mesh_id] = true
 	_mesh_queue.append({ "meshId": mesh_id, "path": glb_path })
-	# Also queue static variant if available
-	if not static_path.is_empty() and not sm.static_mesh_cache.has(mesh_id):
-		var static_key: String = mesh_id + ":static"
-		if not _mesh_in_flight.has(static_key):
-			_mesh_in_flight[static_key] = true
-			_mesh_queue.append({ "meshId": static_key, "path": static_path })
 
 
 ## Apply a loaded mesh to all pending objects waiting for it
@@ -152,18 +148,8 @@ func _apply_mesh_to_pending(mesh_id: String) -> void:
 
 		var rsi = sm.objects.get(local_id)
 		if rsi != null:
-			# Non-animesh rigged with static variant: defer to _apply_static_mesh_to_pending
-			if is_rigged and not sm.animesh_root_for.has(local_id) and sm.static_mesh_paths.has(mesh_id):
-				if sm.static_mesh_cache.has(mesh_id):
-					_apply_static_mesh_single(local_id, mesh_id, rsi)
-				else:
-					if not sm._pending_by_mesh.has(mesh_id + ":static_wait"):
-						sm._pending_by_mesh[mesh_id + ":static_wait"] = []
-					sm._pending_by_mesh[mesh_id + ":static_wait"].append(local_id)
-				continue
-
 			rsi.set_mesh(loaded_mesh)
-			# Rigged non-animesh with identity BSM — still needs AABB correction
+			# Rigged non-animesh — needs AABB correction for prim scale
 			if is_rigged and not sm.animesh_root_for.has(local_id):
 				var aabb: AABB = loaded_mesh.get_aabb()
 				if aabb.size.x > 0.001 and aabb.size.y > 0.001 and aabb.size.z > 0.001:
@@ -176,35 +162,6 @@ func _apply_mesh_to_pending(mesh_id: String) -> void:
 				apply_face_materials(rsi, local_id, sm.object_faces[local_id])
 			else:
 				rsi.set_material_override(null)
-
-
-## Apply static (no-BSM) mesh to a single non-animesh rigged object
-func _apply_static_mesh_single(local_id: int, mesh_id: String, rsi) -> void:
-	var static_mesh: Mesh = sm.static_mesh_cache[mesh_id]
-	rsi.set_mesh(static_mesh)
-	# No AABB correction needed — static mesh has raw mesh-space vertices,
-	# prim scale applies directly (same as unrigged meshes)
-	rsi.scl_divisor = Vector3.ONE
-	rsi.scl_center = Vector3.ZERO
-	rsi.push_transform()
-	if sm.object_faces.has(local_id):
-		rsi.set_material_override(null)
-		apply_face_materials(rsi, local_id, sm.object_faces[local_id])
-	else:
-		rsi.set_material_override(null)
-
-
-## Apply static mesh to all objects waiting for it
-func _apply_static_mesh_to_pending(mesh_id: String) -> void:
-	var wait_key: String = mesh_id + ":static_wait"
-	if not sm._pending_by_mesh.has(wait_key):
-		return
-	var waiting: Array = sm._pending_by_mesh[wait_key]
-	sm._pending_by_mesh.erase(wait_key)
-	for local_id: int in waiting:
-		var rsi = sm.objects.get(local_id)
-		if rsi != null:
-			_apply_static_mesh_single(local_id, mesh_id, rsi)
 
 
 ## Find the animesh root for a given object (0 if not part of an animesh linkset)
@@ -597,14 +554,8 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 						if m == null:
 							sm.mesh_load_failed[mesh_id] = true
 						else:
-							# Static variant — store in separate cache, apply to pending
-							if mesh_id.ends_with(":static"):
-								var real_id: String = mesh_id.substr(0, mesh_id.length() - 7)
-								sm.static_mesh_cache[real_id] = m
-								_apply_static_mesh_to_pending(real_id)
-							else:
-								sm.mesh_cache[mesh_id] = m
-								_apply_mesh_to_pending(mesh_id)
+							sm.mesh_cache[mesh_id] = m
+							_apply_mesh_to_pending(mesh_id)
 							var _t2 := Time.get_ticks_usec()
 							_fin_mesh_extract_ms += (_t1 - _t0) / 1000.0
 							_fin_mesh_apply_ms += (_t2 - _t1) / 1000.0

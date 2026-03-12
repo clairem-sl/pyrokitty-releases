@@ -2,6 +2,15 @@
  * mesh-converter.ts — Converts LLMesh to GLB (binary glTF 2.0).
  * Hand-rolled GLB encoder, no npm dependencies.
  * Supports rigged meshes: emits JOINTS_0/WEIGHTS_0 + skin + skeleton nodes.
+ *
+ * Skeleton/skin approach matches Hippolyzer's gltftools.py:
+ * - Skeleton hierarchy from avatar_skeleton.xml with scale+rotation+translation
+ * - Blender compatibility: joint nodes store translation only; scale+rotation
+ *   goes into a fixup matrix that gets baked into the inverse bind matrices
+ * - alt_inverse_bind_matrix used for joint position overrides (translation only)
+ * - Bind shape matrix baked into vertex positions and normals
+ * - Coordinate conversion: SL (X,Y,Z) → glTF (X,Z,-Y) via similarity transform
+ * - UV flip: [u, -v] (Hippolyzer convention)
  */
 
 import * as fs from 'fs';
@@ -18,8 +27,9 @@ const LOD_PREFERENCE = ['high_lod', 'medium_lod', 'low_lod', 'lowest_lod'];
 interface SkeletonJoint {
   name: string;
   parent: string | null;
-  pos: [number, number, number];  // local position in SL coords
-  rot: [number, number, number];  // local rotation in SL coords (Euler degrees)
+  pos: [number, number, number];    // local position in SL coords
+  rot: [number, number, number];    // local rotation in SL coords (Euler degrees)
+  scale: [number, number, number];  // local scale in SL coords
   children: string[];
   isCollisionVolume: boolean;
 }
@@ -27,6 +37,8 @@ interface SkeletonJoint {
 let skeletonCache: Map<string, SkeletonJoint> | null = null;
 // Attachment point name → parent joint name (from avatar_lad.xml)
 let attachmentPointCache: Map<string, string> | null = null;
+// Joint alias map: alternative name → canonical name (from XML aliases + attachment points + case fallback)
+let jointAliasCache: Map<string, string> | null = null;
 
 function findCharacterFile(filename: string): string {
   const candidates = [
@@ -53,6 +65,67 @@ export function getSkeletonHierarchy(): Map<string, SkeletonJoint> {
   skeletonCache = parseSkeletonXml(xml);
   console.log(`[mesh-converter] Loaded skeleton hierarchy: ${skeletonCache.size} joints`);
   return skeletonCache;
+}
+
+/**
+ * Build joint alias map matching Firestorm's LLAvatarAppearance::getJointAliases().
+ * Maps: bone aliases (from XML) + attachment point names (from LAD) + case-insensitive
+ * fallback for skeleton bones/CVs → canonical bone name.
+ */
+function getJointAliasMap(): Map<string, string> {
+  if (jointAliasCache) return jointAliasCache;
+  jointAliasCache = new Map();
+
+  // 1. Bone aliases from avatar_skeleton.xml
+  const xml = findCharacterFile('avatar_skeleton.xml');
+  if (xml) {
+    const aliasRegex = /<(?:bone|collision_volume)\b[^>]*?\bname="([^"]+)"[^>]*?\baliases="([^"]+)"[^>]*?\/?>/g;
+    let m;
+    while ((m = aliasRegex.exec(xml)) !== null) {
+      const canonicalName = m[1];
+      for (const alias of m[2].split(/\s+/)) {
+        if (alias) jointAliasCache.set(alias, canonicalName);
+      }
+    }
+  }
+
+  // 2. Attachment point names → their parent bone (from avatar_lad.xml)
+  const attachPoints = getAttachmentPoints();
+  for (const [apName, jointName] of attachPoints) {
+    jointAliasCache.set(apName, jointName);
+    // Also map underscore variant (Firestorm: spaces→underscores in DAE)
+    const underscored = apName.replace(/ /g, '_');
+    if (underscored !== apName) jointAliasCache.set(underscored, jointName);
+  }
+
+  // 3. Case-insensitive fallback for skeleton bones/CVs
+  const skeleton = getSkeletonHierarchy();
+  const lowerToCanonical = new Map<string, string>();
+  for (const name of skeleton.keys()) {
+    const lower = name.toLowerCase();
+    if (!lowerToCanonical.has(lower)) lowerToCanonical.set(lower, name);
+  }
+  // Only add case aliases for names not already in the alias map
+  for (const [lower, canonical] of lowerToCanonical) {
+    if (lower !== canonical && !jointAliasCache.has(lower)) {
+      jointAliasCache.set(lower, canonical);
+    }
+  }
+
+  console.log(`[mesh-converter] Built joint alias map: ${jointAliasCache.size} aliases`);
+  return jointAliasCache;
+}
+
+/** Resolve a joint name through the alias map. Returns canonical name or original if unknown. */
+function resolveJointName(name: string): string {
+  const skeleton = getSkeletonHierarchy();
+  if (skeleton.has(name)) return name;  // exact match — no alias needed
+  const aliases = getJointAliasMap();
+  // Try exact alias first, then case-insensitive
+  if (aliases.has(name)) return aliases.get(name)!;
+  const lower = name.toLowerCase();
+  if (aliases.has(lower)) return aliases.get(lower)!;
+  return name;  // unknown — keep original
 }
 
 /** Get attachment point name → parent joint name mapping from avatar_lad.xml */
@@ -129,9 +202,17 @@ function parseSkeletonXml(xml: string): Map<string, SkeletonJoint> {
         rot[0] = parts[0]; rot[1] = parts[1]; rot[2] = parts[2];
       }
     }
+    const scaleMatch = attrs.match(/\bscale="([^"]+)"/);
+    const scale: [number, number, number] = [1, 1, 1];
+    if (scaleMatch) {
+      const parts = scaleMatch[1].trim().split(/\s+/).map(Number);
+      if (parts.length >= 3) {
+        scale[0] = parts[0]; scale[1] = parts[1]; scale[2] = parts[2];
+      }
+    }
 
     const parentName = parentStack.length > 0 ? parentStack[parentStack.length - 1] : null;
-    joints.set(name, { name, parent: parentName, pos, rot, children: [], isCollisionVolume: tagName === 'collision_volume' });
+    joints.set(name, { name, parent: parentName, pos, rot, scale, children: [], isCollisionVolume: tagName === 'collision_volume' });
     if (parentName && joints.has(parentName)) {
       joints.get(parentName)!.children.push(name);
     }
@@ -144,32 +225,22 @@ function parseSkeletonXml(xml: string): Map<string, SkeletonJoint> {
   return joints;
 }
 
-// --- 4×4 matrix helpers (column-major) ---
+// =====================================================================
+// Matrix math — all stored as column-major flat arrays (glTF convention)
+// In column-major: index = col*4 + row
+// M[row][col] = flat[col*4 + row]
+// =====================================================================
 
-/**
- * Strip scale from the upper-3×3 of a column-major 4×4 matrix, preserving rotation and translation.
- * Matches Firestorm's skeleton approach: bone hierarchy uses pure rotation + translation (no scale).
- * IBMs in the skin accessor are unchanged — they handle scale via vertex skinning math.
- */
-function mat4NormalizeRotation(m: number[]): number[] {
-  const r = [...m];
-  // Normalize each column of the 3×3 rotation submatrix
-  for (let col = 0; col < 3; col++) {
-    const base = col * 4;
-    const len = Math.sqrt(r[base]*r[base] + r[base+1]*r[base+1] + r[base+2]*r[base+2]);
-    if (len > 1e-9) { r[base] /= len; r[base+1] /= len; r[base+2] /= len; }
-  }
-  return r;
-}
+const DEG_TO_RAD = Math.PI / 180;
 
 /** Multiply two column-major 4×4 matrices: result = A * B. */
 function mat4Mul(a: number[], b: number[]): number[] {
   const r = new Array(16).fill(0);
-  for (let c = 0; c < 4; c++) {
+  for (let col = 0; col < 4; col++) {
     for (let row = 0; row < 4; row++) {
       let sum = 0;
-      for (let k = 0; k < 4; k++) sum += a[k * 4 + row] * b[c * 4 + k];
-      r[c * 4 + row] = sum;
+      for (let k = 0; k < 4; k++) sum += a[k * 4 + row] * b[col * 4 + k];
+      r[col * 4 + row] = sum;
     }
   }
   return r;
@@ -177,60 +248,205 @@ function mat4Mul(a: number[], b: number[]): number[] {
 
 /** Invert a column-major 4×4 matrix (general, not just rigid-body). */
 function mat4Inverse(m: number[]): number[] | null {
-  const inv = new Array(16);
-  inv[0]  =  m[5]*m[10]*m[15] - m[5]*m[11]*m[14] - m[9]*m[6]*m[15] + m[9]*m[7]*m[14] + m[13]*m[6]*m[11] - m[13]*m[7]*m[10];
-  inv[4]  = -m[4]*m[10]*m[15] + m[4]*m[11]*m[14] + m[8]*m[6]*m[15] - m[8]*m[7]*m[14] - m[12]*m[6]*m[11] + m[12]*m[7]*m[10];
-  inv[8]  =  m[4]*m[9]*m[15]  - m[4]*m[11]*m[13] - m[8]*m[5]*m[15] + m[8]*m[7]*m[13] + m[12]*m[5]*m[11] - m[12]*m[7]*m[9];
-  inv[12] = -m[4]*m[9]*m[14]  + m[4]*m[10]*m[13] + m[8]*m[5]*m[14] - m[8]*m[6]*m[13] - m[12]*m[5]*m[10] + m[12]*m[6]*m[9];
-  inv[1]  = -m[1]*m[10]*m[15] + m[1]*m[11]*m[14] + m[9]*m[2]*m[15] - m[9]*m[3]*m[14] - m[13]*m[2]*m[11] + m[13]*m[3]*m[10];
-  inv[5]  =  m[0]*m[10]*m[15] - m[0]*m[11]*m[14] - m[8]*m[2]*m[15] + m[8]*m[3]*m[14] + m[12]*m[2]*m[11] - m[12]*m[3]*m[10];
-  inv[9]  = -m[0]*m[9]*m[15]  + m[0]*m[11]*m[13] + m[8]*m[1]*m[15] - m[8]*m[3]*m[13] - m[12]*m[1]*m[11] + m[12]*m[3]*m[9];
-  inv[13] =  m[0]*m[9]*m[14]  - m[0]*m[10]*m[13] - m[8]*m[1]*m[14] + m[8]*m[2]*m[13] + m[12]*m[1]*m[10] - m[12]*m[2]*m[9];
-  inv[2]  =  m[1]*m[6]*m[15]  - m[1]*m[7]*m[14]  - m[5]*m[2]*m[15] + m[5]*m[3]*m[14] + m[13]*m[2]*m[7]  - m[13]*m[3]*m[6];
-  inv[6]  = -m[0]*m[6]*m[15]  + m[0]*m[7]*m[14]  + m[4]*m[2]*m[15] - m[4]*m[3]*m[14] - m[12]*m[2]*m[7]  + m[12]*m[3]*m[6];
-  inv[10] =  m[0]*m[5]*m[15]  - m[0]*m[7]*m[13]  - m[4]*m[1]*m[15] + m[4]*m[3]*m[13] + m[12]*m[1]*m[7]  - m[12]*m[3]*m[5];
-  inv[14] = -m[0]*m[5]*m[14]  + m[0]*m[6]*m[13]  + m[4]*m[1]*m[14] - m[4]*m[2]*m[13] - m[12]*m[1]*m[6]  + m[12]*m[2]*m[5];
-  inv[3]  = -m[1]*m[6]*m[11]  + m[1]*m[7]*m[10]  + m[5]*m[2]*m[11] - m[5]*m[3]*m[10] - m[9]*m[2]*m[7]   + m[9]*m[3]*m[6];
-  inv[7]  =  m[0]*m[6]*m[11]  - m[0]*m[7]*m[10]  - m[4]*m[2]*m[11] + m[4]*m[3]*m[10] + m[8]*m[2]*m[7]   - m[8]*m[3]*m[6];
-  inv[11] = -m[0]*m[5]*m[11]  + m[0]*m[7]*m[9]   + m[4]*m[1]*m[11] - m[4]*m[3]*m[9]  - m[8]*m[1]*m[7]   + m[8]*m[3]*m[5];
-  inv[15] =  m[0]*m[5]*m[10]  - m[0]*m[6]*m[9]   - m[4]*m[1]*m[10] + m[4]*m[2]*m[9]  + m[8]*m[1]*m[6]   - m[8]*m[2]*m[5];
-  const det = m[0]*inv[0] + m[1]*inv[4] + m[2]*inv[8] + m[3]*inv[12];
+  // Column-major: m[col*4+row]
+  const m00 = m[0], m10 = m[1], m20 = m[2], m30 = m[3];
+  const m01 = m[4], m11 = m[5], m21 = m[6], m31 = m[7];
+  const m02 = m[8], m12 = m[9], m22 = m[10], m32 = m[11];
+  const m03 = m[12], m13 = m[13], m23 = m[14], m33 = m[15];
+
+  const b00 = m00*m11 - m01*m10, b01 = m00*m12 - m02*m10;
+  const b02 = m00*m13 - m03*m10, b03 = m01*m12 - m02*m11;
+  const b04 = m01*m13 - m03*m11, b05 = m02*m13 - m03*m12;
+  const b06 = m20*m31 - m21*m30, b07 = m20*m32 - m22*m30;
+  const b08 = m20*m33 - m23*m30, b09 = m21*m32 - m22*m31;
+  const b10 = m21*m33 - m23*m31, b11 = m22*m33 - m23*m32;
+  const det = b00*b11 - b01*b10 + b02*b09 + b03*b08 - b04*b07 + b05*b06;
   if (Math.abs(det) < 1e-12) return null;
-  const invDet = 1.0 / det;
-  for (let i = 0; i < 16; i++) inv[i] *= invDet;
-  return inv;
-}
-
-// --- SL↔Godot coordinate transform for 4×4 inverse bind matrices ---
-
-function transformInverseBindMatrix(slRowMajor: number[]): number[] {
-  // Input: 16 floats from SL row-major IBM: m[row*4+col] = M[row][col]
-  //   (.all() returns raw LLSD bytes which are SL row-major)
-  //
-  // Output: column-major for glTF, representing R * M^T * R^T
-  //   M^T: SL uses row-vector convention (v * M), glTF uses column-vector (M * v),
-  //         so the IBM must be transposed.
-  //   R:   SL→Godot coordinate transform (x,y,z)→(x,z,-y)
-  //        R = [[1,0,0,0],[0,0,1,0],[0,-1,0,0],[0,0,0,1]]
-  //
-  // Derivation: v_joint_godot = R * IBM_sl^T * R^T * v_bind_godot
-  //   so IBM_gltf = R * M^T * R^T
-  //
-  // Row-major result of R * M^T * R^T (where M^T[i][j] = M[j][i] = m[j*4+i]):
-  //   Row 0: m[0],  m[8],  -m[4],  m[12]
-  //   Row 1: m[2],  m[10], -m[6],  m[14]
-  //   Row 2: -m[1], -m[9],  m[5],  -m[13]
-  //   Row 3: m[3],  m[11], -m[7],  m[15]
-
-  const m = slRowMajor;
-  // Column-major output (read columns top-to-bottom from the row-major result)
+  const id = 1 / det;
   return [
-    m[0],   m[2],  -m[1],   m[3],   // col 0
-    m[8],   m[10], -m[9],   m[11],  // col 1
-   -m[4],  -m[6],   m[5],  -m[7],   // col 2
-    m[12],  m[14], -m[13],  m[15],  // col 3
+    ( m11*b11 - m12*b10 + m13*b09)*id, (-m10*b11 + m12*b08 - m13*b07)*id,
+    ( m10*b10 - m11*b08 + m13*b06)*id, (-m10*b09 + m11*b07 - m12*b06)*id,
+    (-m01*b11 + m02*b10 - m03*b09)*id, ( m00*b11 - m02*b08 + m03*b07)*id,
+    (-m00*b10 + m01*b08 - m03*b06)*id, ( m00*b09 - m01*b07 + m02*b06)*id,
+    ( m31*b05 - m32*b04 + m33*b03)*id, (-m30*b05 + m32*b02 - m33*b01)*id,
+    ( m30*b04 - m31*b02 + m33*b00)*id, (-m30*b03 + m31*b01 - m32*b00)*id,
+    (-m21*b05 + m22*b04 - m23*b03)*id, ( m20*b05 - m22*b02 + m23*b01)*id,
+    (-m20*b04 + m21*b02 - m23*b00)*id, ( m20*b03 - m21*b01 + m22*b00)*id,
   ];
 }
+
+function mat4FromTranslation(tx: number, ty: number, tz: number): number[] {
+  return [1,0,0,0, 0,1,0,0, 0,0,1,0, tx,ty,tz,1];
+}
+
+/**
+ * Compose a TRS matrix from scale, Euler angles (radians, sxyz convention), and translation.
+ * Result is column-major. Matches Python transformations.compose_matrix(scale, angles, translate).
+ * M = T * R * S, where R = Rz(az) * Ry(ay) * Rx(ax).
+ */
+function composeMatrix(
+  scale: [number, number, number],
+  eulerRad: [number, number, number],
+  translate: [number, number, number],
+): number[] {
+  const [ax, ay, az] = eulerRad;
+  const [sx, sy, sz] = scale;
+  const [tx, ty, tz] = translate;
+
+  const ca = Math.cos(ax), sa = Math.sin(ax);
+  const cb = Math.cos(ay), sb = Math.sin(ay);
+  const cc = Math.cos(az), sc = Math.sin(az);
+
+  // R = Rz * Ry * Rx (3x3 rotation)
+  const r00 = cc * cb;
+  const r10 = sc * cb;
+  const r20 = -sb;
+  const r01 = cc * sb * sa - sc * ca;
+  const r11 = sc * sb * sa + cc * ca;
+  const r21 = cb * sa;
+  const r02 = cc * sb * ca + sc * sa;
+  const r12 = sc * sb * ca - cc * sa;
+  const r22 = cb * ca;
+
+  // TRS in column-major: col0 = S*R col0, col1 = S*R col1, col2 = S*R col2, col3 = T
+  return [
+    r00 * sx, r10 * sx, r20 * sx, 0,
+    r01 * sy, r11 * sy, r21 * sy, 0,
+    r02 * sz, r12 * sz, r22 * sz, 0,
+    tx, ty, tz, 1,
+  ];
+}
+
+/**
+ * Apply coordinate change: SL → glTF via similarity transform C * M * C^(-1).
+ * C maps (x,y,z) → (x,z,-y), i.e. a -90° rotation about X.
+ * Works on column-major matrices.
+ */
+function slToGltfMatrix(m: number[]): number[] {
+  // Step 1: Right-multiply by C^(-1): swap columns 1↔2 with negation on new col 2
+  const afterCol = [
+    m[0], m[1], m[2], m[3],       // col 0 unchanged
+    m[8], m[9], m[10], m[11],     // col 1 ← old col 2
+    -m[4], -m[5], -m[6], -m[7],  // col 2 ← -old col 1
+    m[12], m[13], m[14], m[15],   // col 3 unchanged
+  ];
+  // Step 2: Left-multiply by C: swap rows 1↔2 with negation on new row 2
+  const result = new Array(16);
+  for (let col = 0; col < 4; col++) {
+    const b = col * 4;
+    result[b + 0] = afterCol[b + 0];   // row 0 unchanged
+    result[b + 1] = afterCol[b + 2];   // row 1 ← old row 2
+    result[b + 2] = -afterCol[b + 1];  // row 2 ← -old row 1
+    result[b + 3] = afterCol[b + 3];   // row 3 unchanged
+  }
+  return result;
+}
+
+/** Convert an SL vector to glTF: (x,y,z) → (x,z,-y) */
+function slToGltfVec3(x: number, y: number, z: number): [number, number, number] {
+  return [x, z, -y];
+}
+
+function vec3Dist(a: [number, number, number], b: [number, number, number]): number {
+  const dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+function normalizeVec3(x: number, y: number, z: number): [number, number, number] {
+  const len = Math.sqrt(x * x + y * y + z * z);
+  if (len < 1e-10) return [x, y, z];
+  return [x / len, y / len, z / len];
+}
+
+/**
+ * Split a joint matrix into translation-only (for glTF node) and scale+rotation fixup.
+ * Matches Hippolyzer's _fix_blender_joint().
+ *
+ * Blender doesn't handle bone scale/rotation correctly with glTF IBMs, so we move
+ * scale+rotation out of the node and bake it into the inverse bind matrices.
+ */
+function blenderFixJoint(mat: number[]): { translationOnly: number[]; fixup: number[] } {
+  const tx = mat[12], ty = mat[13], tz = mat[14];
+  const translationOnly = mat4FromTranslation(tx, ty, tz);
+  const invT = mat4FromTranslation(-tx, -ty, -tz);
+  const fixup = mat4Mul(invT, mat);
+  return { translationOnly, fixup };
+}
+
+/**
+ * Apply BSM to vertex position (column-vector convention: v' = BSM * v).
+ * BSM is column-major from node-metaverse (.all()).
+ */
+function applyBSM(
+  px: number, py: number, pz: number, bsm: number[]
+): [number, number, number] {
+  return [
+    bsm[0]*px + bsm[4]*py + bsm[8]*pz + bsm[12],
+    bsm[1]*px + bsm[5]*py + bsm[9]*pz + bsm[13],
+    bsm[2]*px + bsm[6]*py + bsm[10]*pz + bsm[14],
+  ];
+}
+
+/**
+ * Transform a normal by the inverse-transpose of the upper 3x3 of BSM.
+ * For correct normal transformation under non-uniform scale.
+ * invT3x3 is row-major 3x3 (9 floats) from computeInvTranspose3x3.
+ */
+function applyBSMNormal(
+  nx: number, ny: number, nz: number, invT3x3: number[]
+): [number, number, number] {
+  const ox = invT3x3[0]*nx + invT3x3[1]*ny + invT3x3[2]*nz;
+  const oy = invT3x3[3]*nx + invT3x3[4]*ny + invT3x3[5]*nz;
+  const oz = invT3x3[6]*nx + invT3x3[7]*ny + invT3x3[8]*nz;
+  return normalizeVec3(ox, oy, oz);
+}
+
+/**
+ * Compute the inverse-transpose of the upper 3x3 of a column-major 4x4 matrix.
+ * Returns row-major 3x3 (9 floats) for applyBSMNormal.
+ */
+function computeInvTranspose3x3(m: number[]): number[] {
+  // Extract upper 3x3 from column-major (row, col)
+  const a = m[0], b = m[4], c = m[8];
+  const d = m[1], e = m[5], f = m[9];
+  const g = m[2], h = m[6], i = m[10];
+
+  const det = a*(e*i - f*h) - b*(d*i - f*g) + c*(d*h - e*g);
+  if (Math.abs(det) < 1e-12) return [1,0,0, 0,1,0, 0,0,1];
+  const id = 1 / det;
+
+  // inverse-transpose = cofactor matrix / det
+  return [
+    (e*i - f*h)*id, (d*i - f*g)*(-id), (d*h - e*g)*id,
+    (b*i - c*h)*(-id), (a*i - c*g)*id, (a*h - b*g)*(-id),
+    (b*f - c*e)*id, (a*f - c*d)*(-id), (a*e - b*d)*id,
+  ];
+}
+
+/**
+ * Compute joint's local TRS matrix in SL space (column-major).
+ * Matches Hippolyzer's JointNode.matrix property:
+ *   compose_matrix(scale=scale, angles=rotation/RAD_TO_DEG, translate=translation)
+ */
+function jointMatrix(joint: SkeletonJoint): number[] {
+  return composeMatrix(
+    joint.scale,
+    [joint.rot[0] * DEG_TO_RAD, joint.rot[1] * DEG_TO_RAD, joint.rot[2] * DEG_TO_RAD],
+    joint.pos,
+  );
+}
+
+// --- Blender-compat joint context ---
+
+interface JointContext {
+  nodeIdx: number;
+  /** Original joint matrix in SL space (column-major) */
+  origMatrix: number[];
+  /** Fixup matrix (scale+rotation) to bake into IBMs (SL space, column-major) */
+  fixupMatrix: number[];
+}
+
+// --- Cache / meta functions ---
 
 function getCacheDir(): string {
   return path.join(app.getPath('userData'), 'asset-cache', 'meshes');
@@ -238,10 +454,6 @@ function getCacheDir(): string {
 
 export function meshCachePath(meshUuid: string): string {
   return path.join(getCacheDir(), `${meshUuid}.glb`);
-}
-
-export function staticMeshCachePath(meshUuid: string): string {
-  return path.join(getCacheDir(), `${meshUuid}.static.glb`);
 }
 
 export function isMeshCached(meshUuid: string): boolean {
@@ -254,15 +466,11 @@ function metaPath(meshUuid: string): string {
 
 /** Read persisted rigged/jointNames info for a cached mesh.
  *  Falls back to scanning the GLB JSON chunk for "skins" if no .meta file exists. */
-export function readMeshMeta(meshUuid: string): { isRigged: boolean; jointNames?: string[]; staticCachePath?: string } | undefined {
-  // Check for static GLB (rigged mesh without BSM, for non-animesh display)
-  const staticPath = staticMeshCachePath(meshUuid);
-  const hasStatic = fs.existsSync(staticPath);
-
+export function readMeshMeta(meshUuid: string): { isRigged: boolean; jointNames?: string[]; jointOverrides?: string[] } | undefined {
   // Fast path: .meta sidecar exists
   try {
     const data = JSON.parse(fs.readFileSync(metaPath(meshUuid), 'utf8'));
-    return { isRigged: !!data.isRigged, jointNames: data.jointNames, staticCachePath: hasStatic ? staticPath : undefined };
+    return { isRigged: !!data.isRigged, jointNames: data.jointNames, jointOverrides: data.jointOverrides };
   } catch { /* no meta file — fall through to GLB scan */ }
 
   // Fallback: scan GLB JSON chunk for "skins" (handles meshes cached before meta was added)
@@ -294,57 +502,63 @@ export function readMeshMeta(meshUuid: string): { isRigged: boolean; jointNames?
 
 export interface MeshConvertResult {
   cachePath: string;
-  staticCachePath?: string; // GLB without BSM (for non-animesh static display)
   isRigged: boolean;
   jointNames?: string[];
+  jointOverrides?: string[];
+}
+
+/** Compute which joints have alt IBM overrides (custom skeleton positions). */
+function getJointOverrides(skin: LLSkin | undefined): string[] | undefined {
+  if (!skin || !skin.altInverseBindMatrix || skin.altInverseBindMatrix.length === 0) return undefined;
+  const skeleton = getSkeletonHierarchy();
+  const overrides: string[] = [];
+  for (let i = 0; i < skin.jointNames.length; i++) {
+    if (i >= skin.altInverseBindMatrix.length) break;
+    if (skeleton.has(skin.jointNames[i])) {
+      overrides.push(skin.jointNames[i]);
+    }
+  }
+  return overrides.length > 0 ? overrides : undefined;
+}
+
+function buildMeshMeta(mesh: LLMesh): { isRigged: boolean; jointNames?: string[]; jointOverrides?: string[] } {
+  const isRigged = !!(mesh.skin && mesh.skin.jointNames.length > 0);
+  return {
+    isRigged,
+    jointNames: mesh.skin?.jointNames,
+    jointOverrides: getJointOverrides(mesh.skin),
+  };
 }
 
 export async function ensureMeshCached(meshUuid: string, mesh: LLMesh): Promise<MeshConvertResult> {
   const cachePath = meshCachePath(meshUuid);
-  const isRigged = !!(mesh.skin && mesh.skin.jointNames.length > 0);
-  const hasBsm = isRigged && !!mesh.skin?.bindShapeMatrix && !isBsmIdentity(mesh.skin.bindShapeMatrix.all());
-  const staticPath = hasBsm ? staticMeshCachePath(meshUuid) : undefined;
+  const meta = buildMeshMeta(mesh);
 
   if (fs.existsSync(cachePath)) {
-    // Generate static GLB if missing (rigged mesh with non-identity BSM)
-    if (staticPath && !fs.existsSync(staticPath)) {
-      const staticGlb = llMeshToGlb(mesh, { skipBsm: true });
-      if (staticGlb) fs.writeFileSync(staticPath, staticGlb);
-    }
     // Persist meta if missing
-    if (!fs.existsSync(metaPath(meshUuid)) && isRigged) {
-      try { fs.writeFileSync(metaPath(meshUuid), JSON.stringify({ isRigged, jointNames: mesh.skin?.jointNames })); } catch { /* ignore */ }
+    if (!fs.existsSync(metaPath(meshUuid)) && meta.isRigged) {
+      try { fs.writeFileSync(metaPath(meshUuid), JSON.stringify(meta)); } catch { /* ignore */ }
     }
-    return { cachePath, staticCachePath: staticPath, isRigged, jointNames: mesh.skin?.jointNames };
+    return { cachePath, ...meta };
   }
 
-  // Generate full BSM GLB (for animesh)
   const glb = llMeshToGlb(mesh);
   if (!glb) throw new Error(`Failed to convert mesh ${meshUuid} to GLB`);
 
   fs.mkdirSync(path.dirname(cachePath), { recursive: true });
   fs.writeFileSync(cachePath, glb);
 
-  // Generate static GLB without BSM (for non-animesh display)
-  if (staticPath) {
-    const staticGlb = llMeshToGlb(mesh, { skipBsm: true });
-    if (staticGlb) fs.writeFileSync(staticPath, staticGlb);
+  if (meta.isRigged) {
+    try { fs.writeFileSync(metaPath(meshUuid), JSON.stringify(meta)); } catch { /* ignore */ }
   }
-
-  if (isRigged) {
-    try { fs.writeFileSync(metaPath(meshUuid), JSON.stringify({ isRigged, jointNames: mesh.skin?.jointNames })); } catch { /* ignore */ }
-  }
-  return { cachePath, staticCachePath: staticPath, isRigged, jointNames: mesh.skin?.jointNames };
+  return { cachePath, ...meta };
 }
 
-function isBsmIdentity(raw: number[]): boolean {
-  return raw[0] === 1 && raw[5] === 1 && raw[10] === 1 && raw[15] === 1 &&
-    raw[1] === 0 && raw[2] === 0 && raw[3] === 0 && raw[4] === 0 &&
-    raw[6] === 0 && raw[7] === 0 && raw[8] === 0 && raw[9] === 0 &&
-    raw[11] === 0 && raw[12] === 0 && raw[13] === 0 && raw[14] === 0;
-}
+// =====================================================================
+// Main GLB conversion — matches Hippolyzer's gltftools.py approach
+// =====================================================================
 
-export function llMeshToGlb(mesh: LLMesh, opts?: { skipBsm?: boolean }): Buffer | null {
+export function llMeshToGlb(mesh: LLMesh): Buffer | null {
   // Pick best available LOD
   let submeshes: LLSubMesh[] | undefined;
   for (const lod of LOD_PREFERENCE) {
@@ -356,41 +570,25 @@ export function llMeshToGlb(mesh: LLMesh, opts?: { skipBsm?: boolean }): Buffer 
   }
   if (!submeshes || submeshes.length === 0) return null;
 
-  // Extract bind shape matrix for rigged meshes — bake into vertex positions
-  // skipBsm: for non-animesh static display, SL uses raw mesh-space vertices (no BSM)
-  let bsm: number[] | null = null;
-  let bsmNormal: number[] | null = null; // inverse-transpose of BSM upper-3x3 (for normals)
-  if (!opts?.skipBsm && mesh.skin?.bindShapeMatrix) {
-    const raw = mesh.skin.bindShapeMatrix.all();
-    const isId = raw[0] === 1 && raw[5] === 1 && raw[10] === 1 && raw[15] === 1 &&
-      raw[1] === 0 && raw[2] === 0 && raw[3] === 0 && raw[4] === 0 &&
-      raw[6] === 0 && raw[7] === 0 && raw[8] === 0 && raw[9] === 0 &&
-      raw[11] === 0 && raw[12] === 0 && raw[13] === 0 && raw[14] === 0;
-    if (!isId) {
-      bsm = raw;
-      // SL uses transpose(inverse(BSM)) for normals (llface.cpp:1601-1602).
-      // Compute inverse-transpose of BSM's upper-3x3 (row-major).
-      // BSM row-major: [r*4+c] = M[row][col]
-      const a = raw[0], b = raw[1], c = raw[2];
-      const d = raw[4], e = raw[5], f = raw[6];
-      const g = raw[8], h = raw[9], k = raw[10];
-      const det = a*(e*k - f*h) - b*(d*k - f*g) + c*(d*h - e*g);
-      if (Math.abs(det) > 1e-12) {
-        const id = 1 / det;
-        // inverse of 3x3 (row-major), then transpose = inverse-transpose (row-major)
-        // inv[i][j] = cofactor(j,i) / det, then transpose swaps i,j back
-        // So invT[i][j] = cofactor(i,j) / det
-        bsmNormal = [
-          (e*k - f*h) * id, (d*k - f*g) * -id, (d*h - e*g) * id,  0,
-          (b*k - c*h) * -id, (a*k - c*g) * id, (a*h - b*g) * -id,  0,
-          (b*f - c*e) * id, (a*f - c*d) * -id, (a*e - b*d) * id,  0,
-          0, 0, 0, 0,
-        ];
-      }
-    }
+  const skin = mesh.skin;
+  const isRigged = !!(skin && skin.jointNames.length > 0 &&
+    submeshes.some(s => s.weights && s.weights.length > 0));
+  const jointNames: string[] = isRigged ? skin!.jointNames : [];
+
+  // --- BSM extraction (column-major from node-metaverse) ---
+  const bsmColMaj: number[] | null = (isRigged && skin?.bindShapeMatrix)
+    ? skin.bindShapeMatrix.all() : null;
+  const bsmIsIdentity = !bsmColMaj || bsmColMaj.every(
+    (v: number, i: number) => Math.abs(v - (i % 5 === 0 ? 1 : 0)) < 1e-6
+  );
+
+  // Precompute BSM inverse-transpose for normals
+  let bsmInvT3x3: number[] | null = null;
+  if (bsmColMaj && !bsmIsIdentity) {
+    bsmInvT3x3 = computeInvTranspose3x3(bsmColMaj);
   }
 
-  // Collect binary data and glTF descriptors
+  // === Build geometry ===
   const bufferParts: Buffer[] = [];
   const bufferViews: any[] = [];
   const accessors: any[] = [];
@@ -398,10 +596,8 @@ export function llMeshToGlb(mesh: LLMesh, opts?: { skipBsm?: boolean }): Buffer 
   let byteOffset = 0;
 
   for (const sub of submeshes) {
-    if (sub.noGeometry || !sub.position || sub.position.length === 0
-      || !sub.triangleList || sub.triangleList.length === 0) {
-      continue;
-    }
+    if (sub.noGeometry || !sub.position || sub.position.length === 0 ||
+        !sub.triangleList || sub.triangleList.length === 0) continue;
 
     const vertCount = sub.position.length;
     const idxCount = sub.triangleList.length;
@@ -409,23 +605,17 @@ export function llMeshToGlb(mesh: LLMesh, opts?: { skipBsm?: boolean }): Buffer 
     const hasUVs = sub.texCoord0 && sub.texCoord0.length === vertCount;
     const attributes: Record<string, number> = {};
 
-    // --- Positions (vec3 float32) ---
-    // Apply bind shape matrix (if rigged), then SL (x,y,z) → Godot (x,z,-y)
+    // --- Positions: bake BSM (SL space) then coord swap to glTF ---
     const posBuf = Buffer.alloc(vertCount * 12);
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
     for (let i = 0; i < vertCount; i++) {
       const p = sub.position[i];
       let sx = p.x, sy = p.y, sz = p.z;
-      if (bsm) {
-        // Row-vector multiply: [x,y,z,1] * BSM
-        sx = p.x * bsm[0] + p.y * bsm[4] + p.z * bsm[8]  + bsm[12];
-        sy = p.x * bsm[1] + p.y * bsm[5] + p.z * bsm[9]  + bsm[13];
-        sz = p.x * bsm[2] + p.y * bsm[6] + p.z * bsm[10] + bsm[14];
+      if (bsmColMaj && !bsmIsIdentity) {
+        [sx, sy, sz] = applyBSM(p.x, p.y, p.z, bsmColMaj);
       }
-      const gx = sx;
-      const gy = sz;
-      const gz = -sy;
+      const [gx, gy, gz] = slToGltfVec3(sx, sy, sz);
       posBuf.writeFloatLE(gx, i * 12);
       posBuf.writeFloatLE(gy, i * 12 + 4);
       posBuf.writeFloatLE(gz, i * 12 + 8);
@@ -433,10 +623,9 @@ export function llMeshToGlb(mesh: LLMesh, opts?: { skipBsm?: boolean }): Buffer 
       if (gy < minY) minY = gy; if (gy > maxY) maxY = gy;
       if (gz < minZ) minZ = gz; if (gz > maxZ) maxZ = gz;
     }
-
     bufferViews.push({ buffer: 0, byteOffset, byteLength: posBuf.length });
     accessors.push({
-      bufferView: bufferViews.length - 1, componentType: 5126 /* FLOAT */,
+      bufferView: bufferViews.length - 1, componentType: 5126,
       count: vertCount, type: 'VEC3',
       min: [minX, minY, minZ], max: [maxX, maxY, maxZ],
     });
@@ -444,404 +633,341 @@ export function llMeshToGlb(mesh: LLMesh, opts?: { skipBsm?: boolean }): Buffer 
     bufferParts.push(posBuf);
     byteOffset += posBuf.length;
 
-    // --- Normals (vec3 float32) ---
+    // --- Normals: BSM inverse-transpose then coord swap ---
     if (hasNormals) {
       const nrmBuf = Buffer.alloc(vertCount * 12);
       for (let i = 0; i < vertCount; i++) {
         const n = sub.normal![i];
         let nx = n.x, ny = n.y, nz = n.z;
-        if (bsmNormal) {
-          // SL uses transpose(inverse(BSM)) for normals (llface.cpp:1601).
-          // Row-vector multiply: [nx,ny,nz] * invT_3x3
-          nx = n.x * bsmNormal[0] + n.y * bsmNormal[4] + n.z * bsmNormal[8];
-          ny = n.x * bsmNormal[1] + n.y * bsmNormal[5] + n.z * bsmNormal[9];
-          nz = n.x * bsmNormal[2] + n.y * bsmNormal[6] + n.z * bsmNormal[10];
-          const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
-          if (len > 0) { nx /= len; ny /= len; nz /= len; }
-        } else if (bsm) {
-          // Identity inverse-transpose (det was zero?) — use BSM directly as fallback
-          nx = n.x * bsm[0] + n.y * bsm[4] + n.z * bsm[8];
-          ny = n.x * bsm[1] + n.y * bsm[5] + n.z * bsm[9];
-          nz = n.x * bsm[2] + n.y * bsm[6] + n.z * bsm[10];
-          const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
-          if (len > 0) { nx /= len; ny /= len; nz /= len; }
+        if (bsmInvT3x3) {
+          [nx, ny, nz] = applyBSMNormal(n.x, n.y, n.z, bsmInvT3x3);
         }
-        nrmBuf.writeFloatLE(nx, i * 12);
-        nrmBuf.writeFloatLE(nz, i * 12 + 4);
-        nrmBuf.writeFloatLE(-ny, i * 12 + 8);
+        const [gx, gy, gz] = slToGltfVec3(nx, ny, nz);
+        nrmBuf.writeFloatLE(gx, i * 12);
+        nrmBuf.writeFloatLE(gy, i * 12 + 4);
+        nrmBuf.writeFloatLE(gz, i * 12 + 8);
       }
       bufferViews.push({ buffer: 0, byteOffset, byteLength: nrmBuf.length });
-      accessors.push({
-        bufferView: bufferViews.length - 1, componentType: 5126,
-        count: vertCount, type: 'VEC3',
-      });
+      accessors.push({ bufferView: bufferViews.length - 1, componentType: 5126, count: vertCount, type: 'VEC3' });
       attributes['NORMAL'] = accessors.length - 1;
       bufferParts.push(nrmBuf);
       byteOffset += nrmBuf.length;
     }
 
-    // --- UVs (vec2 float32) ---
+    // --- UVs: [u, -v] (Hippolyzer convention) ---
     if (hasUVs) {
       const uvBuf = Buffer.alloc(vertCount * 8);
       for (let i = 0; i < vertCount; i++) {
         const uv = sub.texCoord0![i];
         uvBuf.writeFloatLE(uv.x, i * 8);
-        uvBuf.writeFloatLE(1.0 - uv.y, i * 8 + 4); // flip V for glTF
+        uvBuf.writeFloatLE(-uv.y, i * 8 + 4);
       }
       bufferViews.push({ buffer: 0, byteOffset, byteLength: uvBuf.length });
-      accessors.push({
-        bufferView: bufferViews.length - 1, componentType: 5126,
-        count: vertCount, type: 'VEC2',
-      });
+      accessors.push({ bufferView: bufferViews.length - 1, componentType: 5126, count: vertCount, type: 'VEC2' });
       attributes['TEXCOORD_0'] = accessors.length - 1;
       bufferParts.push(uvBuf);
       byteOffset += uvBuf.length;
     }
 
+    // --- Joints & Weights (inline with geometry, Hippolyzer ordering) ---
+    if (isRigged && sub.weights && sub.weights.length === vertCount) {
+      const jointsBuf = Buffer.alloc(vertCount * 4);
+      const weightsBuf = Buffer.alloc(vertCount * 16);
+      for (let v = 0; v < vertCount; v++) {
+        const w = sub.weights![v];
+        const entries = Object.entries(w);
+        // Re-normalize weights (Hippolyzer does this for quantization error correction)
+        let totalRaw = 0;
+        for (const [, raw] of entries) totalRaw += raw as number;
+        for (let slot = 0; slot < 4; slot++) {
+          if (slot < entries.length) {
+            const [ji, raw] = entries[slot];
+            jointsBuf.writeUInt8(Math.min(parseInt(ji, 10), 255), v * 4 + slot);
+            weightsBuf.writeFloatLE(totalRaw > 0 ? (raw as number) / totalRaw : 0, v * 16 + slot * 4);
+          } else {
+            jointsBuf.writeUInt8(0, v * 4 + slot);
+            weightsBuf.writeFloatLE(0, v * 16 + slot * 4);
+          }
+        }
+      }
+      bufferViews.push({ buffer: 0, byteOffset, byteLength: jointsBuf.length });
+      accessors.push({ bufferView: bufferViews.length - 1, componentType: 5121, count: vertCount, type: 'VEC4' });
+      attributes['JOINTS_0'] = accessors.length - 1;
+      bufferParts.push(jointsBuf);
+      byteOffset += jointsBuf.length;
+
+      bufferViews.push({ buffer: 0, byteOffset, byteLength: weightsBuf.length });
+      accessors.push({ bufferView: bufferViews.length - 1, componentType: 5126, count: vertCount, type: 'VEC4' });
+      attributes['WEIGHTS_0'] = accessors.length - 1;
+      bufferParts.push(weightsBuf);
+      byteOffset += weightsBuf.length;
+    }
+
     // --- Indices ---
-    // SL→Godot is a det=+1 rotation (90° around X), so winding is preserved
     const useUint32 = vertCount > 65535;
     const idxByteSize = useUint32 ? 4 : 2;
     const idxBuf = Buffer.alloc(idxCount * idxByteSize);
-    for (let i = 0; i < idxCount; i += 3) {
-      const a = sub.triangleList[i];
-      const b = sub.triangleList[i + 1];
-      const c = sub.triangleList[i + 2];
-      if (useUint32) {
-        idxBuf.writeUInt32LE(a, i * 4);
-        idxBuf.writeUInt32LE(b, (i + 1) * 4);
-        idxBuf.writeUInt32LE(c, (i + 2) * 4);
-      } else {
-        idxBuf.writeUInt16LE(a, i * 2);
-        idxBuf.writeUInt16LE(b, (i + 1) * 2);
-        idxBuf.writeUInt16LE(c, (i + 2) * 2);
-      }
+    for (let i = 0; i < idxCount; i++) {
+      if (useUint32) idxBuf.writeUInt32LE(sub.triangleList[i], i * 4);
+      else idxBuf.writeUInt16LE(sub.triangleList[i], i * 2);
     }
-
-    // Pad to 4-byte alignment for next buffer view
     const idxPadding = (4 - (idxBuf.length % 4)) % 4;
-    const idxAligned = idxPadding > 0
-      ? Buffer.concat([idxBuf, Buffer.alloc(idxPadding)])
-      : idxBuf;
-
+    const idxAligned = idxPadding > 0 ? Buffer.concat([idxBuf, Buffer.alloc(idxPadding)]) : idxBuf;
     bufferViews.push({ buffer: 0, byteOffset, byteLength: idxBuf.length });
     accessors.push({
       bufferView: bufferViews.length - 1,
-      componentType: useUint32 ? 5125 /* UNSIGNED_INT */ : 5123 /* UNSIGNED_SHORT */,
+      componentType: useUint32 ? 5125 : 5123,
       count: idxCount, type: 'SCALAR',
     });
 
-    primitives.push({ attributes, indices: accessors.length - 1 });
+    primitives.push({ attributes, indices: accessors.length - 1, mode: 4 });
     bufferParts.push(idxAligned);
     byteOffset += idxAligned.length;
   }
 
   if (primitives.length === 0) return null;
 
-  // --- Skin / skeleton data for rigged meshes ---
-  // Skip skin/skeleton entirely for static GLB (no BSM = no skinning needed)
-  const skin = opts?.skipBsm ? null : mesh.skin;
-  const isRigged = skin && skin.jointNames.length > 0 &&
-    submeshes!.some(s => s.weights && s.weights.length > 0);
-
-  const nodes: any[] = [{ mesh: 0 }]; // node 0 = mesh node
+  // === Build skeleton & skin (Hippolyzer approach) ===
+  // node 0 = mesh, node 1 = Armature (if rigged)
+  const nodes: any[] = [{ mesh: 0 }];
+  const sceneNodes = [0];
   let skinObj: any = undefined;
 
   if (isRigged) {
     const skeleton = getSkeletonHierarchy();
-    const jointNames = skin!.jointNames;
-
-    // Resolve attachment point names to their parent bones
     const attachPoints = getAttachmentPoints();
 
-    // Collect all joints used by this mesh + ancestors up to root
-    const usedJoints = new Set<string>(jointNames);
-    usedJoints.add('mPelvis'); // Ensure present as fallback
-    for (const jn of jointNames) {
-      let cur = jn;
-      // If this is an attachment point, ensure its parent bone is included
-      if (!skeleton.has(cur) && attachPoints.has(cur)) {
-        cur = attachPoints.get(cur)!;
-        usedJoints.add(cur);
+    // Resolve joint aliases
+    const rawJointNames = skin!.jointNames;
+    const resolvedSet = new Set<string>();
+    const resolvedJointNames = rawJointNames.map((name) => {
+      const resolved = resolveJointName(name);
+      if (resolved !== name && (rawJointNames.includes(resolved) || resolvedSet.has(resolved))) {
+        resolvedSet.add(name);
+        return name;
       }
-      while (cur && skeleton.has(cur)) {
-        usedJoints.add(cur);
-        const parent = skeleton.get(cur)!.parent;
-        if (!parent) break;
-        cur = parent;
+      resolvedSet.add(resolved);
+      return resolved;
+    });
+
+    // Armature node (scene root for skeleton)
+    const armatureIdx = 1;
+    nodes.push({ name: 'Armature', children: [] as number[] });
+    sceneNodes.push(armatureIdx);
+
+    // --- alt_inverse_bind_matrix overrides ---
+    const jointOverrides = new Map<string, number[]>();
+    if (skin!.altInverseBindMatrix && skin!.altInverseBindMatrix.length > 0) {
+      for (let i = 0; i < resolvedJointNames.length; i++) {
+        if (i < skin!.altInverseBindMatrix.length) {
+          jointOverrides.set(resolvedJointNames[i], skin!.altInverseBindMatrix[i].all());
+        }
       }
     }
 
-    // Build ordered list: topological order (parents before children)
-    // Process standard bones first, then orphaned (custom names not in XML),
-    // so orphaned bones always come after their inferred parents.
+    // --- Collect required joints (skin joints + ancestors to root) ---
+    const requiredJoints = new Set<string>();
+    for (const jname of resolvedJointNames) {
+      let current: string | null = jname;
+      while (current) {
+        requiredJoints.add(current);
+        const sj = skeleton.get(current);
+        current = sj?.parent ?? null;
+      }
+      // If this is an attachment point, also include its parent bone chain
+      if (!skeleton.has(jname) && attachPoints.has(jname)) {
+        let cur: string | null = attachPoints.get(jname)!;
+        while (cur) {
+          requiredJoints.add(cur);
+          const sj = skeleton.get(cur);
+          cur = sj?.parent ?? null;
+        }
+      }
+    }
+
+    // --- Build joint nodes with Blender compat ---
+    const jointContexts = new Map<string, JointContext>();
+    const jointNodeIdxMap = new Map<string, number>();
     const orderedJoints: string[] = [];
-    const visited = new Set<string>();
-    function visit(name: string): void {
-      if (visited.has(name) || !usedJoints.has(name)) return;
-      const sj = skeleton.get(name);
-      if (sj?.parent && usedJoints.has(sj.parent)) visit(sj.parent);
-      visited.add(name);
+
+    const visitJoint = (name: string): void => {
+      if (!requiredJoints.has(name) || jointNodeIdxMap.has(name)) return;
+
+      const skelJoint = skeleton.get(name);
+      if (!skelJoint) return;
+
+      // Visit parent first (topological order)
+      if (skelJoint.parent && requiredJoints.has(skelJoint.parent)) {
+        visitJoint(skelJoint.parent);
+      }
+
+      // Compute joint's local TRS matrix in SL space
+      let jMat = jointMatrix(skelJoint);
+
+      // Apply alt_inverse_bind_matrix translation override (Hippolyzer approach)
+      const override = jointOverrides.get(name);
+      if (override) {
+        // Extract translation from the override matrix (column-major: indices 12,13,14)
+        const overrideTrans: [number, number, number] = [override[12], override[13], override[14]];
+        // Only apply if difference > 0.1mm (Hippolyzer threshold: 0.0001)
+        if (vec3Dist(overrideTrans, skelJoint.pos) > 0.0001) {
+          // Recompose with the override translation but keep original scale+rotation
+          jMat = composeMatrix(
+            skelJoint.scale,
+            [skelJoint.rot[0] * DEG_TO_RAD, skelJoint.rot[1] * DEG_TO_RAD, skelJoint.rot[2] * DEG_TO_RAD],
+            overrideTrans,
+          );
+        }
+      }
+
+      // Blender compatibility: split into translation-only node + fixup
+      const { translationOnly, fixup } = blenderFixJoint(jMat);
+
+      // Convert translation-only matrix from SL → glTF coords
+      const gltfNodeMatrix = slToGltfMatrix(translationOnly);
+
+      const nodeIdx = nodes.length;
+      nodes.push({ name, matrix: gltfNodeMatrix, children: [] as number[] });
+      jointNodeIdxMap.set(name, nodeIdx);
       orderedJoints.push(name);
-    }
-    for (const jn of usedJoints) { if (skeleton.has(jn)) visit(jn); }
-    for (const jn of usedJoints) { if (!skeleton.has(jn)) visit(jn); }
+      jointContexts.set(name, { nodeIdx, origMatrix: jMat, fixupMatrix: fixup });
 
-    // Map joint name → glTF node index (offset by 1 since node 0 is the mesh)
-    const jointNodeOffset = 1; // joint nodes start at index 1
-    const jointNameToNodeIdx = new Map<string, number>();
-    for (let i = 0; i < orderedJoints.length; i++) {
-      jointNameToNodeIdx.set(orderedJoints[i], jointNodeOffset + i);
-    }
-
-    // Map original skin jointNames → index in orderedJoints
-    // (for remapping per-vertex joint indices)
-    const skinJointToOrdered = new Map<number, number>();
-    for (let i = 0; i < jointNames.length; i++) {
-      const oi = orderedJoints.indexOf(jointNames[i]);
-      skinJointToOrdered.set(i, oi >= 0 ? oi : 0);
-    }
-
-    // --- Compute joint world transforms (column-major 4×4 in Godot/glTF space) ---
-    // For joints with IBMs: JW = inverse(IBM_gltf). Handles rotation AND scale.
-    // For ancestor joints without IBMs: accumulate from avatar_skeleton.xml.
-    const jointWorldTransforms = new Map<string, number[]>(); // col-major 4×4
-    for (const jname of orderedJoints) {
-      const skinIdx = jointNames.indexOf(jname);
-      if (skinIdx >= 0 && skin!.inverseBindMatrix[skinIdx]) {
-        const ibmGltf = transformInverseBindMatrix(skin!.inverseBindMatrix[skinIdx].all());
-        const jw = mat4Inverse(ibmGltf);
-        if (jw) {
-          jointWorldTransforms.set(jname, jw);
-        } else {
-          // Singular IBM — fall back to identity
-          jointWorldTransforms.set(jname, [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
-        }
-      } else {
-        // Ancestor: accumulate position from skeleton hierarchy (identity rotation/scale)
-        const sj = skeleton.get(jname);
-        const parentJW = sj?.parent && jointWorldTransforms.has(sj.parent)
-          ? jointWorldTransforms.get(sj.parent)! : [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
-        const lp = sj ? sj.pos : [0, 0, 0] as [number, number, number];
-        // Local transform = translation only (identity rotation for XML ancestors), SL→Godot
-        const localGodot = [1,0,0,0, 0,1,0,0, 0,0,1,0, lp[0],lp[2],-lp[1],1];
-        jointWorldTransforms.set(jname, mat4Mul(parentJW, localGodot));
+      // Visit children
+      for (const childName of skelJoint.children) {
+        if (requiredJoints.has(childName)) visitJoint(childName);
       }
     }
 
-    // --- Resolve orphaned joints (not in avatar_skeleton.xml) ---
-    // Attachment point names (from avatar_lad.xml) → parent to their skeleton joint.
-    // SL resolves these via getJoint() tree walk — attachment points are children of
-    // their parent bones. Their IBM-derived world transform is correct, so we compute
-    // local = inv(parentJW) * childJW like any other child.
-    // Truly unknown names → mPelvis fallback (SL's initJointNums).
-    const orphanParent = new Map<string, string>();
-    for (const jname of orderedJoints) {
-      if (skeleton.has(jname)) continue;
+    // Build skeleton starting from mPelvis, then sweep remaining
+    visitJoint('mPelvis');
+    for (const jname of requiredJoints) visitJoint(jname);
+
+    // Handle orphaned joints (not in skeleton XML — attachment points or unknowns)
+    for (const jname of resolvedJointNames) {
+      if (jointNodeIdxMap.has(jname)) continue;
+      // Find parent: attachment point → its skeleton joint, else Armature
       const attachParent = attachPoints.get(jname);
-      if (attachParent && jointWorldTransforms.has(attachParent)) {
-        orphanParent.set(jname, attachParent);
-      } else {
-        orphanParent.set(jname, 'mPelvis');
-      }
-    }
+      const parentNodeIdx = (attachParent && jointNodeIdxMap.has(attachParent))
+        ? jointNodeIdxMap.get(attachParent)! : armatureIdx;
 
-    // Create glTF nodes for each joint
-    // Node local transforms derived from JW = inverse(IBM), stored as node.matrix
-    // (not TRS) to preserve shear from non-uniform collision volume scale.
-    // For child joints: Local = JW_parent^{-1} * JW_child. For roots: Local = JW.
-    let skeletonRootIdx = -1;
-    for (let i = 0; i < orderedJoints.length; i++) {
-      const jname = orderedJoints[i];
-      const sj = skeleton.get(jname);
-      const node: any = { name: jname };
-
-      const jw = jointWorldTransforms.get(jname)!;
-      const parentName = sj?.parent && jointWorldTransforms.has(sj.parent)
-        ? sj.parent : (orphanParent.get(jname) ?? null);
-
-      // Compute local transform (in Godot/glTF space)
-      let localMat: number[];
-      if (orphanParent.has(jname) && !attachPoints.has(jname)) {
-        // Truly unknown joint — identity under mPelvis (SL initJointNums fallback).
-        localMat = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
-      } else if (parentName) {
-        // Local = JW_parent^{-1} * JW_child
-        const parentJW = jointWorldTransforms.get(parentName)!;
-        const parentInv = mat4Inverse(parentJW);
-        localMat = parentInv ? mat4Mul(parentInv, jw) : jw;
-      } else {
-        localMat = jw;
-      }
-
-      // Write local transform as matrix (not TRS).
-      // For standard skeleton bones: strip scale to match Firestorm's approach — SL bone
-      // hierarchy is pure rotation + translation. Scale in IBMs belongs to vertex skinning
-      // math only. Stripping scale fixes half t-pose from rest.basis scale in pose derivation.
-      // For collision volume bones: keep IBM-derived scale intact. Their vertices have IBMs
-      // that cancel exactly that scale; normalizing would catastrophically distort those vertices.
-      const isCollVol = sj?.isCollisionVolume ?? false;
-      node.matrix = isCollVol ? localMat : mat4NormalizeRotation(localMat);
-
-      // Children in the glTF node (standard hierarchy + orphaned bones parented here)
-      const childNodeIndices: number[] = [];
-      if (sj) {
-        for (const childName of sj.children) {
-          if (jointNameToNodeIdx.has(childName)) {
-            childNodeIndices.push(jointNameToNodeIdx.get(childName)!);
-          }
-        }
-      }
-      orphanParent.forEach((inferredParent, orphanName) => {
-        if (inferredParent === jname && jointNameToNodeIdx.has(orphanName)) {
-          childNodeIndices.push(jointNameToNodeIdx.get(orphanName)!);
-        }
+      const nodeIdx = nodes.length;
+      // Identity local transform (orphan sits at parent's position)
+      nodes.push({ name: jname, children: [] as number[] });
+      jointNodeIdxMap.set(jname, nodeIdx);
+      orderedJoints.push(jname);
+      // Use identity fixup for orphans
+      jointContexts.set(jname, {
+        nodeIdx,
+        origMatrix: [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1],
+        fixupMatrix: [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1],
       });
-      if (childNodeIndices.length > 0) {
-        node.children = childNodeIndices;
-      }
 
-      nodes.push(node);
-
-      // Track skeleton root (joint with no parent — neither XML nor inferred)
-      if (!parentName) {
-        if (skeletonRootIdx === -1) skeletonRootIdx = jointNodeOffset + i;
-      }
+      // Wire orphan to parent
+      (nodes[parentNodeIdx].children as number[]).push(nodeIdx);
     }
 
-    // Mesh node is child of skeleton root
-    if (skeletonRootIdx >= 0) {
-      nodes[0].skin = 0;
-    }
+    // Wire parent-child relationships for skeleton joints
+    for (const jname of orderedJoints) {
+      const skelJoint = skeleton.get(jname);
+      if (!skelJoint) continue; // orphans already wired above
+      const parentName = skelJoint.parent;
+      const nodeIdx = jointNodeIdxMap.get(jname)!;
 
-    // --- Inverse bind matrices accessor ---
-    // Each matrix: 16 floats (MAT4), column-major, coordinate-transformed
-    const ibmBuf = Buffer.alloc(orderedJoints.length * 64); // 16 floats * 4 bytes
-    for (let i = 0; i < orderedJoints.length; i++) {
-      const jname = orderedJoints[i];
-      const skinIdx = jointNames.indexOf(jname);
-
-      let colMajor: number[];
-      if (skinIdx >= 0 && skin!.inverseBindMatrix[skinIdx]) {
-        // node-metaverse stores SL LLSD values verbatim in its column-major Matrix4,
-        // but SL LLSD is row-major → .all() gives us the SL row-major bytes
-        const slRowMajor = skin!.inverseBindMatrix[skinIdx].all();
-        colMajor = transformInverseBindMatrix(slRowMajor);
+      if (!parentName || !jointNodeIdxMap.has(parentName)) {
+        // Root joint → child of Armature
+        (nodes[armatureIdx].children as number[]).push(nodeIdx);
       } else {
-        // Joint not in skin (ancestor added for hierarchy) — use identity
-        colMajor = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
-      }
-
-      for (let j = 0; j < 16; j++) {
-        ibmBuf.writeFloatLE(colMajor[j], (i * 16 + j) * 4);
+        const parentIdx = jointNodeIdxMap.get(parentName)!;
+        (nodes[parentIdx].children as number[]).push(nodeIdx);
       }
     }
 
+    // --- Build IBMs: fixup @ raw_IBM, then coordinate convert ---
+    const skinJointIndices: number[] = [];
+    const glbIBMs: number[][] = [];
+
+    for (let i = 0; i < resolvedJointNames.length; i++) {
+      const jname = resolvedJointNames[i];
+      const ctx = jointContexts.get(jname);
+      const rawIBM = skin!.inverseBindMatrix[i].all(); // column-major (LLSD order)
+
+      let ibm: number[];
+      if (ctx) {
+        // fixup @ IBM (both in SL column-major space)
+        ibm = mat4Mul(ctx.fixupMatrix, rawIBM);
+      } else {
+        ibm = rawIBM;
+      }
+
+      // Convert from SL to glTF coordinate system
+      glbIBMs.push(slToGltfMatrix(ibm));
+
+      const nodeIdx = jointNodeIdxMap.get(jname);
+      skinJointIndices.push(nodeIdx ?? armatureIdx);
+    }
+
+    // Write IBMs to buffer
+    const ibmBuf = Buffer.alloc(resolvedJointNames.length * 64);
+    for (let i = 0; i < resolvedJointNames.length; i++) {
+      for (let j = 0; j < 16; j++) {
+        ibmBuf.writeFloatLE(glbIBMs[i][j], (i * 16 + j) * 4);
+      }
+    }
     bufferViews.push({ buffer: 0, byteOffset, byteLength: ibmBuf.length });
     const ibmAccessorIdx = accessors.length;
     accessors.push({
-      bufferView: bufferViews.length - 1, componentType: 5126 /* FLOAT */,
-      count: orderedJoints.length, type: 'MAT4',
+      bufferView: bufferViews.length - 1, componentType: 5126,
+      count: resolvedJointNames.length, type: 'MAT4',
     });
     bufferParts.push(ibmBuf);
     byteOffset += ibmBuf.length;
 
-    // --- Skin object ---
-    const jointIndices = orderedJoints.map((_, i) => jointNodeOffset + i);
-    skinObj = {
-      inverseBindMatrices: ibmAccessorIdx,
-      joints: jointIndices,
-      skeleton: skeletonRootIdx >= 0 ? skeletonRootIdx : jointIndices[0],
-    };
+    // Mesh node: skin assigned (Hippolyzer: mesh_node.matrix = None)
+    nodes[0].skin = 0;
 
-    // --- Per-submesh JOINTS_0 / WEIGHTS_0 ---
-    // We need to retroactively add these attributes to the primitives we already built.
-    // Iterate submeshes again in the same order.
-    let primIdx = 0;
-    for (const sub of submeshes!) {
-      if (sub.noGeometry || !sub.position || sub.position.length === 0
-        || !sub.triangleList || sub.triangleList.length === 0) {
-        continue;
-      }
-      if (primIdx >= primitives.length) break;
-
-      const vertCount = sub.position.length;
-      const hasWeights = sub.weights && sub.weights.length === vertCount;
-
-      if (hasWeights) {
-        // JOINTS_0: VEC4 of UNSIGNED_BYTE (joint indices remapped to orderedJoints)
-        const jointsBuf = Buffer.alloc(vertCount * 4);
-        // WEIGHTS_0: VEC4 of FLOAT (normalized)
-        const weightsBuf = Buffer.alloc(vertCount * 16);
-
-        for (let v = 0; v < vertCount; v++) {
-          const w = sub.weights![v];
-          const entries = Object.entries(w);
-          // Normalize weights to sum to 1.0
-          // Raw values are UInt16 [0, 65535]
-          let totalRaw = 0;
-          for (const [, raw] of entries) totalRaw += raw;
-
-          for (let slot = 0; slot < 4; slot++) {
-            if (slot < entries.length) {
-              const [jointIdxStr, raw] = entries[slot];
-              const origJointIdx = parseInt(jointIdxStr, 10);
-              // Remap to orderedJoints index
-              const remapped = skinJointToOrdered.get(origJointIdx) ?? 0;
-              jointsBuf.writeUInt8(Math.min(remapped, 255), v * 4 + slot);
-              weightsBuf.writeFloatLE(totalRaw > 0 ? raw / totalRaw : 0, v * 16 + slot * 4);
-            } else {
-              jointsBuf.writeUInt8(0, v * 4 + slot);
-              weightsBuf.writeFloatLE(0, v * 16 + slot * 4);
-            }
-          }
+    // Tag mesh node with joints that have custom positions (for Godot pipeline)
+    const overriddenJointNames: string[] = [];
+    if (skin!.altInverseBindMatrix && skin!.altInverseBindMatrix.length > 0) {
+      for (let i = 0; i < resolvedJointNames.length; i++) {
+        if (i >= skin!.altInverseBindMatrix.length) break;
+        const jname = resolvedJointNames[i];
+        const skelJoint = skeleton.get(jname);
+        if (!skelJoint) continue;
+        const raw = skin!.altInverseBindMatrix[i].all();
+        const overrideTrans: [number, number, number] = [raw[12], raw[13], raw[14]];
+        if (vec3Dist(overrideTrans, skelJoint.pos) > 0.0001) {
+          overriddenJointNames.push(jname);
         }
-
-        // JOINTS_0
-        bufferViews.push({ buffer: 0, byteOffset, byteLength: jointsBuf.length });
-        accessors.push({
-          bufferView: bufferViews.length - 1,
-          componentType: 5121 /* UNSIGNED_BYTE */,
-          count: vertCount, type: 'VEC4',
-        });
-        primitives[primIdx].attributes['JOINTS_0'] = accessors.length - 1;
-        bufferParts.push(jointsBuf);
-        byteOffset += jointsBuf.length;
-
-        // WEIGHTS_0
-        bufferViews.push({ buffer: 0, byteOffset, byteLength: weightsBuf.length });
-        accessors.push({
-          bufferView: bufferViews.length - 1,
-          componentType: 5126 /* FLOAT */,
-          count: vertCount, type: 'VEC4',
-        });
-        primitives[primIdx].attributes['WEIGHTS_0'] = accessors.length - 1;
-        bufferParts.push(weightsBuf);
-        byteOffset += weightsBuf.length;
       }
-      primIdx++;
     }
+    if (overriddenJointNames.length > 0) {
+      nodes[0].extras = { jointOverrides: overriddenJointNames };
+    }
+
+    // Skin object
+    skinObj = {
+      name: 'Armature',
+      inverseBindMatrices: ibmAccessorIdx,
+      joints: skinJointIndices,
+      skeleton: armatureIdx,
+    };
   }
 
   // Build glTF JSON
-  // Scene root nodes: mesh node (0) + skeleton root (if rigged and skeleton root is a top-level node)
-  const sceneNodes = [0];
-  if (isRigged) {
-    // Find skeleton root nodes that aren't children of any other joint node
-    const childOfSomeone = new Set<number>();
-    for (const n of nodes) {
-      if (n.children) for (const c of n.children) childOfSomeone.add(c);
-    }
-    for (let i = 1; i < nodes.length; i++) {
-      if (!childOfSomeone.has(i)) sceneNodes.push(i);
-    }
-  }
-
   const gltf: any = {
     asset: { version: '2.0', generator: 'PyroKitty' },
     scene: 0,
     scenes: [{ nodes: sceneNodes }],
-    nodes,
+    nodes: nodes.map(n => {
+      const out: any = {};
+      if (n.name) out.name = n.name;
+      if (n.mesh !== undefined) out.mesh = n.mesh;
+      if (n.skin !== undefined) out.skin = n.skin;
+      if (n.matrix) out.matrix = n.matrix;
+      if (n.extras) out.extras = n.extras;
+      if (n.children && n.children.length > 0) out.children = n.children;
+      return out;
+    }),
     meshes: [{ primitives }],
     accessors,
     bufferViews,
@@ -859,9 +985,11 @@ export function llMeshToGlb(mesh: LLMesh, opts?: { skipBsm?: boolean }): Buffer 
 
   // Binary chunk
   const binBuf = Buffer.concat(bufferParts);
+  const binPad = (4 - (binBuf.length % 4)) % 4;
+  const binAligned = binPad > 0 ? Buffer.concat([binBuf, Buffer.alloc(binPad)]) : binBuf;
 
   // Assemble GLB: header(12) + JSON chunk(8+data) + BIN chunk(8+data)
-  const totalLength = 12 + 8 + jsonBuf.length + 8 + binBuf.length;
+  const totalLength = 12 + 8 + jsonBuf.length + 8 + binAligned.length;
   const glb = Buffer.alloc(totalLength);
   let off = 0;
 
@@ -876,9 +1004,9 @@ export function llMeshToGlb(mesh: LLMesh, opts?: { skipBsm?: boolean }): Buffer 
   jsonBuf.copy(glb, off); off += jsonBuf.length;
 
   // BIN chunk
-  glb.writeUInt32LE(binBuf.length, off); off += 4;
+  glb.writeUInt32LE(binAligned.length, off); off += 4;
   glb.writeUInt32LE(0x004E4942, off); off += 4;   // "BIN\0"
-  binBuf.copy(glb, off);
+  binAligned.copy(glb, off);
 
   return glb;
 }

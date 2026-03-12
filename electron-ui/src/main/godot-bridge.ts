@@ -295,16 +295,21 @@ export class GodotBridge extends EventEmitter {
     }
 
     // Init fetch queues
-    const meshFetchQueue = new MeshFetchQueue(this.bot, (meshUuid, cachePath, isRigged, jointNames, staticCachePath) => {
+    const meshFetchQueue = new MeshFetchQueue(this.bot, (meshUuid, cachePath, isRigged, jointNames, jointOverrides) => {
       const fwdPath = cachePath.replace(/\\/g, '/');
       const msg: any = { type: 'mesh_ready', meshId: meshUuid, path: fwdPath };
       if (isRigged) {
         msg.isRigged = true;
         msg.jointNames = jointNames;
+        if (jointOverrides && jointOverrides.length > 0) {
+          msg.jointOverrides = jointOverrides;
+        }
       }
-      if (staticCachePath) msg.staticPath = staticCachePath.replace(/\\/g, '/');
+      if (jointOverrides && jointOverrides.length > 0) {
+        console.log(`[MeshReady] meshId=${meshUuid.slice(0, 8)} jointOverrides=${jointOverrides.length}`);
+      }
       if (this.objectSender.selfMeshIds.has(meshUuid)) {
-        console.log(`[SelfAvatar] Mesh ready: meshId=${meshUuid.slice(0, 8)} isRigged=${isRigged} joints=${jointNames?.length ?? 0} hasStatic=${!!staticCachePath}`);
+        console.log(`[SelfAvatar] Mesh ready: meshId=${meshUuid.slice(0, 8)} isRigged=${isRigged} joints=${jointNames?.length ?? 0} overrides=${jointOverrides?.length ?? 0}`);
       }
       this.queueAssetReady(msg);
     });
@@ -350,6 +355,23 @@ export class GodotBridge extends EventEmitter {
     // Send initial snapshot and subscribe to events
     this.objectSender.sendInitialSnapshot((avatar, id) => this.avatarManager.sendAvatarCreate(avatar, id));
     this.subscribeToEvents();
+
+    // Replay sitting state if we were seated before Godot restarted
+    const sitState = this.inputHandler.getSitState();
+    if (sitState.seatLocalId > 0 && sitState.position && sitState.rotation) {
+      this.send({ type: 'sitting_state', sitting: true });
+      const selfId = this.bot.agent?.agentID?.toString();
+      if (selfId) {
+        this.send({
+          type: 'avatar_update',
+          id: selfId,
+          position: sitState.position,
+          rotation: sitState.rotation,
+          parentId: sitState.seatLocalId,
+        });
+      }
+      console.log(`[GodotBridge] Replayed sitting state on reconnect: seatLocalId=${sitState.seatLocalId}`);
+    }
 
     // Send terrain + environment async
     this.environmentMgr.sendTerrain().catch(err => {
@@ -486,7 +508,11 @@ export class GodotBridge extends EventEmitter {
           }
 
           selfAvatarSeatLocalId = seatLocalId;
-          this.inputHandler.setSittingState(true, seatLocalId);
+          this.inputHandler.setSittingState(
+            true, seatLocalId,
+            [sitPos.x, sitPos.y, sitPos.z],
+            [sitRot.x, sitRot.y, sitRot.z, sitRot.w],
+          );
           this.send({ type: 'sitting_state', sitting: true });
 
           // Push avatar into the correct seated position immediately.

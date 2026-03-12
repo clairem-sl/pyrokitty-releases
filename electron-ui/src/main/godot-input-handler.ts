@@ -16,6 +16,8 @@ export class GodotInputHandler {
   private _dbgAgentNullAt = 0;
   private _lastRunning = false;
   private _sittingOnLocalId = 0;
+  private _sitPosition: number[] | null = null;
+  private _sitRotation: number[] | null = null;
 
   constructor(private bot: Bot, private send: SendFn) {}
 
@@ -197,13 +199,30 @@ export class GodotInputHandler {
   handleStandUp(): void {
     this.bot.clientCommands.movement.stand();
     this._sittingOnLocalId = 0;
+    this._sitPosition = null;
+    this._sitRotation = null;
     this.send({ type: 'sitting_state', sitting: false });
     console.log('[GodotBridge] Stood up');
   }
 
   /** Called by GodotBridge when server confirms a ParentID change on the self avatar. */
-  setSittingState(sitting: boolean, seatLocalId: number): void {
+  setSittingState(sitting: boolean, seatLocalId: number, position?: number[], rotation?: number[]): void {
     this._sittingOnLocalId = sitting ? seatLocalId : 0;
+    if (sitting && position && rotation) {
+      this._sitPosition = position;
+      this._sitRotation = rotation;
+    } else if (!sitting) {
+      this._sitPosition = null;
+      this._sitRotation = null;
+    }
+  }
+
+  getSitState(): { seatLocalId: number; position: number[] | null; rotation: number[] | null } {
+    return {
+      seatLocalId: this._sittingOnLocalId,
+      position: this._sitPosition,
+      rotation: this._sitRotation,
+    };
   }
 
   async handleObjectTouch(msg: any): Promise<void> {

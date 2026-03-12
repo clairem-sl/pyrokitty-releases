@@ -4,10 +4,10 @@
 
 export type SendFn = (msg: object) => void;
 
-/** HUD attachment points (34-41 in AttachmentPoint enum) should not be sent to Godot */
+/** HUD attachment points (31-38 in avatar_lad.xml) should not be sent to Godot */
 export function isHudAttachment(obj: any): boolean {
   const ap = obj.attachmentPoint ?? 0;
-  return ap >= 34 && ap <= 41;
+  return ap >= 31 && ap <= 38;
 }
 
 /** Magic texture UUIDs for SL water exclusion (invisiprims) — skip downloading these */

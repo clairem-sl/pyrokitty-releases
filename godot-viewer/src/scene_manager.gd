@@ -90,8 +90,6 @@ var avatar_material: StandardMaterial3D
 var pending_meshes: Dictionary = {}    # localId (int) -> meshId (String)
 var mesh_cache: Dictionary = {}        # meshId (String) -> Mesh resource
 var mesh_load_failed: Dictionary = {}  # meshId (String) -> bool
-var static_mesh_cache: Dictionary = {} # meshId (String) -> Mesh (no BSM, for non-animesh rigged display)
-var static_mesh_paths: Dictionary = {} # meshId (String) -> GLB path (no BSM variant)
 
 # Texture pipeline
 var texture_cache: Dictionary = {}        # textureId (String) -> ImageTexture
@@ -108,13 +106,20 @@ var _pending_by_mesh: Dictionary = {}     # meshId -> Array[localId]
 # Animesh (rigged mesh with skeleton animation)
 var animesh_roots: Dictionary = {}         # root localId (int) -> Node3D (scene tree parent)
 var animesh_shared_skeleton: Dictionary = {} # root localId (int) -> Skeleton3D (ONE per avatar, from XML)
-var animesh_mesh_skeletons: Dictionary = {}  # localId (int) -> Skeleton3D (per-mesh skeleton from GLB, for rendering)
+# animesh_mesh_skeletons removed — all meshes now bind to the shared skeleton
 var animesh_root_for: Dictionary = {}      # localId (int) -> root localId (maps object to its animesh root)
 var rigged_mesh_paths: Dictionary = {}     # meshId (String) -> GLB path (for generate_scene)
+var mesh_joint_overrides: Dictionary = {} # meshId (String) -> Array[String] (joints with custom positions)
 var animesh_anim_data: Dictionary = {}    # animId (String) -> raw Dictionary (with per-joint priorities)
 var animesh_pending_anims: Dictionary = {} # root localId (int) -> Array[animId String] (pending animation IDs)
 var animesh_worn_anims: Dictionary = {}   # root localId (int) -> Array[animId String] (from worn animesh attachments)
 var animesh_mesh_instances: Dictionary = {} # localId (int) -> MeshInstance3D (for texture application)
+
+# Attachment point bone tracking — non-rigged attachments follow their bone each frame
+var attach_bone: Dictionary = {}            # localId (int) -> bone name (String) for objects attached to avatar bones
+var attach_point_id: Dictionary = {}        # localId (int) -> attachmentPointId (int)
+var bone_global_overrides: Dictionary = {}  # root localId (int) -> {bone_name -> Vector3} (global rest positions from meshes)
+var _attach_bone_logged: Dictionary = {}    # localId (int) -> true (debug: one-time log flag)
 
 # Skeleton builder — parses avatar_skeleton.xml once, creates shared skeletons
 var skeleton_builder: RefCounted
