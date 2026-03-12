@@ -26,7 +26,9 @@
         "lint": "eslint src/",
         "lint:fix": "eslint src/ --fix",
         "format": "prettier --write src/",
-        "format:check": "prettier --check src/"
+        "format:check": "prettier --check src/",
+        "test": "vitest run",
+        "test:watch": "vitest"
     },
     "author": "PyroKitty",
     "license": "LGPL-2.1",
@@ -49,7 +51,8 @@
         "knip": "^5.84.1",
         "prettier": "^3.8.1",
         "typescript": "^5.3.0",
-        "typescript-eslint": "^8.57.0"
+        "typescript-eslint": "^8.57.0",
+        "vitest": "^4.1.0"
     },
     "dependencies": {
         "@abasb75/jpeg2000-decoder": "file:../../pyrokitty-openjpeg/packages/2.5.4-decoder",
