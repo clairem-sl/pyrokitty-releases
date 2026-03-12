@@ -15,6 +15,13 @@ var _ocean_logged_ready: bool = false
 var _water_height: float = 20.0       # SL water surface Y (Godot coords), set by handle_terrain_ready
 var _camera_underwater: bool = false   # true when camera is below water surface
 
+# Sun/ambient fade-in — starts at 0, ramps to target over 10s
+var _sun_target_energy: float = 0.0
+var _ambient_target_energy: float = 0.0
+var _sun_energy: float = 0.0
+var _ambient_energy: float = 0.0
+const _LIGHT_FADE_SPEED: float = 0.333  # units/sec (~3s to reach 1.0)
+
 
 func _init(scene_manager) -> void:
 	sm = scene_manager
@@ -29,6 +36,18 @@ func process(_delta: float) -> void:
 	# Underwater fog check
 	if _ocean_quad_tree != null or water_node != null:
 		_update_underwater_fog()
+
+	# Fade sun/ambient toward targets
+	if _sun_energy < _sun_target_energy or _ambient_energy < _ambient_target_energy:
+		var step := _LIGHT_FADE_SPEED * _delta
+		_sun_energy = minf(_sun_energy + step, _sun_target_energy)
+		_ambient_energy = minf(_ambient_energy + step, _ambient_target_energy)
+		var light: DirectionalLight3D = sm.get_node_or_null("../DirectionalLight3D")
+		if light:
+			light.light_energy = _sun_energy
+		var world_env: WorldEnvironment = sm.get_node_or_null("../WorldEnvironment")
+		if world_env and world_env.environment:
+			world_env.environment.ambient_light_energy = _ambient_energy
 
 
 func handle_terrain_ready(msg: Dictionary) -> void:
@@ -229,11 +248,7 @@ func _update_underwater_fog() -> void:
 		# Reset underwater fog color back to defaults
 		env.fog_light_color = Color.WHITE
 		env.fog_light_energy = 1.0
-		if sm._loading_fog_density > 0.0:
-			# Loading fog still active — restore its density
-			env.fog_density = sm._loading_fog_density
-		else:
-			env.fog_enabled = false
+		env.fog_enabled = false
 
 
 func _build_flat_water(water_height: float) -> void:
@@ -271,7 +286,8 @@ func handle_environment_data(msg: Dictionary) -> void:
 			light.basis = Basis.looking_at(-godot_sun_dir, Vector3.UP)
 		var sun_color := Color(float(sun_color_arr[0]), float(sun_color_arr[1]), float(sun_color_arr[2]))
 		light.light_color = sun_color
-		light.light_energy = 1.0
+		_sun_target_energy = 1.0
+		light.light_energy = _sun_energy
 
 	# Update WorldEnvironment with procedural sky
 	var world_env: WorldEnvironment = sm.get_node_or_null("../WorldEnvironment")
@@ -311,4 +327,5 @@ func handle_environment_data(msg: Dictionary) -> void:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 		# Derive ambient energy from SL ambient color luminance
 		var amb_lum: float = amb_c.r * 0.2126 + amb_c.g * 0.7152 + amb_c.b * 0.0722
-		env.ambient_light_energy = clampf(amb_lum * 2.0, 0.05, 1.0)
+		_ambient_target_energy = clampf(amb_lum * 2.0, 0.05, 1.0)
+		env.ambient_light_energy = _ambient_energy

@@ -145,10 +145,10 @@ var _vis_fade: float = FrameBudget.VISIBILITY_FADE_MARGIN
 var _stats_timer: float = 0.0
 const STATS_INTERVAL: float = 10.0
 
-# Loading fog reveal
-var _loading_fog_density: float = 0.15   # starting fog density
-const _LOADING_FOG_START_DENSITY: float = 0.15
-const _LOADING_FOG_FADE_SPEED: float = 0.08  # density units/sec after loading ends
+# Loading fade-in overlay (opaque black → transparent)
+var _fade_overlay: ColorRect = null
+var _fade_alpha: float = 1.0
+const _LOADING_FADE_IN_SPEED: float = 0.5  # alpha units/sec after loading ends (~2s fade)
 
 # ─── Sub-managers ────────────────────────────────────
 
@@ -199,15 +199,14 @@ func _ready() -> void:
 
 	asset_pipeline.start_threads()
 
-	# Start with loading fog
-	var world_env: WorldEnvironment = get_node_or_null("../WorldEnvironment")
-	if world_env and world_env.environment:
-		var env := world_env.environment
-		env.fog_enabled = true
-		env.fog_density = _LOADING_FOG_START_DENSITY
-		env.fog_light_color = Color(0.0, 0.0, 0.0)
-		env.fog_light_energy = 0.0
-		env.fog_aerial_perspective = 0.5
+	# Start with opaque black overlay — fade out as assets load
+	var fade_layer := CanvasLayer.new()
+	fade_layer.layer = 100  # on top of everything
+	_fade_overlay = ColorRect.new()
+	_fade_overlay.color = Color(0.0, 0.0, 0.0, 1.0)
+	_fade_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	fade_layer.add_child(_fade_overlay)
+	add_child(fade_layer)
 
 
 func _process(delta: float) -> void:
@@ -260,32 +259,20 @@ func _process(delta: float) -> void:
 	# Submit queued mesh work to WorkerThreadPool + finalize textures/meshes
 	asset_pipeline.finalize_frame(delta, _vr_mode, _target_frame_ms)
 
-	# Loading fog reveal: thick fog that expands as textures/meshes finalize
-	if asset_pipeline._initial_loading or _loading_fog_density > 0.0:
-		_update_loading_fog(delta)
+	# Loading fade-in overlay
+	if _fade_overlay != null:
+		_update_loading_fade(delta)
 
 
-func _update_loading_fog(delta: float) -> void:
-	var world_env: WorldEnvironment = get_node_or_null("../WorldEnvironment")
-	if world_env == null or world_env.environment == null:
+func _update_loading_fade(delta: float) -> void:
+	# Smooth linear fade from black over the full 30s loading period and beyond.
+	# Rate: 1/30 ≈ 0.033 alpha/sec during loading, then same rate after.
+	_fade_alpha = maxf(0.0, _fade_alpha - delta / 10.0)
+	if _fade_alpha <= 0.0:
+		_fade_overlay.get_parent().queue_free()
+		_fade_overlay = null
 		return
-	var env := world_env.environment
-
-	if asset_pipeline._initial_loading:
-		# During loading: reduce density as items finalize (progress-based)
-		var done: int = asset_pipeline._tex_finalized_count + asset_pipeline._mesh_finalized_count
-		# Ramp from full density → half over the first ~200 items
-		var progress: float = clampf(float(done) / 200.0, 0.0, 1.0)
-		_loading_fog_density = lerpf(_LOADING_FOG_START_DENSITY, _LOADING_FOG_START_DENSITY * 0.4, progress)
-	else:
-		# Loading done: fade fog out smoothly
-		_loading_fog_density = maxf(0.0, _loading_fog_density - _LOADING_FOG_FADE_SPEED * delta)
-		if _loading_fog_density <= 0.001:
-			_loading_fog_density = 0.0
-			env.fog_enabled = false
-			return
-
-	env.fog_density = _loading_fog_density
+	_fade_overlay.color = Color(0.0, 0.0, 0.0, _fade_alpha)
 
 
 # ─── Public API (delegates to sub-managers) ──────────

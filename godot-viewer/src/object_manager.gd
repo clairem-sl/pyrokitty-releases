@@ -882,12 +882,27 @@ func _apply_pending_animations(obj_id: int) -> void:
 ## SL xform.cpp:80: mWorldRotation = mRotation * mParent->getWorldRotation()
 ## SL's operator*(a,b) = Hamilton(b*a), so this is Hamilton(parent * local).
 ## Godot uses standard Hamilton, so we write: world = parent * local.
+## Skeleton evaluation runs at 30 Hz — the visual difference vs 72 Hz is
+## negligible for humanoid motion and this halves the Skeleton3D API call
+## budget on alternating frames.
+const _ANIM_EVAL_INTERVAL: float = 1.0 / 30.0
+
 func process_animesh(delta: float) -> void:
 	for root_id: int in sm.animesh_eval:
 		var eval: Dictionary = sm.animesh_eval[root_id]
 
-		# Advance wall-clock elapsed time
+		# Advance wall-clock elapsed time every frame so animation timing
+		# stays accurate even when skeleton evaluation is skipped.
 		eval["elapsed"] += delta
+
+		# Throttle skeleton evaluation to 30 Hz.
+		var since_eval: float = eval.get("since_eval", _ANIM_EVAL_INTERVAL)
+		since_eval += delta
+		if since_eval < _ANIM_EVAL_INTERVAL:
+			eval["since_eval"] = since_eval
+			continue
+		eval["since_eval"] = 0.0
+
 		var elapsed: float = eval["elapsed"]
 
 		var joints: Dictionary = eval["joints"]  # joint_name -> {rot_keys, pos_keys, duration, loop}
@@ -1398,7 +1413,7 @@ func _cleanup_object(local_id: int) -> void:
 func set_vr_mode(enabled: bool) -> void:
 	sm._vr_mode = enabled
 	var FrameBudget = sm.FrameBudget
-	sm._target_frame_ms = FrameBudget.VR_FINALIZE_STOP_MS if enabled else FrameBudget.DESKTOP_FRAME_MS
+	sm._target_frame_ms = FrameBudget.DESKTOP_FRAME_MS
 	sm._vis_far = FrameBudget.VR_CAMERA_FAR if enabled else FrameBudget.VISIBILITY_FAR
 	sm._vis_fade = FrameBudget.VR_VISIBILITY_FADE_MARGIN if enabled else FrameBudget.VISIBILITY_FADE_MARGIN
 	for rsi in sm.objects.values():

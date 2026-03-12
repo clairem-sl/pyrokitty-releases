@@ -213,7 +213,7 @@ func _process(_delta: float) -> void:
 		# Single unified budget covering both the packet drain and queue processing.
 		# Previously only processing was budgeted; the drain loop allocated a string
 		# per packet with no time limit, costing several ms during loading bursts.
-		var _msg_budget: float = FrameBudget.VR_MSG_BUDGET_MS if _vr_mode else FrameBudget.DESKTOP_MSG_BUDGET_MS
+		var _msg_budget: float = FrameBudget.DESKTOP_MSG_BUDGET_MS
 		var _msg_start := Time.get_ticks_usec() / 1000.0
 
 		# Drain ALL incoming packets every frame.  High-priority messages

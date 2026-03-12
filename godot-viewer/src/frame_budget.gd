@@ -18,12 +18,6 @@ const VR_REFRESH_HZ: float = 72.0
 ## Full frame window in ms, derived from refresh rate.
 const VR_FRAME_MS: float = 1000.0 / VR_REFRESH_HZ   # 13.888... ms
 
-## CPU slice for WebSocket message processing in VR (main.gd _process).
-const VR_MSG_BUDGET_MS: float = 12.0
-
-## Elapsed-frame-time at which scene_manager stops finalization entirely.
-const VR_FINALIZE_STOP_MS: float = 30.0
-
 ## XR camera far plane and object visibility range in VR.  Tighter than
 ## desktop (128 m) to maximise depth buffer precision where ATW cares.
 const VR_CAMERA_FAR: float = 32.0

@@ -452,9 +452,10 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 	var has_textures := tex_batch.size() > 0
 	var has_meshes := not _mesh_tasks.is_empty()
 
-	# Auto-exit initial loading when all queues are drained or after 30s hard cap
+	# Exit initial loading after 30s — keep the large finalization budget and
+	# brightness fade-in for the full duration so the transition feels smooth.
 	var _initial_elapsed_ms := (Time.get_ticks_usec() / 1000.0) - _initial_load_start_ms if _initial_load_start_ms > 0.0 else 0.0
-	if _initial_loading and (_initial_elapsed_ms > 30000.0 or (not has_textures and not has_meshes and _mesh_queue.is_empty())):
+	if _initial_loading and _initial_elapsed_ms > 30000.0:
 		_initial_loading = false
 		if _initial_load_start_ms > 0.0:
 			var total_ms := (Time.get_ticks_usec() / 1000.0) - _initial_load_start_ms
@@ -466,7 +467,7 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 
 	# Initial loading mode: large budget (~50ms/frame) so Godot still renders
 	# at ~15-20fps while the world loads in quickly. Scene_manager drives fog reveal.
-	var is_initial: bool = _initial_loading and not vr_mode
+	var is_initial: bool = _initial_loading
 	if is_initial and _initial_load_start_ms == 0.0:
 		_initial_load_start_ms = Time.get_ticks_usec() / 1000.0
 
@@ -478,12 +479,8 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 	var budget_ms: float
 	if is_initial:
 		budget_ms = 50.0  # ~15-20fps during initial load
-	elif vr_mode:
-		# In VR, never do finalization on an already-late frame — the deadline
-		# is missed, adding more CPU work only makes the next frame late too.
-		budget_ms = clampf(remaining_ms, 0.0, FrameBudget.MIN_FINALIZE_MS)
 	else:
-		# Desktop: when over budget be aggressive — frame is slow anyway.
+		# When over budget be aggressive — frame is slow anyway.
 		budget_ms = maxf(remaining_ms, FrameBudget.OVERBUDGET_FINALIZE_MS if remaining_ms < FrameBudget.MIN_FINALIZE_MS else FrameBudget.MIN_FINALIZE_MS)
 	# Split: 60% textures, 40% meshes (textures are cheaper per-item)
 	var tex_budget_ms := budget_ms * 0.6 if has_meshes else budget_ms
