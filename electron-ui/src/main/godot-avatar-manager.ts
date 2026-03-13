@@ -224,6 +224,8 @@ export class GodotAvatarManager {
       if (gameObj) localId = gameObj.ID;
     } catch { /* gameObject may not be set yet */ }
 
+    const parentId = (avatar as any)._gameObject?.ParentID || 0;
+
     const isSelf = id === this.bot.agent?.agentID?.toString();
     if (isSelf) {
       console.log(`[SelfAvatar] === Creating self avatar uuid=${id.slice(0, 8)} localId=${localId} name=${avatar.getName()} ===`);
@@ -236,6 +238,7 @@ export class GodotAvatarManager {
       name: avatar.getName(),
       position: [pos.x, pos.y, pos.z],
       rotation: [rot.x, rot.y, rot.z, rot.w],
+      parentId,
     });
     this.trackedAvatars.add(id);
     if (localId > 0) {

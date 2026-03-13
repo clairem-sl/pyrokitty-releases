@@ -848,7 +848,10 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
       // defaults (content creator's actual bind pose).  Derive the local transform
       // from inverse(rawIBM) so the fixup exactly cancels the IBM's rotation/scale.
       // CVs are always leaf nodes so this doesn't affect any other bone.
-      if (skelJoint.isCollisionVolume && !jointOverrides.has(name) && rawIBMByName.has(name)) {
+      // Only do this when BSM is identity — non-identity BSM taints the raw IBM
+      // (inverse(rawIBM) = BSM * jointWorld, not jointWorld), producing 100x-scaled
+      // node transforms that Blender renders as giant meshes.
+      if (skelJoint.isCollisionVolume && !jointOverrides.has(name) && rawIBMByName.has(name) && bsmIsIdentity) {
         const rawIBM = rawIBMByName.get(name)!;
         const worldXf = mat4Inverse(rawIBM);
         if (worldXf) {

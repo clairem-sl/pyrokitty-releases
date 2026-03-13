@@ -23,6 +23,13 @@ var _debug_skeleton_visible: bool = false
 # Used as fallback for unanimated CV bones in animation evaluation.
 var _sl_cv_rest_rotations: Dictionary = {}
 
+# Per-root previous SL local rotations for crossfade blending.
+# When the winning animation for a joint changes, we slerp from the old
+# rotation to the new one to avoid visual snapping (mimics Firestorm's
+# ease-in/ease-out crossfade).
+var _prev_sl_local_rot: Dictionary = {}  # root_id -> { joint_name -> Quaternion }
+const _ANIM_BLEND_SPEED: float = 10.0  # ~0.2s to 95% convergence
+
 # Attachment point ID → bone name (from avatar_lad.xml)
 # IDs 31-38 are HUDs (filtered out on the bridge side, never sent to Godot)
 const ATTACH_POINT_BONES: Dictionary = {
@@ -274,7 +281,7 @@ func handle_object_create(msg: Dictionary) -> void:
 					var _bg: Transform3D = _ss.get_bone_global_rest(_bi)
 					var _br: Quaternion = root_node.quaternion * _bg.basis.orthonormalized().get_rotation_quaternion()
 					var _ap_xf: Array = _get_ap_world_transform(_ap, _bp, _br)
-					rsi.pos = _ap_xf[0] + _ap_xf[1] * godot_pos
+					rsi.pos = _ap_xf[0] + _ap_xf[2] * godot_pos
 					rsi.rot = _ap_xf[2] * godot_rot
 				else:
 					rsi.pos = root_node.position + root_node.quaternion * godot_pos
@@ -400,6 +407,26 @@ func handle_object_create(msg: Dictionary) -> void:
 				child_rsi.rot = rsi.rot * sm.child_offset_rot[child_id]
 				child_rsi.push_transform()
 		sm.pending_children.erase(local_id)
+
+	# Resolve any seated avatars waiting for this object as their seat
+	if sm.pending_seated_avatars.has(local_id):
+		for entry: Dictionary in sm.pending_seated_avatars[local_id]:
+			var av_id: String = entry["id"]
+			if sm.avatars.has(av_id):
+				var world_pos: Vector3 = rsi.pos + rsi.rot * entry["pos"]
+				var world_rot: Quaternion = rsi.rot * entry["rot"]
+				sm.avatars[av_id].pos = world_pos
+				sm.avatars[av_id].rot = world_rot
+				sm.avatars[av_id].push_transform()
+				sm.avatar_targets[av_id] = { "pos": world_pos, "rot": world_rot, "vel": Vector3.ZERO }
+				# Update skeleton root node too
+				var av_lid: int = sm.avatar_local_ids.get(av_id, 0)
+				if av_lid > 0 and sm.animesh_roots.has(av_lid):
+					var av_node: Node3D = sm.animesh_roots[av_lid]
+					av_node.position = world_pos
+					av_node.quaternion = world_rot
+				print("[AvatarSit] Resolved: avatar=%s seat=%d pos=%s" % [av_id.substr(0, 8), local_id, world_pos])
+		sm.pending_seated_avatars.erase(local_id)
 
 
 func handle_object_update_batch(msg: Dictionary) -> void:
@@ -881,8 +908,12 @@ func _apply_pending_animations(obj_id: int) -> void:
 	if _is_self_avatar(root_id):
 		print("[SelfAvatar] _apply_pending root=%d uuid=%s: %d available, %d missing, %d total joints" % [root_id, _uuid_short(root_id), available.size(), missing, available.reduce(func(acc: int, d: Dictionary): return acc + (d.get("joints", []) as Array).size(), 0)])
 
-	# Build per-joint priority map: joint_name → {priority, data_index}
-	var joint_best: Dictionary = {}
+	# Build per-joint per-CHANNEL priority maps.
+	# SL claims rotation and position independently: an animation with position
+	# keys but no rotation keys claims the position channel without blocking
+	# lower-priority animations from providing rotation (and vice versa).
+	var joint_best_rot: Dictionary = {}  # joint_name -> {priority, data_idx, joint_data}
+	var joint_best_pos: Dictionary = {}
 	for ai in range(available.size()):
 		var data: Dictionary = available[ai]
 		var base_priority: int = int(data.get("priority", 0))
@@ -892,31 +923,72 @@ func _apply_pending_animations(obj_id: int) -> void:
 			if jname.is_empty():
 				continue
 			var jpri: int = int(joint_data.get("priority", base_priority))
-			if not joint_best.has(jname) or jpri >= joint_best[jname]["priority"]:
-				joint_best[jname] = {"priority": jpri, "data_idx": ai, "joint_data": joint_data}
+			if (joint_data.get("rotationKeys", []) as Array).size() > 0:
+				if not joint_best_rot.has(jname) or jpri >= joint_best_rot[jname]["priority"]:
+					joint_best_rot[jname] = {"priority": jpri, "data_idx": ai, "joint_data": joint_data}
+			if (joint_data.get("positionKeys", []) as Array).size() > 0:
+				if not joint_best_pos.has(jname) or jpri >= joint_best_pos[jname]["priority"]:
+					joint_best_pos[jname] = {"priority": jpri, "data_idx": ai, "joint_data": joint_data}
 
 	# Build merged joint keyframe map (SL space — NOT coordinate-converted)
-	# Each joint tracks which animation it came from (for independent loop timing).
-	var merged_joints: Dictionary = {}  # joint_name -> {rot_keys, pos_keys, duration, loop}
-	for jname: String in joint_best:
-		var jd: Dictionary = joint_best[jname]["joint_data"]
-		var ai: int = joint_best[jname]["data_idx"]
-		var src_anim: Dictionary = available[ai]
-		var rot_keys: Array = jd.get("rotationKeys", [])
-		var pos_keys: Array = jd.get("positionKeys", [])
+	# Rotation and position may come from different animations. Each channel
+	# uses the winning animation's timing for keyframe interpolation.
+	var prev_eval: Dictionary = sm.animesh_eval.get(root_id, {}) as Dictionary
+	var prev_joints: Dictionary = prev_eval.get("joints", {}) as Dictionary
+	var prev_elapsed: float = prev_eval.get("elapsed", 0.0)
+
+	# Collect all joints that won at least one channel
+	var all_joint_names: Dictionary = {}
+	for jname in joint_best_rot:
+		all_joint_names[jname] = true
+	for jname in joint_best_pos:
+		all_joint_names[jname] = true
+
+	var merged_joints: Dictionary = {}
+	for jname: String in all_joint_names:
+		var rot_entry: Dictionary = joint_best_rot.get(jname, {}) as Dictionary
+		var pos_entry: Dictionary = joint_best_pos.get(jname, {}) as Dictionary
+
+		var rot_keys: Array = []
+		var pos_keys: Array = []
+
+		# Pick the rotation winner's animation for timing (most joints are rot-driven)
+		var src_anim: Dictionary = {}
+		var anim_uuid: String = ""
+		if not rot_entry.is_empty():
+			rot_keys = (rot_entry["joint_data"] as Dictionary).get("rotationKeys", [])
+			src_anim = available[int(rot_entry["data_idx"])]
+			anim_uuid = str(src_anim.get("uuid", ""))
+		if not pos_entry.is_empty():
+			pos_keys = (pos_entry["joint_data"] as Dictionary).get("positionKeys", [])
+			if src_anim.is_empty():
+				src_anim = available[int(pos_entry["data_idx"])]
+				anim_uuid = str(src_anim.get("uuid", ""))
+
+		# If same animation still wins this joint, keep its start time
+		var start_elapsed: float = prev_elapsed
+		if prev_joints.has(jname):
+			var prev_jdata: Dictionary = prev_joints[jname]
+			if prev_jdata.get("anim_uuid", "") == anim_uuid:
+				start_elapsed = float(prev_jdata.get("start_elapsed", prev_elapsed))
 		merged_joints[jname] = {
 			"rot_keys": rot_keys,
 			"pos_keys": pos_keys,
 			"duration": float(src_anim.get("duration", 1.0)),
 			"loop": src_anim.get("loop", false),
+			"loop_in": float(src_anim.get("loopInPoint", 0.0)),
+			"loop_out": float(src_anim.get("loopOutPoint", src_anim.get("duration", 1.0))),
+			"ease_in_time": float(src_anim.get("easeInTime", 0.0)),
+			"ease_out_time": float(src_anim.get("easeOutTime", 0.0)),
+			"anim_uuid": anim_uuid,
+			"start_elapsed": start_elapsed,
 		}
 
-	# Store eval data — preserve elapsed time if already running
-	var prev_elapsed: float = 0.0
-	if sm.animesh_eval.has(root_id):
-		prev_elapsed = sm.animesh_eval[root_id].get("elapsed", 0.0)
+	# Store eval data — preserve elapsed and since_eval if already running
+	var prev_since_eval: float = prev_eval.get("since_eval", 0.0)
 	sm.animesh_eval[root_id] = {
 		"elapsed": prev_elapsed,
+		"since_eval": prev_since_eval,
 		"joints": merged_joints,
 	}
 	sm.animesh_eval_active = true
@@ -956,25 +1028,116 @@ func process_animesh(delta: float) -> void:
 		var joints: Dictionary = eval["joints"]  # joint_name -> {rot_keys, pos_keys, duration, loop}
 
 		# Evaluate SL local rotations and positions (SL space, NOT converted).
-		# Each joint loops independently at its own animation's duration.
+		# Each joint uses its own start_elapsed (when its winning animation was first
+		# assigned) so that frequent animation-set rebuilds don't reset joint timing.
+		# Looping animations use inPoint/outPoint to define the loop region:
+		#   - First play: 0 → outPoint (plays ease-in + loop body once)
+		#   - Subsequent: loops inPoint → outPoint
 		var sl_local_rot: Dictionary = {}  # joint_name -> Quaternion (SL space)
 		var sl_local_pos: Dictionary = {}  # joint_name -> Vector3 (SL space, meters)
 		for jname: String in joints:
 			var jdata: Dictionary = joints[jname]
 			var jdur: float = jdata["duration"]
-			if jdur <= 0.0:
-				continue
+			var joint_elapsed: float = elapsed - float(jdata.get("start_elapsed", 0.0))
 			var t: float
-			if jdata["loop"]:
-				t = fmod(elapsed, jdur)
+			if jdur <= 0.0:
+				t = 0.0  # Static pose (e.g. hand pose anims: dur=0, single keyframe)
+			elif jdata["loop"]:
+				var loop_in: float = float(jdata.get("loop_in", 0.0))
+				var loop_out: float = float(jdata.get("loop_out", jdur))
+				var loop_len: float = loop_out - loop_in
+				if loop_len <= 0.0:
+					t = loop_in
+				elif float(jdata.get("ease_in_time", 0.0)) > loop_len:
+					# Ease-in reference frame at loopInPoint: easeInTime exceeds
+					# the loop region, so the first keyframe is a blend-from
+					# reference (e.g. identity on hand/finger poses), not real
+					# content.  Clamp to loopOutPoint after the first pass so the
+					# target pose holds steady instead of oscillating back through
+					# the reference frame.
+					t = minf(joint_elapsed, loop_out)
+				elif joint_elapsed <= loop_out:
+					# First pass: play from 0 through loop_out (includes ease-in)
+					t = minf(joint_elapsed, loop_out)
+				else:
+					# Subsequent passes: loop within inPoint → outPoint
+					t = loop_in + fmod(joint_elapsed - loop_out, loop_len)
 			else:
-				t = minf(elapsed, jdur)
+				t = minf(joint_elapsed, jdur)
 			var rot_keys: Array = jdata["rot_keys"]
 			if rot_keys.size() > 0:
 				sl_local_rot[jname] = _interp_sl_rotation(rot_keys, t)
 			var pos_keys: Array = jdata["pos_keys"]
 			if pos_keys.size() > 0:
 				sl_local_pos[jname] = _interp_sl_position(pos_keys, t)
+
+		# TEMP DEBUG: log finger joint state every ~3 seconds
+		if Engine.get_frames_drawn() % 180 == 0:
+			var finger_in_joints: int = 0
+			var finger_in_rot: int = 0
+			var finger_missing: Array = []
+			var sample: String = ""
+			var sample_rot: String = ""
+			for jname2: String in joints:
+				if jname2.contains("Thumb") or jname2.contains("Index") or jname2.contains("Middle") or jname2.contains("Ring") or jname2.contains("Pinky"):
+					finger_in_joints += 1
+					if not sl_local_rot.has(jname2):
+						finger_missing.append(jname2)
+					var jd2: Dictionary = joints[jname2]
+					if sample.is_empty():
+						var je: float = elapsed - float(jd2.get("start_elapsed", 0.0))
+						sample = "%s dur=%.2f rkeys=%d loop=%s anim=%s je=%.2f" % [jname2, jd2["duration"], (jd2["rot_keys"] as Array).size(), str(jd2["loop"]), str(jd2.get("anim_uuid", "?")).substr(0, 8), je]
+						if sl_local_rot.has(jname2):
+							var q: Quaternion = sl_local_rot[jname2]
+							sample_rot = " rot=(%.3f,%.3f,%.3f,%.3f)" % [q.x, q.y, q.z, q.w]
+			for jname2 in sl_local_rot:
+				if (jname2 as String).contains("Thumb") or (jname2 as String).contains("Index") or (jname2 as String).contains("Middle") or (jname2 as String).contains("Ring") or (jname2 as String).contains("Pinky"):
+					finger_in_rot += 1
+			if finger_in_joints > 0:
+				var missing_str: String = "" if finger_missing.is_empty() else " MISSING=%s" % ",".join(finger_missing.slice(0, 5))
+				print("[FingerDbg] root=%d fingers_in_merged=%d fingers_with_rot=%d elapsed=%.1f %s%s%s" % [root_id, finger_in_joints, finger_in_rot, elapsed, sample, sample_rot, missing_str])
+			# TEMP DEBUG: log ankle/foot/toe joint state
+			var foot_joints: Array = []
+			for jname2 in joints:
+				var jn_lower: String = (jname2 as String).to_lower()
+				if jn_lower.contains("ankle") or jn_lower.contains("foot") or jn_lower.contains("toe"):
+					var jd2: Dictionary = joints[jname2]
+					var rkeys: int = (jd2["rot_keys"] as Array).size()
+					var pkeys: int = (jd2["pos_keys"] as Array).size()
+					var has_r: String = "ROT" if sl_local_rot.has(jname2) else "norot"
+					var anim_id: String = str(jd2.get("anim_uuid", "?")).substr(0, 8)
+					foot_joints.append("%s(rk=%d,pk=%d,%s,anim=%s,dur=%.1f)" % [jname2, rkeys, pkeys, has_r, anim_id, float(jd2.get("duration", 0.0))])
+			if foot_joints.size() > 0:
+				print("[FootDbg] root=%d %s" % [root_id, ", ".join(foot_joints)])
+
+		# Per-animation ease-in blending (matches SL viewer's motion controller).
+		# Each animation has an easeInTime during which its contribution ramps
+		# from 0→1 using a cubic smoothstep curve.  Combined with the per-frame
+		# crossfade this produces smooth transitions when animations start.
+		var prev_rot: Dictionary = _prev_sl_local_rot.get(root_id, {}) as Dictionary
+		var base_blend: float = 1.0 - exp(-_ANIM_BLEND_SPEED * since_eval)
+		for jname3: String in sl_local_rot:
+			var blend: float = base_blend
+			# Cap blend rate by per-animation ease-in weight (cubic smoothstep)
+			if joints.has(jname3):
+				var jdata3: Dictionary = joints[jname3]
+				var ease_in: float = float(jdata3.get("ease_in_time", 0.0))
+				if ease_in > 0.0:
+					var je3: float = elapsed - float(jdata3.get("start_elapsed", 0.0))
+					if je3 < ease_in:
+						var f: float = clampf(je3 / ease_in, 0.0, 1.0)
+						var ease_weight: float = f * f * (3.0 - 2.0 * f)
+						blend = minf(blend, ease_weight)
+			if prev_rot.has(jname3):
+				var prev_q: Quaternion = prev_rot[jname3]
+				var new_q: Quaternion = sl_local_rot[jname3]
+				if prev_q.dot(new_q) < 0.0:
+					new_q = -new_q
+				sl_local_rot[jname3] = prev_q.slerp(new_q, blend)
+			elif blend < 1.0:
+				# No previous rotation — blend from identity (rest pose in SL space)
+				sl_local_rot[jname3] = Quaternion.IDENTITY.slerp(sl_local_rot[jname3], blend)
+		_prev_sl_local_rot[root_id] = sl_local_rot.duplicate()
 
 		# Evaluate on shared skeleton — all meshes bind to it via Godot skinning
 		var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(root_id)
@@ -1042,7 +1205,7 @@ func _update_bone_attachments(root_id: int, shared_skel: Skeleton3D) -> void:
 		var ap_xf: Array = _get_ap_world_transform(ap_id, bone_world_pos, bone_world_rot)
 		var offset_pos: Vector3 = sm.child_offset_pos.get(child_id, Vector3.ZERO)
 		var offset_rot: Quaternion = sm.child_offset_rot.get(child_id, Quaternion.IDENTITY)
-		child_rsi.pos = ap_xf[0] + ap_xf[1] * offset_pos
+		child_rsi.pos = ap_xf[0] + ap_xf[2] * offset_pos
 		child_rsi.rot = ap_xf[2] * offset_rot
 		child_rsi.push_transform()
 		_sync_animesh_transform(child_id, child_rsi)
@@ -1109,49 +1272,24 @@ func _get_bone_global_rest_xf(skel: Skeleton3D, bi: int) -> Transform3D:
 
 ## Apply joint position overrides from a GLB skeleton to the shared skeleton.
 ## Only overrides joints in override_joints list (from mesh extras.jointOverrides).
-## Computes bone world transforms from the GLB skeleton's rest hierarchy,
-## then derives matching local rest transforms for the shared skeleton's hierarchy.
+## Copies the GLB skeleton's local rest transform directly — the mesh-converter
+## already set each override bone's local rest from the alt_inverse_bind_matrix.
+## Using world→local conversion was wrong: if a DIFFERENT mesh had previously
+## overridden an ancestor bone, the shared skeleton's parent chain would differ
+## from the GLB's parent chain, producing incorrect local rests.
 ## Last mesh to set a bone wins (same as SL/Firestorm).
 func _apply_joint_overrides(glb_skel: Skeleton3D, shared_skel: Skeleton3D, override_joints: Array) -> void:
-	# Build a set for fast lookup
-	var override_set: Dictionary = {}
-	for jname in override_joints:
-		override_set[jname] = true
-
-	# Compute world rest transforms from GLB skeleton
-	var glb_world: Dictionary = {}  # bone_name -> Transform3D
-	for bi in range(glb_skel.get_bone_count()):
-		var bname: String = glb_skel.get_bone_name(bi)
-		var parent_bi: int = glb_skel.get_bone_parent(bi)
-		var rest: Transform3D = glb_skel.get_bone_rest(bi)
-		if parent_bi >= 0:
-			var parent_name: String = glb_skel.get_bone_name(parent_bi)
-			glb_world[bname] = glb_world.get(parent_name, Transform3D.IDENTITY) * rest
-		else:
-			glb_world[bname] = rest
-
-	# Apply overrides only for listed joints (process in bone index order = parent-first)
 	var override_count: int = 0
-	for bi in range(shared_skel.get_bone_count()):
-		var bname: String = shared_skel.get_bone_name(bi)
-		if not override_set.has(bname):
+	for jname in override_joints:
+		var glb_bi: int = glb_skel.find_bone(jname as String)
+		var shared_bi: int = shared_skel.find_bone(jname as String)
+		if glb_bi < 0 or shared_bi < 0:
 			continue
-		if not glb_world.has(bname):
-			continue
-
-		var target_world: Transform3D = glb_world[bname]
-		var parent_bi: int = shared_skel.get_bone_parent(bi)
-
-		var parent_world: Transform3D = Transform3D.IDENTITY
-		if parent_bi >= 0:
-			parent_world = _get_bone_global_rest_xf(shared_skel, parent_bi)
-
-		var local_rest: Transform3D = parent_world.affine_inverse() * target_world
-		shared_skel.set_bone_rest(bi, local_rest)
+		shared_skel.set_bone_rest(shared_bi, glb_skel.get_bone_rest(glb_bi))
 		override_count += 1
 
 	if override_count > 0:
-		print("[JointOverride] Applied %d/%d bone overrides from GLB → shared skeleton" % [override_count, override_set.size()])
+		print("[JointOverride] Applied %d/%d bone overrides from GLB → shared skeleton" % [override_count, override_joints.size()])
 
 ## Convert a Basis to its rotation quaternion safely.
 ## Returns IDENTITY if the basis is degenerate (zero or near-zero columns from
@@ -1550,13 +1688,29 @@ func handle_avatar_create(msg: Dictionary) -> void:
 
 	var pos: Array = msg.get("position", [128, 128, 25])
 	var godot_pos := sl_to_godot_pos(pos)
-	print("[AvatarHeight] raw_sl_pos=%s godot_pos=%s" % [pos, godot_pos])
-	rsi.pos = godot_pos
-
 	var godot_rot := Quaternion.IDENTITY
 	if msg.has("rotation"):
 		godot_rot = sl_to_godot_quat(msg["rotation"])
-		rsi.rot = godot_rot
+
+	# If avatar is sitting, transform local offset into world space
+	var seat_id: int = int(msg.get("parentId", 0))
+	var seat_rsi = sm.objects.get(seat_id) if seat_id > 0 else null
+	if seat_id > 0:
+		if seat_rsi != null:
+			godot_pos = seat_rsi.pos + seat_rsi.rot * godot_pos
+			godot_rot = seat_rsi.rot * godot_rot
+		else:
+			# Seat object hasn't arrived yet — queue for deferred resolution
+			if not sm.pending_seated_avatars.has(seat_id):
+				sm.pending_seated_avatars[seat_id] = []
+			sm.pending_seated_avatars[seat_id].append({
+				"id": avatar_id, "pos": godot_pos, "rot": godot_rot
+			})
+			print("[AvatarSit] Deferred: avatar=%s waiting for seat localId=%d" % [avatar_id.substr(0, 8), seat_id])
+
+	print("[AvatarHeight] raw_sl_pos=%s godot_pos=%s seat=%d" % [pos, godot_pos, seat_id])
+	rsi.pos = godot_pos
+	rsi.rot = godot_rot
 
 	rsi.push_transform()
 	sm.avatars[avatar_id] = rsi

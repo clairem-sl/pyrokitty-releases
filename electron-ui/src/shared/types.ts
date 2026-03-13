@@ -5,6 +5,16 @@ export const MAP_COLORS = {
   COUNT_DOT: '#ff8a8a',       // lighter red — agent-count population dots
 };
 
+// Per-bot colors for multi-account map markers (cycled by index)
+export const BOT_COLORS = [
+  '#4cff4c',  // green
+  '#4cc9f0',  // cyan
+  '#f77f00',  // orange
+  '#b388ff',  // purple
+  '#ffca28',  // yellow
+  '#ff6b9d',  // pink
+];
+
 // Grid configuration
 export interface Grid {
   id: string;
@@ -110,6 +120,7 @@ export interface Account {
   password?: string; // Only saved if user opted in
   mfaHash?: string; // Saved after successful MFA login to skip future prompts
   lastRegion?: string; // Last custom start location used
+  startLocationType?: 'last' | 'home' | 'custom'; // Start location preference from login form
 }
 
 // Running viewer instance
@@ -238,6 +249,7 @@ export const IPC_CHANNELS = {
   MAP_OPEN: 'map:open',
   MAP_POSITION_UPDATE: 'map:position-update',
   MAP_GET_POSITIONS: 'map:get-positions',
+  MAP_SELECTED_ACCOUNT: 'map:selected-account',
 } as const;
 
 // IPC Request/Response types
@@ -301,6 +313,7 @@ export interface VoiceState {
 // Map marker for world map
 export interface MapMarker {
   type: 'account' | 'nearby';
+  instanceId?: string; // present on 'account' markers — identifies which bot to teleport
   name: string;
   regionName: string;
   gridX: number;

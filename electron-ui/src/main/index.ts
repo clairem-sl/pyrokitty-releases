@@ -136,6 +136,14 @@ async function createWindow(): Promise<void> {
     createMapWindow();
   });
 
+  // Forward selected account from main renderer to map window
+  ipcMain.on(IPC_CHANNELS.MAP_SELECTED_ACCOUNT, (_event, instanceId: string | null) => {
+    const mw = getMapWindow();
+    if (mw && !mw.isDestroyed()) {
+      mw.webContents.send(IPC_CHANNELS.MAP_SELECTED_ACCOUNT, instanceId);
+    }
+  });
+
   // Load the renderer
   // __dirname is dist/main/, renderer is at dist/renderer/
   const htmlPath = path.join(__dirname, '../renderer/index.html');
@@ -238,6 +246,9 @@ async function createWindow(): Promise<void> {
       },
     },
   ]);
+  // Use setContextMenu so Electron calls SetForegroundWindow before
+  // TrackPopupMenu — without this, Windows sometimes shows its own
+  // taskbar context menu instead of ours.
   tray.setContextMenu(contextMenu);
 
   tray.on('double-click', () => {

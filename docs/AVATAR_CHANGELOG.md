@@ -484,7 +484,110 @@ The Hippolyzer approach produces GLBs that work in Blender and should upload to 
 
 ---
 
-## Known Remaining Issues (as of 2026-03-11)
+## Phase 12 — CV Bone BSM Contamination Fix (2026-03-12)
+
+### Problem: meshes with non-identity bind shape matrix render 100x too large
+
+Maitreya Fitmesh body (and other meshes with non-identity BSM) rendered as a giant distorted shape in Blender. The mesh was ~100x too large and visually broken. Identity-BSM meshes were unaffected.
+
+### Root cause: CV bone IBM-derived transforms in BSM space
+
+`mesh-converter.ts` has a special path for collision volume bones: instead of using XML skeleton data, it derives the local transform from `inverse(rawIBM)` to capture the content creator's actual bind pose. The local transform is computed as:
+
+```
+worldXf = mat4Inverse(rawIBM)           // → BSM × jointWorld (for non-identity BSM)
+parentWorld = getWorldPos(parentName)    // → XML world position (no BSM)
+jMat = mat4FromTranslation(-parentWorld) * worldXf
+```
+
+For identity-BSM meshes, `inverse(rawIBM) = jointWorld` and this works fine.
+
+For non-identity BSM meshes (like Maitreya with BSM scales of 32x/155x/96x), `inverse(rawIBM) = BSM × jointWorld`, producing world transforms ~100x the correct size. But `getWorldPos` returns the XML world position at normal SL scale. The two are in different coordinate systems, so the subtraction doesn't cancel — the result retains the BSM scale.
+
+This produced:
+- **Node translations**: world-space positions 100x too large (e.g., PELVIS: `[-1.0, -1.067, -104.7]` instead of `[-0.01, -0.02, 0.0]`)
+- **IBMs**: identity scale with 100x translations (missing the fixup that should bake scale+rotation in)
+- **In Blender**: 21 CV bone joints at wrong positions → mesh skinned incorrectly → giant distorted rendering
+
+### Fix
+
+Added `&& bsmIsIdentity` guard to the CV bone IBM-derived transform path:
+
+```typescript
+// Before:
+if (skelJoint.isCollisionVolume && !jointOverrides.has(name) && rawIBMByName.has(name)) {
+
+// After:
+if (skelJoint.isCollisionVolume && !jointOverrides.has(name) && rawIBMByName.has(name) && bsmIsIdentity) {
+```
+
+When BSM is non-identity, CV bones now use XML-derived transforms + fixup (same as the Hippolyzer reference), avoiding the BSM contamination entirely.
+
+### Testing methodology
+
+Downloaded Maitreya Fitmesh body (mesh UUID `bf815768-4b11-dd04-5725-3a2a6bc2e539`, object UUID `1d684b64-92a7-aeae-988e-c380e4569b27`) and generated GLBs with three approaches:
+
+1. **hippolized** — `hippolize-llmesh.ts` (Hippolyzer reference, proven correct in Blender)
+2. **alpha** — committed mesh-converter.ts before fix (giant mesh in Blender)
+3. **fixed** — mesh-converter.ts with `&& bsmIsIdentity` guard
+
+Used `test-output/compare-glbs.ts` to structurally diff all three:
+- **hippolized vs fixed**: `MATCH` — all structures, transforms, and IBMs match
+- **hippolized vs alpha**: 42 diffs — 21 CV bone node transforms wrong (100x+), 21 CV bone IBMs wrong (scale 1.0 instead of 0.01)
+
+Blender visual check: hippolized and fixed both render correctly at human proportions. Alpha renders as a giant distorted mesh.
+
+### Test artifacts
+
+- `test-output/maitreya-fitmesh.llmesh` — raw mesh from asset server
+- `test-output/maitreya-fitmesh.hippolized.glb` — Hippolyzer reference
+- `test-output/maitreya-fitmesh.alpha.glb` — pre-fix output (broken)
+
+### Tools added
+
+- `test-output/compare-glbs.ts` — Structural GLB comparison tool. Compares vertex bounds, skeleton node transforms, IBMs, joint indices. Exit code 0 = match, 1 = diffs. Use to validate mesh-converter output against Hippolyzer reference:
+  ```bash
+  cd electron-ui && npx tsx test-output/compare-glbs.ts reference.glb candidate.glb
+  ```
+
+### Failed approach: skip BSM baking for rigged meshes (do not retry)
+
+An attempt was made to avoid baking BSM into vertex positions for rigged meshes, instead compensating by multiplying `IBM × BSM`. While mathematically valid in theory (`JM × IBM × BSM × v = JM × (IBM×BSM) × v`), the implementation had cascading issues:
+- Orphan joint transforms computed as `inverse(IBM × BSM)` = `BSM⁻¹ × jointWorld` (wrong)
+- Vertex positions stayed at tiny raw SL normalized coords ([-0.5, 0.5] instead of [-15, 16])
+- The Hippolyzer reference (proven working) always bakes BSM into vertices — follow that approach
+
+### Remaining issue: Godot rendering
+
+The GLB is now correct (verified in Blender). Godot viewer still shows incorrect rendering for Maitreya. The issue is on the Godot side — likely in how `set_bone_global_pose_override` interacts with the BSM-scaled vertex positions, or how the shared skeleton rest transforms are applied during skin deformation.
+
+---
+
+## Phase 11 — Joint Override & Animation Priority Fixes (2026-03-13)
+
+**Goal:** Fix hand bone positioning and per-channel animation priority.
+
+### Fix 1: Joint override reference frame mismatch
+
+**Problem:** `_apply_joint_overrides()` computed a world→local conversion that mixed two reference frames: the GLB skeleton's parent chain (XML defaults) vs the shared skeleton's parent chain (potentially modified by a different mesh). When a body mesh overrode ancestor bones (e.g. mChest), hand/finger bone overrides from a separate hand mesh would end up at wrong positions.
+
+**Fix:** Copy the GLB skeleton's local rest transform directly to the shared skeleton instead of going through world→local conversion. The mesh-converter already sets each override bone's local rest from the `alt_inverse_bind_matrix`, so the GLB rest is authoritative. This matches SL's behavior where each mesh sets the bone's local position directly.
+
+**Files:** `object_manager.gd` — `_apply_joint_overrides()`
+
+### Fix 2: Per-channel animation priority
+
+**Problem:** Animation priority was tracked per-joint, not per-channel. An animation that claimed a joint with position keys but no rotation keys (e.g. an ankle position override at pri=6) would block lower-priority animations from rotating that joint. This prevented toe-bending animations from working on avatars with ankle position animations.
+
+**Fix:** Split priority arbitration into separate rotation and position channels. An animation only claims the rotation channel if it has rotation keyframes, and only claims the position channel if it has position keyframes. The merged result can now have rotation from one animation and position from another for the same joint.
+
+**Files:** `object_manager.gd` — `_apply_pending_animations()`
+
+**Outcome:** Hand bones position correctly on avatars wearing multiple rigged meshes. Toe/ankle animations play correctly even when a higher-priority animation repositions (but doesn't rotate) the ankle.
+
+---
+
+## Known Remaining Issues (as of 2026-03-13)
 
 - **Prim attachments diverge during walk**: Anchor strategy is running but results are inconsistent. Rigged mesh positions and prim attachment positions can diverge, especially during locomotion animations that move mPelvis.
 - **Half t-pose on some meshes**: Lel heads, some tail joints not fully resolved by hybrid skeleton. Degenerate-basis fix may improve this (affected bones now hold rest pose instead of garbage).

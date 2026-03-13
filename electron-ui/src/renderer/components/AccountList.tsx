@@ -11,6 +11,7 @@ interface AccountListProps {
   onSelectAccount: (accountId: string) => void;
   onAddAccount: () => void;
   onStopInstance: (instanceId: string) => void;
+  onLoginAccount: (accountId: string) => void;
   onLaunchViewer: (instanceId: string) => void;
   onLaunchGodotViewer: (instanceId: string, vrMode?: boolean) => void;
 }
@@ -23,6 +24,7 @@ export const AccountList: React.FC<AccountListProps> = ({
   onSelectAccount,
   onAddAccount,
   onStopInstance,
+  onLoginAccount,
   onLaunchViewer,
   onLaunchGodotViewer,
 }) => {
@@ -63,7 +65,7 @@ export const AccountList: React.FC<AccountListProps> = ({
                 </div>
                 <div className="account-status-row">
                   <StatusIndicator instance={instance} />
-                  {running && instance && (
+                  {running && instance ? (
                     <button
                       className="account-stop-btn"
                       onClick={(e) => {
@@ -75,14 +77,32 @@ export const AccountList: React.FC<AccountListProps> = ({
                     >
                       {stopping ? '...' : 'Logout'}
                     </button>
-                  )}
+                  ) : !running && account.password ? (
+                    <button
+                      className="account-login-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectAccount(account.id);
+                        onLoginAccount(account.id);
+                      }}
+                      title="Login"
+                    >
+                      Login
+                    </button>
+                  ) : null}
                 </div>
-                {running && instance?.regionName && (
+                {instance?.regionName ? (
                   <div className="account-region">
                     {instance.regionName}
                   </div>
+                ) : (
+                  <div className="account-region offline">
+                    {account.startLocationType === 'home' ? 'My Home'
+                      : account.startLocationType === 'custom' && account.lastRegion ? account.lastRegion
+                      : 'My Last Location'}
+                  </div>
                 )}
-                {isMetaverseOnly && instance && (
+                {isMetaverseOnly && instance && selectedAccountId === account.id && (
                   <div className="account-viewer-buttons">
                     <button
                       className="account-launch-btn"

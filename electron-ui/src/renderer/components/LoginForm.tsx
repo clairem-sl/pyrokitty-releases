@@ -5,7 +5,7 @@ import { Grid, Account } from '../../shared/types';
 interface LoginFormProps {
   grids: Grid[];
   onSubmit?: (gridId: string, firstName: string, lastName: string, password: string, savePassword: boolean) => void;
-  onLogin?: (password?: string, startLocation?: string, regionName?: string) => void;  // Login to metaverse
+  onLogin?: (password?: string, startLocation?: string, regionName?: string, startLocationType?: 'last' | 'home' | 'custom') => void;  // Login to metaverse
   onCancel: () => void;
   onRemove?: () => void;
   error: string | null;
@@ -31,7 +31,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
   const [password, setPassword] = useState(account?.password || '');
   const [savePassword, setSavePassword] = useState(false);
   const savedLocation = account?.lastRegion || '';
-  const [startLocationType, setStartLocationType] = useState<'last' | 'home' | 'custom'>(savedLocation ? 'custom' : 'last');
+  const [startLocationType, setStartLocationType] = useState<'last' | 'home' | 'custom'>(account?.startLocationType || (savedLocation ? 'custom' : 'last'));
   const [customLocation, setCustomLocation] = useState(savedLocation);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -46,7 +46,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
       }
       // 'last' is the default, no need to pass it
       const regionName = startLocationType === 'custom' ? customLocation.trim() : undefined;
-      onLogin(password || undefined, startLocation, regionName);
+      onLogin(password || undefined, startLocation, regionName, startLocationType);
     } else if (onSubmit && selectedGridId && firstName.trim() && lastName.trim() && password) {
       onSubmit(selectedGridId, firstName.trim(), lastName.trim(), password, savePassword);
     }

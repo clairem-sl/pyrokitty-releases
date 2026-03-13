@@ -15,6 +15,8 @@ export interface UpdateCoalescerDeps {
   getLightInfo(obj: any): any;
   /** Send a message to Godot */
   send(msg: object): void;
+  /** Re-send an object to Godot (destroy + re-create) when its fundamental type changes */
+  resendObject(obj: any): void;
 }
 
 export class GodotUpdateCoalescer {
@@ -26,10 +28,16 @@ export class GodotUpdateCoalescer {
   private avatarUpdateBuffer: Map<string, any> = new Map();
   private avatarUpdateTimer: ReturnType<typeof setTimeout> | null = null;
   private objectsWithLights = new Set<number>();
+  private objectAnimeshState = new Map<number, boolean>();
   private _debugFlushSeq = 0;
 
   constructor(deps: UpdateCoalescerDeps) {
     this.deps = deps;
+  }
+
+  /** Track an object's animesh state (called from sendObject) */
+  trackAnimesh(localId: number, isAnimesh: boolean): void {
+    this.objectAnimeshState.set(localId, isAnimesh);
   }
 
   /** Track that an object has a light (called from sendObject) */
@@ -145,6 +153,18 @@ export class GodotUpdateCoalescer {
       // Drop stale updates — only accept newer sequence numbers
       if (seq < prevSeq) return;
       this.updateSeq.set(obj.ID, seq);
+
+      // Detect animesh state change — re-create the object if it changed
+      const isAnimesh = !!(obj.extraParams?.extendedMeshData?.flags & 0x1);
+      const wasAnimesh = this.objectAnimeshState.get(obj.ID) ?? false;
+      if (isAnimesh !== wasAnimesh) {
+        console.log(`[Animesh] State changed for localId=${obj.ID} uuid=${uid}: ${wasAnimesh} → ${isAnimesh}`);
+        this.objectAnimeshState.set(obj.ID, isAnimesh);
+        this.updateBuffer.delete(obj.ID);
+        this.deps.resendObject(obj);
+        return;
+      }
+
       const rot = obj.Rotation;
       const scl = obj.Scale;
       const vel = obj.Velocity;

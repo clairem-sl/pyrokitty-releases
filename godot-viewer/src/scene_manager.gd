@@ -79,6 +79,7 @@ var object_parent: Dictionary = {}      # childLocalId -> parentLocalId
 var object_children: Dictionary = {}    # parentLocalId -> Array[childLocalId]
 var child_offset_pos: Dictionary = {}   # childLocalId -> Vector3
 var child_offset_rot: Dictionary = {}   # childLocalId -> Quaternion
+var pending_seated_avatars: Dictionary = {}  # seatLocalId -> Array[{id, pos, rot}]
 
 # Shared mesh resources
 var object_mesh: BoxMesh

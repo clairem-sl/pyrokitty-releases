@@ -46,6 +46,11 @@ export const App: React.FC = () => {
   const selectedInstance = getInstanceForAccount(selectedAccountId || '') || null;
   const activeInstanceId = selectedInstance?.id || null;
 
+  // Sync selected account to map window for teleport targeting
+  useEffect(() => {
+    ipcRenderer.send(IPC_CHANNELS.MAP_SELECTED_ACCOUNT, activeInstanceId);
+  }, [activeInstanceId]);
+
   const handleSelectAccount = (accountId: string) => {
     setSelectedAccountId(accountId);
     setCurrentView('account');
@@ -85,13 +90,14 @@ export const App: React.FC = () => {
   };
 
   // Login to metaverse only (no viewer launch)
-  const handleLogin = async (password?: string, startLocation?: string, regionName?: string) => {
+  const handleLogin = async (password?: string, startLocation?: string, regionName?: string, startLocationType?: 'last' | 'home' | 'custom') => {
     if (!selectedAccountId) return;
 
     try {
       const updates: Partial<Account> = {};
       if (password) updates.password = password;
       if (regionName !== undefined) updates.lastRegion = regionName || undefined;
+      if (startLocationType) updates.startLocationType = startLocationType;
       if (Object.keys(updates).length > 0) await updateAccount(selectedAccountId, updates);
 
       // Pass launchViewer: false to only login to metaverse
@@ -147,6 +153,7 @@ export const App: React.FC = () => {
                 onSelectAccount={handleSelectAccount}
                 onAddAccount={handleAddAccount}
                 onStopInstance={handleStopViewer}
+                onLoginAccount={(accountId) => launchViewer(accountId, undefined, { launchViewer: false })}
                 onLaunchViewer={launchViewerForInstance}
                 onLaunchGodotViewer={launchGodotViewerForInstance}
               />

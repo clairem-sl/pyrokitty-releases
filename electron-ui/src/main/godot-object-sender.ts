@@ -271,6 +271,7 @@ export class GodotObjectSender {
     if (lightInfo) {
       this.updateCoalescer?.trackLight(obj.ID);
     }
+    this.updateCoalescer?.trackAnimesh(obj.ID, isAnimesh);
     if (isAnimesh && objUuid) {
       this.animationManager.registerAnimeshObject(objUuid, obj.ID);
       const buffered = this.animationManager.getBufferedObjectAnims(objUuid);

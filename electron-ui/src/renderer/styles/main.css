@@ -164,10 +164,6 @@ body {
   background: rgba(233, 69, 96, 0.1);
 }
 
-.account-item.running {
-  border-color: var(--success);
-}
-
 .account-item.running.selected {
   border-color: var(--success);
   background: rgba(78, 205, 196, 0.1);
@@ -217,6 +213,23 @@ body {
   cursor: not-allowed;
 }
 
+.account-login-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--success);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.account-login-btn:hover {
+  border-color: var(--success);
+  background: rgba(46, 213, 115, 0.1);
+}
+
 .account-region {
   font-size: 11px;
   color: var(--success);
@@ -224,6 +237,10 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.account-region.offline {
+  color: var(--text-secondary);
 }
 
 .account-viewer-buttons {

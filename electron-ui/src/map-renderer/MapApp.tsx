@@ -3,7 +3,7 @@ import { ipcRenderer } from 'electron';
 import L from 'leaflet';
 import { MapContainer, useMap, useMapEvents } from 'react-leaflet';
 import { createLayerComponent } from '@react-leaflet/core';
-import { IPC_CHANNELS, MAP_COLORS, MapMarker } from '../shared/types';
+import { IPC_CHANNELS, MAP_COLORS, BOT_COLORS, MapMarker } from '../shared/types';
 
 // ── SL Tile Layer ──────────────────────────────────────────
 
@@ -27,30 +27,34 @@ const TileLayerSL = createLayerComponent(
 
 // ── Colors ───────────────────────────────────────────────
 
-const ACCOUNT_COLOR = MAP_COLORS.SELF;
 const NEARBY_COLOR = MAP_COLORS.NEARBY;
+
+/** Get a stable color for an account marker based on its index among account markers */
+function getBotColor(botIndex: number): string {
+  return BOT_COLORS[botIndex % BOT_COLORS.length];
+}
 
 // ── Avatar Markers Layer ──────────────────────────────────
 
 const AvatarMarkersLayer = createLayerComponent(
-  function createMarkers(props: { markers: MapMarker[] }, context: any) {
+  function createMarkers(props: { markers: MapMarker[]; botColorMap: Map<string, string> }, context: any) {
     const group = L.layerGroup();
-    updateMarkerGroup(group, props.markers);
+    updateMarkerGroup(group, props.markers, props.botColorMap);
     return { instance: group, context: { ...context, layerContainer: group } };
   },
-  function updateMarkers(instance: L.LayerGroup, props: { markers: MapMarker[] }, _prevProps: any) {
-    updateMarkerGroup(instance, props.markers);
+  function updateMarkers(instance: L.LayerGroup, props: { markers: MapMarker[]; botColorMap: Map<string, string> }, _prevProps: any) {
+    updateMarkerGroup(instance, props.markers, props.botColorMap);
   },
 );
 
-function updateMarkerGroup(group: L.LayerGroup, markers: MapMarker[]) {
+function updateMarkerGroup(group: L.LayerGroup, markers: MapMarker[], botColorMap: Map<string, string>) {
   group.clearLayers();
 
   for (const pos of markers) {
     const mapX = pos.gridX + pos.localX / 256;
     const mapY = pos.gridY + pos.localY / 256;
     const isAccount = pos.type === 'account';
-    const color = isAccount ? ACCOUNT_COLOR : NEARBY_COLOR;
+    const color = isAccount && pos.instanceId ? (botColorMap.get(pos.instanceId) ?? NEARBY_COLOR) : (isAccount ? MAP_COLORS.SELF : NEARBY_COLOR);
     const marker = L.circleMarker([mapY, mapX], {
       radius: isAccount ? 7 : 4, color, fillColor: color, fillOpacity: 0.85, weight: isAccount ? 2 : 1,
     });
@@ -85,7 +89,7 @@ function AutoCenter({ markers }: { markers: MapMarker[] }) {
 
 // ── Teleport Popup ────────────────────────────────────────
 
-function TeleportPopup({ markers }: { markers: MapMarker[] }) {
+function TeleportPopup({ markers, selectedInstanceId }: { markers: MapMarker[]; selectedInstanceId: string | null }) {
   const map = useMap();
   const popupRef = useRef<L.Popup | null>(null);
   const pulseMarkerRef = useRef<L.CircleMarker | null>(null);
@@ -108,7 +112,7 @@ function TeleportPopup({ markers }: { markers: MapMarker[] }) {
   useEffect(() => {
     const target = targetRef.current;
     if (!target) return;
-    const accountPos = markers.find(m => m.type === 'account');
+    const accountPos = markers.find(m => m.type === 'account' && (!selectedInstanceId || m.instanceId === selectedInstanceId));
     if (!accountPos) return;
     const mapX = accountPos.gridX + accountPos.localX / 256;
     const mapY = accountPos.gridY + accountPos.localY / 256;
@@ -147,11 +151,11 @@ function TeleportPopup({ markers }: { markers: MapMarker[] }) {
     // Safety timeout: clear after 15s
     timeoutRef.current = setTimeout(clearTeleportMarker, 15000);
 
-    ipcRenderer.invoke(IPC_CHANNELS.TELEPORT_REGION, gridX, gridY, x, y, z).then((result: any) => {
+    ipcRenderer.invoke(IPC_CHANNELS.TELEPORT_REGION, selectedInstanceId, gridX, gridY, x, y, z).then((result: any) => {
       if (result?.error) clearTeleportMarker();
     });
     map.closePopup();
-  }, [map, clearTeleportMarker]);
+  }, [map, clearTeleportMarker, selectedInstanceId]);
 
   useMapEvents({
     dblclick(e) {
@@ -196,10 +200,19 @@ function TeleportPopup({ markers }: { markers: MapMarker[] }) {
   return null;
 }
 
+// ── Map ref capture ──────────────────────────────────────────
+
+function MapRefCapture({ mapRef }: { mapRef: React.MutableRefObject<L.Map | null> }) {
+  const map = useMap();
+  mapRef.current = map;
+  return null;
+}
+
 // ── MapApp ─────────────────────────────────────────────────
 
 export const MapApp: React.FC = () => {
   const [markers, setMarkers] = useState<MapMarker[]>([]);
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
 
   // Full marker refresh from 3s timer (nearby avatars, agent counts, etc.)
   useEffect(() => {
@@ -223,7 +236,7 @@ export const MapApp: React.FC = () => {
       const pos = data.regionInfo.agentPosition;
       if (!pos) return;
       setMarkers(prev => prev.map(m =>
-        m.type === 'account'
+        m.type === 'account' && m.instanceId === data.instanceId
           ? { ...m, gridX: data.regionInfo.x, gridY: data.regionInfo.y, localX: pos.x, localY: pos.y, localZ: pos.z }
           : m
       ));
@@ -234,26 +247,81 @@ export const MapApp: React.FC = () => {
     };
   }, []);
 
+  // Listen for selected account from main window
+  useEffect(() => {
+    const handler = (_event: any, instanceId: string | null) => {
+      setSelectedInstanceId(instanceId);
+    };
+    ipcRenderer.on(IPC_CHANNELS.MAP_SELECTED_ACCOUNT, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.MAP_SELECTED_ACCOUNT, handler);
+    };
+  }, []);
+
+  // Build stable color map: instanceId -> color (by order of appearance)
+  const accountMarkers = useMemo(() => markers.filter(m => m.type === 'account' && m.instanceId), [markers]);
+  const botColorMap = useMemo(() => {
+    const map = new Map<string, string>();
+    accountMarkers.forEach((m, i) => {
+      if (m.instanceId) map.set(m.instanceId, getBotColor(i));
+    });
+    return map;
+  }, [accountMarkers]);
+
+  // Auto-select first bot if nothing is selected yet
+  useEffect(() => {
+    if (!selectedInstanceId && accountMarkers.length > 0) {
+      setSelectedInstanceId(accountMarkers[0].instanceId!);
+    }
+  }, [selectedInstanceId, accountMarkers]);
+
+  const mapRef = useRef<L.Map | null>(null);
   const center = useMemo<L.LatLngExpression>(() => [1000, 1000], []);
 
   return (
-    <MapContainer
-      className="map-container"
-      center={center}
-      zoom={0}
-      minZoom={-1}
-      maxZoom={10}
-      maxBounds={[[0, 0], [2048, 2048]]}
-      maxBoundsViscosity={1}
-      crs={L.CRS.Simple}
-      zoomControl={true}
-      attributionControl={false}
-      doubleClickZoom={false}
-    >
-      <TileLayerSL minZoom={-1} maxZoom={10} maxNativeZoom={8} minNativeZoom={1} />
-      <AvatarMarkersLayer markers={markers} />
-      <AutoCenter markers={markers} />
-      <TeleportPopup markers={markers} />
-    </MapContainer>
+    <>
+      <MapContainer
+        className="map-container"
+        center={center}
+        zoom={0}
+        minZoom={-1}
+        maxZoom={10}
+        maxBounds={[[0, 0], [2048, 2048]]}
+        maxBoundsViscosity={1}
+        crs={L.CRS.Simple}
+        zoomControl={true}
+        attributionControl={false}
+        doubleClickZoom={false}
+      >
+        <MapRefCapture mapRef={mapRef} />
+        <TileLayerSL minZoom={-1} maxZoom={10} maxNativeZoom={8} minNativeZoom={1} />
+        <AvatarMarkersLayer markers={markers} botColorMap={botColorMap} />
+        <AutoCenter markers={markers} />
+        <TeleportPopup markers={markers} selectedInstanceId={selectedInstanceId} />
+      </MapContainer>
+      {accountMarkers.length > 0 && (
+        <div className="bot-legend">
+          <div className="bot-legend-title">Avatars</div>
+          {accountMarkers.map((m) => (
+            <div
+              key={m.instanceId}
+              className={`bot-legend-item ${selectedInstanceId === m.instanceId ? 'selected' : ''}`}
+              onClick={() => setSelectedInstanceId(m.instanceId!)}
+              onDoubleClick={() => {
+                setSelectedInstanceId(m.instanceId!);
+                mapRef.current?.setView(
+                  [m.gridY + m.localY / 256, m.gridX + m.localX / 256],
+                  6,
+                );
+              }}
+            >
+              <span className="bot-legend-dot" style={{ background: botColorMap.get(m.instanceId!) }} />
+              <span className="bot-legend-name">{m.name}</span>
+              <span className="bot-legend-region">{m.regionName}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 };

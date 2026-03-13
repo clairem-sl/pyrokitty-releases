@@ -10,7 +10,7 @@ This documentation covers the internal architecture of the Phoenix Firestorm vie
 - [Login System](login-system.md) - Authentication and version checking
 - [Export System](export-system.md) - Collada and backup export functionality
 - [User Data Storage](user-data-storage.md) - Credentials and protected data
-- [Mesh Repository](mesh-repository.md) - Mesh loading and teleport handling
+- ~~Mesh Repository~~ *(doc not yet written)* - Mesh loading and teleport handling
 
 ### Rendering & Performance
 - [Texture System](texture-system.md) - Texture picker, face panels, and GL memory

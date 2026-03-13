@@ -254,4 +254,4 @@ model.addNewMsgCallback([](const LLSD& msg) { /* handle */ });
 ## Next Steps
 
 See [CHAT-SYSTEM.md](./CHAT-SYSTEM.md) for detailed chat architecture.
-See [TODO-LEAP-EXTENSION.md](./TODO-LEAP-EXTENSION.md) for implementation plan.
+See [LEAP-EXTENSION.md](./LEAP-EXTENSION.md) for implementation plan.

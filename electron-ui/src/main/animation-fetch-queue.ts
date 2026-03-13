@@ -27,6 +27,10 @@ export interface AnimationData {
   uuid: string;
   duration: number;
   loop: boolean;
+  loopInPoint: number;
+  loopOutPoint: number;
+  easeInTime: number;
+  easeOutTime: number;
   priority: number;
   joints: AnimationJointData[];
 }
@@ -223,6 +227,10 @@ function convertAnimation(uuid: string, anim: LLAnimation): AnimationData {
     uuid,
     duration: anim.length,
     loop: anim.loop !== 0,
+    loopInPoint: anim.inPoint,
+    loopOutPoint: anim.outPoint,
+    easeInTime: anim.easeInTime,
+    easeOutTime: anim.easeOutTime,
     priority: anim.priority,
     joints,
   };

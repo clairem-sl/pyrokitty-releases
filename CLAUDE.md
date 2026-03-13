@@ -1,6 +1,6 @@
 ## Godot
 
-Version is set in `godot-viewer/godot-version.txt`. Currently `Godot_v4.4-stable_win64`.
+Version is set in `godot-viewer/godot-version.txt`.
 
 Run tests (headless, no window):
 
@@ -65,7 +65,7 @@ See `docs/architecture/` for system documentation and performance optimizations.
 
 ## Avatar Rendering Changelog
 
-See `AVATAR_CHANGELOG.md` for a history of avatar rendering changes, what was tried, and outcomes. **Update this file whenever making avatar rendering changes.**
+See `docs/AVATAR_CHANGELOG.md` for a history of avatar rendering changes, what was tried, and outcomes. **Update this file whenever making avatar rendering changes.**
 
 ## Logs
 

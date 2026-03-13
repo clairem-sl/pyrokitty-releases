@@ -332,7 +332,7 @@ export class GodotBridge extends EventEmitter {
     });
 
     const animationFetchQueue = new AnimationFetchQueue(this.bot, (animUuid, data) => {
-      console.log(`[Animesh] animation_ready: ${animUuid.slice(0, 8)} (${data.joints.length} joints, ${data.duration.toFixed(1)}s, loop=${data.loop})`);
+      console.log(`[Animesh] animation_ready: ${animUuid.slice(0, 8)} (${data.joints.length} joints, ${data.duration.toFixed(1)}s, loop=${data.loop}, pri=${data.priority ?? '?'})`);
       this.animationManager.checkAnimBatchReady(animUuid);
     });
 
@@ -348,6 +348,10 @@ export class GodotBridge extends EventEmitter {
       isAvatarTracked: (id) => this.trackedAvatars.has(id),
       getLightInfo: (obj) => this.objectSender.getLightInfo(obj),
       send: (msg) => this.send(msg),
+      resendObject: (obj) => {
+        this.objectSender.sendObject(obj, obj.ParentID ?? 0);
+        this.objectSender.sendChildren(obj);
+      },
     });
 
     this.objectSender.initQueues(meshFetchQueue, sculptFetchQueue, this.textureFetchQueue, this.updateCoalescer);

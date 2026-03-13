@@ -253,15 +253,22 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
   // Teleport to region by grid coordinates (cross-region)
   // teleportToRegionCoordinates expects global coords (grid * 256).
   // Callers pass grid coords (e.g. 1007, 1194). Detect and convert.
-  ipcMain.handle(IPC_CHANNELS.TELEPORT_REGION, async (_, gridX: number, gridY: number, x: number, y: number, z: number) => {
-    // Pick first connected metaverse instance
-    const instances = viewerManager.getInstances();
+  ipcMain.handle(IPC_CHANNELS.TELEPORT_REGION, async (_, instanceId: string | null, gridX: number, gridY: number, x: number, y: number, z: number) => {
     let bot: any = null;
-    for (const inst of instances) {
-      if (inst.connectionState !== 'metaverse_connected' && inst.connectionState !== 'viewer_connected') continue;
-      const metaverse = metaverseConnectionManager.get(inst.id);
-      if (!metaverse) continue;
-      bot = metaverse.getBot();
+    if (instanceId) {
+      const metaverse = metaverseConnectionManager.get(instanceId);
+      if (metaverse) bot = metaverse.getBot();
+    }
+    // Fallback: pick first connected instance
+    if (!bot) {
+      const instances = viewerManager.getInstances();
+      for (const inst of instances) {
+        if (inst.connectionState !== 'metaverse_connected' && inst.connectionState !== 'viewer_connected') continue;
+        const metaverse = metaverseConnectionManager.get(inst.id);
+        if (!metaverse) continue;
+        bot = metaverse.getBot();
+        if (bot) break;
+      }
     }
     if (!bot) return { error: 'Not connected — no active metaverse instance found' };
     try {
@@ -689,7 +696,7 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
             if (mapData.grid_x === 0 && mapData.grid_y === 0) continue;
 
             markers.push({
-              type: 'account', name: accountName, regionName: mapData.region_name,
+              type: 'account', instanceId: instance.id, name: accountName, regionName: mapData.region_name,
               gridX: mapData.grid_x, gridY: mapData.grid_y,
               localX: mapData.agent_x, localY: mapData.agent_y, localZ: mapData.agent_z,
             });
@@ -712,7 +719,7 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       if (!regionInfo || (regionInfo.x === 0 && regionInfo.y === 0)) continue;
 
       markers.push({
-        type: 'account', name: accountName, regionName: regionInfo.name,
+        type: 'account', instanceId: instance.id, name: accountName, regionName: regionInfo.name,
         gridX: regionInfo.x, gridY: regionInfo.y,
         localX: regionInfo.agentPosition?.x ?? 128, localY: regionInfo.agentPosition?.y ?? 128, localZ: regionInfo.agentPosition?.z ?? 0,
       });
