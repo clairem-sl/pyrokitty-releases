@@ -249,7 +249,7 @@ if (!allowVoice) {
 
 ### Reference: Firestorm Logic
 
-`indra/newview/llvoicewebrtc.cpp` lines 562-586 — `LLVoiceWebRTCConnection::requestVoiceConnection()`:
+`firestorm/indra/newview/llvoicewebrtc.cpp` lines 562-586 — `LLVoiceWebRTCConnection::requestVoiceConnection()`:
 - If `LLViewerParcelMgr` returns `INVALID_PARCEL_ID` → estate voice (parcel_local_id omitted)
 - Otherwise → parcel-specific voice (parcel_local_id = actual local ID)
 
@@ -331,7 +331,7 @@ Lines are prefixed with `[VoiceSidecar]`. Key log patterns:
 
 - Official SL WebRTC dev doc: `sl-webrtc-dev.pdf`
 - LibreMetaverse reference: `C:\DeeDrive\dev\libremetaverse\LibreMetaverse.Voice.WebRTC\`
-- Firestorm WebRTC voice: `indra/newview/llvoicewebrtc.cpp`
+- Firestorm WebRTC voice: `firestorm/indra/newview/llvoicewebrtc.cpp`
 - Test program: `libremetaverse\Programs\WebRtcTest\WebRtcTest.cs`
 - Voice test script: `electron-ui/scripts/test-voice.ts`
 - Test accounts: `electron-ui/data/accounts.json`

@@ -10,10 +10,10 @@ Both use a shared permissions checking system.
 
 ## Key Files
 
-- `indra/newview/fsexportperms.cpp` - Permission checking for exports
-- `indra/newview/fsexportperms.h` - Permission check header
-- `indra/newview/daeexport.cpp` - Collada (.dae) export
-- `indra/newview/fsfloaterexport.cpp` - Backup (.oxp) export floater
+- `firestorm/indra/newview/fsexportperms.cpp` - Permission checking for exports
+- `firestorm/indra/newview/fsexportperms.h` - Permission check header
+- `firestorm/indra/newview/daeexport.cpp` - Collada (.dae) export
+- `firestorm/indra/newview/fsfloaterexport.cpp` - Backup (.oxp) export floater
 
 ## Permission Checking
 

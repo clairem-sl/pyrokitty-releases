@@ -32,14 +32,14 @@ Both share some infrastructure but have separate UI components and data flows.
 Network (simulator)
     │
     ▼
-process_chat_from_simulator()          ← indra/newview/llviewermessage.cpp:2762
+process_chat_from_simulator()          ← firestorm/indra/newview/llviewermessage.cpp:2762
     │
     ├── Anti-spam filtering             ← NACLAntiSpamRegistry
     ├── Mute checking                   ← LLMuteList
     ├── Avatar name lookup              ← LLAvatarNameCache
     │
     ▼
-LLChat object created                   ← indra/llui/llchat.h
+LLChat object created                   ← firestorm/indra/llui/llchat.h
     │
     ▼
 LLFloaterIMNearbyChatHandler::processChat()
@@ -60,10 +60,10 @@ LLLogChat::saveHistory()                ← File persistence (async)
 User types in FSFloaterNearbyChat
     │
     ▼
-FSFloaterNearbyChat::onChatBoxCommit()  ← indra/newview/fsfloaternearbychat.cpp
+FSFloaterNearbyChat::onChatBoxCommit()  ← firestorm/indra/newview/fsfloaternearbychat.cpp
     │
     ▼
-FSNearbyChat::sendChatFromViewer()      ← indra/newview/fsnearbychathub.cpp
+FSNearbyChat::sendChatFromViewer()      ← firestorm/indra/newview/fsnearbychathub.cpp
     │
     ├── Channel number parsing (/42 syntax)
     ├── Chat type triggers (/me, /shout, etc.)
@@ -78,10 +78,10 @@ gAgent.sendChat()                       ← Sends to simulator
 Network (ImprovedInstantMessage packet)
     │
     ▼
-LLIMProcessing::processNewMessage()     ← indra/newview/llimprocessing.cpp
+LLIMProcessing::processNewMessage()     ← firestorm/indra/newview/llimprocessing.cpp
     │
     ▼
-LLIMMgr::addMessage()                   ← indra/newview/llimview.cpp
+LLIMMgr::addMessage()                   ← firestorm/indra/newview/llimview.cpp
     │
     ▼
 LLIMModel::addMessage()                 ← Session management
@@ -102,10 +102,10 @@ LLLogChat::saveHistory()                ← File persistence
 User types in FSFloaterIM
     │
     ▼
-FSFloaterIM::sendMsg()                  ← indra/newview/fsfloaterim.cpp
+FSFloaterIM::sendMsg()                  ← firestorm/indra/newview/fsfloaterim.cpp
     │
     ▼
-LLIMMgr::sendMessage()                  ← indra/newview/llimview.cpp
+LLIMMgr::sendMessage()                  ← firestorm/indra/newview/llimview.cpp
     │
     ▼
 send_improved_im() or HTTP capability   ← Network transmission
@@ -117,7 +117,7 @@ send_improved_im() or HTTP capability   ← Network transmission
 
 ### Data Structures
 
-#### LLChat (`indra/llui/llchat.h`)
+#### LLChat (`firestorm/indra/llui/llchat.h`)
 
 Core chat message structure:
 
@@ -138,7 +138,7 @@ public:
 };
 ```
 
-#### Chat Types (`indra/llcommon/llchat.h`)
+#### Chat Types (`firestorm/indra/llcommon/llchat.h`)
 
 ```cpp
 enum EChatType {
@@ -160,7 +160,7 @@ enum EChatSourceType {
 
 ### IM Session Management
 
-#### LLIMModel (`indra/newview/llimview.h`)
+#### LLIMModel (`firestorm/indra/newview/llimview.h`)
 
 Singleton managing all IM sessions:
 
@@ -224,7 +224,7 @@ public:
 
 ## Existing APIs
 
-### LLChatBar EventAPI (`indra/newview/fsnearbychatbarlistener.cpp`)
+### LLChatBar EventAPI (`firestorm/indra/newview/fsnearbychatbarlistener.cpp`)
 
 **Pump Name:** `LLChatBar`
 
@@ -239,7 +239,7 @@ public:
 {'op': 'sendChat', 'message': 'Hello world', 'type': 'normal'}
 ```
 
-### GroupChat EventAPI (`indra/newview/groupchatlistener.cpp`)
+### GroupChat EventAPI (`firestorm/indra/newview/groupchatlistener.cpp`)
 
 **Pump Name:** `GroupChat`
 
@@ -257,7 +257,7 @@ public:
 
 #### Nearby Chat Signal
 
-**Location:** `indra/newview/llfloaterimnearbychathandler.cpp`
+**Location:** `firestorm/indra/newview/llfloaterimnearbychathandler.cpp`
 
 ```cpp
 // In LLFloaterIMNearbyChatHandler
@@ -270,7 +270,7 @@ static LLEventPump* sChatWatcher;
 
 #### IM Signals
 
-**Location:** `indra/newview/llimview.h`
+**Location:** `firestorm/indra/newview/llimview.h`
 
 ```cpp
 // In LLIMModel
@@ -280,7 +280,7 @@ session_signal_t mNoUnreadMsgsSignal; // Messages read
 
 ### Chat Hub
 
-**Location:** `indra/newview/fsnearbychathub.h`
+**Location:** `firestorm/indra/newview/fsnearbychathub.h`
 
 Central routing for nearby chat:
 
@@ -300,7 +300,7 @@ public:
 
 ### Nearby Chat Floater
 
-**File:** `indra/newview/fsfloaternearbychat.h/cpp`
+**File:** `firestorm/indra/newview/fsfloaternearbychat.h/cpp`
 
 ```cpp
 class FSFloaterNearbyChat : public LLFloater
@@ -313,7 +313,7 @@ class FSFloaterNearbyChat : public LLFloater
 
 ### IM Container
 
-**File:** `indra/newview/fsfloaterimcontainer.h/cpp`
+**File:** `firestorm/indra/newview/fsfloaterimcontainer.h/cpp`
 
 Tabbed container for IM sessions:
 
@@ -327,7 +327,7 @@ class FSFloaterIMContainer : public LLMultiFloater,
 
 ### Individual IM Floater
 
-**File:** `indra/newview/fsfloaterim.h/cpp`
+**File:** `firestorm/indra/newview/fsfloaterim.h/cpp`
 
 ```cpp
 class FSFloaterIM : public LLTransientDockableFloater
@@ -339,7 +339,7 @@ class FSFloaterIM : public LLTransientDockableFloater
 
 ### Chat History Widget
 
-**File:** `indra/newview/fschathistory.h/cpp`
+**File:** `firestorm/indra/newview/fschathistory.h/cpp`
 
 Rich text display for chat:
 
@@ -355,7 +355,7 @@ class FSChatHistory : public LLTextEditor
 
 ## Chat Logging
 
-### LLLogChat (`indra/newview/lllogchat.h`)
+### LLLogChat (`firestorm/indra/newview/lllogchat.h`)
 
 File-based chat history:
 
@@ -390,41 +390,41 @@ public:
 
 | File | Purpose |
 |------|---------|
-| `indra/newview/llviewermessage.cpp` | `process_chat_from_simulator()` at line ~2762 |
-| `indra/newview/llimprocessing.h/cpp` | IM packet processing |
-| `indra/newview/llstartup.cpp` | Message handler registration |
+| `firestorm/indra/newview/llviewermessage.cpp` | `process_chat_from_simulator()` at line ~2762 |
+| `firestorm/indra/newview/llimprocessing.h/cpp` | IM packet processing |
+| `firestorm/indra/newview/llstartup.cpp` | Message handler registration |
 
 ### Data/Model
 
 | File | Purpose |
 |------|---------|
-| `indra/llui/llchat.h` | LLChat structure definition |
-| `indra/newview/llimview.h/cpp` | LLIMModel, LLIMMgr, LLIMSession |
-| `indra/newview/lllogchat.h/cpp` | Chat file logging |
+| `firestorm/indra/llui/llchat.h` | LLChat structure definition |
+| `firestorm/indra/newview/llimview.h/cpp` | LLIMModel, LLIMMgr, LLIMSession |
+| `firestorm/indra/newview/lllogchat.h/cpp` | Chat file logging |
 
 ### UI Components
 
 | File | Purpose |
 |------|---------|
-| `indra/newview/fsfloaternearbychat.h/cpp` | Nearby chat window |
-| `indra/newview/fsfloaterim.h/cpp` | Individual IM window |
-| `indra/newview/fsfloaterimcontainer.h/cpp` | IM tabs container |
-| `indra/newview/fschathistory.h/cpp` | Chat display widget |
-| `indra/llui/llchatentry.h/cpp` | Chat input widget |
+| `firestorm/indra/newview/fsfloaternearbychat.h/cpp` | Nearby chat window |
+| `firestorm/indra/newview/fsfloaterim.h/cpp` | Individual IM window |
+| `firestorm/indra/newview/fsfloaterimcontainer.h/cpp` | IM tabs container |
+| `firestorm/indra/newview/fschathistory.h/cpp` | Chat display widget |
+| `firestorm/indra/llui/llchatentry.h/cpp` | Chat input widget |
 
 ### Event APIs
 
 | File | Purpose |
 |------|---------|
-| `indra/newview/fsnearbychatbarlistener.h/cpp` | LLChatBar API |
-| `indra/newview/groupchatlistener.h/cpp` | GroupChat API |
-| `indra/newview/llfloaterimnearbychathandler.h/cpp` | Chat notification handler |
+| `firestorm/indra/newview/fsnearbychatbarlistener.h/cpp` | LLChatBar API |
+| `firestorm/indra/newview/groupchatlistener.h/cpp` | GroupChat API |
+| `firestorm/indra/newview/llfloaterimnearbychathandler.h/cpp` | Chat notification handler |
 
 ### Central Hub
 
 | File | Purpose |
 |------|---------|
-| `indra/newview/fsnearbychathub.h/cpp` | FSNearbyChat singleton |
+| `firestorm/indra/newview/fsnearbychathub.h/cpp` | FSNearbyChat singleton |
 
 ---
 

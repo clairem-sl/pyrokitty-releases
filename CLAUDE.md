@@ -15,21 +15,23 @@ cd /c/DeeDrive/dev/phoenix-firestorm/electron-ui && AUTO_LOGIN=1 npm start &>/de
 
 ## Building Firestorm (Windows)
 
+Firestorm source lives in `firestorm/` (indra, autobuild, build scripts).
+
 Configure (with debug symbols for crash analysis)
-`SKIP_NSIS=1 autobuild configure -A 64 -c ReleaseFS_open -- --chan PyroKitty --avx2 --jobs 1 --fmodstudio --package -DLL_TESTS:BOOL=FALSE -DSKIP_DEBUG_SYMBOLS:BOOL=FALSE`
+`cd firestorm && SKIP_NSIS=1 autobuild configure -A 64 -c ReleaseFS_open -- --chan PyroKitty --avx2 --jobs 1 --fmodstudio --package -DLL_TESTS:BOOL=FALSE -DSKIP_DEBUG_SYMBOLS:BOOL=FALSE`
 
 Build
-`SKIP_NSIS=1 SKIP_SYMBOLS=1 autobuild build -A 64 -c ReleaseFS_open --no-configure -- --chan PyroKitty --avx2 --jobs 1 --fmodstudio --package -DLL_TESTS:BOOL=FALSE`
+`cd firestorm && SKIP_NSIS=1 SKIP_SYMBOLS=1 autobuild build -A 64 -c ReleaseFS_open --no-configure -- --chan PyroKitty --avx2 --jobs 1 --fmodstudio --package -DLL_TESTS:BOOL=FALSE`
 
 Build with captured output (autobuild spawns a subprocess that bypasses stdout capture - use source instead)
 
 ```
-cd build-vc170-64 && SKIP_NSIS=1 SKIP_SYMBOLS=1 bash -c 'source ../scripts/configure_firestorm.sh --build --jobs 1 --platform windows --avx2 --fmodstudio --package'
+cd firestorm/build-vc170-64 && SKIP_NSIS=1 SKIP_SYMBOLS=1 bash -c 'source ../scripts/configure_firestorm.sh --build --jobs 1 --platform windows --avx2 --fmodstudio --package'
 ```
 
-Build errors are also written to: `build-vc170-64/logs/FirestormBuild_win-64.err`
+Build errors are also written to: `firestorm/build-vc170-64/logs/FirestormBuild_win-64.err`
 
-PDB output: `build-vc170-64/newview/Release/firestorm-bin.pdb`
+PDB output: `firestorm/build-vc170-64/newview/Release/firestorm-bin.pdb`
 WER crash dumps: `C:\Users\callcolor\AppData\Local\CrashDumps\`
 
 
@@ -44,7 +46,7 @@ cd ./electron-ui/node-metaverse && npm run build
 Launch viewer in external login mode (waits for session handoff via WebSocket):
 
 ```bash
-./build-vc170-64/newview/Release/firestorm-bin.exe --external-login --set PKWebSocketPort 9001
+./firestorm/build-vc170-64/newview/Release/firestorm-bin.exe --external-login --set PKWebSocketPort 9001
 ```
 
 Test the handoff with node_metaverse:

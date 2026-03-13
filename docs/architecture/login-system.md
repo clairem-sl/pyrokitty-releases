@@ -6,10 +6,10 @@ The login system handles authentication with Second Life/OpenSim servers, includ
 
 ## Key Files
 
-- `indra/newview/lllogininstance.cpp` - Main login orchestration
-- `indra/newview/lllogininstance.h` - Login instance header
-- `indra/newview/llstartup.cpp` - Startup state machine
-- `indra/viewer_components/login/lllogin.cpp` - Low-level login handling
+- `firestorm/indra/newview/lllogininstance.cpp` - Main login orchestration
+- `firestorm/indra/newview/lllogininstance.h` - Login instance header
+- `firestorm/indra/newview/llstartup.cpp` - Startup state machine
+- `firestorm/indra/viewer_components/login/lllogin.cpp` - Low-level login handling
 
 ## Login Request Parameters
 

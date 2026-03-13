@@ -6,12 +6,12 @@ The shadow system uses cascaded shadow mapping for sun shadows and additional pa
 
 ## Key Files
 
-- `indra/newview/pipeline.cpp` - Shadow generation and rendering (lines 10400-11600)
-- `indra/newview/pipeline.h` - Shadow render targets, cameras, mMainShadow* state (lines 728, 749, 800-805)
-- `indra/newview/lldrawpoolavatar.cpp` - Avatar shadow passes
-- `indra/newview/lldrawpooltree.cpp` - Tree shadow rendering
-- `indra/newview/lldrawpoolterrain.cpp` - Terrain shadow rendering
-- `indra/newview/app_settings/shaders/class1/deferred/shadow*.glsl` - Shadow shaders
+- `firestorm/indra/newview/pipeline.cpp` - Shadow generation and rendering (lines 10400-11600)
+- `firestorm/indra/newview/pipeline.h` - Shadow render targets, cameras, mMainShadow* state (lines 728, 749, 800-805)
+- `firestorm/indra/newview/lldrawpoolavatar.cpp` - Avatar shadow passes
+- `firestorm/indra/newview/lldrawpooltree.cpp` - Tree shadow rendering
+- `firestorm/indra/newview/lldrawpoolterrain.cpp` - Terrain shadow rendering
+- `firestorm/indra/newview/app_settings/shaders/class1/deferred/shadow*.glsl` - Shadow shaders
 
 ## Shadow Pass Count
 
@@ -300,7 +300,7 @@ Values of 2-3 are generally imperceptible in normal gameplay. Higher values may 
 
 ## Shadow Shaders
 
-Located in `indra/newview/app_settings/shaders/class1/deferred/`:
+Located in `firestorm/indra/newview/app_settings/shaders/class1/deferred/`:
 
 ### Vertex Shaders
 - `shadowV.glsl` - Basic vertex transform

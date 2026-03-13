@@ -6,10 +6,10 @@ The texture system handles texture display, selection, and editing in the viewer
 
 ## Key Files
 
-- `indra/newview/lltexturectrl.cpp` - Texture picker floater
-- `indra/newview/lltexturectrl.h` - Texture control header
-- `indra/newview/llpanelface.cpp` - LL texture panel (build floater)
-- `indra/newview/fspanelface.cpp` - Firestorm texture panel
+- `firestorm/indra/newview/lltexturectrl.cpp` - Texture picker floater
+- `firestorm/indra/newview/lltexturectrl.h` - Texture control header
+- `firestorm/indra/newview/llpanelface.cpp` - LL texture panel (build floater)
+- `firestorm/indra/newview/fspanelface.cpp` - Firestorm texture panel
 - `skins/default/xui/en/floater_texture_ctrl.xml` - Texture picker UI
 
 ## Texture Picker Floater
@@ -152,10 +152,10 @@ Defined UUIDs for special textures:
 ## GL Memory: PBR vs Legacy Textures
 
 ### Key Files
-- `indra/newview/llvovolume.cpp` - Face texture assignment during geometry rebuild
-- `indra/newview/llface.h` - Face texture storage
-- `indra/newview/llviewertexture.cpp` - Texture streaming and GL upload
-- `indra/llrender/llrender.h` - Texture channel definitions
+- `firestorm/indra/newview/llvovolume.cpp` - Face texture assignment during geometry rebuild
+- `firestorm/indra/newview/llface.h` - Face texture storage
+- `firestorm/indra/newview/llviewertexture.cpp` - Texture streaming and GL upload
+- `firestorm/indra/llrender/llrender.h` - Texture channel definitions
 
 ### Texture Channel Storage
 

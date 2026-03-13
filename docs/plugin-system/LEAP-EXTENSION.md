@@ -15,8 +15,8 @@ Enable an Electron (or any external) application to:
 
 Create a new EventAPI for external chat applications.
 
-**New file:** `indra/newview/pkchateventapi.h`
-**New file:** `indra/newview/pkchateventapi.cpp`
+**New file:** `firestorm/indra/newview/pkchateventapi.h`
+**New file:** `firestorm/indra/newview/pkchateventapi.cpp`
 
 ```cpp
 class PKChatEventAPI : public LLEventAPI
@@ -97,7 +97,7 @@ if (handler)
 }
 ```
 
-**Reference:** `indra/newview/llfloaterimnearbychathandler.cpp`
+**Reference:** `firestorm/indra/newview/llfloaterimnearbychathandler.cpp`
 
 ### Task 1.2: Hook IM Signal
 
@@ -109,7 +109,7 @@ mIMConnection = LLIMModel::instance().addNewMsgCallback(
     boost::bind(&ChatAPIEventAPI::onIMMessage, this, _1));
 ```
 
-**Reference:** `indra/newview/llimview.h`
+**Reference:** `firestorm/indra/newview/llimview.h`
 
 ### Task 1.3: Implement sendIM
 
@@ -129,7 +129,7 @@ void ChatAPIEventAPI::sendIM(const LLSD& request)
 }
 ```
 
-**Reference:** `indra/newview/llimview.h` - `LLIMMgr`
+**Reference:** `firestorm/indra/newview/llimview.h` - `LLIMMgr`
 
 ### Task 1.4: Implement setVisible
 
@@ -148,7 +148,7 @@ void ChatAPIEventAPI::setVisible(const LLSD& request)
 }
 ```
 
-**Reference:** `indra/llui/llfloaterreg.h`
+**Reference:** `firestorm/indra/llui/llfloaterreg.h`
 
 ---
 
@@ -172,15 +172,15 @@ Broadcast events when sessions are created/removed. Lower priority - the externa
 
 ### New Files to Create
 
-- [x] `indra/newview/pkchateventapi.h` - Created
-- [x] `indra/newview/pkchateventapi.cpp` - Created (with static instance for auto-registration)
+- [x] `firestorm/indra/newview/pkchateventapi.h` - Created
+- [x] `firestorm/indra/newview/pkchateventapi.cpp` - Created (with static instance for auto-registration)
 
 ### Files to Modify
 
-- [x] `indra/newview/CMakeLists.txt` - Added new source files
-- [x] ~~`indra/newview/llappviewer.cpp`~~ - Not needed (uses static initialization)
-- [x] ~~`indra/newview/llfloaterimnearbychathandler.cpp`~~ - Signal already exposed
-- [x] ~~`indra/newview/llimview.cpp`~~ - Signal already exposed
+- [x] `firestorm/indra/newview/CMakeLists.txt` - Added new source files
+- [x] ~~`firestorm/indra/newview/llappviewer.cpp`~~ - Not needed (uses static initialization)
+- [x] ~~`firestorm/indra/newview/llfloaterimnearbychathandler.cpp`~~ - Signal already exposed
+- [x] ~~`firestorm/indra/newview/llimview.cpp`~~ - Signal already exposed
 
 ### Testing
 
@@ -246,5 +246,5 @@ Broadcast events when sessions are created/removed. Lower priority - the externa
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - Overall viewer architecture
 - [CHAT-SYSTEM.md](./CHAT-SYSTEM.md) - Detailed chat system docs
 - [LEAP README](../../../leap/README.md) - LEAP protocol documentation
-- `indra/llcommon/lleventapi.h` - LLEventAPI base class
-- `indra/newview/fsnearbychatbarlistener.cpp` - Example EventAPI implementation
+- `firestorm/indra/llcommon/lleventapi.h` - LLEventAPI base class
+- `firestorm/indra/newview/fsnearbychatbarlistener.cpp` - Example EventAPI implementation

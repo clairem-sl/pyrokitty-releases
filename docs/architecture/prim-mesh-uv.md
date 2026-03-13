@@ -6,9 +6,9 @@
 - **Standard UV shader**: `godot-viewer/src/standard_uv.gdshader` — uses mesh UVs with SL xform()
 
 ## SL Reference Code
-- Side UV: `LLVolumeFace::createSide()` in `indra/llmath/llvolume.cpp` (~line 6841)
-- Cap UV: `LLVolumeFace::createUnCutCubeCap()` in `indra/llmath/llvolume.cpp` (~line 6009)
-- Planar projection: `planarProjection()` in `indra/newview/llface.cpp` (lines 96-129)
+- Side UV: `LLVolumeFace::createSide()` in `firestorm/indra/llmath/llvolume.cpp` (~line 6841)
+- Cap UV: `LLVolumeFace::createUnCutCubeCap()` in `firestorm/indra/llmath/llvolume.cpp` (~line 6009)
+- Planar projection: `planarProjection()` in `firestorm/indra/newview/llface.cpp` (lines 96-129)
 
 ## Box Face Ordering (matches SL TE)
 Surface 0: PATH_BEGIN cap → **top** (TE face 0 = +Z) — face_id=0, renders last path step

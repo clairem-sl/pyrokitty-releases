@@ -17,7 +17,7 @@ function getViewerPath(): string {
   } else {
     // Development: viewer is in the build output directory
     const appRoot = app.getAppPath();
-    return path.join(appRoot, '..', 'build-vc170-64', 'newview', 'Release', 'firestorm-bin.exe');
+    return path.join(appRoot, '..', 'firestorm', 'build-vc170-64', 'newview', 'Release', 'firestorm-bin.exe');
   }
 }
 

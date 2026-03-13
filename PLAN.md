@@ -142,7 +142,7 @@ electron-ui/
 | `pkwebsocketserver.h/.cpp` | WebSocket server for external communication |
 | `pkmirrorflags.h/.cpp` | Per-axis mirror flag cache + notecard persistence |
 
-All changes tagged with `<FS:Pyrokitty>` comments. Search: `grep -r "FS:Pyrokitty" indra/`
+All changes tagged with `<FS:Pyrokitty>` comments. Search: `grep -r "FS:Pyrokitty" firestorm/indra/`
 
 ---
 

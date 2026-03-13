@@ -14,7 +14,7 @@ This document describes the Firestorm viewer architecture relevant to building a
 
 ## Overview
 
-The Firestorm viewer is a C++ application with approximately 715K lines of code in the main viewer (`indra/newview/`), plus supporting libraries. It uses a custom UI framework, Boost.Signals2 for internal events, and LLSD (Linden Lab Structured Data) as its primary data interchange format.
+The Firestorm viewer is a C++ application with approximately 715K lines of code in the main viewer (`firestorm/indra/newview/`), plus supporting libraries. It uses a custom UI framework, Boost.Signals2 for internal events, and LLSD (Linden Lab Structured Data) as its primary data interchange format.
 
 ### High-Level Architecture
 
@@ -24,7 +24,7 @@ The Firestorm viewer is a C++ application with approximately 715K lines of code 
 │  └── LLView → LLPanel → LLFloater hierarchy                 │
 │  └── XML-based layouts (skins/)                             │
 ├─────────────────────────────────────────────────────────────┤
-│  Core Viewer Systems (indra/newview/)                       │
+│  Core Viewer Systems (firestorm/indra/newview/)                       │
 │  └── LLAppViewer (main singleton)                           │
 │  └── LLViewerWindow (main window/input)                     │
 │  └── LLAgent (user avatar state)                            │
@@ -35,7 +35,7 @@ The Firestorm viewer is a C++ application with approximately 715K lines of code 
 │  └── LLEventAPI (named API endpoints)                       │
 │  └── LLEventDispatcher (method dispatch)                    │
 ├─────────────────────────────────────────────────────────────┤
-│  Foundation Libraries (indra/ll*)                           │
+│  Foundation Libraries (firestorm/indra/ll*)                           │
 │  └── llcommon (threads, memory, strings, events)            │
 │  └── llmessage (network protocol)                           │
 │  └── llplugin (out-of-process plugins)                      │
@@ -47,7 +47,7 @@ The Firestorm viewer is a C++ application with approximately 715K lines of code 
 
 ## Core Architecture Layers
 
-### 1. Foundation Layer (`indra/llcommon/`)
+### 1. Foundation Layer (`firestorm/indra/llcommon/`)
 
 Core utilities used throughout the codebase.
 
@@ -60,7 +60,7 @@ Core utilities used throughout the codebase.
 | LLSD | `llsd.h` | Structured data format (like JSON) |
 | Logging | `llerror.h` | LL_INFOS, LL_WARNS, LL_ERRS macros |
 
-### 2. UI Framework (`indra/llui/`)
+### 2. UI Framework (`firestorm/indra/llui/`)
 
 Custom C++ widget library (not web-based).
 
@@ -73,7 +73,7 @@ Custom C++ widget library (not web-based).
 | Text Input | `llchatentry.h` | Chat input widget |
 | Text Display | `lltexteditor.h` | Rich text display |
 
-### 3. Core Viewer (`indra/newview/`)
+### 3. Core Viewer (`firestorm/indra/newview/`)
 
 Main application logic (~1,714 files).
 
@@ -85,7 +85,7 @@ Main application logic (~1,714 files).
 | Rendering | `pipeline.h` | Main render pipeline |
 | Settings | Uses `llcontrol.h` | `gSavedSettings` singleton |
 
-### 4. Plugin System (`indra/llplugin/`)
+### 4. Plugin System (`firestorm/indra/llplugin/`)
 
 Existing out-of-process plugin infrastructure (used for media).
 
@@ -102,7 +102,7 @@ Existing out-of-process plugin infrastructure (used for media).
 
 The viewer uses a sophisticated event system based on Boost.Signals2.
 
-### LLEventPump (`indra/llcommon/llevents.h`)
+### LLEventPump (`firestorm/indra/llcommon/llevents.h`)
 
 Named event channels that support pub/sub messaging.
 
@@ -120,7 +120,7 @@ pump.listen("mylistener", [](const LLSD& event) {
 pump.post(LLSD().with("key", "value"));
 ```
 
-### LLEventAPI (`indra/llcommon/lleventapi.h`)
+### LLEventAPI (`firestorm/indra/llcommon/lleventapi.h`)
 
 Base class for creating named API endpoints accessible via events.
 
@@ -158,7 +158,7 @@ public:
 
 ### 1. LEAP (LLSD Event API Plugin)
 
-**Location:** `indra/llcommon/llleap.cpp`, `llleaplistener.cpp`
+**Location:** `firestorm/indra/llcommon/llleap.cpp`, `llleaplistener.cpp`
 
 External processes that communicate via stdin/stdout using length-prefixed LLSD.
 
@@ -186,7 +186,7 @@ viewer --leap "python my_plugin.py"
 
 ### 2. Media Plugin System
 
-**Location:** `indra/llplugin/`
+**Location:** `firestorm/indra/llplugin/`
 
 Socket-based IPC for out-of-process media handling.
 
@@ -216,38 +216,38 @@ model.addNewMsgCallback([](const LLSD& msg) { /* handle */ });
 
 | File | Path | Description |
 |------|------|-------------|
-| `llappviewer.h/cpp` | `indra/newview/` | Main application class |
-| `llviewerwindow.h/cpp` | `indra/newview/` | Main window management |
-| `llagent.h/cpp` | `indra/newview/` | User avatar state |
-| `llstartup.cpp` | `indra/newview/` | Startup sequence, message registration |
+| `llappviewer.h/cpp` | `firestorm/indra/newview/` | Main application class |
+| `llviewerwindow.h/cpp` | `firestorm/indra/newview/` | Main window management |
+| `llagent.h/cpp` | `firestorm/indra/newview/` | User avatar state |
+| `llstartup.cpp` | `firestorm/indra/newview/` | Startup sequence, message registration |
 
 ### Event System
 
 | File | Path | Description |
 |------|------|-------------|
-| `llevents.h/cpp` | `indra/llcommon/` | LLEventPump system |
-| `lleventapi.h/cpp` | `indra/llcommon/` | LLEventAPI base class |
-| `lleventdispatcher.h/cpp` | `indra/llcommon/` | Method dispatch |
-| `llleap.h/cpp` | `indra/llcommon/` | LEAP process management |
-| `llleaplistener.cpp` | `indra/llcommon/` | LEAP protocol handler |
+| `llevents.h/cpp` | `firestorm/indra/llcommon/` | LLEventPump system |
+| `lleventapi.h/cpp` | `firestorm/indra/llcommon/` | LLEventAPI base class |
+| `lleventdispatcher.h/cpp` | `firestorm/indra/llcommon/` | Method dispatch |
+| `llleap.h/cpp` | `firestorm/indra/llcommon/` | LEAP process management |
+| `llleaplistener.cpp` | `firestorm/indra/llcommon/` | LEAP protocol handler |
 
 ### UI Framework
 
 | File | Path | Description |
 |------|------|-------------|
-| `llview.h/cpp` | `indra/llui/` | Base widget class |
-| `llpanel.h/cpp` | `indra/llui/` | Panel container |
-| `llfloater.h/cpp` | `indra/llui/` | Floating window |
-| `llfloaterreg.h/cpp` | `indra/llui/` | Floater registry |
+| `llview.h/cpp` | `firestorm/indra/llui/` | Base widget class |
+| `llpanel.h/cpp` | `firestorm/indra/llui/` | Panel container |
+| `llfloater.h/cpp` | `firestorm/indra/llui/` | Floating window |
+| `llfloaterreg.h/cpp` | `firestorm/indra/llui/` | Floater registry |
 
 ### Plugin Infrastructure
 
 | File | Path | Description |
 |------|------|-------------|
-| `llpluginclassmedia.h/cpp` | `indra/llplugin/` | Media plugin interface |
-| `llpluginprocessparent.h/cpp` | `indra/llplugin/` | Plugin process manager |
-| `llpluginmessage.h/cpp` | `indra/llplugin/` | Plugin message format |
-| `llpluginmessagepipe.h/cpp` | `indra/llplugin/` | Socket IPC |
+| `llpluginclassmedia.h/cpp` | `firestorm/indra/llplugin/` | Media plugin interface |
+| `llpluginprocessparent.h/cpp` | `firestorm/indra/llplugin/` | Plugin process manager |
+| `llpluginmessage.h/cpp` | `firestorm/indra/llplugin/` | Plugin message format |
+| `llpluginmessagepipe.h/cpp` | `firestorm/indra/llplugin/` | Socket IPC |
 
 ---
 

@@ -51,9 +51,9 @@ gpucache/
 
 ### Key Files
 
-- `indra/newview/llgputexturecache.h` - Header with cache API
-- `indra/newview/llgputexturecache.cpp` - Implementation
-- `indra/newview/lltexturefetch.cpp` - Integration point in texture pipeline
+- `firestorm/indra/newview/llgputexturecache.h` - Header with cache API
+- `firestorm/indra/newview/llgputexturecache.cpp` - Implementation
+- `firestorm/indra/newview/lltexturefetch.cpp` - Integration point in texture pipeline
 
 ### Thread Safety
 

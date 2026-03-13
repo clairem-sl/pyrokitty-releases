@@ -38,13 +38,13 @@ LLPuppetMotion::onUpdate()              (called every frame)
 
 | File | Purpose |
 |------|---------|
-| `indra/newview/llpuppetmodule.cpp/.h` | LEAP IPC, capability config, sending/receiving settings |
-| `indra/newview/llpuppetmotion.cpp/.h` | Motion controller: IK, per-frame update, pack/unpack |
-| `indra/newview/llpuppetevent.cpp/.h` | `LLPuppetJointEvent` and `LLPuppetEvent` data structures, binary serialization |
-| `indra/newview/llviewermessage.cpp` | `process_avatar_animation()`, `handle_puppetry_data()` |
-| `indra/llcharacter/lljoint.h` | `JointPriority` enum — defines `PUPPET_PRIORITY` |
-| `indra/llcharacter/llpose.cpp` | `LLJointStateBlender` — priority-ordered blending |
-| `indra/llcharacter/llik.cpp/.h` | FABRIK IK solver used to compute joint rotations |
+| `firestorm/indra/newview/llpuppetmodule.cpp/.h` | LEAP IPC, capability config, sending/receiving settings |
+| `firestorm/indra/newview/llpuppetmotion.cpp/.h` | Motion controller: IK, per-frame update, pack/unpack |
+| `firestorm/indra/newview/llpuppetevent.cpp/.h` | `LLPuppetJointEvent` and `LLPuppetEvent` data structures, binary serialization |
+| `firestorm/indra/newview/llviewermessage.cpp` | `process_avatar_animation()`, `handle_puppetry_data()` |
+| `firestorm/indra/llcharacter/lljoint.h` | `JointPriority` enum — defines `PUPPET_PRIORITY` |
+| `firestorm/indra/llcharacter/llpose.cpp` | `LLJointStateBlender` — priority-ordered blending |
+| `firestorm/indra/llcharacter/llik.cpp/.h` | FABRIK IK solver used to compute joint rotations |
 
 ## Input: LEAP Module
 

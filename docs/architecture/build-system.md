@@ -6,12 +6,12 @@ The Firestorm build uses `autobuild` which wraps CMake and platform-specific bui
 
 ## Key Files
 
-- `scripts/configure_firestorm.sh` - Main build orchestration script
-- `indra/cmake/00-Common.cmake` - Common compiler flags
-- `indra/cmake/Variables.cmake` - Build variables
-- `indra/newview/CMakeLists.txt` - Main viewer CMake config
-- `indra/newview/viewer_manifest.py` - Packaging and installer creation
-- `indra/newview/fs_viewer_manifest.py` - Firestorm-specific packaging
+- `firestorm/scripts/configure_firestorm.sh` - Main build orchestration script
+- `firestorm/indra/cmake/00-Common.cmake` - Common compiler flags
+- `firestorm/indra/cmake/Variables.cmake` - Build variables
+- `firestorm/indra/newview/CMakeLists.txt` - Main viewer CMake config
+- `firestorm/indra/newview/viewer_manifest.py` - Packaging and installer creation
+- `firestorm/indra/newview/fs_viewer_manifest.py` - Firestorm-specific packaging
 
 ## Build Commands
 
@@ -28,7 +28,7 @@ autobuild build -A 64 -c ReleaseFS_open --no-configure -- --chan <channel> --avx
 ### Build with Captured Output
 Autobuild spawns a subprocess that bypasses stdout capture. Use source instead:
 ```bash
-cd build-vc170-64 && bash -c 'source ../scripts/configure_firestorm.sh --build --jobs 1 --platform windows --avx2 --fmodstudio --package'
+cd firestorm/build-vc170-64 && bash -c 'source ../scripts/configure_firestorm.sh --build --jobs 1 --platform windows --avx2 --fmodstudio --package'
 ```
 
 ## Parallelism Control
@@ -37,7 +37,7 @@ cd build-vc170-64 && bash -c 'source ../scripts/configure_firestorm.sh --build -
 
 Two levels of parallelism:
 1. **MSBuild project parallelism**: `-m:N` flag (controlled by `--jobs N`)
-2. **Compiler parallelism**: `/MP` flag in `indra/cmake/00-Common.cmake`
+2. **Compiler parallelism**: `/MP` flag in `firestorm/indra/cmake/00-Common.cmake`
 
 To limit to 8 total cl.exe processes:
 - Set `/MP8` in 00-Common.cmake (8 threads per project)
@@ -76,7 +76,7 @@ Searches for `makensis.exe` in:
 ## App Name and Channel
 
 ### APP_NAME
-Defined in `indra/llcommon/indra_constants.h`:
+Defined in `firestorm/indra/llcommon/indra_constants.h`:
 ```cpp
 const std::string APP_NAME = "Firestorm";
 ```
@@ -87,7 +87,7 @@ Used for:
 - Various UI strings
 
 ### VIEWER_CHANNEL
-Constructed in `scripts/configure_firestorm.sh`:
+Constructed in `firestorm/scripts/configure_firestorm.sh`:
 ```bash
 CHANNEL="Firestorm-$CHANNEL"
 ```
@@ -96,7 +96,7 @@ Passed to CMake via `-DVIEWER_CHANNEL:STRING=$CHANNEL`
 
 ## Build Output Locations
 
-- Build directory: `build-vc170-64/`
-- Executable: `build-vc170-64/newview/Release/firestorm-bin.exe`
-- Build logs: `build-vc170-64/logs/FirestormBuild_win-64.log`
-- Build errors: `build-vc170-64/logs/FirestormBuild_win-64.err`
+- Build directory: `firestorm/build-vc170-64/`
+- Executable: `firestorm/build-vc170-64/newview/Release/firestorm-bin.exe`
+- Build logs: `firestorm/build-vc170-64/logs/FirestormBuild_win-64.log`
+- Build errors: `firestorm/build-vc170-64/logs/FirestormBuild_win-64.err`

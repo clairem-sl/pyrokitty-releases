@@ -6,10 +6,10 @@ The viewer has a client-side permissions system that determines what actions are
 
 ## Key Files
 
-- `indra/newview/llviewerobject.cpp` - Permission check implementations
-- `indra/newview/llviewercontrol.h` - God mode defines
-- `indra/newview/llagent.cpp` - Agent god level management
-- `indra/newview/llviewermenu.cpp` - God mode menu handlers
+- `firestorm/indra/newview/llviewerobject.cpp` - Permission check implementations
+- `firestorm/indra/newview/llviewercontrol.h` - God mode defines
+- `firestorm/indra/newview/llagent.cpp` - Agent god level management
+- `firestorm/indra/newview/llviewermenu.cpp` - God mode menu handlers
 
 ## Permission Methods
 
@@ -27,7 +27,7 @@ Located in `llviewerobject.cpp`:
 
 ### HACKED_GODLIKE_VIEWER (Always On)
 
-Define in `indra/newview/llviewercontrol.h`:
+Define in `firestorm/indra/newview/llviewercontrol.h`:
 ```cpp
 #define HACKED_GODLIKE_VIEWER
 ```
@@ -51,7 +51,7 @@ bool LLViewerObject::permModify() const
 
 ### TOGGLE_HACKED_GODLIKE_VIEWER (Toggleable)
 
-Define in `indra/newview/llviewercontrol.h`:
+Define in `firestorm/indra/newview/llviewercontrol.h`:
 ```cpp
 #define TOGGLE_HACKED_GODLIKE_VIEWER
 ```
@@ -76,7 +76,7 @@ if (LLGridManager::getInstance()->isInSLBeta()
 
 ## God Levels
 
-Defined in `indra/llcommon/indra_constants.h`:
+Defined in `firestorm/indra/llcommon/indra_constants.h`:
 
 ```cpp
 const U8 GOD_NOT = 0;
@@ -90,8 +90,8 @@ const U8 GOD_FULL = 255;
 ### Texture Panel (Build Floater)
 
 Files:
-- `indra/newview/llpanelface.cpp` - LL texture panel
-- `indra/newview/fspanelface.cpp` - Firestorm texture panel
+- `firestorm/indra/newview/llpanelface.cpp` - LL texture panel
+- `firestorm/indra/newview/fspanelface.cpp` - Firestorm texture panel
 
 The texture panel's `updateUI()` method checks permissions:
 ```cpp

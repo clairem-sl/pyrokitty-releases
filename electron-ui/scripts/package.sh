@@ -9,7 +9,7 @@ ELECTRON_DIR="$(dirname "$SCRIPT_DIR")"
 ROOT_DIR="$(dirname "$ELECTRON_DIR")"
 
 # Viewer build output location
-VIEWER_BUILD="$ROOT_DIR/build-vc170-64/newview/Release"
+VIEWER_BUILD="$ROOT_DIR/firestorm/build-vc170-64/newview/Release"
 
 # Staging directory for viewer files
 VIEWER_STAGING="$ELECTRON_DIR/viewer"
@@ -123,13 +123,14 @@ if [ "$SKIP_VIEWER_BUILD" = false ]; then
 
     if [ "$SKIP_CONFIGURE" = false ]; then
         echo "  Configuring..."
+        cd "$ROOT_DIR/firestorm"
         SKIP_NSIS=1 SKIP_SYMBOLS=1 autobuild configure -A 64 -c ReleaseFS_open -- \
             --chan PyroKitty --avx2 --fmodstudio --package \
             -DLL_TESTS:BOOL=FALSE
     fi
 
     echo "  Building (this may take a while)..."
-    cd "$ROOT_DIR/build-vc170-64"
+    cd "$ROOT_DIR/firestorm/build-vc170-64"
     SKIP_NSIS=1 SKIP_SYMBOLS=1 bash -c 'source ../scripts/configure_firestorm.sh --build --platform windows --avx2 --fmodstudio --package'
 
     echo "  Viewer build complete."

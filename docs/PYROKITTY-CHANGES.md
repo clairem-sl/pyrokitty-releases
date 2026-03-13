@@ -81,8 +81,8 @@ PKChatEventAPI (pkchateventapi.cpp)
 
 | File | Purpose |
 |------|---------|
-| `indra/newview/pkchateventapi.h/.cpp` | Chat event API (subscribe, send, visibility) |
-| `indra/newview/pkwebsocketserver.h/.cpp` | WebSocket server for external communication |
+| `firestorm/indra/newview/pkchateventapi.h/.cpp` | Chat event API (subscribe, send, visibility) |
+| `firestorm/indra/newview/pkwebsocketserver.h/.cpp` | WebSocket server for external communication |
 | `electron-ui/src/main/viewer-connection.ts` | WebSocket client with request/response matching |
 | `electron-ui/src/main/ipc-handlers.ts` | Routes chat based on connection state |
 
@@ -243,10 +243,10 @@ Removed all MAC address and hardware serial retrieval code:
 
 ### CMakeLists.txt Changes
 
-**indra/newview/CMakeLists.txt:**
+**firestorm/indra/newview/CMakeLists.txt:**
 - Added `pkchateventapi.cpp` and `pkchateventapi.h` to build
 
-**indra/llwindow/CMakeLists.txt:**
+**firestorm/indra/llwindow/CMakeLists.txt:**
 - Build system fix
 
 ### viewer_manifest.py Changes
@@ -727,20 +727,20 @@ public getSequenceNumber(): number
 }
 ```
 
-**indra/newview/pkloginhandoff.h/.cpp:**
+**firestorm/indra/newview/pkloginhandoff.h/.cpp:**
 ```cpp
 static bool isSessionContinuation();
 static U32 getInitialSequenceNumber();
 ```
 Parses `session_continuation` and `sequence_number` fields from handoff data.
 
-**indra/llmessage/llcircuit.h/.cpp:**
+**firestorm/indra/llmessage/llcircuit.h/.cpp:**
 ```cpp
 void LLCircuitData::setPacketOutID(TPACKETID id);
 ```
 Allows setting the initial sequence number for session continuation.
 
-**indra/newview/llstartup.cpp (STATE_WORLD_WAIT):**
+**firestorm/indra/newview/llstartup.cpp (STATE_WORLD_WAIT):**
 ```cpp
 if (PKLoginHandoff::isSessionContinuation())
 {
@@ -753,7 +753,7 @@ if (PKLoginHandoff::isSessionContinuation())
 }
 ```
 
-**indra/newview/llstartup.cpp (STATE_AGENT_SEND):**
+**firestorm/indra/newview/llstartup.cpp (STATE_AGENT_SEND):**
 ```cpp
 if (PKLoginHandoff::isSessionContinuation())
 {
@@ -806,7 +806,7 @@ const handoffData: HandoffData = {
 
 For the viewer to appear as the same client to the sim, it must use the same UDP endpoint:
 
-**indra/llmessage/net.cpp:**
+**firestorm/indra/llmessage/net.cpp:**
 ```cpp
 // Enable SO_REUSEADDR for quick port reuse (session handoff)
 int reuse = 1;
@@ -973,10 +973,10 @@ glCompressedTexImage2D() - direct upload, no driver compression
 
 | File | Purpose |
 |------|---------|
-| `indra/llimage/llimage.cpp` | `compressToDXT5()`, `compressDXT5Blocks()` |
-| `indra/llimage/llimageworker.cpp` | Calls `compressToDXT5()` after decode |
-| `indra/llimage/stb_dxt.h` | STB DXT compression library |
-| `indra/llrender/llimagegl.cpp` | Compressed texture upload path |
+| `firestorm/indra/llimage/llimage.cpp` | `compressToDXT5()`, `compressDXT5Blocks()` |
+| `firestorm/indra/llimage/llimageworker.cpp` | Calls `compressToDXT5()` after decode |
+| `firestorm/indra/llimage/stb_dxt.h` | STB DXT compression library |
+| `firestorm/indra/llrender/llimagegl.cpp` | Compressed texture upload path |
 
 ### Settings
 
@@ -1012,7 +1012,7 @@ if (mHasExplicitFormat && !imageraw->hasCompressedData() && isCompressed())
 
 Additionally, the Avatar Welcome Pack floater (`LLFloaterAvatarWelcomePack`) was leaving 5 `dullahan_host.exe` processes running after being closed. The floater uses `single_instance="true"`, so closing it only hides it — the destructor never runs. Added an `onClose()` override that calls `unloadMediaSource()` to kill CEF processes, and moved navigation to `onOpen()` so re-opening the floater re-loads the page.
 
-**Files modified:** `llfloateravatarwelcomepack.cpp/.h`, `indra/llrender/llimagegl.cpp`
+**Files modified:** `llfloateravatarwelcomepack.cpp/.h`, `firestorm/indra/llrender/llimagegl.cpp`
 
 ---
 
@@ -1194,5 +1194,5 @@ Coordinate conversion: SL `(X=East, Y=North, Z=Up)` → Godot `(X=Right, Y=Up, Z
 To find all PyroKitty changes in the codebase:
 
 ```bash
-grep -r "FS:Pyrokitty" indra/
+grep -r "FS:Pyrokitty" firestorm/indra/
 ```

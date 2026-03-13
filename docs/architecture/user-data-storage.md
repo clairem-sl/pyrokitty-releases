@@ -6,11 +6,11 @@ The viewer stores user preferences, credentials, and protected data in platform-
 
 ## Key Files
 
-- `indra/newview/llsechandler_basic.cpp` - Secure data handling
-- `indra/newview/llsechandler_basic.h` - Security handler header
-- `indra/newview/llmachineid.cpp` - Machine ID generation (encryption key source)
-- `indra/llfilesystem/lldir.cpp` - Directory path management
-- `indra/llfilesystem/lldir_win32.cpp` - Windows directory implementation
+- `firestorm/indra/newview/llsechandler_basic.cpp` - Secure data handling
+- `firestorm/indra/newview/llsechandler_basic.h` - Security handler header
+- `firestorm/indra/newview/llmachineid.cpp` - Machine ID generation (encryption key source)
+- `firestorm/indra/llfilesystem/lldir.cpp` - Directory path management
+- `firestorm/indra/llfilesystem/lldir_win32.cpp` - Windows directory implementation
 
 ## Data Locations
 
@@ -25,7 +25,7 @@ Constructed in `llappviewer.cpp`:
 #endif
 ```
 
-Where `APP_NAME` is defined in `indra/llcommon/indra_constants.h`:
+Where `APP_NAME` is defined in `firestorm/indra/llcommon/indra_constants.h`:
 ```cpp
 const std::string APP_NAME = "Firestorm";
 ```
@@ -108,7 +108,7 @@ Older format for storing passwords, still checked for backward compatibility.
 
 To use a different data directory:
 
-1. Edit `indra/llcommon/indra_constants.h`:
+1. Edit `firestorm/indra/llcommon/indra_constants.h`:
 ```cpp
 const std::string APP_NAME = "MyViewer";
 ```
