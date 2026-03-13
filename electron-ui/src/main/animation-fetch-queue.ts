@@ -158,6 +158,12 @@ export class AnimationFetchQueue {
     }
   }
 
+  clearPending(): void {
+    this.queue = [];
+    this.pending.clear();
+    this.failed.clear();
+  }
+
   destroy(): void {
     this.destroyed = true;
     this.queue = [];

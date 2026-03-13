@@ -288,6 +288,77 @@ func sl_to_godot_quat(sl_rot: Array) -> Quaternion:
 func sl_to_godot_scale(sl_scale: Array) -> Vector3:
 	return object_mgr.sl_to_godot_scale(sl_scale)
 
+# Region change — clear entire scene for cross-region teleport
+func handle_region_change() -> void:
+	print("[SceneManager] Region change — clearing all objects, avatars, and lights")
+
+	# Destroy all object RSInstances
+	for local_id: int in objects:
+		objects[local_id].destroy()
+	objects.clear()
+
+	# Destroy all avatar RSInstances
+	for avatar_id: String in avatars:
+		avatars[avatar_id].destroy()
+	avatars.clear()
+
+	# Destroy all lights
+	for local_id: int in light_mgr.object_lights:
+		light_mgr.object_lights[local_id].destroy()
+	light_mgr.object_lights.clear()
+	light_mgr._object_light_data.clear()
+	light_mgr._pending_proj_textures.clear()
+	light_mgr._light_count = 0
+
+	# Destroy all animesh scene tree nodes (skeletons + mesh instances)
+	for local_id: int in animesh_roots:
+		var node: Node3D = animesh_roots[local_id]
+		if node and is_instance_valid(node):
+			node.queue_free()
+	animesh_roots.clear()
+	animesh_shared_skeleton.clear()
+	animesh_mesh_instances.clear()
+	animesh_root_for.clear()
+	animesh_eval.clear()
+	animesh_eval_active = false
+	animesh_pending_anims.clear()
+	animesh_worn_anims.clear()
+	bone_global_overrides.clear()
+
+	# Clear all tracking dictionaries
+	avatar_targets.clear()
+	avatar_local_ids.clear()
+	object_targets.clear()
+	pending_children.clear()
+	object_parent.clear()
+	object_children.clear()
+	child_offset_pos.clear()
+	child_offset_rot.clear()
+	pending_seated_avatars.clear()
+	pending_meshes.clear()
+	pending_textures.clear()
+	_pending_by_texture.clear()
+	_pending_by_mesh.clear()
+	object_faces.clear()
+	object_meta.clear()
+	object_uuid.clear()
+	object_mesh_id.clear()
+	attach_bone.clear()
+	attach_point_id.clear()
+	_attach_bone_logged.clear()
+
+	# Clear animesh crossfade blending state
+	object_mgr._prev_sl_local_rot.clear()
+
+	# Keep caches (mesh_cache, texture_cache, material_cache, rigged_mesh_paths)
+	# — assets are UUID-keyed and valid across regions
+
+	# Clear terrain (new region will send new heightmap + environment)
+	terrain_env.clear()
+
+	print("[SceneManager] Scene cleared, ready for new region data")
+
+
 # Objects
 func handle_object_create(msg: Dictionary) -> void:
 	object_mgr.handle_object_create(msg)

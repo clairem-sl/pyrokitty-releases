@@ -541,6 +541,17 @@ export class GodotObjectSender {
     return this.deferredTextures.size;
   }
 
+  /** Light reset for region change — clear tracking but keep queues alive */
+  clearForRegionChange(): void {
+    for (const sub of this.textureUpdateSubs.values()) {
+      sub.unsubscribe();
+    }
+    this.textureUpdateSubs.clear();
+    this.deferredTextures.clear();
+    this.meshFetchQueue?.clearPending();
+    this.sculptFetchQueue?.clearPending();
+  }
+
   cleanup(): void {
     for (const sub of this.textureUpdateSubs.values()) {
       sub.unsubscribe();

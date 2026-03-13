@@ -261,6 +261,12 @@ export class GodotEnvironmentManager {
     }
   }
 
+  /** Clear parcel env cache for region change (without stopping the timer) */
+  clearParcelCache(): void {
+    this._parcelEnvCache = null;
+    this._parcelEnvFetching = false;
+  }
+
   cleanup(): void {
     if (this.envTimer) {
       clearInterval(this.envTimer);

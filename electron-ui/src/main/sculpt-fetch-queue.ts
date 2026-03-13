@@ -94,6 +94,11 @@ export class SculptFetchQueue {
     }
   }
 
+  clearPending(): void {
+    this.queue = [];
+    this.pending.clear();
+  }
+
   destroy(): void {
     this.destroyed = true;
     this.queue = [];

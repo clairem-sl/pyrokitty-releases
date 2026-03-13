@@ -205,6 +205,8 @@ export class GodotInputHandler {
     console.log('[GodotBridge] Stood up');
   }
 
+  get isSitting(): boolean { return this._sittingOnLocalId !== 0; }
+
   /** Called by GodotBridge when server confirms a ParentID change on the self avatar. */
   setSittingState(sitting: boolean, seatLocalId: number, position?: number[], rotation?: number[]): void {
     this._sittingOnLocalId = sitting ? seatLocalId : 0;

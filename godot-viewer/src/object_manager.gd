@@ -1557,17 +1557,17 @@ func _cleanup_object(local_id: int) -> void:
 
 	# Clean up animesh mesh instance (child of shared skeleton, freed individually)
 	if sm.animesh_mesh_instances.has(local_id):
-		var ami: MeshInstance3D = sm.animesh_mesh_instances[local_id]
-		if ami and is_instance_valid(ami):
-			ami.queue_free()
+		var ami_ref = sm.animesh_mesh_instances[local_id]
+		if ami_ref is MeshInstance3D and is_instance_valid(ami_ref):
+			ami_ref.queue_free()
 		sm.animesh_mesh_instances.erase(local_id)
 	sm.object_mesh_id.erase(local_id)
 	sm.attach_bone.erase(local_id)
 	sm.animesh_root_for.erase(local_id)
 	if sm.animesh_roots.has(local_id):
-		var animesh_node: Node3D = sm.animesh_roots[local_id]
-		if animesh_node and is_instance_valid(animesh_node):
-			animesh_node.queue_free()
+		var animesh_ref = sm.animesh_roots[local_id]
+		if animesh_ref is Node3D and is_instance_valid(animesh_ref):
+			animesh_ref.queue_free()
 		sm.animesh_roots.erase(local_id)
 		sm.animesh_shared_skeleton.erase(local_id)
 		sm.animesh_pending_anims.erase(local_id)
@@ -1846,9 +1846,9 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 					to_erase.append(mesh_lid)
 			for mesh_lid: int in to_erase:
 				sm.animesh_mesh_instances.erase(mesh_lid)
-			var node: Node3D = sm.animesh_roots[av_lid]
-			if node and is_instance_valid(node):
-				node.queue_free()  # Also frees shared skeleton + per-mesh skeletons + meshes
+			var node_ref = sm.animesh_roots[av_lid]
+			if node_ref is Node3D and is_instance_valid(node_ref):
+				node_ref.queue_free()  # Also frees shared skeleton + per-mesh skeletons + meshes
 			sm.animesh_roots.erase(av_lid)
 			sm.animesh_shared_skeleton.erase(av_lid)
 			sm.animesh_eval.erase(av_lid)

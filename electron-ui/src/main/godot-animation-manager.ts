@@ -8,7 +8,6 @@ import type { Bot } from '../../node-metaverse/dist/lib';
 import { Message } from '../../node-metaverse/dist/lib/enums/Message';
 import type { ObjectAnimationMessage } from '../../node-metaverse/dist/lib/classes/messages/ObjectAnimation';
 import type { AvatarAnimationMessage } from '../../node-metaverse/dist/lib/classes/messages/AvatarAnimation';
-import type { Subscription } from 'rxjs';
 import type { AnimationFetchQueue } from './animation-fetch-queue';
 import type { SendFn } from './godot-bridge-types';
 
@@ -63,14 +62,11 @@ export class GodotAnimationManager {
     return this.avatarAnimState.get(id);
   }
 
-  /** Subscribe to ObjectAnimation circuit messages. Returns subscription or null. */
-  subscribeToObjectAnimation(): Subscription | null {
-    try {
-      const circuit = this.bot.currentRegion?.circuit;
-      if (!circuit) return null;
-      return circuit.subscribeToMessages([
-        Message.ObjectAnimation,
-      ], (packet: any) => {
+  /** Subscribe to ObjectAnimation circuit messages (persistent across region changes). */
+  subscribeToObjectAnimation(): { unsubscribe: () => void } {
+    return this.bot.subscribeToCircuitMessages([
+      Message.ObjectAnimation,
+    ], (packet: any) => {
         const msg = packet.message as ObjectAnimationMessage;
         const senderUuid = msg.Sender.ID.toString();
         const animations = msg.AnimationList.map(a => ({
@@ -89,33 +85,30 @@ export class GodotAnimationManager {
         } else {
           console.log(`[Animesh] Buffering ObjectAnimation for ${senderUuid.slice(0, 8)} (known=${localId !== undefined}, connected=${this.connected})`);
         }
-      });
-    } catch { return null; }
+    });
   }
 
-  /** Subscribe to AvatarAnimation circuit messages. Returns subscription or null. */
-  subscribeToAvatarAnimation(): Subscription | null {
-    try {
-      const circuit = this.bot.currentRegion?.circuit;
-      if (!circuit) return null;
-      return circuit.subscribeToMessages([
-        Message.AvatarAnimation,
-      ], (packet: any) => {
-        const msg = packet.message as AvatarAnimationMessage;
-        const avatarId = msg.Sender.ID.toString();
-        const animations = msg.AnimationList.map(a => ({
-          animId: a.AnimID.toString(),
-          sequenceId: a.AnimSequenceID,
-        }));
+  /** Subscribe to AvatarAnimation circuit messages (persistent across region changes). */
+  subscribeToAvatarAnimation(): { unsubscribe: () => void } {
+    return this.bot.subscribeToCircuitMessages([
+      Message.AvatarAnimation,
+    ], (packet: any) => {
+      const msg = packet.message as AvatarAnimationMessage;
+      const avatarId = msg.Sender.ID.toString();
+      const animations = msg.AnimationList.map(a => ({
+        animId: a.AnimID.toString(),
+        sequenceId: a.AnimSequenceID,
+      }));
 
-        this.avatarAnimState.set(avatarId, animations);
+      this.avatarAnimState.set(avatarId, animations);
 
-        const localId = this.avatarLocalIds.get(avatarId);
-        if (localId !== undefined && this.connected) {
-          this.updateAnimSet(localId, animations.map(a => a.animId));
-        }
-      });
-    } catch { return null; }
+      const localId = this.avatarLocalIds.get(avatarId);
+      if (localId !== undefined && this.connected) {
+        this.updateAnimSet(localId, animations.map(a => a.animId));
+      } else {
+        console.log(`[AnimDebug] AvatarAnimation for ${avatarId.slice(0, 8)}: localId=${localId} connected=${this.connected} (buffered only)`);
+      }
+    });
   }
 
   /**
@@ -128,6 +121,7 @@ export class GodotAnimationManager {
     const key = sorted.join(',');
     if (this.animRootLastSet.get(localId) === key) return;
     this.animRootLastSet.set(localId, key);
+    console.log(`[AnimDebug] updateAnimSet localId=${localId}: ${animIds.length} anims [${animIds.map(id => id.slice(0,8)).join(', ')}]`);
 
     const needed = new Set(sorted.filter(id => id.length > 0));
     this.animRootPending.set(localId, needed);
@@ -164,7 +158,10 @@ export class GodotAnimationManager {
   /** Check if all animations for a specific root are cached. If so, send batch to Godot. */
   private checkAnimBatchReadyForRoot(localId: number): void {
     const needed = this.animRootPending.get(localId);
-    if (!needed || needed.size === 0 || !this.animationFetchQueue || !this.connected) return;
+    if (!needed || needed.size === 0 || !this.animationFetchQueue || !this.connected) {
+      console.log(`[AnimDebug] checkBatchReady localId=${localId}: skip (needed=${needed?.size ?? 'null'} queue=${!!this.animationFetchQueue} connected=${this.connected})`);
+      return;
+    }
 
     const allData: Record<string, any> = {};
     for (const animId of needed) {
@@ -218,6 +215,16 @@ export class GodotAnimationManager {
       this.animRootPending.delete(avLocalId);
       this.animRootLastSet.delete(avLocalId);
     }
+  }
+
+  /** Light reset for region change — clear state but keep queues alive */
+  clearForRegionChange(): void {
+    this.animRootPending.clear();
+    this.animRootLastSet.clear();
+    this.animeshAnimState.clear();
+    this.animeshObjects.clear();
+    this.avatarAnimState.clear();
+    this.animationFetchQueue?.clearPending();
   }
 
   cleanup(): void {

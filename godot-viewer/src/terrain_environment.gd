@@ -50,6 +50,25 @@ func process(_delta: float) -> void:
 			world_env.environment.ambient_light_energy = _ambient_energy
 
 
+## Remove terrain and water meshes for region change
+func clear() -> void:
+	if terrain_node:
+		terrain_node.queue_free()
+		terrain_node = null
+	if water_node:
+		water_node.queue_free()
+		water_node = null
+	if _ocean != null:
+		if _ocean is Node and is_instance_valid(_ocean):
+			_ocean.queue_free()
+		_ocean = null
+	if _ocean_quad_tree != null:
+		if _ocean_quad_tree is Node and is_instance_valid(_ocean_quad_tree):
+			_ocean_quad_tree.queue_free()
+		_ocean_quad_tree = null
+	_ocean_logged_ready = false
+
+
 func handle_terrain_ready(msg: Dictionary) -> void:
 	var bin_path: String = msg.get("path", "")
 	if bin_path.is_empty():

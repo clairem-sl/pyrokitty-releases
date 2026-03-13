@@ -34,9 +34,16 @@ import type { Subscription } from 'rxjs';
 import { ChildAgentManager } from './classes/ChildAgentManager';
 import type { EnableSimulatorEvent } from './events/EnableSimulatorEvent';
 
-export class Bot
-{
+export class Bot {
     public clientEvents: ClientEvents;
+
+    /**
+     * When true, teleport events will fire but the bot will NOT automatically
+     * connect to the destination region. This allows external code to intercept
+     * the teleport data and hand it off to another client (e.g., a viewer).
+     */
+    public teleportHandoffMode = false;
+
     private stayRegion = '';
     private stayPosition = new Vector3();
 
@@ -49,109 +56,96 @@ export class Bot
     private _childAgentManager?: ChildAgentManager;
     private readonly options: BotOptionFlags;
     private eventQueueRunning = false;
-    private readonly eventQueueWaits = new Map<string,  {
+    private readonly eventQueueWaits = new Map<string, {
         timer?: NodeJS.Timeout,
-        resolve:  (value: (void | PromiseLike<void>)) => void
+        resolve: (value: (void | PromiseLike<void>)) => void
     }>();
     private stay = false;
 
     /**
-     * When true, teleport events will fire but the bot will NOT automatically
-     * connect to the destination region. This allows external code to intercept
-     * the teleport data and hand it off to another client (e.g., a viewer).
+     * Persistent circuit message subscriptions — automatically re-wired to the
+     * new circuit after every changeRegion(). Each entry holds the message IDs,
+     * the callback, and the current underlying rxjs Subscription.
      */
-    public teleportHandoffMode = false;
+    private readonly _persistentSubs: {
+        ids: number[];
+        callback: (packet: Packet) => Promise<void> | void;
+        sub: Subscription | null;
+        id: number;
+    }[] = [];
+    private _persistentSubNextId = 1;
 
     private _agent?: Agent;
     private _currentRegion?: Region;
     private _clientCommands?: ClientCommands;
 
-    public get currentRegion(): Region
-    {
-        if (this._currentRegion === undefined)
-        {
+    public get currentRegion(): Region {
+        if (this._currentRegion === undefined) {
             throw new Error('Internal error - currentRegion is undefined');
         }
         return this._currentRegion;
     }
 
-    public get agent(): Agent
-    {
-        if (this._agent === undefined)
-        {
+    public get agent(): Agent {
+        if (this._agent === undefined) {
             throw new Error('Internal error - agent is undefined');
         }
         return this._agent;
     }
 
-    public get clientCommands(): ClientCommands
-    {
-        if (this._clientCommands === undefined)
-        {
+    public get clientCommands(): ClientCommands {
+        if (this._clientCommands === undefined) {
             throw new Error('Internal error - clientCommands is undefined');
         }
         return this._clientCommands;
     }
 
-    public get loginParameters(): LoginParameters
-    {
+    public get loginParameters(): LoginParameters {
         return this.loginParams;
     }
 
-    public get childAgentManager(): ChildAgentManager | undefined
-    {
+    public get childAgentManager(): ChildAgentManager | undefined {
         return this._childAgentManager;
     }
 
-    public constructor(login: LoginParameters, options: BotOptionFlags)
-    {
+    public constructor(login: LoginParameters, options: BotOptionFlags) {
         this.clientEvents = new ClientEvents();
         this.loginParams = login;
         this.options = options;
 
-        this.clientEvents.onEventQueueStateChange.subscribe((evt: EventQueueStateChangeEvent) =>
-        {
+        this.clientEvents.onEventQueueStateChange.subscribe((evt: EventQueueStateChangeEvent) => {
             this.eventQueueRunning = evt.active;
-            for (const waitID of this.eventQueueWaits.keys())
-            {
-                try
-                {
+            for (const waitID of this.eventQueueWaits.keys()) {
+                try {
                     const wait = this.eventQueueWaits.get(waitID);
-                    if (wait !== undefined)
-                    {
+                    if (wait !== undefined) {
                         clearTimeout(wait.timer);
                         wait.resolve();
                         this.eventQueueWaits.delete(waitID);
                     }
                 }
-                catch (_ignore: unknown)
-                {
+                catch (_ignore: unknown) {
                     //Nothing
                 }
             }
         });
     }
 
-    public stayPut(stay: boolean, regionName?: string, position?: Vector3): void
-    {
+    public stayPut(stay: boolean, regionName?: string, position?: Vector3): void {
         this.stay = stay;
-        if (regionName !== undefined)
-        {
+        if (regionName !== undefined) {
             this.stayRegion = regionName;
-            if (position !== undefined)
-            {
+            if (position !== undefined) {
                 this.stayPosition = position;
             }
         }
     }
 
-    public getCurrentRegion(): Region
-    {
+    public getCurrentRegion(): Region {
         return this.currentRegion;
     }
 
-    public async login(): Promise<LoginResponse>
-    {
+    public async login(): Promise<LoginResponse> {
         const loginHandler = new LoginHandler(this.clientEvents, this.options);
         const response: LoginResponse = await loginHandler.Login(this.loginParams);
         this._currentRegion = response.region;
@@ -161,14 +155,12 @@ export class Bot
         return response;
     }
 
-    public async changeRegion(region: Region, requested: boolean): Promise<void>
-    {
+    public async changeRegion(region: Region, requested: boolean): Promise<void> {
         this.closeCircuit();
         this._currentRegion = region;
         this._clientCommands = new ClientCommands(this.currentRegion, this.agent, this);
         this._currentRegion.clientCommands = this._clientCommands;
-        if (this.ping !== null)
-        {
+        if (this.ping !== null) {
             clearInterval(this.ping);
             this.ping = null;
         }
@@ -176,16 +168,12 @@ export class Bot
         await this.connectToSim(requested);
     }
 
-    public async waitForEventQueue(timeout = 1000): Promise<void>
-    {
-        return new Promise((resolve, reject) =>
-        {
-            if (this.eventQueueRunning)
-            {
+    public async waitForEventQueue(timeout = 1000): Promise<void> {
+        return new Promise((resolve, reject) => {
+            if (this.eventQueueRunning) {
                 resolve();
             }
-            else
-            {
+            else {
                 const waitID = UUID.random().toString();
                 const newWait: {
                     resolve: (value: (void | PromiseLike<void>)) => void,
@@ -194,8 +182,7 @@ export class Bot
                     'resolve': resolve
                 };
 
-                newWait.timer = setTimeout(() =>
-                {
+                newWait.timer = setTimeout(() => {
                     this.eventQueueWaits.delete(waitID);
                     reject(new Error('Timeout'));
                 }, timeout);
@@ -205,32 +192,27 @@ export class Bot
         });
     }
 
-    public async setInterestList(mode: '360' | 'default'): Promise<boolean>
-    {
+    public async setInterestList(mode: '360' | 'default'): Promise<boolean> {
         const interestList = {
             mode
         };
 
-        try
-        {
+        try {
             const result = await this.currentRegion.caps.capsPostXML('InterestList', interestList);
-            if (typeof result !== 'object' || result === null)
-            {
+            if (typeof result !== 'object' || result === null) {
                 throw new Error('Invalid response received');
             }
             const res = result as Record<string, unknown>;
             return res.mode === mode;
         }
-        catch (e)
-        {
+        catch (e) {
             console.error('Error when setting interest list:');
             console.error(e);
             return false;
         }
     }
 
-    public async close(): Promise<void>
-    {
+    public async close(): Promise<void> {
         const circuit = this.currentRegion.circuit;
         const msg: LogoutRequestMessage = new LogoutRequestMessage();
         msg.AgentData = {
@@ -256,30 +238,25 @@ export class Bot
      *
      * Use this when handing off the session to a viewer for local teleports (same region).
      */
-    public shutdownForHandoff(): void
-    {
+    public shutdownForHandoff(): void {
         // Stop ping timer first to prevent it from using closed circuit
-        if (this.ping !== null)
-        {
+        if (this.ping !== null) {
             clearInterval(this.ping);
             this.ping = null;
         }
 
         // Shut down child agents
-        if (this.enableSimSubscription !== null)
-        {
+        if (this.enableSimSubscription !== null) {
             this.enableSimSubscription.unsubscribe();
             this.enableSimSubscription = null;
         }
-        if (this._childAgentManager)
-        {
+        if (this._childAgentManager) {
             this._childAgentManager.shutdown();
             this._childAgentManager = undefined;
         }
 
         // Unsubscribe from circuit events
-        if (this.circuitSubscription !== null)
-        {
+        if (this.circuitSubscription !== null) {
             this.circuitSubscription.unsubscribe();
             this.circuitSubscription = null;
         }
@@ -292,17 +269,48 @@ export class Bot
         this.currentRegion.circuit.shutdown();
     }
 
-    public agentID(): UUID
-    {
+    /**
+     * Subscribe to circuit messages that persist across region changes.
+     * The callback receives packets from whatever circuit is currently active.
+     * When changeRegion() connects a new circuit, the subscription is
+     * automatically re-wired — no manual re-subscribe needed.
+     *
+     * Returns an unsubscribe function.
+     */
+    public subscribeToCircuitMessages(ids: number[], callback: (packet: Packet) => Promise<void> | void): { unsubscribe: () => void } {
+        const entry = {
+            ids,
+            callback,
+            sub: null as Subscription | null,
+            id: this._persistentSubNextId++,
+        };
+
+        // Wire to current circuit if available
+        try {
+            entry.sub = this.currentRegion.circuit.subscribeToMessages(ids, callback);
+        }
+        catch {
+            // No circuit yet — will be wired in connectToSim
+        }
+
+        this._persistentSubs.push(entry);
+
+        return {
+            unsubscribe: (): void => {
+                entry.sub?.unsubscribe();
+                const idx = this._persistentSubs.findIndex(e => e.id === entry.id);
+                if (idx >= 0) this._persistentSubs.splice(idx, 1);
+            }
+        };
+    }
+
+    public agentID(): UUID {
         return this.agent.agentID;
     }
 
-    public async connectToSim(requested = false): Promise<void>
-    {
-        if (!requested)
-        {
-            if (this.stay && this.stayRegion === '')
-            {
+    public async connectToSim(requested = false): Promise<void> {
+        if (!requested) {
+            if (this.stay && this.stayRegion === '') {
                 requested = true;
             }
         }
@@ -319,6 +327,8 @@ export class Bot
 
         await circuit.waitForAck(circuit.sendMessage(msg, PacketFlags.Reliable), 60000);
 
+        // Re-wire persistent subscriptions to the new circuit
+        this._rewirePersistentSubs();
 
         const agentMovement: CompleteAgentMovementMessage = new CompleteAgentMovementMessage();
         agentMovement.AgentData = {
@@ -331,18 +341,17 @@ export class Bot
         let agentPosition: Vector3 | null = null;
         let regionName: string | null = null;
 
-        circuit.waitForMessage<AgentMovementCompleteMessage>(Message.AgentMovementComplete, 60000).then((agentMovementMsg: AgentMovementCompleteMessage) =>
-        {
+        const movementCompletePromise = circuit.waitForMessage<AgentMovementCompleteMessage>(Message.AgentMovementComplete, 60000).then((agentMovementMsg: AgentMovementCompleteMessage) => {
             agentPosition = agentMovementMsg.Data.Position;
-            if (regionName !== null)
-            {
-                if (this.stayRegion === '' || requested)
-                {
+            // Point camera at the actual landing position so the sim streams
+            // objects near where we arrived (not the previous region's coords)
+            this.agent.cameraCenter = agentPosition;
+            if (regionName !== null) {
+                if (this.stayRegion === '' || requested) {
                     this.stayPut(this.stay, regionName, agentPosition);
                 }
             }
-        }).catch(() =>
-        {
+        }).catch(() => {
             console.error('Timed out waiting for AgentMovementComplete')
         });
 
@@ -358,25 +367,20 @@ export class Bot
         };
         await circuit.waitForAck(circuit.sendMessage(handshakeReply, PacketFlags.Reliable), 10000);
 
-        this.currentRegion.handshake(handshakeMessage).then(() =>
-        {
+        this.currentRegion.handshake(handshakeMessage).then(() => {
             regionName = this.currentRegion.regionName;
             console.log('Arrived in region: ' + regionName);
-            if (agentPosition !== null)
-            {
-                if (this.stayRegion === '' || requested)
-                {
+            if (agentPosition !== null) {
+                if (this.stayRegion === '' || requested) {
                     this.stayPut(this.stay, regionName, agentPosition);
                 }
             }
-        }).catch((error: unknown) =>
-        {
+        }).catch((error: unknown) => {
             console.error('Timed out getting handshake');
             console.error(error);
         });
 
-        if (this._clientCommands)
-        {
+        if (this._clientCommands) {
             await this._clientCommands.network.setBandwidth(10000000);
         }
 
@@ -386,27 +390,30 @@ export class Bot
             SessionID: circuit.sessionID
         };
         circuit.sendMessage(agentRequest, PacketFlags.Reliable);
-        try
-        {
+        try {
             await this.waitForEventQueue(10000);
         }
-        catch (_ignore: unknown)
-        {
+        catch (_ignore: unknown) {
             console.warn('Event queue not ready before appearance setup');
         }
         await this.agent.setInitialAppearance();
+
+        // Ensure camera is set to the landing position before starting agent updates
+        // so the first AgentUpdate tells the sim to stream objects near us.
+        await movementCompletePromise;
         this.agent.circuitActive();
+
+        // Re-request 360-degree interest list — this is per-region and defaults to
+        // camera-facing-only mode, which misses objects behind the avatar.
+        this.setInterestList('360').catch(() => { });
 
         this.lastSuccessfulPing = new Date().getTime();
 
         this.ping = setInterval(() => {
-            (async(): Promise<void> =>
-            {
+            (async (): Promise<void> => {
                 const now = new Date().getTime();
-                if (now - this.lastSuccessfulPing > 120 * 1000)
-                {
-                    if (this.ping !== null)
-                    {
+                if (now - this.lastSuccessfulPing > 120 * 1000) {
+                    if (this.ping !== null) {
                         clearInterval(this.ping);
                         this.ping = null;
                         this.disconnected(false, 'Disconnected from the simulator');
@@ -415,26 +422,20 @@ export class Bot
                 }
 
                 this.pingNumber++;
-                if (this.pingNumber % 12 === 0 && this.stay)
-                {
-                    if (this.currentRegion.regionName.toLowerCase() !== this.stayRegion.toLowerCase())
-                    {
+                if (this.pingNumber % 12 === 0 && this.stay) {
+                    if (this.currentRegion.regionName.toLowerCase() !== this.stayRegion.toLowerCase()) {
                         console.log('Stay Put: Attempting to teleport to ' + this.stayRegion);
-                        if (this.stayPosition === undefined)
-                        {
+                        if (this.stayPosition === undefined) {
                             this.stayPosition = new Vector3([128, 128, 20]);
                         }
-                        this.clientCommands.teleport.teleportTo(this.stayRegion, this.stayPosition, this.stayPosition).then(() =>
-                        {
+                        this.clientCommands.teleport.teleportTo(this.stayRegion, this.stayPosition, this.stayPosition).then(() => {
                             console.log('I found my way home.');
-                        }).catch(() =>
-                        {
+                        }).catch(() => {
                             console.log('Cannot teleport home right now.');
                         });
                     }
                 }
-                if (this.pingNumber > 255)
-                {
+                if (this.pingNumber > 255) {
                     this.pingNumber = 0;
                 }
                 const ping = new StartPingCheckMessage();
@@ -447,14 +448,11 @@ export class Bot
                 await circuit.waitForMessage<CompletePingCheckMessage>(Message.CompletePingCheck, 10000, ((pingData: {
                     pingID: number,
                     timeSent: number
-                }, cpc: CompletePingCheckMessage): FilterResponse =>
-                {
-                    if (cpc.PingID.PingID === pingData.pingID)
-                    {
+                }, cpc: CompletePingCheckMessage): FilterResponse => {
+                    if (cpc.PingID.PingID === pingData.pingID) {
                         this.lastSuccessfulPing = new Date().getTime();
                         const pingTime = this.lastSuccessfulPing - pingData.timeSent;
-                        if (this.clientEvents !== null)
-                        {
+                        if (this.clientEvents !== null) {
                             this.clientEvents.onCircuitLatency.next(pingTime);
                         }
                         return FilterResponse.Finish;
@@ -465,8 +463,7 @@ export class Bot
                     timeSent: new Date().getTime()
                 }));
 
-                if ((new Date().getTime() - this.lastSuccessfulPing) > 60000)
-                {
+                if ((new Date().getTime() - this.lastSuccessfulPing) > 60000) {
                     // We're dead, jim
                     this.kicked('Circuit Timeout');
                 }
@@ -483,11 +480,9 @@ export class Bot
                 Message.TeleportProgress,
                 Message.TeleportCancel,
                 Message.KickUser
-            ], (packet: Packet) =>
-            {
-                switch (packet.message.id)
-                {
-                    case Message.TeleportLocal:
+            ], (packet: Packet) => {
+            switch (packet.message.id) {
+                case Message.TeleportLocal:
                     {
                         const tpEvent = new TeleportEvent();
                         tpEvent.message = '';
@@ -496,15 +491,14 @@ export class Bot
                         tpEvent.simPort = 0;
                         tpEvent.seedCapability = '';
 
-                        if (this.clientEvents === null)
-                        {
+                        if (this.clientEvents === null) {
                             this.kicked('ClientEvents is null');
                         }
 
                         this.clientEvents.onTeleportEvent.next(tpEvent);
                         break;
                     }
-                    case Message.TeleportStart:
+                case Message.TeleportStart:
                     {
                         const tpEvent = new TeleportEvent();
                         tpEvent.message = '';
@@ -513,15 +507,14 @@ export class Bot
                         tpEvent.simPort = 0;
                         tpEvent.seedCapability = '';
 
-                        if (this.clientEvents === null)
-                        {
+                        if (this.clientEvents === null) {
                             this.kicked('ClientEvents is null');
                         }
 
                         this.clientEvents.onTeleportEvent.next(tpEvent);
                         break;
                     }
-                    case Message.TeleportProgress:
+                case Message.TeleportProgress:
                     {
                         const teleportProgress = packet.message as TeleportProgressMessage;
                         const message = Utils.BufferToStringSimple(teleportProgress.Info.Message);
@@ -533,25 +526,24 @@ export class Bot
                         tpEvent.simPort = 0;
                         tpEvent.seedCapability = '';
 
-                        if (this.clientEvents === null)
-                        {
+                        if (this.clientEvents === null) {
                             this.kicked('ClientEvents is null');
                         }
 
                         this.clientEvents.onTeleportEvent.next(tpEvent);
                         break;
                     }
-                    case Message.KickUser:
+                case Message.KickUser:
                     {
                         const kickUser = packet.message as KickUserMessage;
                         this.kicked(Utils.BufferToStringSimple(kickUser.UserInfo.Reason));
 
                         break;
                     }
-                    default:
-                        break;
-                }
-            });
+                default:
+                    break;
+            }
+        });
 
         // Set up child agent manager for neighboring region awareness
         this._childAgentManager = new ChildAgentManager({
@@ -566,31 +558,35 @@ export class Bot
         this._childAgentManager.setMainRegion(circuit.ipAddress, circuit.port);
 
         this.enableSimSubscription = this.clientEvents.onEnableSimulator.subscribe(
-            (evt: EnableSimulatorEvent) =>
-            {
+            (evt: EnableSimulatorEvent) => {
                 this._childAgentManager?.enableSimulator(evt.regionHandle, evt.ipAddress, evt.port)
                     .catch((e) => console.warn('[ChildAgent] enableSimulator error:', e));
             }
         );
     }
 
-    private closeCircuit(): void
-    {
+    /** Re-wire all persistent circuit subscriptions to the current circuit. */
+    private _rewirePersistentSubs(): void {
+        const circuit = this.currentRegion.circuit;
+        for (const entry of this._persistentSubs) {
+            entry.sub?.unsubscribe();
+            entry.sub = circuit.subscribeToMessages(entry.ids, entry.callback);
+        }
+    }
+
+    private closeCircuit(): void {
         // Shut down child agents first
-        if (this.enableSimSubscription !== null)
-        {
+        if (this.enableSimSubscription !== null) {
             this.enableSimSubscription.unsubscribe();
             this.enableSimSubscription = null;
         }
-        if (this._childAgentManager)
-        {
+        if (this._childAgentManager) {
             this._childAgentManager.shutdown();
             this._childAgentManager = undefined;
         }
 
         this.currentRegion.shutdown();
-        if (this.circuitSubscription !== null)
-        {
+        if (this.circuitSubscription !== null) {
             this.circuitSubscription.unsubscribe();
             this.circuitSubscription = null;
         }
@@ -598,29 +594,25 @@ export class Bot
 
         this.clientCommands.shutdown();
         delete this._clientCommands;
-        if (this.ping !== null)
-        {
+        if (this.ping !== null) {
             clearInterval(this.ping);
             this.ping = null;
         }
 
     }
 
-    private kicked(message: string): void
-    {
+    private kicked(message: string): void {
         this.closeCircuit();
         this.agent.shutdown();
         delete this._agent;
         this.disconnected(false, message);
     }
 
-    private disconnected(requested: boolean, message: string): void
-    {
+    private disconnected(requested: boolean, message: string): void {
         const disconnectEvent = new DisconnectEvent();
         disconnectEvent.requested = requested;
         disconnectEvent.message = message;
-        if (this.clientEvents)
-        {
+        if (this.clientEvents) {
             this.clientEvents.onDisconnected.next(disconnectEvent);
         }
     }

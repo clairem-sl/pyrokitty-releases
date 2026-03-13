@@ -265,6 +265,8 @@ func _handle_message(text: String) -> void:
 	var msg_type: String = msg.get("type", "")
 
 	match msg_type:
+		"region_change":
+			scene_manager.handle_region_change()
 		"self_id":
 			scene_manager.set_self_avatar_id(msg.get("id", ""))
 		"object_create":

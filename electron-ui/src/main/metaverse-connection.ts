@@ -180,8 +180,8 @@ export class MetaverseConnection extends EventEmitter {
 
         this.bot = new Bot(loginParams, BotOptionFlags.None);
 
-        // Enable teleport handoff mode for later viewer handoff
-        this.bot.teleportHandoffMode = true;
+        // teleportHandoffMode stays false — node-metaverse handles all teleports.
+        // Godot is just a renderer and Firestorm takes over the session entirely.
 
         // Create display name cache keyed by account
         this.accountId = `${params.firstName}.${params.lastName}`.toLowerCase();

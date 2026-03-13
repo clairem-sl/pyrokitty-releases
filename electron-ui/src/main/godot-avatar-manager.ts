@@ -54,52 +54,45 @@ export class GodotAvatarManager {
 
   // ─── BoM: AvatarAppearance Subscription ───────────────────────
 
-  /** Subscribe to AvatarAppearance circuit messages. Returns subscription or null. */
-  subscribeToAvatarAppearance(): Subscription | null {
-    try {
-      const circuit = this.bot.currentRegion?.circuit;
-      if (!circuit) {
-        console.warn('[BoM] No circuit available for AvatarAppearance subscription');
-        return null;
-      }
-      console.log(`[BoM] Subscribing to AvatarAppearance (Message.AvatarAppearance=${Message.AvatarAppearance})`);
-      return circuit.subscribeToMessages([
-        Message.AvatarAppearance,
-      ], (packet: any) => {
-        try {
-          const msg = packet.message as AvatarAppearanceMessage;
-          const avatarId = msg.Sender.ID.toString();
+  /** Subscribe to AvatarAppearance circuit messages (persistent across region changes). */
+  subscribeToAvatarAppearance(): { unsubscribe: () => void } {
+    console.log(`[BoM] Subscribing to AvatarAppearance (Message.AvatarAppearance=${Message.AvatarAppearance})`);
+    return this.bot.subscribeToCircuitMessages([
+      Message.AvatarAppearance,
+    ], (packet: any) => {
+      try {
+        const msg = packet.message as AvatarAppearanceMessage;
+        const avatarId = msg.Sender.ID.toString();
 
-          // Parse baked texture UUIDs from the avatar's TextureEntry
-          // Baked faces are at specific ETextureIndex positions (8,9,10,11,20,21,41-45), NOT 0-10
-          const te = TextureEntry.from(msg.ObjectData.TextureEntry);
-          const bakes: string[] = [];
-          for (let ch = 0; ch < 11; ch++) {
-            const teFace = BAKE_CHANNEL_TO_TE_FACE[ch];
-            const face = te.faces[teFace] ?? te.defaultTexture;
-            const texId = face?.textureID?.toString() || '';
-            bakes.push(texId);
-          }
-
-          const prevBakes = this.avatarBakedTextures.get(avatarId);
-          this.avatarBakedTextures.set(avatarId, bakes);
-
-          // Log bake channels that have real textures
-          const filled = bakes
-            .map((uuid, i) => (uuid && uuid !== ZERO_UUID) ? `${BAKE_CHANNEL_NAMES[i]}=${uuid.slice(0, 8)}` : null)
-            .filter(Boolean);
-          console.log(`[BoM] AvatarAppearance for ${avatarId.slice(0, 8)}: ${filled.length}/11 bake channels — ${filled.join(', ')}`);
-
-          // Check if bakes changed (or this is the first appearance)
-          const changed = !prevBakes || bakes.some((b, i) => b !== prevBakes[i]);
-          if (changed && this.connected) {
-            this.reemitBakeUpdates(avatarId, bakes);
-          }
-        } catch (err) {
-          console.warn('[BoM] Error parsing AvatarAppearance:', (err as Error).message);
+        // Parse baked texture UUIDs from the avatar's TextureEntry
+        // Baked faces are at specific ETextureIndex positions (8,9,10,11,20,21,41-45), NOT 0-10
+        const te = TextureEntry.from(msg.ObjectData.TextureEntry);
+        const bakes: string[] = [];
+        for (let ch = 0; ch < 11; ch++) {
+          const teFace = BAKE_CHANNEL_TO_TE_FACE[ch];
+          const face = te.faces[teFace] ?? te.defaultTexture;
+          const texId = face?.textureID?.toString() || '';
+          bakes.push(texId);
         }
-      });
-    } catch { return null; }
+
+        const prevBakes = this.avatarBakedTextures.get(avatarId);
+        this.avatarBakedTextures.set(avatarId, bakes);
+
+        // Log bake channels that have real textures
+        const filled = bakes
+          .map((uuid, i) => (uuid && uuid !== ZERO_UUID) ? `${BAKE_CHANNEL_NAMES[i]}=${uuid.slice(0, 8)}` : null)
+          .filter(Boolean);
+        console.log(`[BoM] AvatarAppearance for ${avatarId.slice(0, 8)}: ${filled.length}/11 bake channels — ${filled.join(', ')}`);
+
+        // Check if bakes changed (or this is the first appearance)
+        const changed = !prevBakes || bakes.some((b, i) => b !== prevBakes[i]);
+        if (changed && this.connected) {
+          this.reemitBakeUpdates(avatarId, bakes);
+        }
+      } catch (err) {
+        console.warn('[BoM] Error parsing AvatarAppearance:', (err as Error).message);
+      }
+    });
   }
 
   // ─── BoM: Bake Lookup & Tracking ──────────────────────────────

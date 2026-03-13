@@ -24,6 +24,7 @@
 import { Bot, BotOptionFlags, LoginParameters, Vector3 } from '../../electron-ui/node-metaverse/dist/lib/index.js';
 import { ChatType } from '../../electron-ui/node-metaverse/dist/lib/enums/ChatType.js';
 import { ChatSourceType } from '../../electron-ui/node-metaverse/dist/lib/enums/ChatSourceType.js';
+import { TeleportEventType } from '../../electron-ui/node-metaverse/dist/lib/enums/TeleportEventType.js';
 import { InstantMessageEventFlags } from '../../electron-ui/node-metaverse/dist/lib/enums/InstantMessageEventFlags.js';
 import { RightsFlags } from '../../electron-ui/node-metaverse/dist/lib/enums/RightsFlags.js';
 import { UUID } from '../../electron-ui/node-metaverse/dist/lib/classes/UUID.js';
@@ -305,11 +306,19 @@ export class BotManager {
 
   async teleport(regionName: string, x = 128, y = 128, z = 30): Promise<string> {
     await this.ensureConnected();
+    const agentId = this.bot!.agentID().toString();
+    console.log(`[Teleport] Agent ${agentId} requesting teleport to "${regionName}" (${x}, ${y}, ${z})`);
     const position = new Vector3([x, y, z]);
     const lookAt = new Vector3([0, 1, 0]);
-    await this.bot!.clientCommands.teleport.teleportTo(regionName, position, lookAt);
-    this.updateCamera();
-    return `Teleported to ${regionName} (${x}, ${y}, ${z})`;
+    try {
+      await this.bot!.clientCommands.teleport.teleportTo(regionName, position, lookAt);
+      this.updateCamera();
+      console.log(`[Teleport] Agent ${agentId} teleport to "${regionName}" succeeded`);
+      return `Teleported to ${regionName} (${x}, ${y}, ${z})`;
+    } catch (err: any) {
+      console.error(`[Teleport] Agent ${agentId} teleport to "${regionName}" FAILED:`, err.message || err);
+      throw err;
+    }
   }
 
   /**
@@ -959,6 +968,29 @@ export class BotManager {
       avatar.onLeftRegion.subscribe(() => {
         this.nearbyAvatars.delete(avatarId);
       });
+    });
+
+    // Log all teleport lifecycle events
+    this.bot.clientEvents.onTeleportEvent.subscribe((event) => {
+      const agentId = this.bot?.agentID()?.toString() ?? 'unknown';
+      switch (event.eventType) {
+        case TeleportEventType.TeleportStarted:
+          console.log(`[Teleport] Agent ${agentId} TeleportStart (cross-region)`);
+          break;
+        case TeleportEventType.TeleportProgress:
+          console.log(`[Teleport] Agent ${agentId} TeleportProgress: ${event.message}`);
+          break;
+        case TeleportEventType.TeleportCompleted:
+          if (event.simIP === 'local') {
+            console.log(`[Teleport] Agent ${agentId} TeleportLocal (same-region) completed`);
+          } else {
+            console.log(`[Teleport] Agent ${agentId} TeleportFinish: simIP=${event.simIP}:${event.simPort} regionHandle=${event.regionHandle?.toString()}`);
+          }
+          break;
+        case TeleportEventType.TeleportFailed:
+          console.error(`[Teleport] Agent ${agentId} TeleportFailed: ${event.message}`);
+          break;
+      }
     });
 
     // Track friend online status

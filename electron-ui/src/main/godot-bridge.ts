@@ -19,7 +19,7 @@ import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import type { Bot } from '../../node-metaverse/dist/lib';
 import { Message } from '../../node-metaverse/dist/lib/enums/Message';
-import type { Subscription } from 'rxjs';
+import { TeleportEventType } from '../../node-metaverse/dist/lib/enums/TeleportEventType';
 import { MeshFetchQueue } from './mesh-fetch-queue';
 import { TextureFetchQueue } from './texture-fetch-queue';
 import { SculptFetchQueue } from './sculpt-fetch-queue';
@@ -85,7 +85,7 @@ export class GodotBridge extends EventEmitter {
   private ws: WebSocket | null = null;
   private port: number;
   private bot: Bot;
-  private subscriptions: Subscription[] = [];
+  private subscriptions: { unsubscribe: () => void }[] = [];
   private connected = false;
   private vrMode: boolean;
 
@@ -174,13 +174,8 @@ export class GodotBridge extends EventEmitter {
       try { fs.unlinkSync(overridePath); } catch { /* not present, fine */ }
     }
 
-    // Subscribe to animation + appearance messages early
-    const objAnimSub = this.animationManager.subscribeToObjectAnimation();
-    if (objAnimSub) this.subscriptions.push(objAnimSub);
-    const avatarAnimSub = this.animationManager.subscribeToAvatarAnimation();
-    if (avatarAnimSub) this.subscriptions.push(avatarAnimSub);
-    const appearanceSub = this.avatarManager.subscribeToAvatarAppearance();
-    if (appearanceSub) this.subscriptions.push(appearanceSub);
+    // Subscribe to circuit-specific messages (animation, appearance, sit)
+    this.subscribeToCircuit();
 
     console.log(`[GodotBridge] Spawning Godot on port ${this.port} — ${godotPath}`);
 
@@ -486,59 +481,8 @@ export class GodotBridge extends EventEmitter {
     const updateSubs = this.updateCoalescer!.subscribe(events);
     this.subscriptions.push(...updateSubs);
 
-    // Self-avatar sit detection via AvatarSitResponse (onObjectUpdatedEvent is not fired
-    // for avatars when ParentID > 0, so we must use the circuit message directly).
-    // Standing is detected via onObjectUpdatedEvent which DOES fire when ParentID → 0.
-    let selfAvatarSeatLocalId = 0;
-
-    const circuit = this.bot.currentRegion?.circuit;
-    if (circuit) {
-      const sitResponseSub = circuit.subscribeToMessages([Message.AvatarSitResponse], (packet: any) => {
-        try {
-          const msg = packet.message;
-          const seatUuid: string = msg.SitObject.ID.toString();
-          const sitPos = msg.SitTransform.SitPosition;
-          const sitRot = msg.SitTransform.SitRotation;
-
-          const region = this.bot.currentRegion;
-          if (!region) return;
-
-          let seatLocalId = 0;
-          try {
-            seatLocalId = region.objects.getObjectByUUID(seatUuid as any).ID;
-          } catch {
-            console.warn(`[GodotBridge] AvatarSitResponse: seat ${seatUuid.slice(0, 8)} not in object store`);
-            return;
-          }
-
-          selfAvatarSeatLocalId = seatLocalId;
-          this.inputHandler.setSittingState(
-            true, seatLocalId,
-            [sitPos.x, sitPos.y, sitPos.z],
-            [sitRot.x, sitRot.y, sitRot.z, sitRot.w],
-          );
-          this.send({ type: 'sitting_state', sitting: true });
-
-          // Push avatar into the correct seated position immediately.
-          const selfId = this.bot.agent?.agentID?.toString();
-          if (selfId) {
-            this.send({
-              type: 'avatar_update',
-              id: selfId,
-              position: [sitPos.x, sitPos.y, sitPos.z],
-              rotation: [sitRot.x, sitRot.y, sitRot.z, sitRot.w],
-              parentId: seatLocalId,
-            });
-          }
-          console.log(`[GodotBridge] AvatarSitResponse: seated on ${seatUuid.slice(0, 8)} localId=${seatLocalId} offset=(${sitPos.x.toFixed(2)},${sitPos.y.toFixed(2)},${sitPos.z.toFixed(2)})`);
-        } catch (e) {
-          console.error('[GodotBridge] AvatarSitResponse handler error:', e);
-        }
-      });
-      this.subscriptions.push(sitResponseSub);
-    }
-
     // Standing detection: onObjectUpdatedEvent DOES fire for the avatar when ParentID → 0.
+    // (Sit detection is handled by AvatarSitResponse in subscribeToCircuit())
     const selfStandSub = events.onObjectUpdatedEvent.subscribe((event: any) => {
       const obj = event.object;
       if (obj.PCode !== 47) return;
@@ -546,9 +490,8 @@ export class GodotBridge extends EventEmitter {
       if (!avatarId) return;
       const selfId = this.bot.agent?.agentID?.toString();
       if (!selfId || avatarId !== selfId) return;
-      if ((obj.ParentID || 0) !== 0 || selfAvatarSeatLocalId === 0) return;
+      if ((obj.ParentID || 0) !== 0 || !this.inputHandler.isSitting) return;
 
-      selfAvatarSeatLocalId = 0;
       this.inputHandler.setSittingState(false, 0);
       this.send({ type: 'sitting_state', sitting: false });
       console.log('[GodotBridge] Self avatar stood up (ParentID → 0)');
@@ -564,6 +507,16 @@ export class GodotBridge extends EventEmitter {
       } catch { /* avatar may not be fully initialized yet */ }
     });
     this.subscriptions.push(avatarEnterSub);
+
+    // Cross-region teleport: clear old scene and re-sync
+    const teleportSub = events.onTeleportEvent.subscribe((e) => {
+      console.log(`[GodotBridge] TeleportEvent: type=${e.eventType} simIP=${e.simIP} message=${e.message}`);
+      if (e.eventType === TeleportEventType.TeleportCompleted && e.simIP !== 'local') {
+        console.log(`[GodotBridge] Cross-region teleport detected, clearing scene`);
+        this.handleRegionChange();
+      }
+    });
+    this.subscriptions.push(teleportSub);
 
     // Kill sweep + child rescan: every 2s
     let memLogCounter = 0;
@@ -591,6 +544,121 @@ export class GodotBridge extends EventEmitter {
       ? ` | godot(${gs.fps?.toFixed(0) ?? '?'}fps budget:${gs.budgetElapsed?.toFixed(1) ?? '?'}/${gs.budgetAvail?.toFixed(1) ?? '?'}/${gs.budgetUsed?.toFixed(1) ?? '?'}ms el/av/us): tex: w=${gs.texWorkers}(${gs.texReady ?? '?'}rdy) q=${gs.texQueue} done=${gs.texDone} cached=${gs.texCached} fail=${gs.texFailed} pending=${gs.texPending} [${gs.texTiming ?? '?'}] | mesh: w=${gs.meshWorkers}(${gs.meshReady ?? '?'}rdy) q=${gs.meshQueue} done=${gs.meshDone} cached=${gs.meshCached} fail=${gs.meshFailed} pending=${gs.meshPending} | mats=${gs.materials}(${gs.materialReuse ?? '?'}reuse) opaque=${gs.texOpaque ?? '?'}`
       : '';
     console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | pbr: ${this.materialPipeline.totalPbrFaceCount} faces | deferred: ${this.objectSender.deferredCount}${godotStr}`);
+  }
+
+  /**
+   * Subscribe to circuit-specific messages (ObjectAnimation, AvatarAnimation,
+   * AvatarAppearance, AvatarSitResponse). Must be called again after region
+   * change since the old circuit is destroyed.
+   */
+  /**
+   * Subscribe to circuit messages using Bot's persistent subscription API.
+   * These auto-rewire to the new circuit on region change — no manual
+   * re-subscription needed.  Called once at startup.
+   */
+  private subscribeToCircuit(): void {
+    // Animation messages (ObjectAnimation + AvatarAnimation)
+    this.subscriptions.push(this.animationManager.subscribeToObjectAnimation());
+    this.subscriptions.push(this.animationManager.subscribeToAvatarAnimation());
+
+    // Avatar appearance (BoM bake updates)
+    this.subscriptions.push(this.avatarManager.subscribeToAvatarAppearance());
+
+    // AvatarSitResponse
+    const sitResponseSub = this.bot.subscribeToCircuitMessages([Message.AvatarSitResponse], (packet: any) => {
+      try {
+        const msg = packet.message;
+        const seatUuid: string = msg.SitObject.ID.toString();
+        const sitPos = msg.SitTransform.SitPosition;
+        const sitRot = msg.SitTransform.SitRotation;
+
+        const region = this.bot.currentRegion;
+        if (!region) return;
+
+        let seatLocalId = 0;
+        try {
+          seatLocalId = region.objects.getObjectByUUID(seatUuid as any).ID;
+        } catch {
+          console.warn(`[GodotBridge] AvatarSitResponse: seat ${seatUuid.slice(0, 8)} not in object store`);
+          return;
+        }
+
+        this.inputHandler.setSittingState(
+          true, seatLocalId,
+          [sitPos.x, sitPos.y, sitPos.z],
+          [sitRot.x, sitRot.y, sitRot.z, sitRot.w],
+        );
+        this.send({ type: 'sitting_state', sitting: true });
+
+        const selfId = this.bot.agent?.agentID?.toString();
+        if (selfId) {
+          this.send({
+            type: 'avatar_update',
+            id: selfId,
+            position: [sitPos.x, sitPos.y, sitPos.z],
+            rotation: [sitRot.x, sitRot.y, sitRot.z, sitRot.w],
+            parentId: seatLocalId,
+          });
+        }
+        console.log(`[GodotBridge] AvatarSitResponse: seated on ${seatUuid.slice(0, 8)} localId=${seatLocalId} offset=(${sitPos.x.toFixed(2)},${sitPos.y.toFixed(2)},${sitPos.z.toFixed(2)})`);
+      } catch (e) {
+        console.error('[GodotBridge] AvatarSitResponse handler error:', e);
+      }
+    });
+    this.subscriptions.push(sitResponseSub);
+
+    console.log('[GodotBridge] Subscribed to circuit messages (persistent)');
+  }
+
+  /**
+   * Handle cross-region teleport: clear Godot scene, reset bridge tracking,
+   * then re-snapshot once the new region's objects start arriving.
+   */
+  private handleRegionChange(): void {
+    // Tell Godot to wipe everything
+    this.send({ type: 'region_change' });
+
+    // Reset bridge-side tracking
+    this.trackedObjects.clear();
+    this.trackedAvatars.clear();
+    this.avatarLocalIds.clear();
+
+    // Reset sub-module state (without destroying fetch queues — they're reused)
+    this.objectSender.clearForRegionChange();
+    this.avatarManager.cleanup();
+    this.animationManager.clearForRegionChange();
+
+    // Clear pending downloads (old caps URLs will 403)
+    this.textureFetchQueue?.clearPending();
+
+    // Clear asset ready buffer
+    this.assetReadyBuffer = [];
+    if (this.assetReadyTimer) {
+      clearTimeout(this.assetReadyTimer);
+      this.assetReadyTimer = null;
+    }
+
+    // Clear environment cache (parcel env is per-region)
+    this.environmentMgr?.clearParcelCache();
+
+    // Circuit subscriptions are persistent (auto-rewired by Bot.subscribeToCircuitMessages),
+    // so no re-subscription needed here.
+
+    // Wait for the new region's event queue to start before sending the initial
+    // snapshot — by then objects have started arriving and the circuit is ready.
+    const eqSub = this.bot.clientEvents.onEventQueueStateChange.subscribe((evt) => {
+      if (!evt.active) return;
+      eqSub.unsubscribe();
+
+      if (!this.connected) return;
+      try {
+        console.log('[GodotBridge] New region ready, sending initial snapshot');
+        this.objectSender.sendInitialSnapshot((avatar, id) => this.avatarManager.sendAvatarCreate(avatar, id));
+      } catch (e) {
+        console.error('[GodotBridge] Failed to send initial snapshot after region change:', e);
+      }
+    });
+    this.subscriptions.push(eqSub);
   }
 
   stop(): void {

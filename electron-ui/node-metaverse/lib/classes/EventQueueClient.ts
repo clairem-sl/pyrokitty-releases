@@ -473,12 +473,8 @@ export class EventQueueClient
                                             info.LocationID = Buffer.from(info.LocationID.toArray()).readUInt32BE(0);
 
                                             const regionHandleBuf = Buffer.from(info.RegionHandle.toArray());
-                                            console.log('[TeleportFinish] Raw RegionHandle bytes:', regionHandleBuf.toString('hex'));
-                                            console.log('[TeleportFinish] RegionHandle buffer length:', regionHandleBuf.length);
                                             // RegionHandle is a 64-bit Big Endian integer: high 32 bits at offset 0, low 32 bits at offset 4
                                             info.RegionHandle = new Long(regionHandleBuf.readUInt32BE(4), regionHandleBuf.readUInt32BE(0), true);
-                                            console.log('[TeleportFinish] Parsed RegionHandle:', info.RegionHandle.toString());
-
 
                                             info.SimIP = new IPAddress(Buffer.from(info.SimIP.toArray()), 0).toString();
 

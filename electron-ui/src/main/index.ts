@@ -251,6 +251,10 @@ async function createWindow(): Promise<void> {
   // taskbar context menu instead of ours.
   tray.setContextMenu(contextMenu);
 
+  tray.on('right-click', () => {
+    tray?.popUpContextMenu(contextMenu);
+  });
+
   tray.on('double-click', () => {
     mainWindow?.show();
     mainWindow?.focus();

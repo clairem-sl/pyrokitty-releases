@@ -252,6 +252,13 @@ export class TextureFetchQueue {
     });
   }
 
+  /** Drop pending queue and failed set for region change. In-flight downloads may still 403 — harmless. */
+  clearPending(): void {
+    this.queue = [];
+    this.pending.clear();
+    this.failed.clear();
+  }
+
   destroy(): void {
     this.destroyed = true;
     this.queue = [];
