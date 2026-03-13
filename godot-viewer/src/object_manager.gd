@@ -16,6 +16,9 @@ const BLEND_SNAP_DIST: float = 10.0       # Snap if correction exceeds this (met
 # Self avatar state
 var _first_person_mode: bool = false
 
+# Debug skeleton visualization (toggled via Ctrl+Shift+1)
+var _debug_skeleton_visible: bool = false
+
 # CV bone SL-space rest rotations — cached from skeleton_builder.
 # Used as fallback for unanimated CV bones in animation evaluation.
 var _sl_cv_rest_rotations: Dictionary = {}
@@ -681,13 +684,14 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 		print("[SelfAvatar] Rigged mesh instantiated: localId=%d meshId=%s shared_bones=%d" % [local_id, mesh_id.substr(0, 8), shared_skel.get_bone_count()])
 
 	# Debug: visualize skeleton once per root (check for existing markers)
-	var already_has_markers: bool = false
-	for child in shared_skel.get_children():
-		if child.name.begins_with("dbg_bone_"):
-			already_has_markers = true
-			break
-	if not already_has_markers:
-		_debug_visualize_skeleton(shared_skel)
+	if _debug_skeleton_visible:
+		var already_has_markers: bool = false
+		for child in shared_skel.get_children():
+			if child.name.begins_with("dbg_bone_"):
+				already_has_markers = true
+				break
+		if not already_has_markers:
+			_debug_visualize_skeleton(shared_skel)
 
 	# Free the GLB scene (GLB skeleton + any remaining nodes)
 	scene.queue_free()
@@ -725,6 +729,33 @@ func _debug_visualize_skeleton(skel: Skeleton3D) -> void:
 		count += 1
 
 	print("[DebugSkel] Placed %d bone markers on skeleton (%d bones)" % [count, skel.get_bone_count()])
+
+
+## Toggle debug skeleton markers on/off.
+func toggle_debug_skeleton() -> void:
+	_debug_skeleton_visible = not _debug_skeleton_visible
+	print("[DebugSkel] Skeleton markers %s" % ("ON" if _debug_skeleton_visible else "OFF"))
+	if _debug_skeleton_visible:
+		# Add markers to all existing shared skeletons
+		for root_id in sm.animesh_shared_skeleton:
+			var skel: Skeleton3D = sm.animesh_shared_skeleton[root_id]
+			var already_has_markers: bool = false
+			for child in skel.get_children():
+				if child.name.begins_with("dbg_bone_"):
+					already_has_markers = true
+					break
+			if not already_has_markers:
+				_debug_visualize_skeleton(skel)
+	else:
+		# Remove markers from all shared skeletons
+		for root_id in sm.animesh_shared_skeleton:
+			var skel: Skeleton3D = sm.animesh_shared_skeleton[root_id]
+			var to_remove: Array[Node] = []
+			for child in skel.get_children():
+				if child.name.begins_with("dbg_bone_"):
+					to_remove.append(child)
+			for child in to_remove:
+				child.queue_free()
 
 
 ## Update debug bone marker positions after animation evaluation.
@@ -950,7 +981,8 @@ func process_animesh(delta: float) -> void:
 		if shared_skel != null:
 			_evaluate_skeleton_animation(shared_skel, sl_local_rot, sl_local_pos)
 			_update_bone_attachments(root_id, shared_skel)
-			_update_debug_bone_markers(shared_skel)
+			if _debug_skeleton_visible:
+				_update_debug_bone_markers(shared_skel)
 
 
 

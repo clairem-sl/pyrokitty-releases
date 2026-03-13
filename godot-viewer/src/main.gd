@@ -310,6 +310,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if event.keycode == KEY_F9:
 			_planar_debug_mode = (_planar_debug_mode + 1) % 4
 			scene_manager.set_planar_debug_mode(_planar_debug_mode)
+		elif event.keycode == KEY_1 and event.ctrl_pressed and event.shift_pressed:
+			scene_manager.toggle_debug_skeleton()
 
 
 func send_message(msg: Dictionary) -> void:

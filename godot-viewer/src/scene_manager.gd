@@ -369,6 +369,9 @@ func get_object_debug_info(local_id: int) -> Dictionary:
 func set_planar_debug_mode(mode: int) -> void:
 	object_picker.set_planar_debug_mode(mode)
 
+func toggle_debug_skeleton() -> void:
+	object_mgr.toggle_debug_skeleton()
+
 # Stats
 func get_pipeline_stats() -> Dictionary:
 	return asset_pipeline.get_pipeline_stats()

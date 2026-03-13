@@ -12,7 +12,7 @@ signal xr_pose_updated(avatar_pos: Vector3, avatar_yaw: float)
 
 @export var orbit_speed: float = 0.005
 @export var zoom_speed: float = 2.0
-@export var min_distance: float = 2.0
+@export var min_distance: float = 0.0
 @export var max_distance: float = 500.0
 @export var follow_smoothing: float = 8.0
 @export var turn_rate: float = 2.5        # Radians per second for A/D
