@@ -185,9 +185,6 @@ export class GodotObjectSender {
                 }
               }
             }
-            if (subCount > 0) {
-              console.log(`[BoM] localId=${obj.ID}: substituted ${subCount} faces for avatar ${avatarId.slice(0, 8)}, first bake=${texInfo.faces[0]?.textureId?.slice(0, 8)}`);
-            }
             // Rebuild textureIds after substitution
             const idSet = new Set<string>();
             for (const face of texInfo.faces) {
@@ -321,18 +318,6 @@ export class GodotObjectSender {
 
     if (!skipTextures) {
       this.materialPipeline.fetchTexturesForObject(obj, texInfo);
-    } else if (texInfo) {
-      // Check if this deferred object had BoM textures that won't be fetched
-      for (const face of texInfo.faces) {
-        if (face.textureId && !BAKE_MAGIC_UUIDS.has(face.textureId)) {
-          // Check if this was a substituted bake by looking at the avatar manager
-          const avatarId = this.avatarManager?.findOwnerAvatar(parentLocalId);
-          if (avatarId && this.avatarManager?.getBakedTextures(avatarId)) {
-            console.log(`[BoM] DEFERRED: localId=${obj.ID} baked texture ${face.textureId.slice(0, 8)} deferred (skipTextures=true)`);
-            break;
-          }
-        }
-      }
     }
   }
 

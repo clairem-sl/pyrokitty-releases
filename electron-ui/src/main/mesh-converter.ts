@@ -42,6 +42,9 @@ let jointAliasCache: Map<string, string> | null = null;
 
 function findCharacterFile(filename: string): string {
   const candidates = [
+    // Deployed: extraResources/viewer/character/
+    ...(process.resourcesPath ? [path.join(process.resourcesPath, 'viewer', 'character', filename)] : []),
+    // Dev: relative to dist/main/
     path.join(__dirname, '..', '..', 'viewer', 'character', filename),
     path.join(__dirname, '..', '..', '..', 'viewer', 'character', filename),
     path.join(__dirname, '..', '..', '..', '..', 'indra', 'newview', 'character', filename),
@@ -89,17 +92,25 @@ function getJointAliasMap(): Map<string, string> {
     }
   }
 
-  // 2. Attachment point names → their parent bone (from avatar_lad.xml)
+  // 2. Attachment point underscore variants (from avatar_lad.xml)
+  // Firestorm only adds underscore variants of multi-word attachment names
+  // (llavatarappearance.cpp:1781-1786). Single-word names like "Pelvis" and
+  // "Mouth" are NOT aliases — they remain as orphan joints with their own IBMs.
   const attachPoints = getAttachmentPoints();
   for (const [apName, jointName] of attachPoints) {
-    jointAliasCache.set(apName, jointName);
-    // Also map underscore variant (Firestorm: spaces→underscores in DAE)
     const underscored = apName.replace(/ /g, '_');
     if (underscored !== apName) jointAliasCache.set(underscored, jointName);
   }
 
   // 3. Case-insensitive fallback for skeleton bones/CVs
+  // Skip names whose lowercase form matches an attachment point name (e.g.
+  // "pelvis" from "PELVIS") — those should remain orphan joints, not alias
+  // to the CV bone.
   const skeleton = getSkeletonHierarchy();
+  const attachLower = new Set<string>();
+  for (const apName of attachPoints.keys()) {
+    attachLower.add(apName.toLowerCase());
+  }
   const lowerToCanonical = new Map<string, string>();
   for (const name of skeleton.keys()) {
     const lower = name.toLowerCase();
@@ -107,7 +118,7 @@ function getJointAliasMap(): Map<string, string> {
   }
   // Only add case aliases for names not already in the alias map
   for (const [lower, canonical] of lowerToCanonical) {
-    if (lower !== canonical && !jointAliasCache.has(lower)) {
+    if (lower !== canonical && !jointAliasCache.has(lower) && !attachLower.has(lower)) {
       jointAliasCache.set(lower, canonical);
     }
   }

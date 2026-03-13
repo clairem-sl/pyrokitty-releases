@@ -9,7 +9,8 @@ export class TextureEntry
     public static MAX_UINT32 = 4294967295;
     public defaultTexture: TextureEntryFace | null;
     public faces: TextureEntryFace[] = [];
-    public gltfMaterialOverrides = new Map<number, LLGLTFMaterialOverride>()
+    public gltfMaterialOverrides = new Map<number, LLGLTFMaterialOverride>();
+    public _label?: string;
 
     public static readFaceBitfield(buf: Buffer, pos: number): {
         result: boolean,
@@ -80,9 +81,10 @@ export class TextureEntry
         return bytes;
     }
 
-    public static from(buf: Buffer): TextureEntry
+    public static from(buf: Buffer, label?: string): TextureEntry
     {
         const te = new TextureEntry();
+        te._label = label;
         if (buf.length < 16)
         {
             te.defaultTexture = null;
@@ -633,9 +635,10 @@ export class TextureEntry
 
     private createFace(face: number): void
     {
-        if (face > 32)
+        if (face > 45)
         {
-            console.error('Warning: Face number exceeds maximum number of faces: 32');
+            // TEX_NUM_INDICES = 46 (avatar baked textures go up to face 45)
+            console.warn(`Warning: Face number ${face} exceeds TEX_NUM_INDICES (46). TextureEntry buffer may be corrupt.${this._label ? ` Object: ${this._label}` : ''}`);
         }
         while (this.faces.length <= face)
         {

@@ -607,8 +607,6 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	if override_joints.size() > 0:
 		print("[JointOverride] Applying %d overrides for mesh %s" % [override_joints.size(), mesh_id.substr(0, 8)])
 		_apply_joint_overrides(glb_skeleton, shared_skel, override_joints)
-	else:
-		print("[JointOverride] No overrides for mesh %s — skipping" % mesh_id.substr(0, 8))
 
 	# Duplicate skin and remap bone indices to shared skeleton order.
 	# Bones not in the shared skeleton (e.g. attachment point joints like "Pelvis",
@@ -622,13 +620,10 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 			if glb_bi >= 0 and glb_bi < glb_skeleton.get_bone_count():
 				var bone_name: String = glb_skeleton.get_bone_name(glb_bi)
 				var shared_bi: int = shared_skel.find_bone(bone_name)
-				if shared_bi < 0:
-					# Case-insensitive fallback
-					var lower: String = bone_name.to_lower()
-					for sbi in range(shared_skel.get_bone_count()):
-						if shared_skel.get_bone_name(sbi).to_lower() == lower:
-							shared_bi = sbi
-							break
+				# No case-insensitive fallback — SL bone names are case-sensitive.
+				# "Pelvis" (attachment point) != "PELVIS" (collision volume).
+				# "Mouth" (attachment point) != "MOUTH" (collision volume, if any).
+				# Mismatched names should fall through to dynamic bone addition.
 				if shared_bi < 0:
 					# Bone not in shared skeleton — add it dynamically.
 					# This handles attachment point joints (e.g. "Pelvis", "Mouth")

@@ -149,52 +149,28 @@ echo "Step 1: Building Electron app..."
 cd "$ELECTRON_DIR"
 
 # 1a: Build node-metaverse (only if source changed)
-if needs_rebuild "node-metaverse/lib" "node-metaverse/dist" "*.ts"; then
-    echo "  Building node-metaverse..."
-    npm run build:metaverse
-else
-    echo "  node-metaverse up to date, skipping..."
-fi
+echo "  Building node-metaverse..."
+npm run build:metaverse
 
 # 1b: Build main process (only if source changed)
-if needs_rebuild "src/main" "dist/main" "*.ts"; then
-    echo "  Building main process..."
-    npm run build:main
-else
-    echo "  Main process up to date, skipping..."
-fi
+echo "  Building main process..."
+npm run build:main
 
 # 1c: Build renderer (only if source changed)
-if needs_rebuild "src/renderer" "dist/renderer" "*.ts*"; then
-    echo "  Building renderer..."
-    npm run build:renderer
-else
-    echo "  Renderer up to date, skipping..."
-fi
+echo "  Building renderer..."
+npm run build:renderer
 
 # 1d: Build map renderer (only if source changed)
-if needs_rebuild "src/map-renderer" "dist/map-renderer" "*.ts*"; then
-    echo "  Building map renderer..."
-    npm run build:map
-else
-    echo "  Map renderer up to date, skipping..."
-fi
+echo "  Building map renderer..."
+npm run build:map
 
 # 1e: Build GPU texture compressor (only if source changed)
-if needs_rebuild "src/gpu-compress" "dist/gpu-compress" "*.ts"; then
-    echo "  Building GPU compressor..."
-    npm run build:gpu-compress
-else
-    echo "  GPU compressor up to date, skipping..."
-fi
+echo "  Building GPU compressor..."
+npm run build:gpu-compress
 
 # 1f: Build sound player (only if source changed)
-if needs_rebuild "src/sound-player" "dist/sound-player" "*.ts"; then
-    echo "  Building sound player..."
-    npm run build:sound-player
-else
-    echo "  Sound player up to date, skipping..."
-fi
+echo "  Building sound player..."
+npm run build:sound-player
 
 # Step 2: Copy viewer to staging
 echo ""
@@ -228,7 +204,7 @@ if [ "$NEEDS_STAGING" = true ]; then
     done
 
     # Copy other required files
-    for file in featuretable.txt gpu_table.txt; do
+    for file in featuretable.txt gpu_table.txt ca-bundle.crt; do
         if [ -f "$VIEWER_BUILD/$file" ]; then
             cp "$VIEWER_BUILD/$file" "$VIEWER_STAGING/"
         fi
@@ -263,12 +239,15 @@ if [ -d "$GODOT_SRC" ]; then
         cp "$GODOT_SRC/project.godot" "$GODOT_STAGING/"
         cp "$GODOT_SRC/main.tscn" "$GODOT_STAGING/"
         cp -r "$GODOT_SRC/src" "$GODOT_STAGING/"
+        if [ -d "$GODOT_SRC/data" ]; then
+            cp -r "$GODOT_SRC/data" "$GODOT_STAGING/"
+        fi
         if [ -d "$GODOT_SRC/addons" ]; then
             cp -r "$GODOT_SRC/addons" "$GODOT_STAGING/"
         fi
 
         # Copy loose project files (icon, shaders, OpenXR action map)
-        for f in icon.png icon.png.import openxr_action_map.tres; do
+        for f in icon.png icon.png.import openxr_action_map.tres override.vr.cfg; do
             if [ -f "$GODOT_SRC/$f" ]; then
                 cp "$GODOT_SRC/$f" "$GODOT_STAGING/"
             fi

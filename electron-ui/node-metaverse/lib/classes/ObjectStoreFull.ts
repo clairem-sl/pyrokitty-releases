@@ -110,7 +110,7 @@ export class ObjectStoreFull extends ObjectStoreLite implements IObjectStore
             {
                 console.log('Whoopie');
             }
-            obj.TextureEntry = TextureEntry.from(objData.TextureEntry);
+            obj.TextureEntry = TextureEntry.from(objData.TextureEntry, `${obj.FullID?.toString()} (localID=${obj.ID})`);
             const override = this.cachedMaterialOverrides.get(obj.ID);
             if (override)
             {
@@ -446,7 +446,7 @@ export class ObjectStoreFull extends ObjectStoreLite implements IObjectStore
                 {
                     this.cachedMaterialOverrides.set(o.ID, o.TextureEntry.gltfMaterialOverrides);
                 }
-                o.TextureEntry = TextureEntry.from(buf.subarray(pos, pos + textureEntryLength));
+                o.TextureEntry = TextureEntry.from(buf.subarray(pos, pos + textureEntryLength), `${o.FullID?.toString()} (localID=${o.ID})`);
                 const override = this.cachedMaterialOverrides.get(o.ID);
                 if (override)
                 {
@@ -533,7 +533,7 @@ export class ObjectStoreFull extends ObjectStoreLite implements IObjectStore
                         {
                             this.cachedMaterialOverrides.set(o.ID, o.TextureEntry.gltfMaterialOverrides);
                         }
-                        o.TextureEntry = TextureEntry.from(objectData.TextureEntry.subarray(4));
+                        o.TextureEntry = TextureEntry.from(objectData.TextureEntry.subarray(4), `${o.FullID?.toString()} (localID=${o.ID})`);
                         const override = this.cachedMaterialOverrides.get(o.ID);
                         if (override)
                         {
