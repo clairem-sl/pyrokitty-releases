@@ -8,8 +8,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\libremetaverse\LibreMetaverse.StructuredData\LibreMetaverse.StructuredData.csproj" />
-    <ProjectReference Include="..\..\..\libremetaverse\LibreMetaverse\LibreMetaverse.csproj" />
+    <PackageReference Include="LibreMetaverse" Version="2.5.10.153" />
+    <PackageReference Include="LibreMetaverse.StructuredData" Version="2.5.10.153" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="SIPSorcery" Version="8.0.23" />
