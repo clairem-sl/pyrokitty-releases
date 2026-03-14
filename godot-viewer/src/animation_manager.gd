@@ -44,7 +44,24 @@ func handle_animations_batch(msg: Dictionary) -> void:
 			local_id, sm.object_mgr._uuid_short(local_id), animations.size(),
 			str(sm.animesh_roots.has(local_id)),
 			str(sm.animesh_shared_skeleton.has(local_id))])
-	if local_id == 0 or animations.is_empty():
+	if local_id == 0:
+		return
+
+	# TAG 100
+	# Empty batch = all animations stopped — clear eval state so old animation stops
+	if animations.is_empty():
+		var anim_root: int = sm.animesh_root_for.get(local_id, local_id)
+		sm.animesh_pending_anims.erase(anim_root)
+		sm.animesh_eval.erase(anim_root)
+		_prev_sl_local_rot.erase(anim_root)
+		# Reset skeleton to rest pose
+		var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(anim_root)
+		if shared_skel != null:
+			for bi in range(shared_skel.get_bone_count()):
+				shared_skel.set_bone_pose_rotation(bi, Quaternion.IDENTITY)
+				shared_skel.set_bone_pose_position(bi, Vector3.ZERO)
+		if sm.object_mgr._is_self_avatar(local_id):
+			print("[SelfAvatar] Animations cleared for localId=%d" % local_id)
 		return
 
 	# Cache all animation data and build pending anim list
@@ -363,6 +380,14 @@ func _evaluate_skeleton_animation(skeleton: Skeleton3D, sl_local_rot: Dictionary
 	# Lazy-init CV rest rotations cache
 	if _sl_cv_rest_rotations.is_empty():
 		_sl_cv_rest_rotations = sm.skeleton_builder.get_sl_rest_rotations()
+
+	# TAG 100
+	# Reset all bone poses to identity so that bones no longer in the current
+	# animation set return to rest pose (prevents stale walking/standing poses
+	# persisting after animation transitions).
+	for bi in range(skeleton.get_bone_count()):
+		skeleton.set_bone_pose_rotation(bi, Quaternion.IDENTITY)
+		skeleton.set_bone_pose_position(bi, Vector3.ZERO)
 
 	var sl_world: Dictionary = {}     # bone_idx -> Quaternion (SL space)
 	var godot_world: Dictionary = {}  # bone_idx -> Quaternion (Godot space)

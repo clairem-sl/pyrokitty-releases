@@ -11,6 +11,8 @@ export class TextureEntry
     public faces: TextureEntryFace[] = [];
     public gltfMaterialOverrides = new Map<number, LLGLTFMaterialOverride>();
     public _label?: string;
+    /** Face indices that had their textureID explicitly set in the binary data */
+    public explicitTextureFaces = new Set<number>();
 
     public static readFaceBitfield(buf: Buffer, pos: number): {
         result: boolean,
@@ -116,6 +118,7 @@ export class TextureEntry
                             {
                                 te.createFace(face);
                                 te.faces[face].textureID = uuid;
+                                te.explicitTextureFaces.add(face);
                             }
                         }
                     }

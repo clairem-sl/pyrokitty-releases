@@ -12,9 +12,24 @@ export function isHudAttachment(obj: any): boolean {
 
 /** Magic texture UUIDs for SL water exclusion (invisiprims) — skip downloading these */
 export const WATER_EXCLUSION_TEXTURES = new Set([
-  'e97cf410-8e61-7005-ec06-629eba4cd1fb',
-  '38b86f85-2575-52a9-a531-23108d8da837',
+  'e97cf410-8e61-7005-ec06-629eba4cd1fb',  // IMG_ALPHA_GRAD
+  '38b86f85-2575-52a9-a531-23108d8da837',  // IMG_ALPHA_GRAD_2D
 ]);
+
+/**
+ * Built-in SL texture UUIDs that should never be fetched from the asset server.
+ * These are hardcoded in the viewer and handled purely in code.
+ */
+export const IMG_TRANSPARENT = '8dcd4a48-2d37-4909-9f78-f7a9eb4ef903';
+export const IMG_INVISIBLE   = '3a367d1c-bef1-6d43-7595-e88c1e3aadb3';
+export const IMG_WHITE        = '5748decc-f629-461c-9a36-a35a221fe21f';
+export const IMG_DEFAULT      = 'd2114404-dd59-4a4d-8e6c-49359e91bbf0';
+
+/** Faces with these textures should be fully transparent (not sent to Godot) */
+export const TRANSPARENT_TEXTURES = new Set([IMG_TRANSPARENT, IMG_INVISIBLE]);
+
+/** Faces with these textures use the face's own color — no texture fetch needed */
+export const SOLID_COLOR_TEXTURES = new Set([IMG_WHITE, IMG_DEFAULT]);
 
 export const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
 
@@ -53,9 +68,9 @@ export const BAKE_CHANNEL_TO_TE_FACE = [
   11,  // EYES → TEX_EYES_BAKED
   20,  // SKIRT → TEX_SKIRT_BAKED
   21,  // HAIR → TEX_HAIR_BAKED
-  41,  // LEFTARM → TEX_LEFT_ARM_BAKED
-  42,  // LEFTLEG → TEX_LEFT_LEG_BAKED
-  43,  // AUX1 → TEX_AUX1_BAKED
-  44,  // AUX2 → TEX_AUX2_BAKED
-  45,  // AUX3 → TEX_AUX3_BAKED
+  40,  // LEFTARM → TEX_LEFT_ARM_BAKED
+  41,  // LEFTLEG → TEX_LEFT_LEG_BAKED
+  42,  // AUX1 → TEX_AUX1_BAKED
+  43,  // AUX2 → TEX_AUX2_BAKED
+  44,  // AUX3 → TEX_AUX3_BAKED
 ];

@@ -902,8 +902,7 @@ func _make_placeholder_material(color: Array, full_bright: bool, double_sided: b
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 	if color[3] < 1.0:
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-		mat.alpha_scissor_threshold = 0.5
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 
 	if full_bright:
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED

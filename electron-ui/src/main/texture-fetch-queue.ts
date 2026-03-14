@@ -163,9 +163,18 @@ export class TextureFetchQueue {
       // Check if this is a baked texture — use appearance service URL
       const bake = this.bakeInfo.get(textureUuid);
       if (bake) {
-        j2cBuf = await this.downloadBakeTexture(textureUuid, bake.avatarUuid, bake.channel);
+        try {
+          j2cBuf = await this.downloadBakeTexture(textureUuid, bake.avatarUuid, bake.channel);
+          console.log(`[BoM] Downloaded bake ${textureUuid.slice(0,8)}: ${j2cBuf.length} bytes`);
+        } catch (bakeErr: any) {
+          // Appearance service may 404 for some bake channels (e.g. other
+          // avatars' universal bakes).  Fall back to regular asset fetch.
+          console.warn(`[BoM] Bake fetch failed for ${textureUuid.slice(0,8)} (${bakeErr.message}), trying asset server`);
+          j2cBuf = await this.bot.clientCommands.asset.downloadAsset(
+            AssetType.Texture, textureUuid
+          );
+        }
         this.bakeInfo.delete(textureUuid);
-        console.log(`[BoM] Downloaded bake ${textureUuid.slice(0,8)}: ${j2cBuf.length} bytes`);
       } else {
         // Regular texture: download via ViewerAsset
         j2cBuf = await this.bot.clientCommands.asset.downloadAsset(

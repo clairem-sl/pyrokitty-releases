@@ -797,8 +797,8 @@ export class BotManager {
    * Also includes the defaultTexture if present.
    */
   async getObjectTextures(localId: number): Promise<{
-    defaultTexture?: { textureId: string; offsetU: number; offsetV: number; repeatU: number; repeatV: number; rotation: number };
-    faces: Array<{ face: number; textureId: string; offsetU: number; offsetV: number; repeatU: number; repeatV: number; rotation: number }>;
+    defaultTexture?: { textureId: string; rgba: { r: number; g: number; b: number; a: number }; offsetU: number; offsetV: number; repeatU: number; repeatV: number; rotation: number; glow: number; materialId?: string };
+    faces: Array<{ face: number; textureId: string; rgba: { r: number; g: number; b: number; a: number }; offsetU: number; offsetV: number; repeatU: number; repeatV: number; rotation: number; glow: number; materialId?: string }>;
   }> {
     await this.ensureConnected();
     const obj = await this.bot!.clientCommands.region.getObjectByLocalID(localId, true);
@@ -808,15 +808,22 @@ export class BotManager {
     }
 
     const mappingNames: Record<number, string> = { 0: 'default', 2: 'planar', 4: 'spherical' };
-    const faceData = (face: any) => ({
-      textureId: face.textureID?.toString() || '',
-      offsetU: face.offsetU ?? 0,
-      offsetV: face.offsetV ?? 0,
-      repeatU: face.repeatU ?? 1,
-      repeatV: face.repeatV ?? 1,
-      rotation: face.rotation ?? 0,
-      mapping: mappingNames[face.mappingType as number] ?? 'default',
-    });
+    const faceData = (face: any) => {
+      const color = face.rgba;
+      const matId = face.materialID?.toString();
+      return {
+        textureId: face.textureID?.toString() || '',
+        rgba: color ? { r: color.red ?? 1, g: color.green ?? 1, b: color.blue ?? 1, a: color.alpha ?? 1 } : { r: 1, g: 1, b: 1, a: 1 },
+        offsetU: face.offsetU ?? 0,
+        offsetV: face.offsetV ?? 0,
+        repeatU: face.repeatU ?? 1,
+        repeatV: face.repeatV ?? 1,
+        rotation: face.rotation ?? 0,
+        glow: face.glow ?? 0,
+        mapping: mappingNames[face.mappingType as number] ?? 'default',
+        ...(matId && matId !== '00000000-0000-0000-0000-000000000000' ? { materialId: matId } : {}),
+      };
+    };
 
     return {
       defaultTexture: te.defaultTexture ? faceData(te.defaultTexture) : undefined,

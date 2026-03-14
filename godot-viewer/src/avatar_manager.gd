@@ -57,8 +57,10 @@ func set_self_avatar_yaw(godot_yaw: float) -> void:
 	var rsi = sm.avatars.get(sm.self_avatar_id)
 	if rsi == null:
 		return
-	# Godot yaw around Y axis
-	rsi.rot = Quaternion(Vector3.UP, godot_yaw)
+	# Godot yaw → visual rotation: add PI/2 to match the SL heading offset
+	# (godot-input-handler.ts adds PI/2 when converting yaw to SL BodyRotation,
+	# so sl_to_godot_quat on the server echo produces yaw + PI/2 around Y)
+	rsi.rot = Quaternion(Vector3.UP, godot_yaw + PI / 2.0)
 	rsi.push_transform()
 
 

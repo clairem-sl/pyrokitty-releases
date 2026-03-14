@@ -67,6 +67,7 @@ export class GodotAnimationManager {
     return this.bot.subscribeToCircuitMessages([
       Message.ObjectAnimation,
     ], (packet: any) => {
+      try {
         const msg = packet.message as ObjectAnimationMessage;
         const senderUuid = msg.Sender.ID.toString();
         const animations = msg.AnimationList.map(a => ({
@@ -85,6 +86,9 @@ export class GodotAnimationManager {
         } else {
           console.log(`[Animesh] Buffering ObjectAnimation for ${senderUuid.slice(0, 8)} (known=${localId !== undefined}, connected=${this.connected})`);
         }
+      } catch (err) {
+        console.error(`[Animesh] ObjectAnimation handler error:`, (err as Error).message);
+      }
     });
   }
 
@@ -93,20 +97,24 @@ export class GodotAnimationManager {
     return this.bot.subscribeToCircuitMessages([
       Message.AvatarAnimation,
     ], (packet: any) => {
-      const msg = packet.message as AvatarAnimationMessage;
-      const avatarId = msg.Sender.ID.toString();
-      const animations = msg.AnimationList.map(a => ({
-        animId: a.AnimID.toString(),
-        sequenceId: a.AnimSequenceID,
-      }));
+      try {
+        const msg = packet.message as AvatarAnimationMessage;
+        const avatarId = msg.Sender.ID.toString();
+        const animations = msg.AnimationList.map(a => ({
+          animId: a.AnimID.toString(),
+          sequenceId: a.AnimSequenceID,
+        }));
 
-      this.avatarAnimState.set(avatarId, animations);
+        this.avatarAnimState.set(avatarId, animations);
 
-      const localId = this.avatarLocalIds.get(avatarId);
-      if (localId !== undefined && this.connected) {
-        this.updateAnimSet(localId, animations.map(a => a.animId));
-      } else {
-        console.log(`[AnimDebug] AvatarAnimation for ${avatarId.slice(0, 8)}: localId=${localId} connected=${this.connected} (buffered only)`);
+        const localId = this.avatarLocalIds.get(avatarId);
+        if (localId !== undefined && this.connected) {
+          this.updateAnimSet(localId, animations.map(a => a.animId));
+        } else {
+          console.log(`[AnimDebug] AvatarAnimation for ${avatarId.slice(0, 8)}: localId=${localId} connected=${this.connected} (buffered only)`);
+        }
+      } catch (err) {
+        console.error(`[AnimDebug] AvatarAnimation handler error:`, (err as Error).message);
       }
     });
   }
@@ -158,12 +166,27 @@ export class GodotAnimationManager {
   /** Check if all animations for a specific root are cached. If so, send batch to Godot. */
   private checkAnimBatchReadyForRoot(localId: number): void {
     const needed = this.animRootPending.get(localId);
-    if (!needed || needed.size === 0 || !this.animationFetchQueue || !this.connected) {
-      console.log(`[AnimDebug] checkBatchReady localId=${localId}: skip (needed=${needed?.size ?? 'null'} queue=${!!this.animationFetchQueue} connected=${this.connected})`);
+    if (!needed || !this.connected) {
+      console.log(`[AnimDebug] checkBatchReady localId=${localId}: skip (needed=${needed?.size ?? 'null'} connected=${this.connected})`);
+      return;
+    }
+
+    // Empty animation set — send empty batch so Godot clears the old animations
+    if (needed.size === 0 || !this.animationFetchQueue) {
+      this.animRootPending.delete(localId);
+      const uuid = this.getUuidForLocalId(localId);
+      console.log(`[Animesh] Sending empty batch for localId=${localId} uuid=${uuid.slice(0, 8)} (animations cleared)`);
+      this.send({
+        type: 'animations_batch',
+        localId,
+        uuid,
+        animations: {},
+      });
       return;
     }
 
     const allData: Record<string, any> = {};
+    let stillFetching = false;
     for (const animId of needed) {
       const cached = this.animationFetchQueue.getCached(animId);
       if (cached) {
@@ -171,13 +194,18 @@ export class GodotAnimationManager {
       } else if (this.animationFetchQueue.hasFailed(animId)) {
         continue;
       } else {
-        return; // Still fetching
+        stillFetching = true;
       }
     }
 
-    this.animRootPending.delete(localId);
-    const animDataArray = Object.values(allData);
-    if (animDataArray.length === 0) return;
+    // Send whatever is cached now — don't let pending fetches keep old animations playing.
+    // When remaining fetches complete, checkAnimBatchReady will send an updated batch.
+    if (stillFetching && Object.keys(allData).length === 0) {
+      return; // Nothing cached yet at all — wait for at least one
+    }
+    if (!stillFetching) {
+      this.animRootPending.delete(localId);
+    }
 
     const uuid = this.getUuidForLocalId(localId);
     // Check if this is the self avatar

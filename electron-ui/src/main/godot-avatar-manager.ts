@@ -75,14 +75,24 @@ export class GodotAvatarManager {
         const avatarId = msg.Sender.ID.toString();
 
         // Parse baked texture UUIDs from the avatar's TextureEntry
-        // Baked faces are at specific ETextureIndex positions (8,9,10,11,20,21,41-45), NOT 0-10
+        // Baked faces are at specific ETextureIndex positions (8,9,10,11,20,21,40-44), NOT 0-10
         const te = TextureEntry.from(msg.ObjectData.TextureEntry);
         const bakes: string[] = [];
         for (let ch = 0; ch < 11; ch++) {
           const teFace = BAKE_CHANNEL_TO_TE_FACE[ch];
-          const face = te.faces[teFace] ?? te.defaultTexture;
-          const texId = face?.textureID?.toString() || '';
-          bakes.push(texId);
+          if (te.explicitTextureFaces.has(teFace)) {
+            // Face was explicitly set in the TextureEntry bitfield — real bake
+            bakes.push(te.faces[teFace]?.textureID?.toString() || '');
+          } else if (ch < 6) {
+            // Basic channels (HEAD..HAIR): always present in AvatarAppearance.
+            // If not explicitly set, the bake matches the TE default texture.
+            bakes.push(te.defaultTexture?.textureID?.toString() || '');
+          } else {
+            // Universal channels (LEFTARM..AUX3): not explicitly set means
+            // no bake exists for this channel.  Inheriting the default would
+            // produce another channel's UUID → 404 from appearance service.
+            bakes.push('');
+          }
         }
 
         const prevBakes = this.avatarBakedTextures.get(avatarId);
@@ -92,7 +102,8 @@ export class GodotAvatarManager {
         const filled = bakes
           .map((uuid, i) => (uuid && uuid !== ZERO_UUID) ? `${BAKE_CHANNEL_NAMES[i]}=${uuid.slice(0, 8)}` : null)
           .filter(Boolean);
-        console.log(`[BoM] AvatarAppearance for ${avatarId.slice(0, 8)}: ${filled.length}/11 bake channels — ${filled.join(', ')}`);
+        const explicit = Array.from(te.explicitTextureFaces).sort((a, b) => a - b);
+        console.log(`[BoM] AvatarAppearance for ${avatarId.slice(0, 8)}: ${filled.length}/11 bake channels — ${filled.join(', ')}  (explicitFaces: ${explicit.join(',')})`);
 
         // Check if bakes changed (or this is the first appearance)
         const changed = !prevBakes || bakes.some((b, i) => b !== prevBakes[i]);

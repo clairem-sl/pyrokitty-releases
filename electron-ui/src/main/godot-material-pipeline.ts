@@ -9,7 +9,7 @@ import type { MaterialFetchQueue, MaterialOverrideData, TextureTransform } from 
 import type { TextureFetchQueue } from './texture-fetch-queue';
 import type { GodotAvatarManager } from './godot-avatar-manager';
 import type { SendFn } from './godot-bridge-types';
-import { WATER_EXCLUSION_TEXTURES, ZERO_UUID, BAKE_MAGIC_UUIDS } from './godot-bridge-types';
+import { WATER_EXCLUSION_TEXTURES, ZERO_UUID, BAKE_MAGIC_UUIDS, TRANSPARENT_TEXTURES, SOLID_COLOR_TEXTURES } from './godot-bridge-types';
 
 export class GodotMaterialPipeline {
   private materialToFaces = new Map<string, { localId: number; faceIndex: number; face: any; inlineOverride: any }[]>();
@@ -118,17 +118,31 @@ export class GodotMaterialPipeline {
         const pbr = gltfPBR.get(i);
 
         let textureId: string;
-        if (pbr?.baseColorTextureId) {
+        const legacyId = face.textureID?.toString() || '';
+        if (BAKE_MAGIC_UUIDS.has(legacyId)) {
+          // BoM: legacy face is a bake — use it (will be substituted later)
+          textureId = legacyId;
+        } else if (pbr?.baseColorTextureId) {
           textureId = pbr.baseColorTextureId;
         } else {
-          textureId = face.textureID?.toString() || '';
+          textureId = legacyId;
         }
         if (!textureId || textureId === ZERO_UUID) continue;
 
         const rgba = face.rgba;
-        const color = rgba
+        let color = rgba
           ? [rgba.getRed(), rgba.getGreen(), rgba.getBlue(), rgba.getAlpha()]
           : [1, 1, 1, 1];
+
+        // Built-in transparent textures — force alpha to 0 regardless of what the
+        // resolved textureId is (PBR may override the texture but legacy transparency wins).
+        if (TRANSPARENT_TEXTURES.has(legacyId)) {
+          color = [color[0], color[1], color[2], 0];
+        }
+
+        // Built-in solid-color textures — use the face's own color/alpha (the texture
+        // is just a flat fill, so the face tint IS the final color). No texture fetch needed.
+        // No color override — the face RGBA already carries the intended tint + transparency.
 
         let alphaMode = gltfAlpha.get(i)?.mode ?? -1;
         let alphaCutoff = gltfAlpha.get(i)?.cutoff ?? 0.5;
@@ -227,7 +241,7 @@ export class GodotMaterialPipeline {
         // Skip faces covered by PBR materials — UNLESS it's a substituted bake texture.
         // Baked textures are the actual content; PBR just specifies rendering properties.
         if (materialFaceIndices.has(face.index) && !face._isBake) continue;
-        if (face.textureId && !WATER_EXCLUSION_TEXTURES.has(face.textureId) && !BAKE_MAGIC_UUIDS.has(face.textureId)) {
+        if (face.textureId && !WATER_EXCLUSION_TEXTURES.has(face.textureId) && !BAKE_MAGIC_UUIDS.has(face.textureId) && !TRANSPARENT_TEXTURES.has(face.textureId) && !SOLID_COLOR_TEXTURES.has(face.textureId)) {
           if (face._isBake && face._bakeAvatarUuid != null && face._bakeChannel != null) {
             this.textureFetchQueue.requestBake(face.textureId, obj.ID, face._bakeAvatarUuid, face._bakeChannel);
           } else {
@@ -414,12 +428,23 @@ export class GodotMaterialPipeline {
       const rotation = baseColorTransform?.rotation ?? face?.rotation ?? 0;
 
       const rgba = face?.rgba;
-      const legacyColor = rgba
+      let legacyColor = rgba
         ? [rgba.getRed(), rgba.getGreen(), rgba.getBlue(), rgba.getAlpha()]
         : [1, 1, 1, 1];
 
-      // Resolve final textureId — substitute magic bake UUIDs if needed
-      let resolvedTextureId = baseColorTextureId || face?.textureID?.toString() || '';
+      // Resolve final textureId — substitute magic bake UUIDs if needed.
+      // BoM: if the legacy face texture is a bake magic UUID, the baked texture
+      // overrides the PBR base color (matching SL viewer behaviour).
+      const legacyTexId = face?.textureID?.toString() || '';
+
+      // Built-in transparent textures — force alpha to 0 so Godot creates a transparent material
+      if (TRANSPARENT_TEXTURES.has(legacyTexId)) {
+        legacyColor = [legacyColor[0], legacyColor[1], legacyColor[2], 0];
+      }
+
+      let resolvedTextureId = BAKE_MAGIC_UUIDS.has(legacyTexId)
+        ? legacyTexId                                  // will be substituted below
+        : (baseColorTextureId || legacyTexId);
       let isBake = false;
       let bakeAvatarUuid: string | undefined;
       let bakeChannel: number | undefined;
@@ -474,7 +499,7 @@ export class GodotMaterialPipeline {
       this.pbrFaceCount++;
 
       // Fetch the resolved texture (may be substituted bake UUID)
-      if (resolvedTextureId && !BAKE_MAGIC_UUIDS.has(resolvedTextureId) && this.textureFetchQueue) {
+      if (resolvedTextureId && !BAKE_MAGIC_UUIDS.has(resolvedTextureId) && !TRANSPARENT_TEXTURES.has(resolvedTextureId) && !SOLID_COLOR_TEXTURES.has(resolvedTextureId) && this.textureFetchQueue) {
         if (isBake && faceData._bakeAvatarUuid && faceData._bakeChannel != null) {
           this.textureFetchQueue.requestBake(resolvedTextureId, localId, faceData._bakeAvatarUuid, faceData._bakeChannel);
         } else {
