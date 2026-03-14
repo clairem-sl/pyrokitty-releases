@@ -124,6 +124,13 @@
             ],
             "artifactName": "PyroKitty-Launcher-${version}-win64.${ext}",
             "icon": "../icons/pyrokitty2.ico"
+        },
+        "linux": {
+            "target": [
+                "AppImage"
+            ],
+            "artifactName": "PyroKitty-Launcher-${version}.${ext}",
+            "icon": "../icons/pyrokitty2.png"
         }
     }
 }

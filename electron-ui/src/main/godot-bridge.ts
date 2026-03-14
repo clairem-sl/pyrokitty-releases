@@ -69,6 +69,11 @@ function getGodotDir(): string {
 
 function getGodotPath(): string {
   const dir = getGodotDir();
+  if (process.platform === 'linux') {
+    // Linux zip: dir is Godot_v4.7-dev2_mono_linux_x86_64, exe is Godot_v4.7-dev2_mono_linux.x86_64
+    const exe = dir.replace(/_x86_64$/, '.x86_64');
+    return path.join(getGodotViewerRoot(), dir, exe);
+  }
   return path.join(getGodotViewerRoot(), dir, `${dir}.exe`);
 }
 
