@@ -5,7 +5,7 @@ import { app, shell } from 'electron';
 import { Bot, AssetType, FolderType, InventoryType, LLLindenText } from '../../node-metaverse/dist/lib';
 import { InventoryFolder } from '../../node-metaverse/dist/lib/classes/InventoryFolder';
 import { InventoryItem } from '../../node-metaverse/dist/lib/classes/InventoryItem';
-import { j2cToPng, pngToJ2c, isAvailable as isJ2kAvailable } from './j2k-converter';
+import { j2cToPng, pngToJ2c } from './j2k-converter';
 import { SyncStatus } from '../shared/types';
 import { ViewerInventoryAdapter, ViewerInventoryFolder } from './viewer-inventory-adapter';
 
@@ -182,10 +182,7 @@ export class InventorySyncManager {
     if (this.syncing) return;
     this.syncing = true;
 
-    const j2kAvailable = isJ2kAvailable();
-    if (!j2kAvailable) {
-      console.warn('[InventorySync] OpenJPEG binaries not found — texture sync disabled, notecard sync only');
-    }
+    const j2kAvailable = true; // WASM decoder/encoder always available
 
     try {
       this.setProgress({ phase: 'preparing', current: 0, total: 0 });

@@ -5,8 +5,6 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
-import { execFileSync } from 'child_process';
 import { app } from 'electron';
 import sharp from 'sharp';
 import { SculptType } from '../../node-metaverse/dist/lib';
@@ -30,51 +28,40 @@ export function sculptMeshId(textureUuid: string, sculptType: number): string {
   return `sculpt_${textureUuid}_${sculptType}`;
 }
 
-// ─── J2K decode ──────────────────────────────────────────────────────
+// ─── J2K decode (WASM) ───────────────────────────────────────────────
 
-let _opjPath: string | null | undefined;
+let _wasmModule: any = null;
 
-function findOpjDecompress(): string | null {
-  if (_opjPath !== undefined) return _opjPath;
-  if (process.platform !== 'win32') { _opjPath = null; return null; }
-  const candidates = [
-    ...((process as any).resourcesPath ? [path.join((process as any).resourcesPath, 'bin', 'opj_decompress.exe')] : []),
-    path.resolve(__dirname, '..', '..', 'bin', 'opj_decompress.exe'),
-    path.resolve(__dirname, '..', 'bin', 'opj_decompress.exe'),
-    path.join(__dirname, 'opj_decompress.exe'),
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) { _opjPath = p; return p; }
-  }
-  _opjPath = null;
-  return null;
+async function loadWasm() {
+  if (_wasmModule) return;
+  const mod = (await import('@abasb75/jpeg2000-decoder')).default;
+  _wasmModule = await mod.OpenJPEGWASM();
 }
 
-let _jobCounter = 0;
-
 async function decodeJ2kToRaw(j2cBuffer: Buffer): Promise<{ pixels: Buffer; width: number; height: number; channels: number }> {
-  const opjPath = findOpjDecompress();
-  if (!opjPath) throw new Error('opj_decompress not found');
-
-  const stamp = `sculpt_${process.pid}_${++_jobCounter}`;
-  const j2kFile = path.join(os.tmpdir(), `${stamp}.j2k`);
-  const pngFile = path.join(os.tmpdir(), `${stamp}.png`);
+  await loadWasm();
+  const decoder = new _wasmModule.J2KDecoder();
   try {
-    fs.writeFileSync(j2kFile, j2cBuffer);
-    execFileSync(opjPath, ['-i', j2kFile, '-o', pngFile], { timeout: 15000, stdio: 'pipe' });
+    const encoded = j2cBuffer.buffer.slice(j2cBuffer.byteOffset, j2cBuffer.byteOffset + j2cBuffer.byteLength);
+    const encodedBuffer = decoder.getEncodedBuffer(encoded.byteLength);
+    encodedBuffer.set(new Uint8Array(encoded));
+    decoder.decode();
+
+    const frameInfo = decoder.getFrameInfo();
+    let { width, height, componentCount: channels } = frameInfo;
+    let pixels = Buffer.from(decoder.getDecodedBuffer());
+
     // Downsample large sculpt textures to cap vertex count (SL viewer uses 64x64 max)
     const MAX_SCULPT_RES = 128;
-    let pipeline = sharp(pngFile);
-    const metadata = await sharp(pngFile).metadata();
-    if (metadata.width && metadata.height &&
-        (metadata.width > MAX_SCULPT_RES || metadata.height > MAX_SCULPT_RES)) {
-      pipeline = pipeline.resize(MAX_SCULPT_RES, MAX_SCULPT_RES, { fit: 'fill' });
+    if (width > MAX_SCULPT_RES || height > MAX_SCULPT_RES) {
+      const resized = await sharp(pixels, { raw: { width, height, channels: channels as 1 | 2 | 3 | 4 } })
+        .resize(MAX_SCULPT_RES, MAX_SCULPT_RES, { fit: 'fill' })
+        .raw().toBuffer({ resolveWithObject: true });
+      return { pixels: resized.data, width: resized.info.width, height: resized.info.height, channels: resized.info.channels };
     }
-    const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
-    return { pixels: data, width: info.width, height: info.height, channels: info.channels };
+    return { pixels, width, height, channels };
   } finally {
-    try { fs.unlinkSync(j2kFile); } catch { /* empty */ }
-    try { fs.unlinkSync(pngFile); } catch { /* empty */ }
+    decoder.delete();
   }
 }
 

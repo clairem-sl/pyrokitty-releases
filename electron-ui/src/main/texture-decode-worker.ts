@@ -1,63 +1,12 @@
 /**
  * texture-decode-worker.ts — Runs in a worker thread.
- * On Windows: native opj_decompress (no 50MB WASM heap per worker).
- * Elsewhere: WASM OpenJPEG decoder (no native binary needed).
- * Both paths output WebP via sharp for compact disk cache.
+ * Uses WASM OpenJPEG decoder (cross-platform, no native binary needed).
+ * Outputs WebP via sharp for compact disk cache, or raw RGBA for GPU compression.
  */
 import { parentPort, workerData } from 'worker_threads';
-import { execFileSync } from 'child_process';
 import sharp from 'sharp';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 
-/** Set to true to always use WASM decoder (cross-platform, no process spawn overhead) */
-const USE_WASM = true;
-
-const workerId = workerData?.workerId ?? process.pid;
-let jobCounter = 0;
-
-function tmpPath(ext: string): string {
-  return path.join(os.tmpdir(), `pktex_${workerId}_${++jobCounter}${ext}`);
-}
-
-// ─── Native path (Windows) ──────────────────────────────────────────
-
-function findOpjDecompress(): string | null {
-  if (process.platform !== 'win32') return null;
-  const candidates = [
-    // Packaged: extraResources puts bin/ at resources/bin/
-    ...((process as any).resourcesPath ? [path.join((process as any).resourcesPath, 'bin', 'opj_decompress.exe')] : []),
-    // Dev: __dirname = dist/main/, bin is at ../../bin (electron-ui/bin/)
-    path.resolve(__dirname, '..', '..', 'bin', 'opj_decompress.exe'),
-    path.resolve(__dirname, '..', 'bin', 'opj_decompress.exe'),
-    path.join(__dirname, 'opj_decompress.exe'),
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-  return null;
-}
-
-const opjPath = findOpjDecompress();
-
-async function decodeNative(j2cBuffer: Buffer): Promise<Buffer> {
-  const j2kFile = tmpPath('.j2k');
-  const pngFile = tmpPath('.png');
-  try {
-    fs.writeFileSync(j2kFile, j2cBuffer);
-    execFileSync(opjPath!, ['-i', j2kFile, '-o', pngFile], {
-      timeout: 15000,
-      stdio: 'pipe',
-    });
-    return await sharp(pngFile).webp({ quality: 80 }).toBuffer();
-  } finally {
-    try { fs.unlinkSync(j2kFile); } catch { /* empty */ }
-    try { fs.unlinkSync(pngFile); } catch { /* empty */ }
-  }
-}
-
-// ─── WASM path (other platforms) ────────────────────────────────────
+// ─── WASM decoder ────────────────────────────────────────────────────
 
 let wasmModule: any = null;
 
@@ -182,7 +131,7 @@ parentPort!.on('message', async (msg: { id: number; j2cBuffer: Buffer; mode?: 'w
       );
     } else {
       // Default: WebP output for disk cache / Godot fallback
-      const webpBuf = (!USE_WASM && opjPath) ? await decodeNative(buf) : await decodeWasm(buf);
+      const webpBuf = await decodeWasm(buf);
       parentPort!.postMessage({ id: msg.id, webpBuf }, [webpBuf.buffer as ArrayBuffer]);
     }
   } catch (err) {
