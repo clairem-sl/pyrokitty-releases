@@ -99,7 +99,7 @@ func handle_avatar_create(msg: Dictionary) -> void:
 	rsi.set_material_override(sm.avatar_material)
 
 	var pos: Array = msg.get("position", [128, 128, 25])
-	var godot_pos := sm.object_mgr.sl_to_godot_pos(pos)
+	var godot_pos: Vector3 = sm.object_mgr.sl_to_godot_pos(pos)
 	var godot_rot := Quaternion.IDENTITY
 	if msg.has("rotation"):
 		godot_rot = sm.object_mgr.sl_to_godot_quat(msg["rotation"])
@@ -195,7 +195,7 @@ func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
 	var rsi = sm.avatars.get(avatar_id)
 
 	if data.has("position"):
-		var raw_pos := sm.object_mgr.sl_to_godot_pos(data["position"])
+		var raw_pos: Vector3 = sm.object_mgr.sl_to_godot_pos(data["position"])
 		var seat_id: int = int(data.get("parentId", 0))
 		var seat_rsi = sm.objects.get(seat_id) if seat_id > 0 else null
 
