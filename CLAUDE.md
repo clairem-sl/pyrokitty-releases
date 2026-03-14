@@ -63,9 +63,9 @@ See `electron-ui/data/accounts.json` for login credentials (BonnieBelle81, Bonni
 
 See `docs/architecture/` for system documentation and performance optimizations.
 
-## Avatar Rendering Changelog
+## Avatar Rendering Reference
 
-See `docs/AVATAR_CHANGELOG.md` for a history of avatar rendering changes, what was tried, and outcomes. **Update this file whenever making avatar rendering changes.**
+See `docs/avatar-rendering.md` for skeleton architecture, animation system, shape deformation, coordinate systems, and known issues. **Update this file whenever making avatar rendering changes.**
 
 ## Logs
 

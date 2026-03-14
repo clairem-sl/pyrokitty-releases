@@ -6,7 +6,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { Bot, BotOptionFlags, LoginParameters, UUID, Vector3 } from '../../node-metaverse/dist/lib';
+import { Bot, BotOptionFlags, LoginParameters, UUID } from '../../node-metaverse/dist/lib';
 import { LoginError } from '../../node-metaverse/dist/lib/classes/LoginError';
 import { ChatType } from '../../node-metaverse/dist/lib/enums/ChatType';
 import { ChatSourceType } from '../../node-metaverse/dist/lib/enums/ChatSourceType';
@@ -275,7 +275,7 @@ export class MetaverseConnection extends EventEmitter {
     if (this.bot) {
       try {
         await this.bot.close();
-      } catch (e) {
+      } catch {
         // Ignore close errors
       }
       this.bot = null;
@@ -1017,7 +1017,7 @@ export class MetaverseConnection extends EventEmitter {
           this.emit('friends-update', Array.from(this.friends.values()));
         }
       }
-    } catch (e) {
+    } catch {
       // Name resolution failed, keep empty name
     }
   }
@@ -1128,7 +1128,6 @@ export class MetaverseConnection extends EventEmitter {
     await this.bot.clientCommands.comms.sendInstantMessage(toId, message);
 
     // Emit our own message for UI echo
-    const session = this.chatSessions.get(toId);
     const outMessage: ChatMessage = {
       id: this.generateMessageId(),
       type: 'im',

@@ -54,13 +54,6 @@ function findCharacterFile(filename: string): string {
 
 // ── XML parsing helpers ──────────────────────────────────────────────
 
-function getAttr(tag: string, name: string): string | undefined {
-  // Handles: name="value", name = "value", name='value'
-  const re = new RegExp(`${name}\\s*=\\s*["']([^"']*)["']`);
-  const m = tag.match(re);
-  return m ? m[1] : undefined;
-}
-
 function parseVec3(s: string): Vec3 {
   const parts = s.trim().split(/\s+/).map(Number);
   return [parts[0] || 0, parts[1] || 0, parts[2] || 0];
@@ -237,17 +230,6 @@ export function computeSkeletonDeltas(visualParamBytes: number[]): Record<string
   ensureParsed();
   const params = sharedParams!;  // only groups 0+2, maps 1:1 to byte array
   const byId = paramById!;       // all params, for driver lookups
-
-  // DEBUG: log byte alignment around Crooked_Nose (id=656)
-  const crookedIdx = params.findIndex(p => p.id === 656);
-  if (crookedIdx >= 0) {
-    const context: string[] = [];
-    for (let j = Math.max(0, crookedIdx - 3); j <= Math.min(params.length - 1, crookedIdx + 3); j++) {
-      const b = j < visualParamBytes.length ? visualParamBytes[j] : -1;
-      context.push(`[${j}]id=${params[j].id}:byte=${b}`);
-    }
-    console.log(`[AvatarShape] DEBUG byte alignment: ${context.join(' ')} | server_bytes=${visualParamBytes.length} our_params=${params.length}`);
-  }
 
   // Accumulators per bone: additive scale and offset
   const accScale: Record<string, Vec3> = {};

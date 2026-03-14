@@ -2,7 +2,7 @@
 
 ## Concept
 
-A Godot 4.4 application that acts as a **render sidecar** to the existing PyroKitty stack. node-metaverse handles all SL protocol work (login, UDP, caps, object tracking, asset fetch). Godot receives scene commands over WebSocket and renders the 3D world. The Electron UI continues to handle chat, inventory, friends, groups, and map.
+A Godot application that acts as a **render sidecar** to the existing PyroKitty stack. node-metaverse handles all SL protocol work (login, UDP, caps, object tracking, asset fetch). Godot receives scene commands over WebSocket and renders the 3D world. The Electron UI continues to handle chat, inventory, friends, groups, and map. Engine version tracked in `godot-viewer/godot-version.txt`.
 
 ```
 ┌──────────────────────────────┐
@@ -42,10 +42,12 @@ Godot runs a WebSocket (TCP) server on a local port (default 9100). node-metaver
 | `object_properties` | Object name + description (response to `request_object_properties`) |
 | `mesh_ready` | Mesh converted to GLB and written to cache |
 | `texture_ready` | Texture decoded to .bctex (or WebP fallback) and written to cache |
-| `avatar_create` | New avatar: id, name, position, rotation |
+| `avatar_create` | New avatar: id, localId, name, position, rotation |
 | `avatar_update` | Single avatar position + rotation update |
 | `avatar_update_batch` | Batched avatar position/rotation updates |
 | `avatar_kill` | Remove avatar |
+| `avatar_shape` | Avatar shape bone deltas: avatarId, bones (scale/offset per bone) |
+| `animations_batch` | Animation set for a skeleton root: localId, animIds[] |
 | `terrain_ready` | Heightmap binary cached to disk, path + waterHeight |
 | `environment_data` | Sun direction, sunlight color, ambient color from EEP |
 | `planar_debug` | Toggle planar UV debug visualization mode (F9) |
@@ -400,128 +402,26 @@ SL linksets have independent scale per prim — parent scale does NOT affect chi
 - [ ] Region crossing
 - **Victory:** Can navigate a region freely
 
-### M6 — Avatars (mesh body focus, no legacy system avatar)
+### M6 — Avatars ✅
 
-Modern SL avatars are a skeleton + pile of rigged mesh attachments + baked textures.
-Reuses existing animesh pipeline (skeleton, bone eval, GLB rigged mesh).
-Shape sliders deferred to Phase 2 — default skeleton shape is acceptable for first pass.
+Modern SL avatars are a skeleton + rigged mesh attachments + baked textures. One shared Skeleton3D per avatar (from `avatar_skeleton.xml`), all meshes bind to it via skin index remapping. Animations evaluated once per skeleton. Shape deformation via VisualParam bytes from AvatarAppearance messages.
 
-**Other viewers to study:** Crystal Frost, SL mobile viewer, LibreMetaverse — may have
-pre-extracted shape param tables or simplified appearance pipelines.
+See `docs/avatar-rendering.md` for full technical reference.
 
-#### Phase 1 — Skeleton + Attachments (IN PROGRESS)
-- [x] Create skeleton root Node3D per avatar in `handle_avatar_create` (registered in `animesh_roots`)
-- [x] Route rigged mesh attachments to avatar skeleton (parentId = avatarLocalId → animesh pipeline)
-- [x] Track attachments via `Avatar.getAttachments()` + `onAttachmentAdded` subscription
-- [x] HUD attachment filtering (points 34-41 skipped via `isHudAttachment()`)
-- [x] Avatar animations: `subscribeToAvatarAnimation()` forwards AvatarAnimation circuit messages
-- [x] Attachment linkset child prims: grandchildren registered via `_register_animesh_descendants()`
-- [x] Non-rigged attachment positions follow avatar (recursive `_update_children_world_pos()`)
-- [x] Per-root skeleton list cache (`animesh_root_skeletons`) for O(1) process_animesh lookup
-- [x] Animation batching: bridge-side dedup + batch (`updateAnimSet` → `animations_batch` message). Replaces old 3-message flow. System animations (STAND, WALK) are regular server assets, not packaged.
-- [x] Initial snapshot attachment routing: `getObjectsByParent(avatarLocalId)` instead of relying on `getAllObjects()` which only returns root parents
-- [x] Blue box avatar placeholder (smaller 0.3x1.4x0.3 so rigged attachments visible around it)
-- [x] RSI fall-through fix: `_apply_mesh_to_pending` now `continue`s after animesh instantiation instead of setting rigged mesh on RSI
-- [x] Object creation: animesh children with rigged meshes get placeholder box on RSI, not the rigged mesh
-- [x] Non-animated bone fix: bones without animation keyframes skip pose computation instead of lossy SL↔Godot round-trip
-- [x] Per-skeleton animation evaluation: each skeleton evaluated independently in `process_animesh()` — previously used first skeleton as reference, missing bones only present on other skeletons (e.g., head bones missing if first skeleton was a boot)
-- [x] Recursive `getGlobalPosition`: walks full parent chain for nested children (child→attachment→avatar). Fixed texture loading for grandchild objects where position was computed relative to avatar instead of world coords.
-- [x] Degenerate basis fix: `.orthonormalized()` before `.get_rotation_quaternion()` on collision volume bones with non-uniform scale
-- [x] Avatar RSI placeholder hiding: blue box RSI (from `sm.avatars`) hidden when first rigged mesh loads for that avatar
-- [x] **BUG: Half t-pose** — Arms/legs stuck in T-pose. **Two root causes found and fixed**:
-  1. **IBM scale in rest transforms** (mesh-converter.ts): Standard bones had non-identity scale from IBM-derived rest transforms (e.g., mShoulderLeft Z-axis scale 1.12). Fixed: `mat4NormalizeRotation()` normalizes column lengths to 1.0 for standard bones only (collision volumes keep their IBM scale for vertex skinning).
-  2. **Multi-skeleton reference bug** (animesh_manager.gd): SL avatars have multiple meshes (head, upper body, lower body, hands, feet, accessories), each with its own Skeleton3D containing only bones relevant to that mesh. Head mesh: 70 joints (face bones, no shoulders/hips). Body mesh: 42-56 joints (shoulders/hips, no face). The code computed poses on `root_skeletons[0]` (the "reference" skeleton) and cached results by name for other skeletons. If the head mesh happened to be first, shoulder/hip bones were never computed → body stayed in T-pose. Fixed: each skeleton now evaluates independently with its own SL world rotation chain.
-  - **Why multiple skeletons?** Each SL mesh asset (head, body, hands, etc.) is a separate GLB file with its own glTF skin. Godot creates a separate Skeleton3D per GLB import. This is a **workaround**, not the correct architecture — see Phase 2.5 refactor plan below.
-- [ ] **BUG: Textures missing** — need BoM Phase 2 for real textures (bake placeholder UUIDs visible, which is expected progress).
-- [ ] **NOTE: `onAttachmentAdded` never fires** — zero events for ANY avatar in logs. All attachments come from `getAttachments()` at avatar creation time or `getObjectsByParent()` in rescan.
-- [ ] **NOTE: Diagnostic logging active** — `[AvatarDebug]` lines in object_manager.gd, asset_pipeline.gd, scene_manager.gd, godot-bridge.ts. Remove when bugs are resolved.
+- [x] Skeleton root per avatar, rigged mesh attachment routing
+- [x] HUD filtering, animation batching, attachment linkset children
+- [x] Bakes on Mesh (BoM) — baked skin/clothing textures from appearance service
+- [x] Shared skeleton refactor — one Skeleton3D per avatar from XML, all meshes bind to it
+- [x] Joint position overrides from mesh `alt_inverse_bind_matrix`
+- [x] Per-channel animation priority (rotation/position independent per joint)
+- [x] Shape deformation — VisualParam bytes → bone scale/offset via `avatar-shape.ts`
+  - `fast-xml-parser` for `avatar_lad.xml`, groups 0+3, dedup, trapezoidal driver activation
+  - Login-time buffering in `metaverse-connection.ts`
 - [ ] Display names (floating labels above avatar)
-- [ ] Send attachment point info for non-rigged attachment bone positioning
-- [ ] Clean up debug logging in asset_pipeline.gd and object_manager.gd
-- **Victory:** Avatars render as their actual mesh body + clothes + hair on default skeleton
-
-#### Phase 2 — Bakes on Mesh (BoM) (DONE)
-- [x] Parse baked texture UUIDs from `AvatarAppearance` message TextureEntry (faces 0-10)
-- [x] BoM substitution: detect 11 magic bake UUIDs on attachment faces, replace with actual baked texture
-- [x] Send baked texture UUIDs to Godot per avatar, fetch/decode/apply them
-- [x] Handle `AvatarAppearance` updates (outfit changes mid-session)
-- [x] Magic bake UUIDs excluded from texture fetch queue (never downloaded as assets)
-- **Victory:** Mesh bodies show correct skin/makeup/tattoo layers
-
-#### Phase 2.5 — Shared Skeleton Refactor
-
-**Problem**: Each rigged mesh creates its own Skeleton3D with only its bone subset. An avatar with head (70 joints), body (56 joints), hands (9 joints each), feet (5 joints each) creates 5+ redundant skeletons. Animation evaluation runs independently on each, duplicating work and risking inconsistencies. Head position floats because head mesh's IBM-derived bone positions don't match body mesh's.
-
-**How SL/Firestorm does it**: ONE skeleton from `avatar_skeleton.xml` with all ~133 bones (standard + collision volumes + Bento). Individual meshes are skins bound to that skeleton. IBMs are only used in vertex skinning (`skin_transform = bone_global_pose * IBM`), never in the skeleton hierarchy.
-
-**Key Godot insight**: When `MeshInstance3D.skeleton` points to a Skeleton3D, Godot creates a `SkinReference` that maps from the mesh's `Skin` resource (which stores bone names + bind poses/IBMs from the GLB) to the target Skeleton3D's bone indices. The Skin's bind poses (IBMs) are used for vertex skinning, while the Skeleton3D's rest poses define the hierarchy. These are independent — the shared skeleton can have XML-based rest poses while each mesh's Skin retains its own IBMs.
-
-**Target scene tree**:
-```
-animesh_root (Node3D, avatar localId)
-├── shared_skeleton (Skeleton3D, 133 bones from XML)
-│   ├── body_mesh (MeshInstance3D, binds to shared_skeleton via Skin)
-│   ├── head_mesh (MeshInstance3D, binds to shared_skeleton via Skin)
-│   ├── hands_mesh (MeshInstance3D, ...)
-│   └── feet_mesh (MeshInstance3D, ...)
-```
-
-**Implementation steps**:
-
-1. **Build shared Skeleton3D from XML** (Godot side, at avatar creation):
-   - Godot loads `avatar_skeleton.xml` at startup, builds bone hierarchy data
-   - When `animesh_roots[id]` is created, create a Skeleton3D with all bones
-   - Rest transforms = pure translation from XML positions (no rotation, no scale)
-   - Store in `animesh_shared_skeleton[root_id]`
-   - Add as child of `animesh_roots[root_id]`
-
-2. **Modified mesh instantiation** (`_instantiate_animesh_mesh`):
-   - Import GLB normally → get Skeleton3D + MeshInstance3D (as today)
-   - Extract the MeshInstance3D and its `Skin` resource
-   - **Discard** the per-mesh Skeleton3D (queue_free)
-   - Add MeshInstance3D as child of shared skeleton
-   - Set `mesh_instance.skeleton = mesh_instance.get_path_to(shared_skeleton)`
-   - Godot's SkinReference handles bone name→index remapping automatically
-
-3. **Simplified animation evaluation** (`process_animesh`):
-   - ONE skeleton per avatar → compute poses once
-   - All meshes update automatically via their skeleton binding
-   - Remove `animesh_root_skeletons` (Array[Skeleton3D]), replace with `animesh_shared_skeleton` (single Skeleton3D)
-   - Remove per-skeleton loop — just evaluate the shared skeleton
-
-4. **Data structure changes** (scene_manager.gd):
-   - Remove: `animesh_skeletons` (localId → Skeleton3D per mesh)
-   - Remove: `animesh_root_skeletons` (rootId → Array[Skeleton3D])
-   - Add: `animesh_shared_skeleton` (rootId → single Skeleton3D)
-   - Keep: `animesh_mesh_instances`, `animesh_root_for`, `animesh_eval`
-
-5. **Joint position overrides** (follow-up):
-   - SL meshes can override bone positions via LLSkin joint data
-   - First mesh's overrides win (SL behavior)
-   - Call `shared_skeleton.set_bone_rest()` to update affected bones
-   - This fixes head position (head mesh overrides mHead/mNeck positions)
-
-**Files to modify**:
-- `godot-viewer/src/object_manager.gd` — `_instantiate_animesh_mesh()`, avatar creation
-- `godot-viewer/src/animesh_manager.gd` — `process_animesh()`, remove multi-skeleton loop
-- `godot-viewer/src/scene_manager.gd` — data structure declarations
-- `godot-viewer/src/main.gd` — load avatar_skeleton.xml at startup
-- `electron-ui/src/main/mesh-converter.ts` — no changes needed (GLBs keep their skeletons for valid glTF)
-
-**Benefits**:
-- Single source of truth for bone hierarchy (matches SL exactly)
-- Animation computed once per avatar instead of per-mesh (~3-5x speedup)
-- Head position fixed (consistent bone positions across all meshes)
-- Foundation for Phase 3 shape sliders (modify shared skeleton rest poses)
-- Cleaner code (no multi-skeleton workarounds)
-
-#### Phase 3 — Shape Sliders
-- [ ] Parse `param_skeleton` sections from `avatar_lad.xml` (~30 skeleton-affecting params)
-- [ ] Or pre-extract to JSON (see `scripts/content_tools/skel_tool.py` for reference parser)
-- [ ] Apply visual param values (0-255) → bone position offsets + scale changes
-- [ ] Handle driver params (primary params that control secondary params)
-- [ ] Send shape data to Godot per avatar from `AvatarAppearance.VisualParam[]`
-- **Victory:** Avatars have correct height, proportions, body shape
+- [ ] Hover height (`AppearanceHover`)
+- [ ] Morph targets (face detail deformation via vertex blend shapes)
+- [ ] Clean up debug logging
+- **Victory:** Avatars render with correct body, textures, proportions, and animations
 
 #### BoM Magic UUIDs (for reference)
 ```
@@ -574,7 +474,7 @@ IMG_USE_BAKED_AUX3      edd51b77-fc10-ce7a-4b3d-011dfc349e4f
 ## Resolved Questions
 
 - **Embedded or separate window?** Separate window. Godot runs as its own process, Electron spawns it.
-- **Which Godot version?** 4.4-stable. Godot 4.6.x has an OpenXR regression (black flicker on Quest 3). Version controlled by `godot-version.txt`.
+- **Which Godot version?** Currently `Godot_v4.7-dev2_mono_win64`. Was 4.4-stable but upgraded; revert to 4.4 if VR is needed (4.6.x+ has OpenXR regression on Quest 3). Version controlled by `godot-version.txt`.
 - **GDExtension language?** C++ for prim tessellation (closest to existing llvolume code), GDScript for everything else. Currently all GDScript.
 - **Scene tree or RenderingServer?** RenderingServer RIDs via `RSInstance` wrappers. MeshInstance3D nodes caused scene tree overhead at scale.
 - **Camera ownership?** Godot owns camera locally for responsiveness, sends yaw back to node-metaverse for body rotation in AgentUpdate.
@@ -614,6 +514,9 @@ godot-viewer/
     main.gd              ← WebSocket TCP server (1MB buffer), message dispatch, VR init, frame budget
     scene_manager.gd     ← RSInstance-based object/avatar CRUD, flat linkset hierarchy, terrain/water/sky,
                            texture/material/mesh/light pipelines, PBR materials, frame-budgeted finalization
+    object_manager.gd    ← Avatar/animesh lifecycle, shared skeleton management, shape deformation,
+                           joint overrides, animation evaluation, bone attachment positioning
+    skeleton_builder.gd  ← Parses avatar_skeleton.xml, builds shared Skeleton3D (159 bones)
     prim_mesh_generator.gd ← Procedural prim geometry from SL shape params (port of LLVolume), cached by param hash
     camera_controller.gd ← Orbit camera with avatar follow, WASD+Q/E+F input, fly/run/sprint, self-avatar yaw,
                            right-click object picking, debug inspector panel
@@ -627,8 +530,13 @@ godot-viewer/
 electron-ui/src/main/
   godot-bridge.ts        ← Spawns Godot, WebSocket client, streams objects/avatars/terrain/environment,
                            handles input_move, queues projection texture fetches, kills on shader errors
+  godot-avatar-manager.ts ← Avatar lifecycle, BoM substitution, shape data buffering/sending
+  godot-animation-manager.ts ← Animation batching, ObjectAnimation subscription, avatar anim routing
+  avatar-shape.ts        ← Parses avatar_lad.xml (fast-xml-parser), computes bone scale/offset from
+                           VisualParam bytes with driver weight remapping (trapezoidal activation)
+  metaverse-connection.ts ← SL protocol connection, buffers VisualParam bytes + bake textures during login
   mesh-fetch-queue.ts    ← Concurrent mesh download queue with dedup, disk caching, and notify-once
-  mesh-converter.ts      ← LLMesh → GLB (binary glTF 2.0) converter
+  mesh-converter.ts      ← LLMesh → GLB (binary glTF 2.0) converter with joint override extraction
   sculpt-fetch-queue.ts  ← Sculpt texture fetch + conversion to GLB mesh
   sculpt-converter.ts    ← Sculpt map pixel data → vertex positions → GLB
   texture-fetch-queue.ts ← Concurrent texture download queue with J2C decode, disk caching, and notify-once

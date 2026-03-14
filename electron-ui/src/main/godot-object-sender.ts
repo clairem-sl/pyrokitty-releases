@@ -171,7 +171,6 @@ export class GodotObjectSender {
 
           const bakes = this.avatarManager.getBakedTextures(avatarId);
           if (bakes) {
-            let subCount = 0;
             for (const face of texInfo.faces) {
               const channel = BAKE_MAGIC_UUIDS.get(face.textureId);
               if (channel !== undefined) {
@@ -181,7 +180,6 @@ export class GodotObjectSender {
                   face._isBake = true;
                   face._bakeAvatarUuid = avatarId;
                   face._bakeChannel = channel;
-                  subCount++;
                 }
               }
             }

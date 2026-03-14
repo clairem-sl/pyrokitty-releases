@@ -8,6 +8,9 @@ extends Node3D
 const FrameBudget = preload("res://src/frame_budget.gd")
 const PrimMeshGeneratorScript = preload("res://src/prim_mesh_generator.gd")
 const ObjectManagerScript = preload("res://src/object_manager.gd")
+const AnimationManagerScript = preload("res://src/animation_manager.gd")
+const AvatarManagerScript = preload("res://src/avatar_manager.gd")
+const InterpolationManagerScript = preload("res://src/interpolation_manager.gd")
 const LightManagerScript = preload("res://src/light_manager.gd")
 const AssetPipelineScript = preload("res://src/asset_pipeline.gd")
 const TerrainEnvironmentScript = preload("res://src/terrain_environment.gd")
@@ -153,11 +156,14 @@ const _LOADING_FADE_IN_SPEED: float = 0.5  # alpha units/sec after loading ends 
 
 # ─── Sub-managers ────────────────────────────────────
 
-var object_mgr: RefCounted      # ObjectManager
-var light_mgr: RefCounted       # LightManager
-var asset_pipeline: RefCounted  # AssetPipeline
-var terrain_env: RefCounted     # TerrainEnvironment
-var object_picker: RefCounted   # ObjectPicker
+var object_mgr: RefCounted         # ObjectManager
+var animation_mgr: RefCounted      # AnimationManager
+var avatar_mgr: RefCounted         # AvatarManager
+var interp_mgr: RefCounted         # InterpolationManager
+var light_mgr: RefCounted          # LightManager
+var asset_pipeline: RefCounted     # AssetPipeline
+var terrain_env: RefCounted        # TerrainEnvironment
+var object_picker: RefCounted      # ObjectPicker
 
 
 func _exit_tree() -> void:
@@ -193,6 +199,9 @@ func _ready() -> void:
 
 	# Initialize sub-managers
 	object_mgr = ObjectManagerScript.new(self)
+	animation_mgr = AnimationManagerScript.new(self)
+	avatar_mgr = AvatarManagerScript.new(self)
+	interp_mgr = InterpolationManagerScript.new(self)
 	light_mgr = LightManagerScript.new(self)
 	asset_pipeline = AssetPipelineScript.new(self)
 	terrain_env = TerrainEnvironmentScript.new(self)
@@ -242,14 +251,14 @@ func _process(delta: float) -> void:
 	terrain_env.process(delta)
 
 	# Interpolate avatar positions/rotations toward their targets
-	object_mgr.interpolate_avatars(delta)
+	interp_mgr.interpolate_avatars(delta)
 
 	# Interpolate moving objects (physical objects with velocity)
-	object_mgr.interpolate_objects(delta)
+	interp_mgr.interpolate_objects(delta)
 
 	# Evaluate animesh animations (manual per-frame, not AnimationPlayer)
 	if animesh_eval_active:
-		object_mgr.process_animesh(delta)
+		animation_mgr.process_animesh(delta)
 
 	# Periodic light distance culling sweep
 	light_mgr._light_cull_timer += delta
@@ -348,7 +357,7 @@ func handle_region_change() -> void:
 	_attach_bone_logged.clear()
 
 	# Clear animesh crossfade blending state
-	object_mgr._prev_sl_local_rot.clear()
+	animation_mgr._prev_sl_local_rot.clear()
 
 	# Keep caches (mesh_cache, texture_cache, material_cache, rigged_mesh_paths)
 	# — assets are UUID-keyed and valid across regions
@@ -377,39 +386,39 @@ func handle_object_properties(msg: Dictionary) -> void:
 
 # Avatars
 func handle_avatar_create(msg: Dictionary) -> void:
-	object_mgr.handle_avatar_create(msg)
+	avatar_mgr.handle_avatar_create(msg)
 
 func handle_avatar_update(msg: Dictionary) -> void:
-	object_mgr.handle_avatar_update(msg)
+	avatar_mgr.handle_avatar_update(msg)
 
 func handle_avatar_update_batch(msg: Dictionary) -> void:
-	object_mgr.handle_avatar_update_batch(msg)
+	avatar_mgr.handle_avatar_update_batch(msg)
 
 func handle_avatar_kill(msg: Dictionary) -> void:
-	object_mgr.handle_avatar_kill(msg)
+	avatar_mgr.handle_avatar_kill(msg)
 
 # Self avatar
 func set_self_avatar_id(id: String) -> void:
-	object_mgr.set_self_avatar_id(id)
+	avatar_mgr.set_self_avatar_id(id)
 
 func set_self_avatar_yaw(godot_yaw: float) -> void:
-	object_mgr.set_self_avatar_yaw(godot_yaw)
+	avatar_mgr.set_self_avatar_yaw(godot_yaw)
 
 func get_self_avatar_click_data() -> Dictionary:
-	return object_mgr.get_self_avatar_click_data()
+	return avatar_mgr.get_self_avatar_click_data()
 
 func set_vr_mode(enabled: bool) -> void:
-	object_mgr.set_vr_mode(enabled)
+	avatar_mgr.set_vr_mode(enabled)
 
 func set_first_person_mode(enabled: bool) -> void:
-	object_mgr.set_first_person_mode(enabled)
+	avatar_mgr.set_first_person_mode(enabled)
 
 # Animesh
 func handle_animations_batch(msg: Dictionary) -> void:
-	object_mgr.handle_animations_batch(msg)
+	animation_mgr.handle_animations_batch(msg)
 
 func handle_avatar_shape(msg: Dictionary) -> void:
-	object_mgr.handle_avatar_shape(msg)
+	avatar_mgr.handle_avatar_shape(msg)
 
 # Assets
 func handle_mesh_ready(msg: Dictionary) -> void:
@@ -445,7 +454,7 @@ func set_planar_debug_mode(mode: int) -> void:
 	object_picker.set_planar_debug_mode(mode)
 
 func toggle_debug_skeleton() -> void:
-	object_mgr.toggle_debug_skeleton()
+	animation_mgr.toggle_debug_skeleton()
 
 # Stats
 func get_pipeline_stats() -> Dictionary:
