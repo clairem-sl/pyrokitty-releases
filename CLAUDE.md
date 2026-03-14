@@ -85,12 +85,12 @@ Server source at `..\opensim` — useful for understanding server-side handling 
 
 ## OpenJPEG WASM (J2K decoder)
 
-Fork: `..\pyrokitty-openjpeg` → `https://github.com/pyrokitty64/openjpeg`
+Fork: `wasm-openjpeg` → `https://github.com/pyrokitty64/openjpeg`
 
 Rebuild WASM (requires podman, uses Emscripten container):
 
 ```bash
-cd C:/DeeDrive/dev/pyrokitty-openjpeg
+cd C:/DeeDrive/dev/phoenix-firestorm/wasm-openjpeg
 rm -rf build
 MSYS_NO_PATHCONV=1 podman run --rm -v "$(cygpath -w $(pwd)):/openjpegjs" -w /openjpegjs openjpegjsbuild bash -c "scripts/wasm-build.sh"
 ```
@@ -98,7 +98,7 @@ MSYS_NO_PATHCONV=1 podman run --rm -v "$(cygpath -w $(pwd)):/openjpegjs" -w /ope
 Then rebuild the npm package and reinstall:
 
 ```bash
-cd C:/DeeDrive/dev/pyrokitty-openjpeg/packages/2.5.4-decoder && npm run build
+cd C:/DeeDrive/dev/phoenix-firestorm/wasm-openjpeg/packages/2.5.4-decoder && npm run build
 cd C:/DeeDrive/dev/phoenix-firestorm/electron-ui && npm install @abasb75/jpeg2000-decoder
 ```
 

@@ -1,0 +1,22 @@
+{
+  "name": "@abasb75/openjpeg",
+  "version": "2.5.3",
+  "description": "OpenJpegc for JavaScript",
+  "main": "index.js",
+  "types": "interface.d.ts",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+
+  },
+  "author": "",
+  "repository": {
+      "type": "git",
+      "url": "https://github.com/abasb75/openjpeg"
+  },
+  "bugs": {
+      "url": "https://github.com/abasb75/openjpeg/issues"
+  },
+  "homepage": "https://github.com/abasb75/openjpeg#readme"
+}

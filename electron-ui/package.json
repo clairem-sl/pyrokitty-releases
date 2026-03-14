@@ -55,7 +55,7 @@
         "vitest": "^4.1.0"
     },
     "dependencies": {
-        "@abasb75/jpeg2000-decoder": "file:../../pyrokitty-openjpeg/packages/2.5.4-decoder",
+        "@abasb75/jpeg2000-decoder": "file:../wasm-openjpeg/packages/2.5.4-decoder",
         "@mantine/core": "^8.3.14",
         "@mantine/hooks": "^8.3.14",
         "@react-leaflet/core": "^2.1.0",
@@ -122,7 +122,7 @@
                 "dir",
                 "7z"
             ],
-            "artifactName": "PyroKitty-Launcher-${version}.${ext}",
+            "artifactName": "PyroKitty-Launcher-${version}-win64.${ext}",
             "icon": "../icons/pyrokitty2.ico"
         }
     }

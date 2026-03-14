@@ -212,7 +212,7 @@ export class MetaverseConnection extends EventEmitter {
 
       this.emit('login-progress', 'Connecting to simulator...');
       // Set draw distance so the server sends EnableSimulator for neighboring regions
-      this.bot!.agent.cameraFar = 1024;
+      this.bot!.agent.cameraFar = 128;
       await this.bot!.connectToSim();
 
       // Groups will be populated from AgentGroupDataUpdate event

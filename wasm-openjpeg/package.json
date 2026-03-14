@@ -1,0 +1,18 @@
+{
+  "name": "@abasb75/openjpeg",
+  "version": "0.0.0",
+  "description": "Openjpeg for browsers",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "tsc": "^2.0.4",
+    "typescript": "^5.7.2"
+  }
+}

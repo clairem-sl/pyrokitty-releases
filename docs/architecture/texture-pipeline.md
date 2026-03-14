@@ -26,10 +26,10 @@ Fresh cache fill on a region with ~10,000 textures + ~5,600 meshes:
 ## Optimizations Applied
 
 ### 1. WASM SIMD (OpenJPEG)
-- **What**: Rebuilt `pyrokitty-openjpeg` with Emscripten `-msimd128` flag
+- **What**: Rebuilt `wasm-openjpeg` with Emscripten `-msimd128` flag
 - **Result**: 1,207 SIMD instructions auto-vectorized (was 0), primarily in DWT wavelet and T1 entropy inner loops
 - **Impact**: Speeds up J2K decode step (the main CPU bottleneck). Exact % TBD — need side-by-side fresh cache comparison
-- **Location**: `C:\DeeDrive\dev\pyrokitty-openjpeg`, `scripts/wasm-build.sh`
+- **Location**: `C:\DeeDrive\dev\wasm-openjpeg`, `scripts/wasm-build.sh`
 
 ### 2. GPU Single-Pass Mipmap + Compress Pipeline
 - **What**: Moved mipmap generation and BC compression into a single GPU command buffer with one IPC round trip

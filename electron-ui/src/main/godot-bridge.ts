@@ -294,6 +294,9 @@ export class GodotBridge extends EventEmitter {
       this.send({ type: 'self_id', id: selfId });
     }
 
+    // Send draw distance so Godot's visibility range matches the server value
+    this.send({ type: 'settings', draw_distance: this.bot.agent.cameraFar });
+
     // Init fetch queues
     const meshFetchQueue = new MeshFetchQueue(this.bot, (meshUuid, cachePath, isRigged, jointNames, jointOverrides) => {
       const fwdPath = cachePath.replace(/\\/g, '/');

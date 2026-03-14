@@ -305,6 +305,8 @@ func _handle_message(text: String) -> void:
 				camera_ctrl.set_sitting(msg.get("sitting", false))
 		"avatar_shape":
 			scene_manager.handle_avatar_shape(msg)
+		"settings":
+			scene_manager.handle_settings(msg)
 		_:
 			push_warning("[Main] Unknown message type: %s" % msg_type)
 

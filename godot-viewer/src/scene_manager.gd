@@ -407,6 +407,17 @@ func set_self_avatar_yaw(godot_yaw: float) -> void:
 func get_self_avatar_click_data() -> Dictionary:
 	return avatar_mgr.get_self_avatar_click_data()
 
+func handle_settings(msg: Dictionary) -> void:
+	var draw_dist: float = msg.get("draw_distance", 128.0)
+	if draw_dist > 0.0:
+		_vis_far = draw_dist
+		_vis_fade = draw_dist * 0.25
+		for rsi in objects.values():
+			rsi.set_vis_range(_vis_far, _vis_fade)
+		for rsi in avatars.values():
+			rsi.set_vis_range(_vis_far, _vis_fade)
+		print("[SceneManager] Draw distance set to %.0f m (fade %.0f m)" % [_vis_far, _vis_fade])
+
 func set_vr_mode(enabled: bool) -> void:
 	avatar_mgr.set_vr_mode(enabled)
 

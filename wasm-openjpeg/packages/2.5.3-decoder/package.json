@@ -1,0 +1,20 @@
+{
+    "name": "@abasb75/jpeg2000-decoder",
+    "version": "2.5.3",
+    "description": "OpenJpeg for JavaScript",
+    "main": "index.js",
+    "types": "interface.d.ts",
+    "directories": {
+      "test": "test"
+    },
+    "author": "",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/abasb75/openjpeg"
+    },
+    "bugs": {
+        "url": "https://github.com/abasb75/openjpeg/issues"
+    },
+    "homepage": "https://github.com/abasb75/openjpeg#readme"
+  }
+  

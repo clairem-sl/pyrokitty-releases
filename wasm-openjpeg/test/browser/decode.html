@@ -1,0 +1,79 @@
+<!--
+Copyright (c) Chris Hafey.
+SPDX-License-Identifier: MIT
+-->
+<!DOCTYPE HTML>
+<html>
+<head>
+    <script type="text/javascript" src="dist/openjpegjs.js"></script>
+    <script type="text/javascript" src="dist/helpers/decode.js"></script>
+    <script type="text/javascript" src="dist/helpers/utils.js"></script>
+    <style>
+      *{
+        padding: 0;
+        margin: 0;
+        box-sizing: border-box;
+      }
+    </style>
+</head>
+<body>
+<div style="width: 100%;height: 100vh;display: flex;justify-content: center;align-items: center; padding: 20px;">
+  <canvas id='myCanvas' style="height: 100%; max-width: 400px;" />
+</div>
+</body>
+
+<script>
+  let decoder = undefined;
+  let encoder = undefined;
+  let decoderjs = undefined;
+  let encoderjs = undefined;
+  let encodedBitStream = undefined;
+
+  // upon loading a decoded bitstream, set to the decoded data so it can be reencoded
+  // as part of the lossy encoding functionality.  NOTE - is not changed after load  
+  let uncompressedImageFrame = undefined;
+  let fullEncodedBitStream = undefined; 
+
+  let frameInfo = undefined;
+  let compressionRatio = 0;
+  let minMax = undefined;
+  let progressionOrder = undefined;
+  let decodeLevel = 0;
+  let decodeLayer = 0;
+  let numDecompositionsToEncode = 5;
+
+
+
+  
+  function display(decoded) {
+    console.log(decoded);
+    const { frameInfo , decodedBuffer } = decoded;
+  
+    var canvas = document.getElementById("myCanvas");
+    
+    renderToCanvas(frameInfo,decodedBuffer,canvas);
+  }
+
+
+  function loadArrayBuffer(arrayBuffer) {
+    console.log(arrayBuffer);
+    const decoded = decode(arrayBuffer).then(decoded=>{
+      console.log(decoded);
+      display(decoded);
+    });
+  }
+
+
+  window.onload = function(){
+
+    fetch('sample1.jp2')
+        .then((response) => {
+          return response.arrayBuffer();
+        })
+        .then((arrayBuffer) => {
+            loadArrayBuffer(arrayBuffer);
+        })
+    }
+
+</script>
+</html>
