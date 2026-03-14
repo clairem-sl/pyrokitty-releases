@@ -131,6 +131,7 @@ export class MetaverseConnection extends EventEmitter {
 
   // Buffer AvatarAppearance bake textures from login time (arrive before GodotBridge subscribes)
   private avatarAppearanceBuffer = new Map<string, string[]>(); // avatarUUID → 11 bake texture UUIDs
+  private avatarVisualParamBuffer = new Map<string, number[]>(); // avatarUUID → VisualParam bytes
   private avatarAppearanceSub: { unsubscribe: () => void } | null = null;
   private static readonly MAX_SOUND_DISTANCE = 50;
 
@@ -300,6 +301,7 @@ export class MetaverseConnection extends EventEmitter {
     this.avatarAppearanceSub?.unsubscribe();
     this.avatarAppearanceSub = null;
     this.avatarAppearanceBuffer.clear();
+    this.avatarVisualParamBuffer.clear();
     // Clean up avatar subscriptions
     this.selfMoveSubscription?.unsubscribe();
     this.selfMoveSubscription = null;
@@ -540,6 +542,7 @@ export class MetaverseConnection extends EventEmitter {
       this.avatarAppearanceSub?.unsubscribe();
       this.avatarAppearanceSub = null;
       this.avatarAppearanceBuffer.clear();
+      this.avatarVisualParamBuffer.clear();
       this.selfMoveSubscription?.unsubscribe();
       this.selfMoveSubscription = null;
       if (this.regionInfoThrottleTimer) {
@@ -734,6 +737,11 @@ export class MetaverseConnection extends EventEmitter {
           }
           this.avatarAppearanceBuffer.set(avatarId, bakes);
 
+          // Buffer VisualParam bytes for shape processing (GodotAvatarManager subscribes later)
+          if (msg.VisualParam && msg.VisualParam.length > 0) {
+            this.avatarVisualParamBuffer.set(avatarId, msg.VisualParam.map((vp: { ParamValue: number }) => vp.ParamValue));
+          }
+
           // Diagnostic: log parsed bake info
           const uniqueBakes = new Set(bakes.filter(b => b && b !== '00000000-0000-0000-0000-000000000000'));
           const filled = bakes.map((uuid, i) => (uuid && uuid !== '00000000-0000-0000-0000-000000000000') ? `${['HEAD','UPPER','LOWER','EYES','SKIRT','HAIR','LARM','LLEG','AUX1','AUX2','AUX3'][i]}=${uuid.slice(0, 8)}` : null).filter(Boolean);
@@ -751,6 +759,11 @@ export class MetaverseConnection extends EventEmitter {
   /** Returns buffered AvatarAppearance bake textures. avatarUUID → 11 bake UUIDs. */
   getAvatarAppearanceBuffer(): Map<string, string[]> {
     return this.avatarAppearanceBuffer;
+  }
+
+  /** Returns buffered VisualParam bytes. avatarUUID → byte array. */
+  getVisualParamBuffer(): Map<string, number[]> {
+    return this.avatarVisualParamBuffer;
   }
 
   private getAvatarPosition(): { x: number; y: number; z: number } | null {

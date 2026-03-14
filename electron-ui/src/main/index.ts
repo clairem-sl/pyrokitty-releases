@@ -246,14 +246,26 @@ async function createWindow(): Promise<void> {
       },
     },
   ]);
-  // Use setContextMenu so Electron calls SetForegroundWindow before
-  // TrackPopupMenu — without this, Windows sometimes shows its own
-  // taskbar context menu instead of ours.
-  tray.setContextMenu(contextMenu);
-
-  tray.on('right-click', () => {
-    tray?.popUpContextMenu(contextMenu);
+  // Win32 requires SetForegroundWindow before TrackPopupMenu or the OS
+  // taskbar menu appears on top. Electron's setContextMenu handles this
+  // internally but is unreliable (Electron #40937). Instead, we grab
+  // foreground focus via a tiny off-screen window before calling
+  // popUpContextMenu ourselves.
+  const trayFocusWin = new BrowserWindow({
+    width: 1, height: 1, x: -100, y: -100,
+    show: false, frame: false, skipTaskbar: true,
+    transparent: true,
   });
+
+  const showTrayMenu = () => {
+    trayFocusWin.show();
+    trayFocusWin.focus();
+    tray?.popUpContextMenu(contextMenu);
+    trayFocusWin.hide();
+  };
+
+  tray.on('click', showTrayMenu);
+  tray.on('right-click', showTrayMenu);
 
   tray.on('double-click', () => {
     mainWindow?.show();

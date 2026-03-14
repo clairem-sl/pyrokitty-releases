@@ -408,6 +408,9 @@ func set_first_person_mode(enabled: bool) -> void:
 func handle_animations_batch(msg: Dictionary) -> void:
 	object_mgr.handle_animations_batch(msg)
 
+func handle_avatar_shape(msg: Dictionary) -> void:
+	object_mgr.handle_avatar_shape(msg)
+
 # Assets
 func handle_mesh_ready(msg: Dictionary) -> void:
 	asset_pipeline.handle_mesh_ready(msg)

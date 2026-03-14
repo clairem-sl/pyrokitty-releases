@@ -59,6 +59,7 @@
         "@mantine/core": "^8.3.14",
         "@mantine/hooks": "^8.3.14",
         "@react-leaflet/core": "^2.1.0",
+        "fast-xml-parser": "^5.5.5",
         "leaflet": "^1.9.4",
         "leaflet.markercluster": "^1.5.3",
         "react": "^18.2.0",

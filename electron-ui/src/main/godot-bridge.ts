@@ -116,7 +116,7 @@ export class GodotBridge extends EventEmitter {
   private lastGodotStats: any = null;
   private killSweepTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(bot: Bot, options: { vrMode?: boolean; objectAnimationBuffer?: Map<string, { animId: string; sequenceId: number }[]>; avatarAppearanceBuffer?: Map<string, string[]> } = {}) {
+  constructor(bot: Bot, options: { vrMode?: boolean; objectAnimationBuffer?: Map<string, { animId: string; sequenceId: number }[]>; avatarAppearanceBuffer?: Map<string, string[]>; visualParamBuffer?: Map<string, number[]> } = {}) {
     super();
     this.bot = bot;
     this.port = 0;
@@ -148,6 +148,11 @@ export class GodotBridge extends EventEmitter {
     // Seed from MetaverseConnection's early AvatarAppearance buffer
     if (options.avatarAppearanceBuffer && options.avatarAppearanceBuffer.size > 0) {
       this.avatarManager.seedBakedTextures(options.avatarAppearanceBuffer);
+    }
+
+    // Seed buffered VisualParam bytes → compute and buffer avatar shapes
+    if (options.visualParamBuffer && options.visualParamBuffer.size > 0) {
+      this.avatarManager.seedVisualParams(options.visualParamBuffer);
     }
   }
 

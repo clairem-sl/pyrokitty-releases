@@ -23,6 +23,9 @@ var _debug_skeleton_visible: bool = false
 # Used as fallback for unanimated CV bones in animation evaluation.
 var _sl_cv_rest_rotations: Dictionary = {}
 
+# Avatar shape deformation — per-avatar bone scale/offset from VisualParam
+var _avatar_shapes: Dictionary = {}  # avatarId (String) -> bones Dictionary
+
 # Per-root previous SL local rotations for crossfade blending.
 # When the winning animation for a joint changes, we slerp from the old
 # rotation to the new one to avoid visual snapping (mimics Firestorm's
@@ -635,8 +638,17 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	# Override list comes from mesh_ready message, stored on scene_manager.
 	var override_joints: Array = sm.mesh_joint_overrides.get(mesh_id, [])
 	if override_joints.size() > 0:
-		print("[JointOverride] Applying %d overrides for mesh %s" % [override_joints.size(), mesh_id.substr(0, 8)])
+		print("[JointOverride] Applying %d overrides for mesh %s (avatar root=%d)" % [override_joints.size(), mesh_id.substr(0, 16), animesh_root_id])
 		_apply_joint_overrides(glb_skeleton, shared_skel, override_joints)
+		# Check if any leg bones were overridden
+		var leg_overrides: Array = []
+		for jn in override_joints:
+			if "Hip" in (jn as String) or "Knee" in (jn as String) or "Pelvis" in (jn as String):
+				leg_overrides.append(jn)
+		if leg_overrides.size() > 0:
+			var av_uuid: String = sm.object_uuid.get(animesh_root_id, "?")
+			print("[JointOverride] Leg bones overridden for avatar %s: %s" % [av_uuid.substr(0, 8), str(leg_overrides)])
+			_log_bone_rests(shared_skel, av_uuid, "after_override")
 
 	# Duplicate skin and remap bone indices to shared skeleton order.
 	# Bones not in the shared skeleton (e.g. attachment point joints like "Pelvis",
@@ -1278,14 +1290,84 @@ func _get_bone_global_rest_xf(skel: Skeleton3D, bi: int) -> Transform3D:
 ## overridden an ancestor bone, the shared skeleton's parent chain would differ
 ## from the GLB's parent chain, producing incorrect local rests.
 ## Last mesh to set a bone wins (same as SL/Firestorm).
+## Apply joint position overrides from a GLB skeleton to the shared skeleton.
+## In SL, joint overrides REPLACE the shape-computed local position for that bone,
+## but parent shape scale STILL affects the overridden bone's world position
+## (xform.cpp:76: mWorldPosition.scaleVec(mParent->getScale())).
+## We simulate this by applying parent shape scale to the override position,
+## just as we do for non-overridden bones in _apply_shape_to_skeleton.
 func _apply_joint_overrides(glb_skel: Skeleton3D, shared_skel: Skeleton3D, override_joints: Array) -> void:
+	# Gather parent shape scales and XML parent info for parent-scale application
+	var avatar_root_id: int = -1
+	# Find which avatar root this shared_skel belongs to
+	for av_lid: int in sm.animesh_shared_skeleton:
+		if sm.animesh_shared_skeleton[av_lid] == shared_skel:
+			avatar_root_id = av_lid
+			break
+
+	# Get shape data for this avatar (if any)
+	var parent_scale: Dictionary = {}  # bone_name -> Vector3 (SL space scale)
+	if avatar_root_id >= 0:
+		var avatar_uuid: String = sm.object_uuid.get(avatar_root_id, "")
+		if not avatar_uuid.is_empty() and _avatar_shapes.has(avatar_uuid):
+			var shape_bones: Dictionary = _avatar_shapes[avatar_uuid]
+			for bname: String in shape_bones:
+				var shape_data: Dictionary = shape_bones[bname]
+				var s: Array = shape_data.get("scale", [1, 1, 1])
+				parent_scale[bname] = Vector3(s[0], s[1], s[2])
+		else:
+			print("[JointOverride] WARNING: no shape data for avatar root=%d uuid=%s (shapes has %d entries)" % [avatar_root_id, avatar_uuid.substr(0, 8), _avatar_shapes.size()])
+	else:
+		print("[JointOverride] WARNING: could not find avatar root for shared_skel")
+	print("[JointOverride] parent_scale has %d entries" % parent_scale.size())
+
+	# Get XML parent info for looking up parent names
+	var xml_bones: Array = sm.skeleton_builder.get_bone_data()
+	var xml_parent: Dictionary = {}  # bone_name -> parent_name
+	for bd: Dictionary in xml_bones:
+		xml_parent[bd["name"]] = bd.get("parent_name", "")
+
 	var override_count: int = 0
+	var debug_bones: Array = ["mPelvis", "mHipLeft", "mHipRight", "mKneeLeft", "mKneeRight", "mAnkleLeft", "mAnkleRight", "mFootLeft", "mFootRight"]
 	for jname in override_joints:
 		var glb_bi: int = glb_skel.find_bone(jname as String)
 		var shared_bi: int = shared_skel.find_bone(jname as String)
 		if glb_bi < 0 or shared_bi < 0:
 			continue
-		shared_skel.set_bone_rest(shared_bi, glb_skel.get_bone_rest(glb_bi))
+		var glb_rest: Transform3D = glb_skel.get_bone_rest(glb_bi)
+		var is_debug: bool = debug_bones.has(jname)
+
+		# Convert GLB rest (Godot space) back to SL space to apply parent scale
+		# Godot (gx, gy, gz) → SL (gx, -gz, gy)
+		var godot_pos: Vector3 = glb_rest.origin
+		var sl_pos := Vector3(godot_pos.x, -godot_pos.z, godot_pos.y)
+
+		if is_debug:
+			print("[JointOverride] %s: glb_sl=(%s, %s, %s)" % [
+				jname, "%.6f" % sl_pos.x, "%.6f" % sl_pos.y, "%.6f" % sl_pos.z])
+
+		# Apply immediate parent's shape scale (SL xform.cpp uses parent's LOCAL scale)
+		var pname: String = xml_parent.get(jname as String, "")
+		if not pname.is_empty() and parent_scale.has(pname):
+			var ps: Vector3 = parent_scale[pname]
+			if is_debug:
+				print("[JointOverride] %s: parent=%s parent_scale=(%s, %s, %s)" % [
+					jname, pname, "%.6f" % ps.x, "%.6f" % ps.y, "%.6f" % ps.z])
+			sl_pos = Vector3(sl_pos.x * ps.x, sl_pos.y * ps.y, sl_pos.z * ps.z)
+
+		# Convert back to Godot space
+		var final_godot := Vector3(sl_pos.x, sl_pos.z, -sl_pos.y)
+
+		if is_debug:
+			var old_rest: Transform3D = shared_skel.get_bone_rest(shared_bi)
+			print("[JointOverride] %s: shared_before=(%s, %s, %s) final=(%s, %s, %s)" % [
+				jname,
+				"%.6f" % old_rest.origin.x, "%.6f" % old_rest.origin.y, "%.6f" % old_rest.origin.z,
+				"%.6f" % final_godot.x, "%.6f" % final_godot.y, "%.6f" % final_godot.z])
+
+		var new_rest := Transform3D()
+		new_rest.origin = final_godot
+		shared_skel.set_bone_rest(shared_bi, new_rest)
 		override_count += 1
 
 	if override_count > 0:
@@ -1734,6 +1816,11 @@ func handle_avatar_create(msg: Dictionary) -> void:
 		var shared_skel: Skeleton3D = sm.skeleton_builder.create_shared_skeleton()
 		avatar_node.add_child(shared_skel)
 		sm.animesh_shared_skeleton[local_id] = shared_skel
+		# Apply pending shape if AvatarAppearance arrived before avatar_create
+		if _avatar_shapes.has(avatar_id):
+			print("[AvatarShape] Applying pending shape for %s at avatar_create" % avatar_id.substr(0, 8))
+			_apply_shape_to_skeleton(shared_skel, _avatar_shapes[avatar_id], avatar_id)
+			_log_bone_rests(shared_skel, avatar_id, "after_shape")
 		if avatar_id == sm.self_avatar_id:
 			print("[SelfAvatar] === Skeleton root created: localId=%d bones=%d ===" % [local_id, shared_skel.get_bone_count()])
 
@@ -1855,6 +1942,150 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 			sm.animesh_pending_anims.erase(av_lid)
 			sm.animesh_worn_anims.erase(av_lid)
 		sm.avatar_local_ids.erase(avatar_id)
+		_avatar_shapes.erase(avatar_id)
+
+
+func handle_avatar_shape(msg: Dictionary) -> void:
+	var avatar_id: String = msg.get("avatarId", "")
+	if avatar_id.is_empty():
+		return
+	var bones: Dictionary = msg.get("bones", {})
+	_avatar_shapes[avatar_id] = bones
+
+	var av_lid: int = sm.avatar_local_ids.get(avatar_id, 0)
+	if av_lid <= 0:
+		return
+	var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(av_lid)
+	if shared_skel == null:
+		return
+
+	_apply_shape_to_skeleton(shared_skel, bones, avatar_id)
+	_log_bone_rests(shared_skel, avatar_id, "after_shape")
+	_reapply_joint_overrides(av_lid, shared_skel, avatar_id)
+	_log_bone_rests(shared_skel, avatar_id, "after_reapply_overrides")
+	print("[AvatarShape] Applied shape for avatar %s (%d bones modified)" % [avatar_id.substr(0, 8), bones.size()])
+
+
+## Reset skeleton bone rests to XML baseline + shape scale/offset deltas.
+## In SL (xform.cpp), a joint's scale affects its CHILDREN's positions:
+##   child.worldPos = parent.worldRot * (child.localPos * parent.scale) + parent.worldPos
+## where parent.scale is the parent's LOCAL scale (not world/cumulative).
+## We bake the immediate parent scale into each bone's rest position.
+## We do NOT put scale into the basis — Godot's rest basis scale would cascade
+## through the entire subtree, which is not how SL works.
+func _apply_shape_to_skeleton(skeleton: Skeleton3D, bones: Dictionary, avatar_id: String) -> void:
+	var xml_bones: Array = sm.skeleton_builder.get_bone_data()
+	var xml_by_name: Dictionary = {}
+	for bd: Dictionary in xml_bones:
+		xml_by_name[bd["name"]] = bd
+
+	# Build parent_name → shape scale lookup (immediate parent scale only)
+	var parent_scale: Dictionary = {}  # bone_name -> Vector3 (SL space scale)
+	for bname: String in bones:
+		var shape_data: Dictionary = bones[bname]
+		var s: Array = shape_data.get("scale", [1, 1, 1])
+		parent_scale[bname] = Vector3(s[0], s[1], s[2])
+
+	var debug_bones: Array = ["mPelvis", "mHipLeft", "mHipRight", "mKneeLeft", "mKneeRight", "mAnkleLeft", "mAnkleRight", "mFootLeft", "mFootRight"]
+
+	for bi in range(skeleton.get_bone_count()):
+		var bname: String = skeleton.get_bone_name(bi)
+		var xml_data: Dictionary = xml_by_name.get(bname, {})
+		if xml_data.is_empty():
+			continue  # dynamically-added bone, skip
+
+		var rest := Transform3D()
+		var sp: Vector3 = xml_data["pos"]  # SL space local position
+		var is_debug: bool = debug_bones.has(bname)
+
+		if is_debug:
+			print("[ShapeDebug] %s %s: xml_pos_sl=(%s, %s, %s)" % [avatar_id.substr(0, 8), bname, "%.6f" % sp.x, "%.6f" % sp.y, "%.6f" % sp.z])
+
+		# Apply shape offset to this bone's position (in SL space)
+		if bones.has(bname):
+			var shape_data: Dictionary = bones[bname]
+			var o: Array = shape_data.get("offset", [0, 0, 0])
+			var offset := Vector3(o[0], o[1], o[2])
+			if is_debug:
+				print("[ShapeDebug] %s %s: shape_offset_sl=(%s, %s, %s)" % [avatar_id.substr(0, 8), bname, "%.6f" % offset.x, "%.6f" % offset.y, "%.6f" % offset.z])
+			sp += offset
+
+		# Apply immediate parent's shape scale to this bone's position (in SL space).
+		# SL xform.cpp: mWorldPosition.scaleVec(mParent->getScale()) where getScale()
+		# returns the parent's LOCAL scale. The cascading through ancestors happens
+		# naturally via each parent's already-scaled world position.
+		var pname: String = xml_data.get("parent_name", "")
+		if not pname.is_empty() and parent_scale.has(pname):
+			var ps: Vector3 = parent_scale[pname]
+			if is_debug:
+				print("[ShapeDebug] %s %s: parent=%s parent_scale_sl=(%s, %s, %s) pos_before_scale=(%s, %s, %s)" % [avatar_id.substr(0, 8), bname, pname, "%.6f" % ps.x, "%.6f" % ps.y, "%.6f" % ps.z, "%.6f" % sp.x, "%.6f" % sp.y, "%.6f" % sp.z])
+			sp = Vector3(sp.x * ps.x, sp.y * ps.y, sp.z * ps.z)
+			if is_debug:
+				print("[ShapeDebug] %s %s: pos_after_scale=(%s, %s, %s)" % [avatar_id.substr(0, 8), bname, "%.6f" % sp.x, "%.6f" % sp.y, "%.6f" % sp.z])
+
+		# SL → Godot position conversion
+		rest.origin = Vector3(sp.x, sp.z, -sp.y)
+		if is_debug:
+			print("[ShapeDebug] %s %s: final_godot=(%s, %s, %s)" % [avatar_id.substr(0, 8), bname, "%.6f" % rest.origin.x, "%.6f" % rest.origin.y, "%.6f" % rest.origin.z])
+		skeleton.set_bone_rest(bi, rest)
+
+
+## Re-apply joint overrides from all rigged meshes on an avatar after shape change.
+## Meshes with joint overrides take precedence over shape (last mesh wins, same as SL).
+func _reapply_joint_overrides(root_local_id: int, shared_skel: Skeleton3D, avatar_id: String) -> void:
+	for mesh_lid: int in sm.animesh_mesh_instances:
+		if sm.animesh_root_for.get(mesh_lid, 0) != root_local_id:
+			continue
+		var mesh_id: String = sm.object_mesh_id.get(mesh_lid, "")
+		if mesh_id.is_empty():
+			continue
+		var override_joints: Array = sm.mesh_joint_overrides.get(mesh_id, [])
+		if override_joints.is_empty():
+			continue
+		# Need the GLB skeleton to get the override rest transforms.
+		# The override rest was already copied to shared_skel during initial setup,
+		# and shape just reset all rests to XML baseline. Re-apply from the GLB.
+		print("[ReapplyOverrides] %s mesh_lid=%d mesh_id=%s overrides=%s" % [avatar_id.substr(0, 8), mesh_lid, mesh_id.substr(0, 16), str(override_joints)])
+		var glb_path: String = sm.rigged_mesh_paths.get(mesh_id, "")
+		if glb_path.is_empty():
+			continue
+		var doc := GLTFDocument.new()
+		var state := GLTFState.new()
+		var err := doc.append_from_file(glb_path, state)
+		if err != OK:
+			continue
+		var scene: Node = doc.generate_scene(state)
+		if scene == null:
+			continue
+		var glb_skel: Skeleton3D = _find_node_of_type(scene, "Skeleton3D")
+		if glb_skel != null:
+			_apply_joint_overrides(glb_skel, shared_skel, override_joints)
+		scene.queue_free()
+
+
+## Debug: log all bones whose rest differs from XML baseline
+func _log_bone_rests(skel: Skeleton3D, avatar_id: String, stage: String) -> void:
+	var xml_bones: Array = sm.skeleton_builder.get_bone_data()
+	var xml_by_name: Dictionary = {}
+	for bd: Dictionary in xml_bones:
+		var sp: Vector3 = bd["pos"]
+		xml_by_name[bd["name"]] = Vector3(sp.x, sp.z, -sp.y)  # SL → Godot
+
+	var modified: int = 0
+	for bi in range(skel.get_bone_count()):
+		var bname: String = skel.get_bone_name(bi)
+		var r: Transform3D = skel.get_bone_rest(bi)
+		var xml_origin: Vector3 = xml_by_name.get(bname, r.origin)
+		var origin_diff: float = (r.origin - xml_origin).length()
+		var basis_is_identity: bool = r.basis.is_equal_approx(Basis.IDENTITY)
+		if origin_diff > 0.0001 or not basis_is_identity:
+			modified += 1
+			print("[AvatarShape] %s %s %s rest=(%s, %s, %s) xml=(%s, %s, %s) delta=%.4f basis_id=%s" % [
+				avatar_id.substr(0, 8), stage, bname,
+				"%.4f" % r.origin.x, "%.4f" % r.origin.y, "%.4f" % r.origin.z,
+				"%.4f" % xml_origin.x, "%.4f" % xml_origin.y, "%.4f" % xml_origin.z,
+				origin_diff, str(basis_is_identity)])
+	print("[AvatarShape] %s %s: %d bones modified from XML baseline" % [avatar_id.substr(0, 8), stage, modified])
 
 
 # ─── Interpolation ───────────────────────────────────

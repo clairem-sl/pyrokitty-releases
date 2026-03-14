@@ -286,6 +286,7 @@ export class ViewerManager extends EventEmitter {
       vrMode,
       objectAnimationBuffer: metaverse.getObjectAnimationBuffer(),
       avatarAppearanceBuffer: metaverse.getAvatarAppearanceBuffer(),
+      visualParamBuffer: metaverse.getVisualParamBuffer(),
     });
     this.godotBridges.set(instanceId, bridge);
 

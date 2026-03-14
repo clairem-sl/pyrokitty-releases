@@ -1009,7 +1009,9 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
     // Mesh node: skin assigned (Hippolyzer: mesh_node.matrix = None)
     nodes[0].skin = 0;
 
-    // Tag mesh node with joints that have custom positions (for Godot pipeline)
+    // Tag mesh node with joints that have alt IBM overrides (for Godot pipeline).
+    // In SL, every joint with an alt_inverse_bind_matrix gets an override —
+    // the mesh's position is authoritative regardless of distance from XML default.
     const overriddenJointNames: string[] = [];
     if (skin!.altInverseBindMatrix && skin!.altInverseBindMatrix.length > 0) {
       for (let i = 0; i < resolvedJointNames.length; i++) {
@@ -1017,11 +1019,7 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
         const jname = resolvedJointNames[i];
         const skelJoint = skeleton.get(jname);
         if (!skelJoint) continue;
-        const raw = skin!.altInverseBindMatrix[i].all();
-        const overrideTrans: [number, number, number] = [raw[12], raw[13], raw[14]];
-        if (vec3Dist(overrideTrans, skelJoint.pos) > 0.0001) {
-          overriddenJointNames.push(jname);
-        }
+        overriddenJointNames.push(jname);
       }
     }
     if (overriddenJointNames.length > 0) {

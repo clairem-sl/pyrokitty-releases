@@ -110,6 +110,11 @@ func get_sl_rest_rotations() -> Dictionary:
 	return result
 
 
+## Return the parsed bone data array for shape deformation baseline lookup.
+func get_bone_data() -> Array:
+	return _bones
+
+
 func _parse_vec3(s: String) -> Vector3:
 	if s.is_empty():
 		return Vector3.ZERO

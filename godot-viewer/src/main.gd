@@ -303,6 +303,8 @@ func _handle_message(text: String) -> void:
 			var camera_ctrl := get_node_or_null("Camera3D")
 			if camera_ctrl and camera_ctrl.has_method("set_sitting"):
 				camera_ctrl.set_sitting(msg.get("sitting", false))
+		"avatar_shape":
+			scene_manager.handle_avatar_shape(msg)
 		_:
 			push_warning("[Main] Unknown message type: %s" % msg_type)
 
