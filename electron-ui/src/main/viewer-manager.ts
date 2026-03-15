@@ -7,7 +7,7 @@ import { accountManager } from './account-manager';
 import { gridManager } from './grid-manager';
 import { connectionManager, ViewerConnection } from './viewer-connection';
 import { metaverseConnectionManager, MetaverseConnection } from './metaverse-connection';
-import { voiceManager } from './voice-manager';
+import { voiceRegistry } from './voice-registry';
 import { GodotBridge } from './godot-bridge';
 
 function getViewerPath(): string {
@@ -141,7 +141,9 @@ export class ViewerManager extends EventEmitter {
 
       // Start voice sidecar with bot caps
       try {
-        await voiceManager.connectWithBot(metaverse.getBot());
+        const vm = voiceRegistry.create(instanceId);
+        vm.start();
+        await vm.connectWithBot(metaverse.getBot());
       } catch (err) {
         console.warn(`[ViewerManager] Voice connect failed (non-fatal):`, err);
       }
@@ -378,7 +380,7 @@ export class ViewerManager extends EventEmitter {
     // Detach voice from viewer before disconnecting WebSocket
     const viewerConn = connectionManager.getConnection(instanceId);
     if (viewerConn) {
-      voiceManager.detachFromViewer(viewerConn);
+      voiceRegistry.get(instanceId)?.detachFromViewer(viewerConn);
     }
 
     // Disconnect WebSocket
@@ -444,7 +446,12 @@ export class ViewerManager extends EventEmitter {
 
       // Reconnect voice with bot caps
       try {
-        await voiceManager.connectWithBot(metaverse.getBot());
+        let vm = voiceRegistry.get(instanceId);
+        if (!vm) {
+          vm = voiceRegistry.create(instanceId);
+          vm.start();
+        }
+        await vm.connectWithBot(metaverse.getBot());
       } catch (err) {
         console.warn(`[ViewerManager] Voice reconnect failed (non-fatal):`, err);
       }
@@ -765,7 +772,7 @@ export class ViewerManager extends EventEmitter {
     }
 
     // Disconnect voice
-    voiceManager.disconnect();
+    voiceRegistry.remove(instanceId);
 
     connectionManager.disconnect(instanceId);
     await metaverseConnectionManager.remove(instanceId);
@@ -795,7 +802,7 @@ export class ViewerManager extends EventEmitter {
         // Hide native chat UI since Electron handles it
         connection.setChatVisible(false);
         // Switch voice to viewer caps
-        voiceManager.connectWithViewer(connection).catch(err => {
+        voiceRegistry.get(instanceId)?.connectWithViewer(connection).catch(err => {
           console.warn(`[ViewerManager] Voice switch to viewer failed (non-fatal):`, err);
         });
       });
@@ -824,8 +831,8 @@ export class ViewerManager extends EventEmitter {
     }
     this.godotBridges.clear();
 
-    // Stop voice sidecar
-    voiceManager.stop();
+    // Stop all voice sidecars
+    voiceRegistry.stopAll();
 
     // Tell all viewers to quit gracefully before disconnecting
     for (const [instanceId] of this.instances) {

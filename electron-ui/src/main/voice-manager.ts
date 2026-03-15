@@ -51,6 +51,12 @@ export class VoiceManager extends EventEmitter {
   private lineBuffer = '';
   private positionInterval: NodeJS.Timeout | null = null;
   private viewerPositionUnsubscribed = false;
+  private readonly tag: string;
+
+  constructor(public readonly instanceId: string) {
+    super();
+    this.tag = `[Voice:${instanceId}]`;
+  }
 
   get isConnected(): boolean {
     return this.connected;
@@ -67,7 +73,7 @@ export class VoiceManager extends EventEmitter {
     if (this.process) return;
 
     const sidecarPath = getSidecarPath();
-    console.log(`[VoiceManager] Starting sidecar: ${sidecarPath}`);
+    console.log(`${this.tag} Starting sidecar: ${sidecarPath}`);
 
     try {
       this.process = spawn(sidecarPath, [], {
@@ -83,24 +89,24 @@ export class VoiceManager extends EventEmitter {
         const lines = data.toString().split('\n');
         for (const line of lines) {
           if (line.trim()) {
-            console.log(`[VoiceSidecar] ${line.trimEnd()}`);
+            console.log(`[VoiceSidecar:${this.instanceId}] ${line.trimEnd()}`);
           }
         }
       });
 
       this.process.on('error', (error) => {
-        console.error(`[VoiceManager] Sidecar error:`, error);
+        console.error(`${this.tag} Sidecar error:`, error);
         this.emit('voiceError', error.message);
       });
 
       this.process.on('exit', (code, signal) => {
-        console.log(`[VoiceManager] Sidecar exited: code=${code}, signal=${signal}`);
+        console.log(`${this.tag} Sidecar exited: code=${code}, signal=${signal}`);
         this.process = null;
         this.connected = false;
         this.emit('stopped');
       });
     } catch (error) {
-      console.error(`[VoiceManager] Failed to start sidecar:`, error);
+      console.error(`${this.tag} Failed to start sidecar:`, error);
       this.process = null;
     }
   }
@@ -130,7 +136,7 @@ export class VoiceManager extends EventEmitter {
 
     const region = bot.currentRegion;
     if (!region?.caps) {
-      console.warn('[VoiceManager] No caps available from bot');
+      console.warn(`${this.tag} No caps available from bot`);
       return;
     }
 
@@ -146,7 +152,7 @@ export class VoiceManager extends EventEmitter {
     } catch { /* cap not available */ }
 
     if (!caps.ProvisionVoiceAccountRequest) {
-      console.warn('[VoiceManager] ProvisionVoiceAccountRequest cap not available');
+      console.warn(`${this.tag} ProvisionVoiceAccountRequest cap not available`);
       return;
     }
 
@@ -159,12 +165,12 @@ export class VoiceManager extends EventEmitter {
 
     // If position isn't available yet, wait for it (parcel map + position needed for correct parcel ID)
     if (!pos || (pos.x === 0 && pos.y === 0)) {
-      console.log('[VoiceManager] Position not available yet, waiting...');
+      console.log(`${this.tag} Position not available yet, waiting...`);
       const resolvedPos = await this.waitForBotPosition(bot, agentId, 10, 500);
       if (resolvedPos) {
         await this.doConnectWithBot(bot, caps, agentId, sessionId, regionName, resolvedPos);
       } else {
-        console.warn('[VoiceManager] Position never became available, connecting with parcelLocalId=-1');
+        console.warn(`${this.tag} Position never became available, connecting with parcelLocalId=-1`);
         await this.doConnectWithBot(bot, caps, agentId, sessionId, regionName, null);
       }
     } else {
@@ -173,9 +179,13 @@ export class VoiceManager extends EventEmitter {
   }
 
   private getBotPosition(bot: any, agentId: string): { x: number; y: number; z: number } | null {
-    const self = bot.currentRegion?.agents?.get(agentId);
-    if (self?.position && (self.position.x !== 0 || self.position.y !== 0)) {
-      return self.position;
+    try {
+      const self = bot.currentRegion?.agents?.get(agentId);
+      if (self?.position && (self.position.x !== 0 || self.position.y !== 0)) {
+        return self.position;
+      }
+    } catch {
+      // bot.currentRegion getter throws after logout
     }
     return null;
   }
@@ -187,10 +197,10 @@ export class VoiceManager extends EventEmitter {
         attempts++;
         const pos = this.getBotPosition(bot, agentId);
         if (pos) {
-          console.log(`[VoiceManager] Position available after ${attempts} attempts: (${pos.x?.toFixed(0)},${pos.y?.toFixed(0)})`);
+          console.log(`${this.tag} Position available after ${attempts} attempts: (${pos.x?.toFixed(0)},${pos.y?.toFixed(0)})`);
           resolve(pos);
         } else if (attempts >= maxRetries) {
-          console.warn(`[VoiceManager] Position still unavailable after ${attempts} attempts`);
+          console.warn(`${this.tag} Position still unavailable after ${attempts} attempts`);
           resolve(null);
         } else {
           setTimeout(check, intervalMs);
@@ -223,17 +233,17 @@ export class VoiceManager extends EventEmitter {
             const flags = parcel?.ParcelFlags ?? 0;
             const allowVoice = !!(flags & (1 << 29));       // AllowVoiceChat
             const useEstate = !!(flags & (1 << 30));        // UseEstateVoiceChan
-            console.log(`[VoiceManager] Parcel "${parcel?.Name}" localID=${pid}, allowVoice=${allowVoice}, useEstate=${useEstate}`);
+            console.log(`${this.tag} Parcel "${parcel?.Name}" localID=${pid}, allowVoice=${allowVoice}, useEstate=${useEstate}`);
             if (!allowVoice) {
-              console.warn('[VoiceManager] Voice disabled on this parcel');
+              console.warn(`${this.tag} Voice disabled on this parcel`);
             }
             parcelLocalId = useEstate ? -1 : pid;
           }
         }
       }
-      console.log(`[VoiceManager] Parcel local ID: ${parcelLocalId} (pos=${pos?.x?.toFixed(0) ?? 'N/A'},${pos?.y?.toFixed(0) ?? 'N/A'})`);
+      console.log(`${this.tag} Parcel local ID: ${parcelLocalId} (pos=${pos?.x?.toFixed(0) ?? 'N/A'},${pos?.y?.toFixed(0) ?? 'N/A'})`);
     } catch (e) {
-      console.warn('[VoiceManager] Failed to get parcel local ID:', e);
+      console.warn(`${this.tag} Failed to get parcel local ID:`, e);
     }
 
     // Convert to global coordinates (region grid position * 256 + local offset)
@@ -246,7 +256,7 @@ export class VoiceManager extends EventEmitter {
       pos.z || 0,
     ] : undefined;
 
-    console.log(`[VoiceManager] Region offset: (${regionOffsetX},${regionOffsetY}), global pos: ${globalPos ? `(${globalPos[0].toFixed(0)},${globalPos[1].toFixed(0)},${globalPos[2].toFixed(0)})` : 'N/A'}`);
+    console.log(`${this.tag} Region offset: (${regionOffsetX},${regionOffsetY}), global pos: ${globalPos ? `(${globalPos[0].toFixed(0)},${globalPos[1].toFixed(0)},${globalPos[2].toFixed(0)})` : 'N/A'}`);
 
     this.sendCommand({
       cmd: 'connect',
@@ -276,7 +286,7 @@ export class VoiceManager extends EventEmitter {
       const capsResponse = await viewerConnection.request('VoiceAPI', { op: 'getCaps' });
 
       if (!capsResponse?.caps?.ProvisionVoiceAccountRequest) {
-        console.warn('[VoiceManager] Viewer does not have voice caps');
+        console.warn(`${this.tag} Viewer does not have voice caps`);
         return;
       }
 
@@ -303,7 +313,7 @@ export class VoiceManager extends EventEmitter {
       viewerConnection.on('message', this.handleViewerMessage);
 
     } catch (error) {
-      console.error('[VoiceManager] Failed to connect with viewer:', error);
+      console.error(`${this.tag} Failed to connect with viewer:`, error);
     }
   }
 
@@ -360,7 +370,7 @@ export class VoiceManager extends EventEmitter {
 
   private sendCommand(cmd: Record<string, unknown>): void {
     if (!this.process?.stdin?.writable) {
-      console.warn('[VoiceManager] Cannot send command — sidecar not running');
+      console.warn(`${this.tag} Cannot send command — sidecar not running`);
       return;
     }
     const line = JSON.stringify(cmd) + '\n';
@@ -379,17 +389,17 @@ export class VoiceManager extends EventEmitter {
         const event = JSON.parse(line) as VoiceEvent;
         this.handleEvent(event);
       } catch {
-        console.warn(`[VoiceManager] Failed to parse event: ${line}`);
+        console.warn(`${this.tag} Failed to parse event: ${line}`);
       }
     }
   }
 
   private handleEvent(event: VoiceEvent): void {
-    console.log(`[VoiceManager] Event: ${event.event}`, event);
+    console.log(`${this.tag} Event: ${event.event}`, event);
 
     switch (event.event) {
       case 'ready':
-        console.log('[VoiceManager] Sidecar ready');
+        console.log(`${this.tag} Sidecar ready`);
         this.emit('ready');
         break;
       case 'connected':
@@ -416,7 +426,7 @@ export class VoiceManager extends EventEmitter {
         this.emit('audioDevices', event.inputs, event.outputs);
         break;
       case 'error':
-        console.error(`[VoiceManager] Sidecar error: ${event.message}`);
+        console.error(`${this.tag} Sidecar error: ${event.message}`);
         this.emit('voiceError', event.message);
         break;
       default:
@@ -446,7 +456,7 @@ export class VoiceManager extends EventEmitter {
         if (this._posLogCount < 3) {
           const gx = regionOffsetX + (pos?.x || 0);
           const gy = regionOffsetY + (pos?.y || 0);
-          console.log(`[VoiceManager] Position: local=(${pos?.x?.toFixed(1)},${pos?.y?.toFixed(1)},${pos?.z?.toFixed(1)}), global=(${gx.toFixed(0)},${gy.toFixed(0)}), region=${regionName}`);
+          console.log(`${this.tag} Position: local=(${pos?.x?.toFixed(1)},${pos?.y?.toFixed(1)},${pos?.z?.toFixed(1)}), global=(${gx.toFixed(0)},${gy.toFixed(0)}), region=${regionName}`);
           this._posLogCount++;
         }
 
@@ -510,5 +520,3 @@ export class VoiceManager extends EventEmitter {
     });
   };
 }
-
-export const voiceManager = new VoiceManager();

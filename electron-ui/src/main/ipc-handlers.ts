@@ -9,7 +9,7 @@ import { Vector3 } from '../../node-metaverse/dist/lib';
 import { chatLogManager } from './chat-log-manager';
 import { InventorySyncManager } from './inventory-sync-manager';
 import { ViewerInventoryAdapter } from './viewer-inventory-adapter';
-import { voiceManager } from './voice-manager';
+import { voiceRegistry } from './voice-registry';
 import { getMapWindow } from './map-window';
 
 // Track sync managers per instance
@@ -537,101 +537,147 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
   });
 
   // ── Voice controls ──────────────────────────────────
-  const voiceState: VoiceState = {
-    connected: false,
-    connecting: false,
-    micMuted: true, // PTT mode: mic starts muted
-    speakerMuted: false,
-    volume: 1.0,
-    micLevel: 0,
-    participants: [],
-  };
-
+  // Per-instance voice state; volume/speaker-mute are global
+  const voiceStates = new Map<string, VoiceState>();
+  let globalVolume = 1.0;
+  let globalSpeakerMuted = false;
   let savedVolume = 1.0; // For speaker mute/unmute toggle
 
-  function broadcastVoiceState(): void {
-    mainWindow.webContents.send(IPC_CHANNELS.VOICE_STATE_UPDATE, { ...voiceState });
+  function getOrCreateVoiceState(instanceId: string): VoiceState {
+    let state = voiceStates.get(instanceId);
+    if (!state) {
+      state = {
+        instanceId,
+        connected: false,
+        connecting: false,
+        micMuted: true, // PTT mode: mic starts muted
+        speakerMuted: globalSpeakerMuted,
+        volume: globalVolume,
+        micLevel: 0,
+        participants: [],
+      };
+      voiceStates.set(instanceId, state);
+    }
+    return state;
+  }
+
+  function broadcastVoiceState(instanceId: string): void {
+    const state = voiceStates.get(instanceId);
+    if (state) {
+      mainWindow.webContents.send(IPC_CHANNELS.VOICE_STATE_UPDATE, { ...state });
+    }
   }
 
   // Renderer -> main voice commands
+  // PTT routes to the selected instance only
   ipcMain.handle(IPC_CHANNELS.VOICE_PTT_DOWN, async () => {
-    console.log('[Voice] PTT DOWN');
-    if (voiceState.micMuted) {
-      voiceState.micMuted = false;
-      voiceManager.setMicMute(false);
-      broadcastVoiceState();
+    const id = voiceRegistry.getSelectedInstanceId();
+    const vm = voiceRegistry.getSelected();
+    if (!id || !vm) return;
+    console.log(`[Voice] PTT DOWN (${id})`);
+    const state = getOrCreateVoiceState(id);
+    if (state.micMuted) {
+      state.micMuted = false;
+      vm.setMicMute(false);
+      broadcastVoiceState(id);
     }
   });
 
   ipcMain.handle(IPC_CHANNELS.VOICE_PTT_UP, async () => {
-    console.log('[Voice] PTT UP');
-    if (!voiceState.micMuted) {
-      voiceState.micMuted = true;
-      voiceManager.setMicMute(true);
-      broadcastVoiceState();
+    const id = voiceRegistry.getSelectedInstanceId();
+    const vm = voiceRegistry.getSelected();
+    if (!id || !vm) return;
+    console.log(`[Voice] PTT UP (${id})`);
+    const state = getOrCreateVoiceState(id);
+    if (!state.micMuted) {
+      state.micMuted = true;
+      vm.setMicMute(true);
+      broadcastVoiceState(id);
     }
   });
 
+  // Volume is global — applied to all sidecar processes
   ipcMain.handle(IPC_CHANNELS.VOICE_SET_VOLUME, async (_, volume: number) => {
-    voiceState.volume = Math.max(0, Math.min(1, volume));
-    voiceState.speakerMuted = voiceState.volume === 0;
-    savedVolume = voiceState.volume > 0 ? voiceState.volume : savedVolume;
-    voiceManager.setVolume(voiceState.volume);
-    broadcastVoiceState();
+    globalVolume = Math.max(0, Math.min(1, volume));
+    globalSpeakerMuted = globalVolume === 0;
+    savedVolume = globalVolume > 0 ? globalVolume : savedVolume;
+    voiceRegistry.forEach((vm, id) => {
+      vm.setVolume(globalVolume);
+      const state = getOrCreateVoiceState(id);
+      state.volume = globalVolume;
+      state.speakerMuted = globalSpeakerMuted;
+      broadcastVoiceState(id);
+    });
   });
 
   ipcMain.handle(IPC_CHANNELS.VOICE_TOGGLE_SPEAKER_MUTE, async () => {
-    voiceState.speakerMuted = !voiceState.speakerMuted;
-    if (voiceState.speakerMuted) {
-      savedVolume = voiceState.volume > 0 ? voiceState.volume : savedVolume;
-      voiceState.volume = 0;
+    globalSpeakerMuted = !globalSpeakerMuted;
+    if (globalSpeakerMuted) {
+      savedVolume = globalVolume > 0 ? globalVolume : savedVolume;
+      globalVolume = 0;
     } else {
-      voiceState.volume = savedVolume || 0.5;
+      globalVolume = savedVolume || 0.5;
     }
-    voiceManager.setVolume(voiceState.volume);
-    broadcastVoiceState();
+    voiceRegistry.forEach((vm, id) => {
+      vm.setVolume(globalVolume);
+      const state = getOrCreateVoiceState(id);
+      state.volume = globalVolume;
+      state.speakerMuted = globalSpeakerMuted;
+      broadcastVoiceState(id);
+    });
   });
 
-  // VoiceManager events -> renderer
-  voiceManager.on('connected', () => {
-    voiceState.connected = true;
-    voiceState.connecting = false;
+  // VoiceRegistry events -> renderer (events arrive with instanceId as first arg)
+  voiceRegistry.on('connected', (instanceId: string) => {
+    const state = getOrCreateVoiceState(instanceId);
+    state.connected = true;
+    state.connecting = false;
     // Enforce PTT default: mic starts muted
-    voiceManager.setMicMute(true);
-    voiceState.micMuted = true;
-    broadcastVoiceState();
+    const vm = voiceRegistry.get(instanceId);
+    if (vm) vm.setMicMute(true);
+    state.micMuted = true;
+    // Apply current global volume
+    if (vm) vm.setVolume(globalVolume);
+    state.volume = globalVolume;
+    state.speakerMuted = globalSpeakerMuted;
+    broadcastVoiceState(instanceId);
   });
 
-  voiceManager.on('disconnected', () => {
-    voiceState.connected = false;
-    voiceState.connecting = false;
-    voiceState.micLevel = 0;
-    voiceState.participants = [];
-    broadcastVoiceState();
+  voiceRegistry.on('disconnected', (instanceId: string) => {
+    const state = getOrCreateVoiceState(instanceId);
+    state.connected = false;
+    state.connecting = false;
+    state.micLevel = 0;
+    state.participants = [];
+    broadcastVoiceState(instanceId);
+    voiceStates.delete(instanceId);
   });
 
-  voiceManager.on('ready', () => {
-    voiceState.connecting = true;
-    broadcastVoiceState();
+  voiceRegistry.on('ready', (instanceId: string) => {
+    const state = getOrCreateVoiceState(instanceId);
+    state.connecting = true;
+    broadcastVoiceState(instanceId);
   });
 
-  voiceManager.on('participantJoined', (agentId: string) => {
-    if (!voiceState.participants.includes(agentId)) {
-      voiceState.participants.push(agentId);
-      broadcastVoiceState();
+  voiceRegistry.on('participantJoined', (instanceId: string, agentId: string) => {
+    const state = getOrCreateVoiceState(instanceId);
+    if (!state.participants.includes(agentId)) {
+      state.participants.push(agentId);
+      broadcastVoiceState(instanceId);
     }
   });
 
-  voiceManager.on('participantLeft', (agentId: string) => {
-    voiceState.participants = voiceState.participants.filter(id => id !== agentId);
-    broadcastVoiceState();
+  voiceRegistry.on('participantLeft', (instanceId: string, agentId: string) => {
+    const state = getOrCreateVoiceState(instanceId);
+    state.participants = state.participants.filter(id => id !== agentId);
+    broadcastVoiceState(instanceId);
   });
 
-  // micLevel events from sidecar (forwarded through voiceManager)
-  voiceManager.on('micLevel', (level: number) => {
-    voiceState.micLevel = level;
-    // Don't broadcast on every micLevel - renderer polls via state update
-    mainWindow.webContents.send(IPC_CHANNELS.VOICE_STATE_UPDATE, { ...voiceState });
+  // micLevel events from sidecar (forwarded through voiceRegistry)
+  voiceRegistry.on('micLevel', (instanceId: string, level: number) => {
+    const state = getOrCreateVoiceState(instanceId);
+    state.micLevel = level;
+    mainWindow.webContents.send(IPC_CHANNELS.VOICE_STATE_UPDATE, { ...state });
   });
 
   // Context menu: right-click on user names

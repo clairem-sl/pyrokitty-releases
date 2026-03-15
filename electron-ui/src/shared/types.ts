@@ -301,6 +301,7 @@ export interface ViewerAPI {
 
 // Voice state broadcast to renderer
 export interface VoiceState {
+  instanceId?: string;
   connected: boolean;
   connecting: boolean;
   micMuted: boolean;

@@ -2,7 +2,11 @@ import React from 'react';
 import { useVoice } from '../hooks/useVoice';
 import { useWorldSounds } from '../hooks/useWorldSounds';
 
-export const VoiceBar: React.FC = () => {
+interface VoiceBarProps {
+  activeInstanceId: string | null;
+}
+
+export const VoiceBar: React.FC<VoiceBarProps> = ({ activeInstanceId }) => {
   const {
     connected,
     connecting,
@@ -14,7 +18,7 @@ export const VoiceBar: React.FC = () => {
     pttUp,
     setVolume,
     toggleSpeakerMute,
-  } = useVoice();
+  } = useVoice(activeInstanceId);
 
   const { volume: soundVolume, setVolume: setSoundVolume, muted: soundMuted, toggleMute: toggleSoundMute } = useWorldSounds();
 

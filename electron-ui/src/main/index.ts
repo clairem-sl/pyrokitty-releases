@@ -8,6 +8,7 @@ import { viewerManager } from './viewer-manager';
 import { chatLogManager } from './chat-log-manager';
 import { IPC_CHANNELS } from '../shared/types';
 import { setMapWindow, getMapWindow } from './map-window';
+import { voiceRegistry } from './voice-registry';
 import { InventoryFolder } from '../../node-metaverse/dist/lib/classes/InventoryFolder';
 import { initGpuCompressWindow, destroyGpuCompressWindow } from './gpu-compress-window';
 import { getSavedBounds, trackWindow } from './window-state-manager';
@@ -148,8 +149,9 @@ async function createWindow(): Promise<void> {
     createMapWindow();
   });
 
-  // Forward selected account from main renderer to map window
+  // Forward selected account from main renderer to map window + voice routing
   ipcMain.on(IPC_CHANNELS.MAP_SELECTED_ACCOUNT, (_event, instanceId: string | null) => {
+    voiceRegistry.setSelectedInstance(instanceId);
     const mw = getMapWindow();
     if (mw && !mw.isDestroyed()) {
       mw.webContents.send(IPC_CHANNELS.MAP_SELECTED_ACCOUNT, instanceId);

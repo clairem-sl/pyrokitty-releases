@@ -205,7 +205,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       </div>
 
       {/* Voice bar */}
-      <VoiceBar />
+      <VoiceBar activeInstanceId={instanceId} />
 
       {/* Inventory sync bar */}
       <div className="sync-bar">

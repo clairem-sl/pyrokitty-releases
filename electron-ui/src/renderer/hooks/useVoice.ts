@@ -12,19 +12,27 @@ const DEFAULT_STATE: VoiceState = {
   participants: [],
 };
 
-export function useVoice() {
-  const [state, setState] = useState<VoiceState>(DEFAULT_STATE);
+export function useVoice(activeInstanceId: string | null) {
+  const [states, setStates] = useState<Map<string, VoiceState>>(new Map());
   const pttActiveRef = useRef(false);
 
   useEffect(() => {
     const handler = (_event: any, data: VoiceState) => {
-      setState(data);
+      if (data.instanceId) {
+        setStates(prev => {
+          const next = new Map(prev);
+          next.set(data.instanceId!, data);
+          return next;
+        });
+      }
     };
     ipcRenderer.on(IPC_CHANNELS.VOICE_STATE_UPDATE, handler);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.VOICE_STATE_UPDATE, handler);
     };
   }, []);
+
+  const state = (activeInstanceId ? states.get(activeInstanceId) : null) || DEFAULT_STATE;
 
   const pttDown = useCallback(() => {
     if (!pttActiveRef.current) {
