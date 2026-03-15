@@ -8806,6 +8806,7 @@
     "id": 879,
     "valueMin": -0.5,
     "valueMax": 2,
+    "sex": "male",
     "drivenParams": [
       {
         "id": 30879,
@@ -8825,7 +8826,8 @@
               0
             ]
           }
-        ]
+        ],
+        "sex": "male"
       }
     ]
   },

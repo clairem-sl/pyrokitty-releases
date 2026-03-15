@@ -364,7 +364,7 @@ func process_animesh(delta: float) -> void:
 		var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(root_id)
 		if shared_skel != null:
 			_evaluate_skeleton_animation(shared_skel, sl_local_rot, sl_local_pos)
-			_apply_global_pose_overrides(shared_skel)
+			_apply_global_pose_overrides(shared_skel, root_id)
 			_update_bone_attachments(root_id, shared_skel)
 			if _debug_skeleton_visible:
 				_update_debug_bone_markers(shared_skel)
@@ -375,20 +375,60 @@ func process_animesh(delta: float) -> void:
 ## Compute and apply global pose overrides for a skeleton.
 ## Called every frame for ALL skeletons so that skinning and attachments
 ## always see correct bone positions (not just rest).
-func _apply_global_pose_overrides(skeleton: Skeleton3D) -> void:
-	var bone_globals: Array[Transform3D] = []
-	bone_globals.resize(skeleton.get_bone_count())
-	for bi in range(skeleton.get_bone_count()):
+##
+## Two SL behaviors are applied here dynamically (matching xform.cpp):
+## 1. PARENT SCALE on child position (xform.cpp:76):
+##    child.worldPos = parent.worldRot * (child.localPos * parent.scale) + parent.worldPos
+##    Scale does NOT cascade through rotation/basis — only affects child position.
+## 2. BONE'S OWN SCALE in skinning matrix (xform.cpp:93):
+##    worldMatrix.initAll(mScale, mWorldRotation, mWorldPosition)
+##    Scale is included in the world matrix upper 3x3 for vertex deformation
+##    but does NOT cascade to children's scale (SL: worldScale = localScale).
+func _apply_global_pose_overrides(skeleton: Skeleton3D, root_id: int) -> void:
+	var shape_scales: Dictionary = sm.bone_shape_scales.get(root_id, {})
+	var bone_count: int = skeleton.get_bone_count()
+
+	# Position+rotation chain (NO scale in basis) — used for child positioning
+	var pos_globals: Array[Transform3D] = []
+	pos_globals.resize(bone_count)
+
+	for bi in range(bone_count):
 		var rest_xf: Transform3D = skeleton.get_bone_rest(bi)
 		var pose_rot: Quaternion = skeleton.get_bone_pose_rotation(bi)
 		var pose_pos: Vector3 = skeleton.get_bone_pose_position(bi)
-		var local_xf: Transform3D = rest_xf * Transform3D(Basis(pose_rot), pose_pos)
 		var parent_bi: int = skeleton.get_bone_parent(bi)
+
+		# Apply parent shape scale to this bone's rest position dynamically
+		# SL scale (sx, sy, sz) → Godot position (gx, gy, gz) = (sl_x, sl_z, -sl_y)
+		# Scale mapping: gx *= sx, gy *= sz, gz *= sy
 		if parent_bi >= 0:
-			bone_globals[bi] = bone_globals[parent_bi] * local_xf
+			var parent_name: String = skeleton.get_bone_name(parent_bi)
+			if shape_scales.has(parent_name):
+				var ps: Vector3 = shape_scales[parent_name]  # SL space (sx, sy, sz)
+				var o: Vector3 = rest_xf.origin
+				rest_xf.origin = Vector3(o.x * ps.x, o.y * ps.z, o.z * ps.y)
+
+		# Position+rotation chain (no scale in basis — prevents scale cascade)
+		var local_xf: Transform3D = rest_xf * Transform3D(Basis(pose_rot), pose_pos)
+		if parent_bi >= 0:
+			pos_globals[bi] = pos_globals[parent_bi] * local_xf
 		else:
-			bone_globals[bi] = local_xf
-		skeleton.set_bone_global_pose_override(bi, bone_globals[bi], 1.0, true)
+			pos_globals[bi] = local_xf
+
+		# Apply this bone's OWN shape scale to the skinning transform basis.
+		# SL puts scale into the world matrix for vertex deformation but does NOT
+		# cascade it to children (worldScale = localScale, not parent * local).
+		var bname: String = skeleton.get_bone_name(bi)
+		var final_xf: Transform3D = pos_globals[bi]
+		if shape_scales.has(bname):
+			var bs: Vector3 = shape_scales[bname]  # SL space (sx, sy, sz)
+			var godot_scale := Vector3(bs.x, bs.z, bs.y)  # SL→Godot scale axis mapping
+			final_xf = Transform3D(
+				pos_globals[bi].basis * Basis.from_scale(godot_scale),
+				pos_globals[bi].origin
+			)
+
+		skeleton.set_bone_global_pose_override(bi, final_xf, 1.0, true)
 
 
 # ─── Skeleton Evaluation ─────────────────────────────
@@ -497,6 +537,7 @@ func _update_bone_attachments(root_id: int, shared_skel: Skeleton3D) -> void:
 			continue
 
 		# Compute bone global transform from shared skeleton (rest * pose through parent chain)
+		# Apply dynamic parent shape scale to match _apply_global_pose_overrides
 		var chain: Array[int] = []
 		var cur: int = bi
 		while cur >= 0:
@@ -504,11 +545,20 @@ func _update_bone_attachments(root_id: int, shared_skel: Skeleton3D) -> void:
 			cur = shared_skel.get_bone_parent(cur)
 		chain.reverse()
 
+		var shape_scales: Dictionary = sm.bone_shape_scales.get(root_id, {})
 		var bone_global_xf := Transform3D.IDENTITY
 		for idx: int in chain:
 			var rest_xf: Transform3D = shared_skel.get_bone_rest(idx)
 			var pose_rot: Quaternion = shared_skel.get_bone_pose_rotation(idx)
 			var pose_pos: Vector3 = shared_skel.get_bone_pose_position(idx)
+			# Apply parent shape scale dynamically (same as _apply_global_pose_overrides)
+			var parent_idx: int = shared_skel.get_bone_parent(idx)
+			if parent_idx >= 0:
+				var parent_name: String = shared_skel.get_bone_name(parent_idx)
+				if shape_scales.has(parent_name):
+					var ps: Vector3 = shape_scales[parent_name]
+					var o: Vector3 = rest_xf.origin
+					rest_xf.origin = Vector3(o.x * ps.x, o.y * ps.z, o.z * ps.y)
 			bone_global_xf = bone_global_xf * rest_xf * Transform3D(Basis(pose_rot), pose_pos)
 
 		var bone_pos: Vector3 = bone_global_xf.origin
@@ -517,14 +567,14 @@ func _update_bone_attachments(root_id: int, shared_skel: Skeleton3D) -> void:
 		# Debug: log once per child
 		if not sm._attach_bone_logged.has(child_id):
 			sm._attach_bone_logged[child_id] = true
-			var _dbg_offset_pos: Vector3 = sm.child_offset_pos.get(child_id, Vector3.ZERO)
-			var _dbg_ap_id: int = sm.attach_point_id.get(child_id, 0)
-			print("[AttachBone] child=%d bone=%s bone_pos=%s offset_pos=%s ap=%d root=%d" % [child_id, bone_name, bone_pos, _dbg_offset_pos, _dbg_ap_id, root_id])
+			print("[AttachBone] child=%d bone=%s ap=%d root=%d" % [child_id, bone_name, sm.attach_point_id.get(child_id, 0), root_id])
 
 		var bone_world_pos: Vector3 = root_node.position + root_node.quaternion * bone_pos
 		var bone_world_rot: Quaternion = root_node.quaternion * bone_rot
 		var ap_id: int = sm.attach_point_id.get(child_id, 0)
-		var ap_xf: Array = _get_ap_world_transform(ap_id, bone_world_pos, bone_world_rot)
+		# Pass bone's shape scale so AP offset is scaled by parent bone (xform.cpp:76)
+		var bone_scale: Vector3 = shape_scales.get(bone_name, Vector3.ONE)
+		var ap_xf: Array = _get_ap_world_transform(ap_id, bone_world_pos, bone_world_rot, bone_scale)
 		var offset_pos: Vector3 = sm.child_offset_pos.get(child_id, Vector3.ZERO)
 		var offset_rot: Quaternion = sm.child_offset_rot.get(child_id, Quaternion.IDENTITY)
 		child_rsi.pos = ap_xf[0] + ap_xf[2] * offset_pos
@@ -537,18 +587,20 @@ func _update_bone_attachments(root_id: int, shared_skel: Skeleton3D) -> void:
 			sm.interp_mgr._update_children_world_pos(child_id, child_rsi.pos, child_rsi.rot)
 
 
-## Compute the world rotation of an attachment point given the bone's world rotation.
-## Returns [_, _, ap_world_rot] (only index [2] is used — the AP world orientation).
-## ap_xf[2] = bone_world_rot * ap_rot_godot, used for child_offset_rot orientation.
-## NOTE: Position is NOT derived here. SL network sends child positions in avatar-root-local
-## space (already includes AP height). Position = root_node.pos + root_node.rot * child_offset.
-func _get_ap_world_transform(ap_id: int, bone_world_pos: Vector3, bone_world_rot: Quaternion) -> Array:
+## Compute the world transform of an attachment point given the bone's world transform.
+## Returns [ap_world_pos, bone_world_rot, ap_world_rot].
+## The AP is a child of the bone in SL's skeleton hierarchy, so its local position
+## is scaled by the bone's shape scale (xform.cpp:76: child.localPos * parent.scale).
+## bone_shape_scale is in SL space (sx, sy, sz).
+func _get_ap_world_transform(ap_id: int, bone_world_pos: Vector3, bone_world_rot: Quaternion, bone_shape_scale: Vector3 = Vector3.ONE) -> Array:
 	if ap_id <= 0 or not sm.object_mgr.ATTACH_POINT_OFFSETS.has(ap_id):
 		return [bone_world_pos, bone_world_rot, bone_world_rot]
 	var ap_data: Dictionary = sm.object_mgr.ATTACH_POINT_OFFSETS[ap_id]
 	var sl_pos: Vector3 = ap_data["pos"]
 	var sl_euler: Vector3 = ap_data["rot"]
-	var ap_pos_godot := Vector3(sl_pos.x, sl_pos.z, -sl_pos.y)
+	# Apply bone shape scale to AP offset in SL space (xform.cpp:76: child.localPos * parent.scale)
+	var scaled_sl_pos := Vector3(sl_pos.x * bone_shape_scale.x, sl_pos.y * bone_shape_scale.y, sl_pos.z * bone_shape_scale.z)
+	var ap_pos_godot := Vector3(scaled_sl_pos.x, scaled_sl_pos.z, -scaled_sl_pos.y)
 	var ap_rot_godot: Quaternion = _sl_euler_to_godot_quat(sl_euler.x, sl_euler.y, sl_euler.z)
 	var ap_world_pos: Vector3 = bone_world_pos + bone_world_rot * ap_pos_godot
 	var ap_world_rot: Quaternion = bone_world_rot * ap_rot_godot
@@ -602,29 +654,17 @@ func _get_bone_global_rest_xf(skel: Skeleton3D, bi: int) -> Transform3D:
 ## overridden an ancestor bone, the shared skeleton's parent chain would differ
 ## from the GLB's parent chain, producing incorrect local rests.
 ## Last mesh to set a bone wins (same as SL/Firestorm).
-## In SL, joint overrides REPLACE the shape-computed local position for that bone,
-## but parent shape scale STILL affects the overridden bone's world position
-## (xform.cpp:76: mWorldPosition.scaleVec(mParent->getScale())).
-## We simulate this by applying parent shape scale to the override position,
-## just as we do for non-overridden bones in _apply_shape_to_skeleton.
+## In SL, joint overrides REPLACE the shape-computed local position for that bone.
+## Parent shape scale is applied dynamically each frame in _apply_global_pose_overrides
+## (matching xform.cpp:76), NOT baked into the rest position. This keeps override rest
+## consistent with GLB IBMs (both without parent scale), preventing skinning mismatch.
 func _apply_joint_overrides(glb_skel: Skeleton3D, shared_skel: Skeleton3D, override_joints: Array, mesh_id: String) -> void:
-	# Find the avatar root for priority tracking and shape scale lookup
+	# Find the avatar root for priority tracking
 	var avatar_root_id: int = -1
 	for av_lid: int in sm.animesh_shared_skeleton:
 		if sm.animesh_shared_skeleton[av_lid] == shared_skel:
 			avatar_root_id = av_lid
 			break
-
-	# Gather parent shape scales for parent-scale application (same baking as _apply_shape_to_skeleton)
-	var parent_scale: Dictionary = {}  # bone_name -> Vector3 (SL space scale)
-	if avatar_root_id >= 0:
-		var avatar_uuid: String = sm.object_uuid.get(avatar_root_id, "")
-		if not avatar_uuid.is_empty() and sm.avatar_mgr._avatar_shapes.has(avatar_uuid):
-			var shape_bones: Dictionary = sm.avatar_mgr._avatar_shapes[avatar_uuid]
-			for bname: String in shape_bones:
-				var shape_data: Dictionary = shape_bones[bname]
-				var s: Array = shape_data.get("scale", [1, 1, 1])
-				parent_scale[bname] = Vector3(s[0], s[1], s[2])
 
 	var xml_bones: Array = sm.skeleton_builder.get_bone_data()
 	var xml_parent: Dictionary = {}  # bone_name -> parent_name
@@ -667,11 +707,7 @@ func _apply_joint_overrides(glb_skel: Skeleton3D, shared_skel: Skeleton3D, overr
 			continue
 		owners[bone_key] = mesh_id
 
-		# Apply immediate parent's shape scale (same baking as _apply_shape_to_skeleton)
-		var pname: String = xml_parent.get(jname as String, "")
-		if not pname.is_empty() and parent_scale.has(pname):
-			var ps: Vector3 = parent_scale[pname]
-			sl_pos = Vector3(sl_pos.x * ps.x, sl_pos.y * ps.y, sl_pos.z * ps.z)
+		# Parent scale NOT baked — applied dynamically in _apply_global_pose_overrides
 
 		var final_godot := Vector3(sl_pos.x, sl_pos.z, -sl_pos.y)
 
@@ -854,16 +890,31 @@ func _update_debug_bone_markers(skel: Skeleton3D) -> void:
 		if bi < 0:
 			continue
 		# Compute bone global transform manually (rest * pose through parent chain)
+		# Apply dynamic parent scale (same as _apply_global_pose_overrides)
 		var chain: Array[int] = []
 		var cur: int = bi
 		while cur >= 0:
 			chain.append(cur)
 			cur = skel.get_bone_parent(cur)
 		chain.reverse()
+		# Find root_id for shape scale lookup
+		var dbg_root_id: int = 0
+		for rid: int in sm.animesh_shared_skeleton:
+			if sm.animesh_shared_skeleton[rid] == skel:
+				dbg_root_id = rid
+				break
+		var dbg_shape_scales: Dictionary = sm.bone_shape_scales.get(dbg_root_id, {})
 		var bone_xf := Transform3D.IDENTITY
 		for idx: int in chain:
 			var rest_xf: Transform3D = skel.get_bone_rest(idx)
 			var pose_rot: Quaternion = skel.get_bone_pose_rotation(idx)
 			var pose_pos: Vector3 = skel.get_bone_pose_position(idx)
+			var parent_idx: int = skel.get_bone_parent(idx)
+			if parent_idx >= 0:
+				var parent_name: String = skel.get_bone_name(parent_idx)
+				if dbg_shape_scales.has(parent_name):
+					var ps: Vector3 = dbg_shape_scales[parent_name]
+					var o: Vector3 = rest_xf.origin
+					rest_xf.origin = Vector3(o.x * ps.x, o.y * ps.z, o.z * ps.y)
 			bone_xf = bone_xf * rest_xf * Transform3D(Basis(pose_rot), pose_pos)
 		child.global_position = (skel_global * bone_xf).origin

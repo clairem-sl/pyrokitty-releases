@@ -225,8 +225,17 @@ export class GodotBridge extends EventEmitter {
       console.error(`[Godot] ${data.toString().trim()}`);
     });
 
-    this.process.on('exit', (code) => {
-      console.log(`[GodotBridge] Godot exited with code ${code}`);
+    this.process.on('exit', (code, signal) => {
+      console.log(`[GodotBridge] Godot exited with code=${code} signal=${signal}`);
+      // Read crash breadcrumb if Godot died unexpectedly
+      if (code !== 0 && code !== null) {
+        try {
+          const appData = process.env.APPDATA || '';
+          const breadcrumb = require('fs').readFileSync(
+            require('path').join(appData, 'Godot', 'app_userdata', 'PyroKitty 3D', 'crash_breadcrumb.txt'), 'utf8');
+          console.error(`[GodotBridge] Crash breadcrumb: ${breadcrumb.trim()}`);
+        } catch { /* breadcrumb file may not exist */ }
+      }
       this.cleanup();
       this.emit('exit');
     });
@@ -333,7 +342,7 @@ export class GodotBridge extends EventEmitter {
     const sculptFetchQueue = new SculptFetchQueue(this.bot, (meshId, cachePath) => {
       const fwdPath = cachePath.replace(/\\/g, '/');
       this.queueAssetReady({ type: 'mesh_ready', meshId, path: fwdPath });
-    });
+    }, this.textureFetchQueue.decodePool);
 
     const materialFetchQueue = new MaterialFetchQueue(this.bot, (materialUuid, data) => {
       this.materialPipeline.handleMaterialReady(materialUuid, data);

@@ -15,6 +15,7 @@ import { app } from 'electron';
 
 const MAX_CONCURRENT_DOWNLOADS = 16;
 
+
 // Zero UUID — skip these
 const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
 

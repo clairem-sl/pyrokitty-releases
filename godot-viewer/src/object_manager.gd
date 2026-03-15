@@ -254,7 +254,8 @@ func handle_object_create(msg: Dictionary) -> void:
 					var _bp: Vector3 = root_node.position + root_node.quaternion * _bpos
 					var _bg: Transform3D = _ss.get_bone_global_rest(_bi)
 					var _br: Quaternion = root_node.quaternion * _bg.basis.orthonormalized().get_rotation_quaternion()
-					var _ap_xf: Array = sm.animation_mgr._get_ap_world_transform(_ap, _bp, _br)
+					var _bone_scale: Vector3 = sm.bone_shape_scales.get(parent_id, {}).get(_bn, Vector3.ONE)
+					var _ap_xf: Array = sm.animation_mgr._get_ap_world_transform(_ap, _bp, _br, _bone_scale)
 					rsi.pos = _ap_xf[0] + _ap_xf[2] * godot_pos
 					rsi.rot = _ap_xf[2] * godot_rot
 				else:

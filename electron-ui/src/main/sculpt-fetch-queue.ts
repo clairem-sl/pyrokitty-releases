@@ -7,6 +7,7 @@
 import { AssetType } from '../../node-metaverse/dist/lib';
 import type { Bot } from '../../node-metaverse/dist/lib';
 import { isSculptCached, sculptCachePath, ensureSculptCached, sculptMeshId } from './sculpt-converter';
+import type { DecodePool } from './decode-pool';
 
 const MAX_CONCURRENT = 4;
 
@@ -15,6 +16,7 @@ export type SculptReadyCallback = (sculptMeshId: string, cachePath: string) => v
 export class SculptFetchQueue {
   private bot: Bot;
   private onReady: SculptReadyCallback;
+  private decodePool: DecodePool;
   private pending = new Map<string, Set<number>>(); // dedupKey → localIds waiting
   private active = 0;
   private queue: { textureUuid: string; sculptType: number; dedupKey: string }[] = [];
@@ -22,9 +24,10 @@ export class SculptFetchQueue {
   private notified = new Set<string>(); // dedupKeys already sent to Godot
   private destroyed = false;
 
-  constructor(bot: Bot, onReady: SculptReadyCallback) {
+  constructor(bot: Bot, onReady: SculptReadyCallback, decodePool: DecodePool) {
     this.bot = bot;
     this.onReady = onReady;
+    this.decodePool = decodePool;
   }
 
   get queueDepth(): number { return this.queue.length; }
@@ -82,7 +85,7 @@ export class SculptFetchQueue {
         return;
       }
 
-      const cachePath = await ensureSculptCached(textureUuid, sculptType, j2cBuf);
+      const cachePath = await ensureSculptCached(textureUuid, sculptType, j2cBuf, this.decodePool);
       if (!this.destroyed) {
         this.notified.add(dedupKey);
         console.log(`[SculptFetchQueue] Ready: ${dedupKey}`);

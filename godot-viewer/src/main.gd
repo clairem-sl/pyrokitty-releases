@@ -25,6 +25,19 @@ var _window_bounds_timer: float = 0.0
 var _last_window_pos: Vector2i = Vector2i(-99999, -99999)
 var _last_window_size: Vector2i = Vector2i(-99999, -99999)
 
+# Crash breadcrumb — written before each message is processed so we know
+# what killed us if the process dies mid-message.
+var _breadcrumb_path: String = ""
+var _breadcrumb_file: FileAccess
+var _msg_count: int = 0
+var _frame_count: int = 0
+
+func write_breadcrumb(text: String) -> void:
+	if _breadcrumb_file:
+		_breadcrumb_file.seek(0)
+		_breadcrumb_file.store_string("frame=%d %s\n" % [_frame_count, text])
+		_breadcrumb_file.flush()
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		# Tell Electron to kill us (instant TerminateProcess) and also quit locally —
@@ -47,6 +60,14 @@ func _exit_tree() -> void:
 func _ready() -> void:
 	# We handle WM_CLOSE_REQUEST in _notification to send quit to Electron first
 	get_tree().auto_accept_quit = false
+
+	# Crash breadcrumb file — survives process death, tells us the last message processed
+	_breadcrumb_path = OS.get_user_data_dir() + "/crash_breadcrumb.txt"
+	_breadcrumb_file = FileAccess.open(_breadcrumb_path, FileAccess.WRITE)
+	if _breadcrumb_file:
+		_breadcrumb_file.store_string("Godot started at %s\n" % Time.get_datetime_string_from_system())
+		_breadcrumb_file.flush()
+		print("[Main] Crash breadcrumb: %s" % _breadcrumb_path)
 
 	# Parse command-line args
 	var args := OS.get_cmdline_user_args()
@@ -151,6 +172,8 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	_frame_count += 1
+	write_breadcrumb("_process START msgs=%d queued=%d" % [_msg_count, _low_priority_queue.size()])
 	fps_timer += _delta
 	# Send pipeline stats to Electron for logging
 	stats_timer += _delta
@@ -245,6 +268,8 @@ func _process(_delta: float) -> void:
 		ws_peer = null
 		tcp_peer = null
 
+	write_breadcrumb("msgs_done total=%d queued=%d → scene_process" % [_msg_count, _low_priority_queue.size()])
+
 
 ## Classify a raw JSON string as high-priority without full parsing.
 ## Peeks at the first 40 bytes — enough to see any "type":"avatar_*" or "self_id".
@@ -263,6 +288,13 @@ func _handle_message(text: String) -> void:
 
 	var msg: Dictionary = json.data
 	var msg_type: String = msg.get("type", "")
+
+	# Crash breadcrumb — write before processing so we know what killed us
+	_msg_count += 1
+	var local_id_str: String = str(msg.get("localId", msg.get("id", "")))
+	var mesh_id_str: String = str(msg.get("meshId", "")).left(8)
+	write_breadcrumb("msg#%d type=%s localId=%s meshId=%s queued=%d" % [
+		_msg_count, msg_type, local_id_str, mesh_id_str, _low_priority_queue.size()])
 
 	match msg_type:
 		"region_change":

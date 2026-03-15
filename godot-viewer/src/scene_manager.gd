@@ -115,6 +115,7 @@ var animesh_root_for: Dictionary = {}      # localId (int) -> root localId (maps
 var rigged_mesh_paths: Dictionary = {}     # meshId (String) -> GLB path (for generate_scene)
 var mesh_joint_overrides: Dictionary = {} # meshId (String) -> Array[String] (joints with custom positions)
 var bone_override_owner: Dictionary = {}  # root localId (int) -> Dictionary { boneName -> meshId } (lowest UUID wins)
+var bone_shape_scales: Dictionary = {}   # root localId (int) -> Dictionary { boneName -> Vector3 (SL space scale) }
 var animesh_anim_data: Dictionary = {}    # animId (String) -> raw Dictionary (with per-joint priorities)
 var animesh_pending_anims: Dictionary = {} # root localId (int) -> Array[animId String] (pending animation IDs)
 var animesh_worn_anims: Dictionary = {}   # root localId (int) -> Array[animId String] (from worn animesh attachments)
@@ -334,6 +335,7 @@ func handle_region_change() -> void:
 	animesh_pending_anims.clear()
 	animesh_worn_anims.clear()
 	bone_global_overrides.clear()
+	bone_shape_scales.clear()
 
 	# Clear all tracking dictionaries
 	avatar_targets.clear()

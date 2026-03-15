@@ -28,37 +28,45 @@ export class DecodePool {
   private destroyed = false;
 
   constructor() {
-    const workerPath = path.join(__dirname, 'texture-decode-worker.js');
     for (let i = 0; i < POOL_SIZE; i++) {
-      const w = new Worker(workerPath, { workerData: { workerId: i } });
-      w.on('message', (msg: { id: number; webpBuf?: Buffer; rgbaPixels?: Buffer; width?: number; height?: number; error?: string }) => {
-        const job = this.pending.get(msg.id);
-        if (!job) return;
-        this.pending.delete(msg.id);
-
-        if (msg.error) {
-          job.reject(new Error(msg.error));
-        } else if (job.mode === 'raw') {
-          // msg.rgbaPixels is already a Buffer from structured clone — don't copy
-          job.resolve({
-            rgbaPixels: msg.rgbaPixels!,
-            width: msg.width!,
-            height: msg.height!,
-          } as RawDecodeResult);
-        } else {
-          job.resolve(msg.webpBuf!);
-        }
-
-        // Return worker to idle pool and drain queue
-        this.idle.push(w);
-        this.drain();
-      });
-      w.on('error', (err) => {
-        console.error('[DecodePool] Worker error:', err);
-      });
-      this.workers.push(w);
-      this.idle.push(w);
+      this.spawnWorker();
     }
+  }
+
+  private spawnWorker(): void {
+    if (this.destroyed) return;
+    const workerPath = path.join(__dirname, 'texture-decode-worker.js');
+    const w = new Worker(workerPath, { workerData: { workerId: this.workers.length } });
+    w.on('message', (msg: { id: number; webpBuf?: Buffer; rgbaPixels?: Buffer; width?: number; height?: number; error?: string }) => {
+      const job = this.pending.get(msg.id);
+      if (!job) return;
+      this.pending.delete(msg.id);
+      if (msg.error) {
+        job.reject(new Error(msg.error));
+      } else if (job.mode === 'raw') {
+        job.resolve({ rgbaPixels: msg.rgbaPixels!, width: msg.width!, height: msg.height! } as RawDecodeResult);
+      } else {
+        job.resolve(msg.webpBuf!);
+      }
+      this.idle.push(w);
+      this.drain();
+    });
+    w.on('error', (err) => {
+      console.error('[DecodePool] Worker error:', err);
+    });
+    w.on('exit', (code) => {
+      if (code !== 0 && !this.destroyed) {
+        console.error(`[DecodePool] Worker exited with code ${code} — WASM abort? Replacing.`);
+        const idx = this.workers.indexOf(w);
+        if (idx >= 0) this.workers.splice(idx, 1);
+        const idleIdx = this.idle.indexOf(w);
+        if (idleIdx >= 0) this.idle.splice(idleIdx, 1);
+        this.spawnWorker();
+      }
+    });
+    this.workers.push(w);
+    this.idle.push(w);
+    this.drain();
   }
 
   get queueDepth(): number { return this.queue.length; }

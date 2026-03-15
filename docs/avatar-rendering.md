@@ -93,8 +93,17 @@ bone_scale = (1,1,1) + Σ(weight_i × param_scale_delta_i)
 bone_offset = Σ(weight_i × param_offset_delta_i)
 ```
 
-### SL Bone Scale Semantics
-Parent scale multiplies child bone positions (`xform.cpp: mWorldPosition.scaleVec(mParent->getScale())`). This is NOT Godot basis scale (which would cascade through the entire subtree). We apply parent scale to each child's local position in SL space before coordinate conversion.
+### SL Bone Scale Semantics (UPDATED 2026-03-15)
+
+Two scale effects in SL's `xform.cpp`, both applied dynamically each frame in `_apply_global_pose_overrides`:
+
+1. **Parent scale on child position** (`xform.cpp:76`): `child.worldPos = parent.worldRot * (child.localPos * parent.scale) + parent.worldPos`. Scale does NOT cascade through rotation/basis — only affects child position. Applied dynamically (not baked into rest) so override rest positions match GLB IBMs (both without parent scale).
+
+2. **Bone's own scale in skinning matrix** (`xform.cpp:93`): `worldMatrix.initAll(mScale, mWorldRotation, mWorldPosition)`. The bone's shape scale goes into the world matrix upper 3x3 for per-vertex mesh deformation. Scale does NOT cascade to children's scale (`worldScale = localScale`). In Godot, achieved via `Basis.from_scale()` multiplied into the global pose override basis.
+
+SL→Godot scale axis mapping: `Vector3(sl_sx, sl_sz, sl_sy)` (SL X→Godot X, SL Z→Godot Y, SL Y→Godot Z).
+
+Shape scales stored in `sm.bone_shape_scales[root_id]` as SL-space `Vector3(sx, sy, sz)` per bone name.
 
 ### Critical Implementation Details
 
@@ -114,8 +123,10 @@ Source: `llvoavatar.cpp` `expected_tweakable_count = group(TWEAKABLE) + group(TR
 
 **Login timing.** AvatarAppearance arrives before GodotBridge subscribes. `metaverse-connection.ts` buffers `avatarVisualParamBuffer`, seeded to avatar manager on bridge init.
 
+### Sex Filtering (IMPLEMENTED 2026-03-15)
+Params with `sex="male"` or `sex="female"` in avatar_lad.xml use weight 0 when avatar sex doesn't match (Firestorm: `(getSex() & avatar_sex) ? mCurWeight : getDefaultWeight()`). Avatar sex determined by param id=80 ("male") at byteIndex=31: dequantized > 0.5 = male. Only 1 skeleton param is sex-filtered: id=879 Male_Package → mGroin. Sex field extracted by `convert-avatar-lad.js` into JSON.
+
 ### Not Implemented
-- **Skinning matrix scale**: SL puts joint scale into the skinning world matrix for per-vertex deformation. Minor visual difference, would require custom shader.
 - **Morph targets**: Face detail deformation via vertex morphs (blend shapes). Separate from skeleton shape.
 - **Hover height**: `AppearanceHover` is separate from shape params.
 
@@ -142,10 +153,7 @@ CV rotation/scale is baked into GLB IBMs via Hippolyzer-style fixup. Rest transf
 
 ## Known Issues
 
-- **Prim attachments diverge during walk**: Rigged mesh and prim attachment positions can diverge during locomotion
-- **Half t-pose on some meshes**: Lel heads, some tail joints not fully resolved
 - **Degenerate CV bone poses**: Falling back to IDENTITY/rest instead of animated
-- **Self-avatar animation batch not logged**: Own UUID never appears in batch ready logs
 - **519 missing children on rescan**: Attachment routing incomplete on startup
 - **Debug logging**: Multiple log categories (`[AttachDebug]`, `[AttachBone]`, `[AvatarDebug]`, `[ShapeDebug]`, etc.) still active
 
@@ -289,31 +297,44 @@ We tried running `_apply_global_pose_overrides` unconditionally for ALL skeleton
 
 `avatar_lad_skeleton.json` lacks sex info. Firestorm's `LLPolySkeletalDistortion::apply()` checks `(getSex() & avatar_sex)` and uses `getDefaultWeight()` for params that don't match the avatar's sex. Our code always uses the byte value. This causes wrong scale on mHead (our: 0.926, Firestorm: 1.096). Need to add sex field to the JSON and filter in `computeSkeletonDeltas()`.
 
-### Recommended Priority for Next Session
+### Resolution (2026-03-15)
 
-1. **Fix IBMs in mesh-converter (Approach 3)** — This is the foundation. `getWorldPos()` should use override-modified node positions, not XML defaults. Once IBMs match rest, eyes are fixed and head droop likely resolves.
-2. **Remove parent scale from overrides** — With correct IBMs, Approach 1 becomes safe. Override positions and IBMs both lack parent scale → consistent skinning. Non-overridden bones keep parent scale in shape (with threshold filter preventing near-default overrides from breaking them).
-3. **Ball avatar fix** — Call `_apply_global_pose_overrides` on skeleton creation and shape change, not every frame.
-4. **Sex filtering** — Add sex field to `avatar_lad_skeleton.json`, filter in `computeSkeletonDeltas()`.
+Issues 1-4 and 6 were resolved by implementing dynamic parent scale + bone scale in skinning (Approach 2, done properly this time with all consumers updated). The key changes:
+
+1. **Dynamic parent scale**: `_apply_shape_to_skeleton` no longer bakes parent scale. Shape scales stored in `sm.bone_shape_scales`. `_apply_global_pose_overrides` applies parent scale dynamically each frame (matching `xform.cpp:76`). All bone position consumers (`_update_bone_attachments`, debug markers) also use dynamic parent scale.
+
+2. **Bone scale in skinning basis**: `_apply_global_pose_overrides` includes each bone's own shape scale in the global pose override via `Basis.from_scale()`, matching `xform.cpp:93: initAll(mScale, mWorldRot, mWorldPos)`. Scale does NOT cascade to children (matching SL: `worldScale = localScale`).
+
+3. **AP offset bone scale**: `_get_ap_world_transform` now scales AP offsets by the bone's shape scale (AP is a child joint, subject to `xform.cpp:76`). Fixed boots too low / ears too high.
+
+4. **Sex filtering**: `convert-avatar-lad.js` extracts `@_sex`. `computeSkeletonDeltas()` filters by avatar sex (param id=80, byteIndex=31). Only 1 skeleton param affected: id=879 Male_Package → mGroin. Earlier mHead attribution was incorrect.
+
+5. **Network positions are AP-local**: Confirmed by Firestorm log comparison — `setupDrawable` shows `obj_pos_local` values are small offsets (0.08m), not skeleton heights. Formula `ap_world + ap_rot * offset` is correct.
+
+### Remaining Issues
+
+- **Ball avatar before animations** — `set_bone_global_pose_override` only called during anim eval
+- **Morph targets** — Face detail vertex morphs (blend shapes)
+- **Hover height** — `AppearanceHover` separate from shape params
 
 ### Test Avatars
 
-| Avatar | UUID | Type | Use For |
-|--------|------|------|---------|
-| Dog (SparkleSpice) | 8f99e602-680e-4af8-bfc5-88a22491e2dc | Avatar | Non-human mesh, head droop, eye popping, shape scale extremes |
-| Dog animesh | e8ca0f4d-6bb9-9e4f-adb0-a72e135d6fbf | Animesh | Correct baseline for dog mesh (no shape) |
-| Human (27df63dc) | 27df63dc-2a9e-4c4e-9fbf-404aa902e529 | Avatar | Leg asymmetry test, partial joint overrides |
+| Avatar | UUID | Type |
+|--------|------|------|
+| Dog (SparkleSpice) | 8f99e602-680e-4af8-bfc5-88a22491e2dc | Avatar |
+| Dog animesh | e8ca0f4d-6bb9-9e4f-adb0-a72e135d6fbf | Animesh |
+| Human (ostiabs) | 27df63dc-2a9e-4c4e-9fbf-404aa902e529 | Avatar |
 
 ### Firestorm Reference Code Locations
 
 | What | File | Line/Function |
 |------|------|---------------|
+| World matrix with scale | `xform.cpp` | line 93: `initAll(mScale, mWorldRotation, mWorldPosition)` |
+| Parent scale on children | `xform.cpp` | line 76: `mWorldPosition.scaleVec(mParent->getScale())` |
+| Skinning matrix palette | `llskinningutil.cpp` | line 182: `matMul(invBind, world, mat)` |
+| Attachment setupDrawable | `llviewerjointattachment.cpp` | lines 108-130: world→AP-local conversion |
 | Override application | `llvoavatar.cpp` | `addAttachmentOverridesForObject` ~line 7744 |
 | Override threshold | `lljoint.cpp` | `aboveJointPosThreshold` line 398 (0.1mm) |
-| Override priority | `lljoint.cpp` | `findActiveOverride` — `mOverrides.begin()` on `std::map<LLUUID>` |
-| Alt IBM loading | `llmodel.cpp` | `fromLLSD` lines 1707-1722 (NO inversion, direct copy) |
-| Parent scale on children | `xform.cpp` | line ~76: `mWorldPosition.scaleVec(mParent->getScale())` |
 | Shape scale application | `llpolyskeletaldistortion.cpp` | `apply()` lines 189-227 |
 | Sex filtering | `llpolyskeletaldistortion.cpp` | `apply()`: `(getSex() & avatar_sex) ? mCurWeight : getDefaultWeight()` |
 | ControlAvatar (worn animesh) | `llcontrolavatar.cpp` | Separate avatar with own skeleton |
-| Full rig threshold | `llvovolume.cpp` | `JOINT_COUNT_REQUIRED_FOR_FULLRIG = 1` |

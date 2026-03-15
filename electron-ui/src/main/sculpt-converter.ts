@@ -8,6 +8,7 @@ import * as path from 'path';
 import { app } from 'electron';
 import sharp from 'sharp';
 import { SculptType } from '../../node-metaverse/dist/lib';
+import type { DecodePool } from './decode-pool';
 
 type Vec3 = { x: number; y: number; z: number };
 
@@ -26,43 +27,6 @@ export function isSculptCached(textureUuid: string, sculptType: number): boolean
 /** Sculpt mesh ID used as meshId in Godot messages */
 export function sculptMeshId(textureUuid: string, sculptType: number): string {
   return `sculpt_${textureUuid}_${sculptType}`;
-}
-
-// ─── J2K decode (WASM) ───────────────────────────────────────────────
-
-let _wasmModule: any = null;
-
-async function loadWasm() {
-  if (_wasmModule) return;
-  const mod = (await import('@abasb75/jpeg2000-decoder')).default;
-  _wasmModule = await mod.OpenJPEGWASM();
-}
-
-async function decodeJ2kToRaw(j2cBuffer: Buffer): Promise<{ pixels: Buffer; width: number; height: number; channels: number }> {
-  await loadWasm();
-  const decoder = new _wasmModule.J2KDecoder();
-  try {
-    const encoded = j2cBuffer.buffer.slice(j2cBuffer.byteOffset, j2cBuffer.byteOffset + j2cBuffer.byteLength);
-    const encodedBuffer = decoder.getEncodedBuffer(encoded.byteLength);
-    encodedBuffer.set(new Uint8Array(encoded));
-    decoder.decode();
-
-    const frameInfo = decoder.getFrameInfo();
-    let { width, height, componentCount: channels } = frameInfo;
-    let pixels = Buffer.from(decoder.getDecodedBuffer());
-
-    // Downsample large sculpt textures to cap vertex count (SL viewer uses 64x64 max)
-    const MAX_SCULPT_RES = 128;
-    if (width > MAX_SCULPT_RES || height > MAX_SCULPT_RES) {
-      const resized = await sharp(pixels, { raw: { width, height, channels: channels as 1 | 2 | 3 | 4 } })
-        .resize(MAX_SCULPT_RES, MAX_SCULPT_RES, { fit: 'fill' })
-        .raw().toBuffer({ resolveWithObject: true });
-      return { pixels: resized.data, width: resized.info.width, height: resized.info.height, channels: resized.info.channels };
-    }
-    return { pixels, width, height, channels };
-  } finally {
-    decoder.delete();
-  }
 }
 
 // ─── Sculpt map decode ───────────────────────────────────────────────
@@ -303,12 +267,30 @@ export function sculptMeshToGlb(mesh: { positions: number[]; normals: number[]; 
 // ─── Full pipeline ───────────────────────────────────────────────────
 
 export async function ensureSculptCached(
-  textureUuid: string, sculptType: number, j2cBuffer: Buffer
+  textureUuid: string, sculptType: number, j2cBuffer: Buffer,
+  decodePool: DecodePool,
 ): Promise<string> {
   const cachePath = sculptCachePath(textureUuid, sculptType);
   if (fs.existsSync(cachePath)) return cachePath;
 
-  const { pixels, width, height, channels } = await decodeJ2kToRaw(j2cBuffer);
+  const raw = await decodePool.decodeRaw(j2cBuffer);
+  let pixels: Buffer = raw.rgbaPixels;
+  let width = raw.width;
+  let height = raw.height;
+  let channels = 4; // decodeRaw always returns RGBA
+
+  // Downsample large sculpt textures (SL viewer uses 64x64 max)
+  const MAX_SCULPT_RES = 128;
+  if (width > MAX_SCULPT_RES || height > MAX_SCULPT_RES) {
+    const resized = await sharp(pixels, { raw: { width, height, channels: channels as 1 | 2 | 3 | 4 } })
+      .resize(MAX_SCULPT_RES, MAX_SCULPT_RES, { fit: 'fill' })
+      .raw().toBuffer({ resolveWithObject: true });
+    pixels = resized.data;
+    width = resized.info.width;
+    height = resized.info.height;
+    channels = resized.info.channels;
+  }
+
   const grid = decodeSculptMap(pixels, width, height, channels);
   const mesh = buildSculptMesh(grid, sculptType);
   const glb = sculptMeshToGlb(mesh);

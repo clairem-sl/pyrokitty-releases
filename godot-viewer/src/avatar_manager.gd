@@ -10,10 +10,8 @@ var _first_person_mode: bool = false
 # Avatar shape deformation — per-avatar bone scale/offset from VisualParam
 var _avatar_shapes: Dictionary = {}  # avatarId (String) -> bones Dictionary
 
-
 func _init(scene_manager) -> void:
 	sm = scene_manager
-
 
 # ─── Self Avatar ─────────────────────────────────────
 
@@ -77,11 +75,17 @@ func get_self_avatar_click_data() -> Dictionary:
 
 # ─── Avatar Handlers ──────────────────────────────────
 
+func _crumb(text: String) -> void:
+	var main = sm.get_parent()
+	if main and main.has_method("write_breadcrumb"):
+		main.write_breadcrumb(text)
+
 func handle_avatar_create(msg: Dictionary) -> void:
 	var avatar_id: String = msg.get("id", "")
 	if avatar_id.is_empty():
 		return
 	var local_id: int = int(msg.get("localId", 0))
+	_crumb("avatar_create id=%s lid=%d step=start" % [avatar_id.substr(0, 8), local_id])
 
 	# Remove existing if duplicate
 	if sm.avatars.has(avatar_id):
@@ -95,6 +99,7 @@ func handle_avatar_create(msg: Dictionary) -> void:
 				old_node.queue_free()
 			sm.animesh_roots.erase(old_lid)
 
+	_crumb("avatar_create id=%s lid=%d step=RSInstance" % [avatar_id.substr(0, 8), local_id])
 	var rsi = sm.RSInstance.new(sm._scenario, sm._vis_far, sm._vis_fade)
 	# Small blue placeholder so we can see avatar position while attachments load
 	rsi.set_mesh(sm.avatar_mesh)
@@ -144,10 +149,12 @@ func handle_avatar_create(msg: Dictionary) -> void:
 		avatar_node.quaternion = godot_rot
 		avatar_node.scale = Vector3.ONE
 		sm.animesh_roots[local_id] = avatar_node
+		_crumb("avatar_create id=%s lid=%d step=create_skeleton" % [avatar_id.substr(0, 8), local_id])
 		# Create shared skeleton from avatar_skeleton.xml (ONE per avatar)
 		var shared_skel: Skeleton3D = sm.skeleton_builder.create_shared_skeleton()
 		avatar_node.add_child(shared_skel)
 		sm.animesh_shared_skeleton[local_id] = shared_skel
+		_crumb("avatar_create id=%s lid=%d step=apply_shape" % [avatar_id.substr(0, 8), local_id])
 		# Apply pending shape if AvatarAppearance arrived before avatar_create
 		if _avatar_shapes.has(avatar_id):
 			print("[AvatarShape] Applying pending shape for %s at avatar_create" % avatar_id.substr(0, 8))
@@ -156,6 +163,7 @@ func handle_avatar_create(msg: Dictionary) -> void:
 		if avatar_id == sm.self_avatar_id:
 			print("[SelfAvatar] === Skeleton root created: localId=%d bones=%d ===" % [local_id, shared_skel.get_bone_count()])
 
+		_crumb("avatar_create id=%s lid=%d step=pending_children" % [avatar_id.substr(0, 8), local_id])
 		# Resolve pending children that arrived before this avatar —
 		# fix their world positions
 		if sm.pending_children.has(local_id):
@@ -167,10 +175,12 @@ func handle_avatar_create(msg: Dictionary) -> void:
 					child_rsi.push_transform()
 			sm.pending_children.erase(local_id)
 
+		_crumb("avatar_create id=%s lid=%d step=register_descendants" % [avatar_id.substr(0, 8), local_id])
 		# Register ALL descendants (children, grandchildren, etc.) as animesh children.
 		# Handles attachment linksets where child prims also need skeleton rigging.
 		sm.object_mgr._register_animesh_descendants(local_id, local_id)
 
+	_crumb("avatar_create id=%s lid=%d step=DONE" % [avatar_id.substr(0, 8), local_id])
 	if avatar_id == sm.self_avatar_id:
 		sm.self_avatar_moved.emit(rsi.pos)
 		_apply_self_avatar_visibility()
@@ -276,6 +286,7 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 			sm.animesh_eval.erase(av_lid)
 			sm.animesh_pending_anims.erase(av_lid)
 			sm.animesh_worn_anims.erase(av_lid)
+		sm.bone_shape_scales.erase(av_lid)
 		sm.avatar_local_ids.erase(avatar_id)
 		_avatar_shapes.erase(avatar_id)
 
@@ -303,23 +314,28 @@ func handle_avatar_shape(msg: Dictionary) -> void:
 	print("[AvatarShape] Applied shape for avatar %s (%d bones modified)" % [avatar_id.substr(0, 8), bones.size()])
 
 
-## Reset skeleton bone rests to XML baseline + shape scale/offset deltas.
-## In SL (xform.cpp), a joint's scale affects its CHILDREN's positions:
-##   child.worldPos = parent.worldRot * (child.localPos * parent.scale) + parent.worldPos
-## We bake the immediate parent scale into each bone's rest position because
-## Godot doesn't apply parent-scale-on-child automatically.
+## Reset skeleton bone rests to XML baseline + shape offset deltas.
+## Parent scale is NOT baked into rest — it is applied dynamically each frame
+## in _apply_global_pose_overrides (matching SL's xform.cpp:76 behavior).
+## Bone's OWN shape scale is also applied dynamically in the skinning basis
+## (matching SL's xform.cpp:93: worldMatrix.initAll(mScale, mWorldRot, mWorldPos)).
 func _apply_shape_to_skeleton(skeleton: Skeleton3D, bones: Dictionary, avatar_id: String) -> void:
 	var xml_bones: Array = sm.skeleton_builder.get_bone_data()
 	var xml_by_name: Dictionary = {}
 	for bd: Dictionary in xml_bones:
 		xml_by_name[bd["name"]] = bd
 
-	# Build parent_name → shape scale lookup (immediate parent scale only)
-	var parent_scale: Dictionary = {}  # bone_name -> Vector3 (SL space scale)
+	# Build bone_name → shape scale lookup and store for dynamic use
+	var shape_scales: Dictionary = {}  # bone_name -> Vector3 (SL space scale)
 	for bname: String in bones:
 		var shape_data: Dictionary = bones[bname]
 		var s: Array = shape_data.get("scale", [1, 1, 1])
-		parent_scale[bname] = Vector3(s[0], s[1], s[2])
+		shape_scales[bname] = Vector3(s[0], s[1], s[2])
+
+	# Store shape scales for dynamic parent-scale application in _apply_global_pose_overrides
+	var av_lid: int = sm.avatar_local_ids.get(avatar_id, 0)
+	if av_lid > 0:
+		sm.bone_shape_scales[av_lid] = shape_scales
 
 	for bi in range(skeleton.get_bone_count()):
 		var bname: String = skeleton.get_bone_name(bi)
@@ -336,11 +352,7 @@ func _apply_shape_to_skeleton(skeleton: Skeleton3D, bones: Dictionary, avatar_id
 			var o: Array = shape_data.get("offset", [0, 0, 0])
 			sp += Vector3(o[0], o[1], o[2])
 
-		# Apply immediate parent's shape scale to this bone's position (in SL space)
-		var pname: String = xml_data.get("parent_name", "")
-		if not pname.is_empty() and parent_scale.has(pname):
-			var ps: Vector3 = parent_scale[pname]
-			sp = Vector3(sp.x * ps.x, sp.y * ps.y, sp.z * ps.z)
+		# Parent scale is NOT baked here — applied dynamically in _apply_global_pose_overrides
 
 		# SL → Godot position conversion
 		rest.origin = Vector3(sp.x, sp.z, -sp.y)

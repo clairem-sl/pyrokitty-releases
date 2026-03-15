@@ -88,6 +88,12 @@ for (const node of allParamNodes) {
     valueMax: parseFloat(node['@_value_max'] || '1'),
   };
 
+  // Sex filtering (SEX_FEMALE=0x01, SEX_MALE=0x02, SEX_BOTH=0x03)
+  const sex = node['@_sex'];
+  if (sex === 'male' || sex === 'female') {
+    param.sex = sex;
+  }
+
   // Skeleton bones
   const skel = node.param_skeleton;
   if (skel && skel.bone) {
@@ -163,6 +169,7 @@ for (const param of transmittedParams) {
           valueMax: driven.valueMax,
           bones: driven.bones,
         };
+        if (driven.sex) nested.sex = driven.sex;
         // Merge activation params onto the nested driven object
         if (entry.min1 !== undefined) nested.min1 = entry.min1;
         if (entry.max1 !== undefined) nested.max1 = entry.max1;
@@ -182,6 +189,7 @@ for (const param of transmittedParams) {
     valueMin: param.valueMin,
     valueMax: param.valueMax,
   };
+  if (param.sex) out.sex = param.sex;
   if (param.bones) out.bones = param.bones;
   if (drivenParams) out.drivenParams = drivenParams;
 

@@ -331,14 +331,20 @@ export class GodotObjectSender {
     }
   }
 
+  /** Max objects to send per rescan tick to avoid flooding Godot */
+  private static readonly RESCAN_BATCH_LIMIT = 50;
+
   /** Re-scan all tracked roots for untracked children (catches late arrivals) */
   rescanChildren(): void {
     try {
       const objectStore = this.bot.currentRegion.objects;
       let found = 0;
+      const limit = GodotObjectSender.RESCAN_BATCH_LIMIT;
       for (const localId of this.trackedObjects) {
+        if (found >= limit) break;
         const children = objectStore.getObjectsByParent(localId);
         for (const child of children) {
+          if (found >= limit) break;
           if (child.PCode === 47) continue;
           if (isHudAttachment(child)) continue;
           if (!this.trackedObjects.has(child.ID)) {
@@ -349,9 +355,11 @@ export class GodotObjectSender {
       }
       // Scan avatar attachments
       for (const [, avatarLocalId] of this.avatarLocalIds) {
+        if (found >= limit) break;
         try {
           const children = objectStore.getObjectsByParent(avatarLocalId);
           for (const child of children) {
+            if (found >= limit) break;
             if (child.PCode === 47) continue;
             if (isHudAttachment(child)) continue;
             if (!this.trackedObjects.has(child.ID)) {
@@ -362,7 +370,7 @@ export class GodotObjectSender {
         } catch { /* avatar may have left */ }
       }
       if (found > 0) {
-        console.log(`[GodotBridge] Rescan found ${found} missing children`);
+        console.log(`[GodotBridge] Rescan found ${found} missing children${found >= limit ? ` (capped at ${limit}, more next tick)` : ''}`);
       }
     } catch { /* bot may be disconnected */ }
   }
@@ -383,6 +391,8 @@ export class GodotObjectSender {
       const collect = (obj: any, parentId: number) => {
         if (obj.PCode === 47) return;
         if (isHudAttachment(obj)) return;
+        // Skip objects already sent during avatar creation
+        if (this.trackedObjects.has(obj.ID)) return;
         queue.push({ obj, parentId });
         if (obj.children) {
           for (const child of obj.children) {
@@ -396,7 +406,7 @@ export class GodotObjectSender {
         avatarLocalIdSet.add(lid);
       }
 
-      // Collect avatar attachments explicitly
+      // Collect avatar attachments explicitly (skips already-tracked from avatar creation)
       let attachmentRouted = 0;
       for (const avLid of avatarLocalIdSet) {
         try {
@@ -404,6 +414,7 @@ export class GodotObjectSender {
           for (const obj of attachObjs) {
             if (obj.PCode === 47) continue;
             if (isHudAttachment(obj)) continue;
+            if (this.trackedObjects.has(obj.ID)) continue;
             collect(obj, avLid);
             attachmentRouted++;
           }
@@ -421,9 +432,12 @@ export class GodotObjectSender {
         this.trackedObjects.add(obj.ID);
       }
 
-      console.log(`[GodotBridge] Sending ${queue.length} objects in batches of 200 (50ms apart)`);
+      // Throttled batching: 50 objects every 100ms to avoid overwhelming Godot
+      // during cold start (Vulkan resource creation, skeleton setup, etc.)
+      const BATCH_SIZE = 50;
+      const BATCH_INTERVAL_MS = 100;
+      console.log(`[GodotBridge] Sending ${queue.length} objects in batches of ${BATCH_SIZE} (${BATCH_INTERVAL_MS}ms apart)`);
 
-      const BATCH_SIZE = 200;
       let offset = 0;
       const connected = () => this.trackedObjects.size > 0; // proxy for connected state
       const sendNextBatch = () => {
@@ -434,7 +448,7 @@ export class GodotObjectSender {
         }
         offset = end;
         if (offset < queue.length) {
-          setTimeout(sendNextBatch, 50);
+          setTimeout(sendNextBatch, BATCH_INTERVAL_MS);
         } else {
           console.log(`[GodotBridge] Initial snapshot complete: ${queue.length} objects`);
         }

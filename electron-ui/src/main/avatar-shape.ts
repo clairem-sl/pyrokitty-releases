@@ -16,6 +16,7 @@ interface DrivenParam {
   valueMin: number;
   valueMax: number;
   bones: BoneEntry[];
+  sex?: 'male' | 'female';
   // Trapezoidal activation: ramp up [min1→max1], hold [max1→max2], ramp down [max2→min2]
   // When not specified, defaults to full driver range (simple linear remap).
   min1?: number;
@@ -29,6 +30,7 @@ interface SkeletonParam {
   id: number;
   valueMin: number;
   valueMax: number;
+  sex?: 'male' | 'female';
   bones?: BoneEntry[];
   drivenParams?: DrivenParam[];
 }
@@ -104,17 +106,35 @@ function getDrivenWeight(
   }
 }
 
+// ── Sex determination ────────────────────────────────────────────────
+
+// Param id=80 ("male") at byteIndex=31, valueMin=0, valueMax=1.
+// Matches Firestorm: getVisualParamWeight("male") > 0.5f ? SEX_MALE : SEX_FEMALE
+const SEX_PARAM_BYTE_INDEX = 31;
+
+function determineAvatarSex(visualParamBytes: number[]): 'male' | 'female' {
+  const byte = visualParamBytes[SEX_PARAM_BYTE_INDEX];
+  if (byte === undefined) return 'female';
+  const weight = byte / 255.0; // valueMin=0, valueMax=1 → weight = byte/255
+  return weight > 0.5 ? 'male' : 'female';
+}
+
 // ── Public API ───────────────────────────────────────────────────────
 
 /**
  * Given an array of VisualParam bytes (one per param, in ID-sorted order),
  * compute skeleton bone deltas (scale and offset) for each affected bone.
  *
+ * Sex filtering: params with a sex attribute that doesn't match the avatar's
+ * sex use weight 0 (Firestorm: getDefaultWeight() = 0 for skeleton params).
+ * Avatar sex determined by param id=80 ("male") at byteIndex=31.
+ *
  * Returns a map of bone name → { scale: [1+accX, 1+accY, 1+accZ], offset: [x,y,z] }
  */
 export function computeSkeletonDeltas(visualParamBytes: number[]): Record<string, BoneDelta> {
   ensureLoaded();
   const params = skeletonParams!;
+  const avatarSex = determineAvatarSex(visualParamBytes);
 
   // Accumulators per bone: additive scale and offset
   const accScale: Record<string, Vec3> = {};
@@ -140,7 +160,10 @@ export function computeSkeletonDeltas(visualParamBytes: number[]): Record<string
     if (byte === undefined) continue;
 
     // Dequantize
-    const weight = (byte / 255.0) * (param.valueMax - param.valueMin) + param.valueMin;
+    const rawWeight = (byte / 255.0) * (param.valueMax - param.valueMin) + param.valueMin;
+
+    // Sex filtering on driver param: use weight 0 if sex doesn't match
+    const weight = (param.sex && param.sex !== avatarSex) ? 0 : rawWeight;
 
     // Direct skeleton bones
     if (param.bones) {
@@ -150,7 +173,11 @@ export function computeSkeletonDeltas(visualParamBytes: number[]): Record<string
     // Driven params with nested bone data
     if (param.drivenParams) {
       for (const driven of param.drivenParams) {
-        const drivenWeight = getDrivenWeight(weight, param, driven);
+        let drivenWeight = getDrivenWeight(weight, param, driven);
+        // Sex filtering on driven param: use weight 0 if sex doesn't match
+        if (driven.sex && driven.sex !== avatarSex) {
+          drivenWeight = 0;
+        }
         accumulateBones(driven.bones, drivenWeight);
       }
     }
