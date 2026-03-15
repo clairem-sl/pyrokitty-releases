@@ -44,6 +44,8 @@ function findCharacterFile(filename: string): string {
   const candidates = [
     // Deployed: extraResources/viewer/character/
     ...(process.resourcesPath ? [path.join(process.resourcesPath, 'viewer', 'character', filename)] : []),
+    // Linux fallback: voice sidecar ships linden character files
+    ...(process.resourcesPath ? [path.join(process.resourcesPath, 'voice', 'linden', 'character', filename)] : []),
     // Dev: relative to dist/main/
     path.join(__dirname, '..', '..', 'viewer', 'character', filename),
     path.join(__dirname, '..', '..', '..', 'viewer', 'character', filename),

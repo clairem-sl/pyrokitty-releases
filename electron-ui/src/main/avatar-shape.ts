@@ -42,6 +42,7 @@ function findCharacterFile(filename: string): string {
   const resourcesPath = (process as any).resourcesPath as string | undefined;
   const candidates = [
     ...(resourcesPath ? [path.join(resourcesPath, 'viewer', 'character', filename)] : []),
+    ...(resourcesPath ? [path.join(resourcesPath, 'voice', 'linden', 'character', filename)] : []),
     path.join(__dirname, '..', '..', 'viewer', 'character', filename),
     path.join(__dirname, '..', '..', '..', 'viewer', 'character', filename),
     path.join(__dirname, '..', '..', '..', '..', 'indra', 'newview', 'character', filename),

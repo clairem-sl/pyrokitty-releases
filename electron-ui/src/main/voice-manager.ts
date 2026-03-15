@@ -28,13 +28,14 @@ export interface VoiceCaps {
 }
 
 function getSidecarPath(): string {
+  const bin = process.platform === 'win32' ? 'VoiceSidecar.exe' : 'VoiceSidecar';
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'voice', 'VoiceSidecar.exe');
+    return path.join(process.resourcesPath, 'voice', bin);
   } else {
     const appRoot = app.getAppPath();
     // dotnet build defaults to Debug; dotnet publish uses Release
-    const releasePath = path.join(appRoot, 'voice', 'bin', 'Release', 'net8.0', 'VoiceSidecar.exe');
-    const debugPath = path.join(appRoot, 'voice', 'bin', 'Debug', 'net8.0', 'VoiceSidecar.exe');
+    const releasePath = path.join(appRoot, 'voice', 'bin', 'Release', 'net8.0', bin);
+    const debugPath = path.join(appRoot, 'voice', 'bin', 'Debug', 'net8.0', bin);
     try {
       fs.accessSync(releasePath);
       return releasePath;

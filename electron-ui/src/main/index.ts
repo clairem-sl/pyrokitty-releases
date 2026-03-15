@@ -12,6 +12,18 @@ import { InventoryFolder } from '../../node-metaverse/dist/lib/classes/Inventory
 import { initGpuCompressWindow, destroyGpuCompressWindow } from './gpu-compress-window';
 import { getSavedBounds, trackWindow } from './window-state-manager';
 
+// Linux-specific Chromium tweaks (must run before app.whenReady())
+if (process.platform === 'linux') {
+  // Disable GPU acceleration — Electron's Chromium GPU process contends with Godot's
+  // Vulkan usage on the same (often integrated) GPU, triggering libglib assertions.
+  // Electron is UI-only (no 3D), so software rendering is fine.
+  app.disableHardwareAcceleration();
+
+  // Suppress Chromium's ERROR-level stderr spam (GLib-GObject g_object_ref/unref
+  // assertion failures from GTK/GIO internals). We have our own file logger.
+  app.commandLine.appendSwitch('log-level', '3');
+}
+
 // Ensure consistent userData path in dev mode (npx electron defaults to "Electron")
 app.setName('pyrokitty-ui');
 if (!app.isPackaged) {
@@ -206,11 +218,17 @@ async function createWindow(): Promise<void> {
     }, 2000);
   }
 
-  // Hide to tray instead of closing
+  // On Linux, close quits (tray support is unreliable across DEs)
+  // On Windows/macOS, hide to tray instead
   mainWindow.on('close', (event) => {
     if (!isQuitting) {
-      event.preventDefault();
-      mainWindow?.hide();
+      if (process.platform === 'linux') {
+        isQuitting = true;
+        performCleanup().then(() => app.quit());
+      } else {
+        event.preventDefault();
+        mainWindow?.hide();
+      }
     }
   });
 
@@ -218,59 +236,62 @@ async function createWindow(): Promise<void> {
     mainWindow = null;
   });
 
-  // Create system tray icon
-  const icon = nativeImage.createFromPath(iconPath);
-  tray = new Tray(icon);
-  tray.setToolTip('PyroKitty');
+  // Tray is Windows-only — Electron's StatusNotifierItem on Linux is unstable
+  // and causes libglib crashes. On Linux, close = quit (see close handler above).
+  if (process.platform !== 'linux') {
+    const icon = nativeImage.createFromPath(iconPath);
+    tray = new Tray(icon);
+    tray.setToolTip('PyroKitty');
 
-  // Menu item icons
-  const showIcon = nativeImage.createFromPath(
-    getIconPath('pyrokitty2_16.png')
-  );
+    const showIcon = nativeImage.createFromPath(
+      getIconPath('pyrokitty2_16.png')
+    );
 
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: 'Show PyroKitty',
-      icon: showIcon,
-      click: () => {
-        mainWindow?.show();
-        mainWindow?.focus();
+    const contextMenu = Menu.buildFromTemplate([
+      {
+        label: 'Show PyroKitty',
+        icon: showIcon,
+        click: () => {
+          mainWindow?.show();
+          mainWindow?.focus();
+        },
       },
-    },
-    {
-      label: 'Quit',
-      click: async () => {
-        isQuitting = true;
-        await performCleanup();
-        app.quit();
+      {
+        label: 'Quit',
+        click: async () => {
+          isQuitting = true;
+          await performCleanup();
+          app.quit();
+        },
       },
-    },
-  ]);
-  // Win32 requires SetForegroundWindow before TrackPopupMenu or the OS
-  // taskbar menu appears on top. Electron's setContextMenu handles this
-  // internally but is unreliable (Electron #40937). Instead, we grab
-  // foreground focus via a tiny off-screen window before calling
-  // popUpContextMenu ourselves.
-  const trayFocusWin = new BrowserWindow({
-    width: 1, height: 1, x: -100, y: -100,
-    show: false, frame: false, skipTaskbar: true,
-    transparent: true,
-  });
+    ]);
 
-  const showTrayMenu = () => {
-    trayFocusWin.show();
-    trayFocusWin.focus();
-    tray?.popUpContextMenu(contextMenu);
-    trayFocusWin.hide();
-  };
+    const showTrayMenu = () => {
+      // Win32 requires SetForegroundWindow before TrackPopupMenu or the OS
+      // taskbar menu appears on top. Electron's setContextMenu handles this
+      // internally but is unreliable (Electron #40937). Instead, we grab
+      // foreground focus via a tiny off-screen window before calling
+      // popUpContextMenu ourselves.
+      const trayFocusWin = new BrowserWindow({
+        width: 1, height: 1, x: -100, y: -100,
+        show: false, frame: false, skipTaskbar: true,
+        transparent: true,
+      });
+      trayFocusWin.show();
+      trayFocusWin.focus();
+      tray?.popUpContextMenu(contextMenu);
+      trayFocusWin.hide();
+      trayFocusWin.close();
+    };
 
-  tray.on('click', showTrayMenu);
-  tray.on('right-click', showTrayMenu);
+    tray.on('click', showTrayMenu);
+    tray.on('right-click', showTrayMenu);
 
-  tray.on('double-click', () => {
-    mainWindow?.show();
-    mainWindow?.focus();
-  });
+    tray.on('double-click', () => {
+      mainWindow?.show();
+      mainWindow?.focus();
+    });
+  }
 }
 
 app.whenReady().then(createWindow);
