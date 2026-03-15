@@ -600,16 +600,16 @@ func _get_bone_global_rest_xf(skel: Skeleton3D, bi: int) -> Transform3D:
 ## (xform.cpp:76: mWorldPosition.scaleVec(mParent->getScale())).
 ## We simulate this by applying parent shape scale to the override position,
 ## just as we do for non-overridden bones in _apply_shape_to_skeleton.
-func _apply_joint_overrides(glb_skel: Skeleton3D, shared_skel: Skeleton3D, override_joints: Array) -> void:
-	# Gather parent shape scales and XML parent info for parent-scale application
+func _apply_joint_overrides(glb_skel: Skeleton3D, shared_skel: Skeleton3D, override_joints: Array, mesh_id: String) -> void:
+	# Gather parent shape scales for parent-scale application.
+	# SL xform.cpp: child.worldPos = parent.worldRot * (child.localPos * parent.scale) + parent.worldPos
+	# We bake parent.scale into the child rest position because Godot doesn't do this automatically.
 	var avatar_root_id: int = -1
-	# Find which avatar root this shared_skel belongs to
 	for av_lid: int in sm.animesh_shared_skeleton:
 		if sm.animesh_shared_skeleton[av_lid] == shared_skel:
 			avatar_root_id = av_lid
 			break
 
-	# Get shape data for this avatar (if any)
 	var parent_scale: Dictionary = {}  # bone_name -> Vector3 (SL space scale)
 	if avatar_root_id >= 0:
 		var avatar_uuid: String = sm.object_uuid.get(avatar_root_id, "")
@@ -619,63 +619,64 @@ func _apply_joint_overrides(glb_skel: Skeleton3D, shared_skel: Skeleton3D, overr
 				var shape_data: Dictionary = shape_bones[bname]
 				var s: Array = shape_data.get("scale", [1, 1, 1])
 				parent_scale[bname] = Vector3(s[0], s[1], s[2])
-		else:
-			print("[JointOverride] WARNING: no shape data for avatar root=%d uuid=%s (shapes has %d entries)" % [avatar_root_id, avatar_uuid.substr(0, 8), sm.avatar_mgr._avatar_shapes.size()])
-	else:
-		print("[JointOverride] WARNING: could not find avatar root for shared_skel")
-	print("[JointOverride] parent_scale has %d entries" % parent_scale.size())
 
-	# Get XML parent info for looking up parent names
 	var xml_bones: Array = sm.skeleton_builder.get_bone_data()
 	var xml_parent: Dictionary = {}  # bone_name -> parent_name
+	var xml_pos: Dictionary = {}     # bone_name -> Vector3 (SL space default position)
 	for bd: Dictionary in xml_bones:
 		xml_parent[bd["name"]] = bd.get("parent_name", "")
+		xml_pos[bd["name"]] = bd["pos"] as Vector3
+
+	# Override priority: lowest mesh UUID wins (matches SL's std::map<LLUUID> ordering).
+	# Multiple meshes may override the same bone — only the lowest UUID's value is used.
+	if not sm.bone_override_owner.has(avatar_root_id):
+		sm.bone_override_owner[avatar_root_id] = {}
+	var owners: Dictionary = sm.bone_override_owner[avatar_root_id]
 
 	var override_count: int = 0
-	var debug_bones: Array = ["mPelvis", "mHipLeft", "mHipRight", "mKneeLeft", "mKneeRight", "mAnkleLeft", "mAnkleRight", "mFootLeft", "mFootRight"]
+	var skipped_default: int = 0
+	var skipped_priority: int = 0
 	for jname in override_joints:
 		var glb_bi: int = glb_skel.find_bone(jname as String)
 		var shared_bi: int = shared_skel.find_bone(jname as String)
 		if glb_bi < 0 or shared_bi < 0:
 			continue
 		var glb_rest: Transform3D = glb_skel.get_bone_rest(glb_bi)
-		var is_debug: bool = debug_bones.has(jname)
 
-		# Convert GLB rest (Godot space) back to SL space to apply parent scale
-		# Godot (gx, gy, gz) → SL (gx, -gz, gy)
+		# Convert GLB rest (Godot space) to SL space for parent scale application
 		var godot_pos: Vector3 = glb_rest.origin
 		var sl_pos := Vector3(godot_pos.x, -godot_pos.z, godot_pos.y)
 
-		if is_debug:
-			print("[JointOverride] %s: glb_sl=(%s, %s, %s)" % [
-				jname, "%.6f" % sl_pos.x, "%.6f" % sl_pos.y, "%.6f" % sl_pos.z])
+		# Skip overrides at default position (Firestorm: aboveJointPosThreshold, 0.1mm).
+		var default_pos: Vector3 = xml_pos.get(jname as String, sl_pos)
+		if (sl_pos - default_pos).length() < 0.0001:
+			skipped_default += 1
+			continue
 
-		# Apply immediate parent's shape scale (SL xform.cpp uses parent's LOCAL scale)
+		# Priority check: only apply if this mesh UUID is lower than the current owner.
+		# SL uses std::map<LLUUID> which sorts by UUID — lowest wins.
+		var bone_key: String = jname as String
+		if owners.has(bone_key) and mesh_id >= owners[bone_key]:
+			skipped_priority += 1
+			continue
+		owners[bone_key] = mesh_id
+
+		# Apply immediate parent's shape scale (same as _apply_shape_to_skeleton does)
 		var pname: String = xml_parent.get(jname as String, "")
 		if not pname.is_empty() and parent_scale.has(pname):
 			var ps: Vector3 = parent_scale[pname]
-			if is_debug:
-				print("[JointOverride] %s: parent=%s parent_scale=(%s, %s, %s)" % [
-					jname, pname, "%.6f" % ps.x, "%.6f" % ps.y, "%.6f" % ps.z])
 			sl_pos = Vector3(sl_pos.x * ps.x, sl_pos.y * ps.y, sl_pos.z * ps.z)
 
 		# Convert back to Godot space
 		var final_godot := Vector3(sl_pos.x, sl_pos.z, -sl_pos.y)
-
-		if is_debug:
-			var old_rest: Transform3D = shared_skel.get_bone_rest(shared_bi)
-			print("[JointOverride] %s: shared_before=(%s, %s, %s) final=(%s, %s, %s)" % [
-				jname,
-				"%.6f" % old_rest.origin.x, "%.6f" % old_rest.origin.y, "%.6f" % old_rest.origin.z,
-				"%.6f" % final_godot.x, "%.6f" % final_godot.y, "%.6f" % final_godot.z])
 
 		var new_rest := Transform3D()
 		new_rest.origin = final_godot
 		shared_skel.set_bone_rest(shared_bi, new_rest)
 		override_count += 1
 
-	if override_count > 0:
-		print("[JointOverride] Applied %d/%d bone overrides from GLB → shared skeleton" % [override_count, override_joints.size()])
+	if override_count > 0 or skipped_default > 0 or skipped_priority > 0:
+		print("[JointOverride] mesh=%s applied=%d/%d (skipped: %d default, %d priority)" % [mesh_id.substr(0, 8), override_count, override_joints.size(), skipped_default, skipped_priority])
 
 ## Convert a Basis to its rotation quaternion safely.
 ## Returns IDENTITY if the basis is degenerate (zero or near-zero columns from

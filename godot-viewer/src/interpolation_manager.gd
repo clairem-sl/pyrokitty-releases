@@ -51,8 +51,13 @@ func interpolate_avatars(delta: float) -> void:
 
 		rsi.pos = target.get("pos", rsi.pos) + blend_offset * (1.0 - blend_frac)
 
-		# Slerp rotation (Firestorm restores rotation for non-self avatars, no angular vel)
-		rsi.rot = rsi.rot.slerp(target_rot, clampf(AVATAR_SLERP_SPEED * delta, 0.0, 1.0))
+		# Self avatar: rotation is set directly by set_self_avatar_yaw() each frame
+		# from the client's camera heading — don't fight it with a slerp toward
+		# the stale server echo.  Matches Firestorm, which derives self rotation
+		# from agent.getAtAxis() and ignores the server rotation for self.
+		# Non-self avatars: slerp toward server rotation (no angular velocity).
+		if avatar_id != sm.self_avatar_id:
+			rsi.rot = rsi.rot.slerp(target_rot, clampf(AVATAR_SLERP_SPEED * delta, 0.0, 1.0))
 
 		rsi.push_transform()
 

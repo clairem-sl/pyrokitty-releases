@@ -1,0 +1,8873 @@
+[
+  {
+    "byteIndex": 0,
+    "id": 1,
+    "valueMin": -0.3,
+    "valueMax": 2,
+    "drivenParams": [
+      {
+        "id": 30001,
+        "valueMin": -0.3,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mFaceForeheadCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.007,
+              0,
+              0.001
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerRight",
+            "scale": [
+              0.1,
+              0,
+              0
+            ],
+            "offset": [
+              0.004,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerLeft",
+            "scale": [
+              0.1,
+              0,
+              0
+            ],
+            "offset": [
+              0.004,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterRight",
+            "scale": [
+              0.1,
+              0,
+              0
+            ],
+            "offset": [
+              0.004,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterLeft",
+            "scale": [
+              0.1,
+              0,
+              0
+            ],
+            "offset": [
+              0.004,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.004,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.004,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 1,
+    "id": 2,
+    "valueMin": -0.8,
+    "valueMax": 2.5,
+    "drivenParams": [
+      {
+        "id": 30002,
+        "valueMin": -0.8,
+        "valueMax": 2.5,
+        "bones": [
+          {
+            "name": "mFaceNoseCenter",
+            "scale": [
+              0.5,
+              0.3,
+              0.1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseLeft",
+            "scale": [
+              0,
+              0.3,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseRight",
+            "scale": [
+              0,
+              0.3,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseBridge",
+            "scale": [
+              0.1,
+              0.1,
+              0
+            ],
+            "offset": [
+              0.006,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 2,
+    "id": 4,
+    "valueMin": -0.5,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 30004,
+        "valueMin": -0.5,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceNoseLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.005,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.005,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 4,
+    "id": 6,
+    "valueMin": -0.3,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 30006,
+        "valueMin": -1,
+        "valueMax": 1.5,
+        "bones": [
+          {
+            "name": "mFaceNoseCenter",
+            "scale": [
+              0.1,
+              0.1,
+              0.1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 5,
+    "id": 7,
+    "valueMin": -0.5,
+    "valueMax": 0.5,
+    "drivenParams": [
+      {
+        "id": 30007,
+        "valueMin": -0.5,
+        "valueMax": 0.5,
+        "bones": [
+          {
+            "name": "mFaceChin",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.06,
+              0,
+              0.01
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 6,
+    "id": 8,
+    "valueMin": -0.5,
+    "valueMax": 1.5,
+    "drivenParams": [
+      {
+        "id": 30008,
+        "valueMin": -0.5,
+        "valueMax": 1.5,
+        "bones": [
+          {
+            "name": "mFaceJawShaper",
+            "scale": [
+              0,
+              0.125,
+              0.5
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 7,
+    "id": 10,
+    "valueMin": -1.5,
+    "valueMax": 3,
+    "drivenParams": [
+      {
+        "id": 30010,
+        "valueMin": -1.5,
+        "valueMax": 3,
+        "bones": [
+          {
+            "name": "mFaceCheekLowerLeft",
+            "scale": [
+              0,
+              -0.12,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceCheekLowerRight",
+            "scale": [
+              0,
+              -0.12,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 8,
+    "id": 11,
+    "valueMin": -0.5,
+    "valueMax": 1.5,
+    "drivenParams": [
+      {
+        "id": 30011,
+        "valueMin": -0.5,
+        "valueMax": 1.5,
+        "bones": [
+          {
+            "name": "mFaceNoseBridge",
+            "scale": [
+              0.15,
+              0.01,
+              0.7
+            ],
+            "offset": [
+              0.009,
+              0,
+              -0.006
+            ]
+          },
+          {
+            "name": "mFaceForeheadCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.001,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 11,
+    "id": 14,
+    "valueMin": -0.5,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 30014,
+        "valueMin": -0.5,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceCheekUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.02
+            ]
+          },
+          {
+            "name": "mFaceCheekUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.02
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 12,
+    "id": 15,
+    "valueMin": -0.5,
+    "valueMax": 1.5,
+    "drivenParams": [
+      {
+        "id": 30015,
+        "valueMin": -0.5,
+        "valueMax": 1.5,
+        "bones": [
+          {
+            "name": "mFaceEar1Left",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEar1Right",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 13,
+    "id": 16,
+    "valueMin": -0.5,
+    "valueMax": 3,
+    "drivenParams": [
+      {
+        "id": 30016,
+        "valueMin": -0.5,
+        "valueMax": 3,
+        "bones": [
+          {
+            "name": "mFaceEyebrowOuterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.001,
+              0.0035
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.002
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.001,
+              0.0035
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.002
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 14,
+    "id": 17,
+    "valueMin": -0.5,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 30017,
+        "valueMin": -0.5,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceChin",
+            "scale": [
+              0,
+              0.5,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 15,
+    "id": 18,
+    "valueMin": -1.5,
+    "valueMax": 2.5,
+    "drivenParams": [
+      {
+        "id": 30018,
+        "valueMin": -1.5,
+        "valueMax": 2.5,
+        "bones": [
+          {
+            "name": "mFaceCheekUpperLeft",
+            "scale": [
+              0.15,
+              0.1,
+              0.1
+            ],
+            "offset": [
+              0.002,
+              0,
+              0.0015
+            ]
+          },
+          {
+            "name": "mFaceCheekUpperRight",
+            "scale": [
+              0.15,
+              0.1,
+              0.1
+            ],
+            "offset": [
+              0.002,
+              0,
+              0.0015
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 16,
+    "id": 19,
+    "valueMin": -1.5,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 30019,
+        "valueMin": -1.5,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceNoseBase",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.001,
+              0,
+              -0.0015
+            ]
+          },
+          {
+            "name": "mFaceNoseCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.002,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceNoseRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.001,
+              0,
+              -0.002
+            ]
+          },
+          {
+            "name": "mFaceNoseLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.001,
+              0,
+              -0.002
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 17,
+    "id": 20,
+    "valueMin": -0.5,
+    "valueMax": 1.5,
+    "drivenParams": [
+      {
+        "id": 30020,
+        "valueMin": -0.5,
+        "valueMax": 1.5,
+        "bones": [
+          {
+            "name": "mFaceNoseCenter",
+            "scale": [
+              0.2,
+              0.4,
+              0.2
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseLeft",
+            "scale": [
+              0,
+              0.3,
+              0
+            ],
+            "offset": [
+              0,
+              0.0015,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseRight",
+            "scale": [
+              0,
+              0.3,
+              0
+            ],
+            "offset": [
+              0,
+              -0.0015,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 18,
+    "id": 21,
+    "valueMin": -0.2,
+    "valueMax": 1.3,
+    "drivenParams": [
+      {
+        "id": 30021,
+        "valueMin": -0.2,
+        "valueMax": 1.3,
+        "bones": [
+          {
+            "name": "mFaceEyeLidUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.006
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.006
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 20,
+    "id": 23,
+    "valueMin": -0.5,
+    "valueMax": 1.5,
+    "drivenParams": [
+      {
+        "id": 30023,
+        "valueMin": -0.5,
+        "valueMax": 1.5,
+        "bones": [
+          {
+            "name": "mFaceEyeLidLowerLeft",
+            "scale": [
+              0,
+              0,
+              0.5
+            ],
+            "offset": [
+              0,
+              0,
+              -0.001
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerRight",
+            "scale": [
+              0,
+              0,
+              0.5
+            ],
+            "offset": [
+              0,
+              0,
+              -0.001
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 21,
+    "id": 24,
+    "valueMin": -1.5,
+    "valueMax": 2,
+    "drivenParams": [
+      {
+        "id": 30024,
+        "valueMin": -1.5,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mFaceEyeLidLowerRight",
+            "scale": [
+              0,
+              0.1,
+              0.2
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerLeft",
+            "scale": [
+              0,
+              0.1,
+              0.2
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperRight",
+            "scale": [
+              0,
+              0.1,
+              0.2
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperLeft",
+            "scale": [
+              0,
+              0.1,
+              0.2
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeAltLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeAltRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 22,
+    "id": 25,
+    "valueMin": -0.8,
+    "valueMax": 1.5,
+    "drivenParams": [
+      {
+        "id": 30025,
+        "valueMin": -0.8,
+        "valueMax": 1.5,
+        "bones": [
+          {
+            "name": "mFaceLipUpperLeft",
+            "scale": [
+              0,
+              0.1,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperRight",
+            "scale": [
+              0,
+              0.1,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipCornerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.001,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipCornerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.001,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 23,
+    "id": 27,
+    "valueMin": -1.3,
+    "valueMax": 1.2,
+    "drivenParams": [
+      {
+        "id": 30027,
+        "valueMin": -1.3,
+        "valueMax": 1.2,
+        "bones": [
+          {
+            "name": "mFaceNoseBridge",
+            "scale": [
+              0,
+              0.4,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 24,
+    "id": 31,
+    "valueMin": 0,
+    "valueMax": 2,
+    "drivenParams": [
+      {
+        "id": 30031,
+        "valueMin": 0,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mFaceEyebrowOuterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.005
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.001
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.005
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.001
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 25,
+    "id": 33,
+    "valueMin": -2.3,
+    "valueMax": 2,
+    "bones": [
+      {
+        "name": "mNeck",
+        "scale": [
+          0,
+          0,
+          0.02
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mCollarLeft",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mCollarRight",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mShoulderLeft",
+        "scale": [
+          0,
+          0.08,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mShoulderRight",
+        "scale": [
+          0,
+          0.08,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mElbowLeft",
+        "scale": [
+          0,
+          0.06,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mElbowRight",
+        "scale": [
+          0,
+          0.06,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mChest",
+        "scale": [
+          0,
+          0,
+          0.05
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTorso",
+        "scale": [
+          0,
+          0,
+          0.05
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mSpine3",
+        "scale": [
+          0,
+          0,
+          0.05
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mSpine4",
+        "scale": [
+          0,
+          0,
+          0.05
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHipLeft",
+        "scale": [
+          0,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHipRight",
+        "scale": [
+          0,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mKneeLeft",
+        "scale": [
+          0,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mKneeRight",
+        "scale": [
+          0,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb1Left",
+        "scale": [
+          0,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb1Right",
+        "scale": [
+          0,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb2Left",
+        "scale": [
+          0,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb2Right",
+        "scale": [
+          0,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mWing1Left",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mWing2Left",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.015,
+          0.015,
+          0
+        ]
+      },
+      {
+        "name": "mWing3Left",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.025,
+          0.025,
+          0
+        ]
+      },
+      {
+        "name": "mWing4Left",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.03,
+          0.03,
+          0
+        ]
+      },
+      {
+        "name": "mWing4FanLeft",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.03,
+          0.03,
+          0
+        ]
+      },
+      {
+        "name": "mWing1Right",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mWing2Right",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.015,
+          -0.015,
+          0
+        ]
+      },
+      {
+        "name": "mWing3Right",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.025,
+          -0.025,
+          0
+        ]
+      },
+      {
+        "name": "mWing4Right",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.03,
+          -0.03,
+          0
+        ]
+      },
+      {
+        "name": "mWing4FanRight",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.03,
+          -0.03,
+          0
+        ]
+      },
+      {
+        "name": "mTail1",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.02,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTail2",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.02,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTail3",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.02,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTail4",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.02,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTail5",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.02,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTail6",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.02,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 26,
+    "id": 34,
+    "valueMin": -0.7,
+    "valueMax": 1.5,
+    "bones": [
+      {
+        "name": "mNeck",
+        "scale": [
+          0.1,
+          0.1,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mCollarLeft",
+        "scale": [
+          0,
+          0.2,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mCollarRight",
+        "scale": [
+          0,
+          0.2,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mShoulderLeft",
+        "scale": [
+          0.1,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mShoulderRight",
+        "scale": [
+          0.1,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mElbowLeft",
+        "scale": [
+          0.1,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mElbowRight",
+        "scale": [
+          0.1,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mChest",
+        "scale": [
+          0.1,
+          0.1,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTorso",
+        "scale": [
+          0.1,
+          0.1,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mSpine3",
+        "scale": [
+          0.1,
+          0.1,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mSpine4",
+        "scale": [
+          0.1,
+          0.1,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mPelvis",
+        "scale": [
+          0.1,
+          0.1,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mSpine1",
+        "scale": [
+          0.1,
+          0.1,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mSpine2",
+        "scale": [
+          0.1,
+          0.1,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHipLeft",
+        "scale": [
+          0.13,
+          0.13,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHipRight",
+        "scale": [
+          0.13,
+          0.13,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mKneeLeft",
+        "scale": [
+          0.12,
+          0.12,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mKneeRight",
+        "scale": [
+          0.12,
+          0.12,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimbsRoot",
+        "scale": [
+          0.1,
+          0.1,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb1Left",
+        "scale": [
+          0.13,
+          0.13,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb1Right",
+        "scale": [
+          0.13,
+          0.13,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb2Left",
+        "scale": [
+          0.12,
+          0.12,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb2Right",
+        "scale": [
+          0.12,
+          0.12,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTail1",
+        "scale": [
+          0.05,
+          0.1,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTail2",
+        "scale": [
+          0.05,
+          0.1,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTail3",
+        "scale": [
+          0.05,
+          0.1,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTail4",
+        "scale": [
+          0.05,
+          0.1,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTail5",
+        "scale": [
+          0.05,
+          0.1,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTail6",
+        "scale": [
+          0.05,
+          0.1,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mWing1Right",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.01,
+          -0.01,
+          0
+        ]
+      },
+      {
+        "name": "mWing1Left",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          -0.01,
+          0.01,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 27,
+    "id": 35,
+    "valueMin": -1,
+    "valueMax": 2,
+    "drivenParams": [
+      {
+        "id": 30035,
+        "valueMin": -1,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mFaceEar1Left",
+            "scale": [
+              0.55,
+              0.55,
+              0.55
+            ],
+            "offset": [
+              0,
+              -0.002,
+              0.001
+            ]
+          },
+          {
+            "name": "mFaceEar1Right",
+            "scale": [
+              0.55,
+              0.55,
+              0.55
+            ],
+            "offset": [
+              0,
+              0.002,
+              0.001
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 28,
+    "id": 36,
+    "valueMin": -1.8,
+    "valueMax": 1.4,
+    "bones": [
+      {
+        "name": "mNeck",
+        "scale": [
+          0.01,
+          0.03,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mCollarLeft",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          0,
+          0.02,
+          0
+        ]
+      },
+      {
+        "name": "mCollarRight",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          0,
+          -0.02,
+          0
+        ]
+      },
+      {
+        "name": "mChest",
+        "scale": [
+          0.02,
+          0.08,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mWing1Right",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          0,
+          -0.02,
+          0
+        ]
+      },
+      {
+        "name": "mWing1Left",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          0,
+          0.02,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 29,
+    "id": 37,
+    "valueMin": -3.2,
+    "valueMax": 2.8,
+    "bones": [
+      {
+        "name": "mPelvis",
+        "scale": [
+          0,
+          0.1,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mSpine1",
+        "scale": [
+          0,
+          0.1,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mSpine2",
+        "scale": [
+          0,
+          0.1,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHipLeft",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          0,
+          0.004,
+          0
+        ]
+      },
+      {
+        "name": "mHipRight",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          0,
+          -0.004,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimbsRoot",
+        "scale": [
+          0,
+          0.1,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb1Left",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          0,
+          0.004,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb1Right",
+        "scale": [
+          0,
+          0,
+          0
+        ],
+        "offset": [
+          0,
+          -0.004,
+          0
+        ]
+      },
+      {
+        "name": "mTail1",
+        "scale": [
+          0,
+          0.05,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTail2",
+        "scale": [
+          0,
+          0.02,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mTail3",
+        "scale": [
+          0,
+          0.01,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 30,
+    "id": 38,
+    "valueMin": -1,
+    "valueMax": 1,
+    "bones": [
+      {
+        "name": "mTorso",
+        "scale": [
+          0,
+          0,
+          0.3
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mSpine3",
+        "scale": [
+          0,
+          0,
+          0.3
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mSpine4",
+        "scale": [
+          0,
+          0,
+          0.3
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mPelvis",
+        "scale": [
+          0,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mSpine1",
+        "scale": [
+          0,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mSpine2",
+        "scale": [
+          0,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHipLeft",
+        "scale": [
+          0,
+          0,
+          -0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHipRight",
+        "scale": [
+          0,
+          0,
+          -0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mKneeRight",
+        "scale": [
+          0,
+          0,
+          -0.05
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mKneeLeft",
+        "scale": [
+          0,
+          0,
+          -0.05
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimbsRoot",
+        "scale": [
+          0,
+          0,
+          0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb1Left",
+        "scale": [
+          0,
+          0,
+          -0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb1Right",
+        "scale": [
+          0,
+          0,
+          -0.1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb2Right",
+        "scale": [
+          0,
+          0,
+          -0.05
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb2Left",
+        "scale": [
+          0,
+          0,
+          -0.05
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 31,
+    "id": 80,
+    "valueMin": 0,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 32,
+        "valueMin": 0,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mNeck",
+            "scale": [
+              0,
+              0,
+              0.2
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mCollarLeft",
+            "scale": [
+              0,
+              0.4,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mCollarRight",
+            "scale": [
+              0,
+              0.4,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mShoulderLeft",
+            "scale": [
+              0,
+              0.35,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mShoulderRight",
+            "scale": [
+              0,
+              0.35,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mElbowLeft",
+            "scale": [
+              0,
+              0.1,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mElbowRight",
+            "scale": [
+              0,
+              0.1,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mChest",
+            "scale": [
+              0.05,
+              0.05,
+              0.05
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mTorso",
+            "scale": [
+              0,
+              0,
+              0.05
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mSpine3",
+            "scale": [
+              0,
+              0,
+              0.05
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mSpine4",
+            "scale": [
+              0,
+              0,
+              0.05
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mHipLeft",
+            "scale": [
+              0.05,
+              0.05,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mHipRight",
+            "scale": [
+              0.05,
+              0.05,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mKneeLeft",
+            "scale": [
+              0.05,
+              0.05,
+              0.1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mKneeRight",
+            "scale": [
+              0.05,
+              0.05,
+              0.1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mHindLimb1Left",
+            "scale": [
+              0.05,
+              0.05,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mHindLimb1Right",
+            "scale": [
+              0.05,
+              0.05,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mHindLimb2Left",
+            "scale": [
+              0.05,
+              0.05,
+              0.1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mHindLimb2Right",
+            "scale": [
+              0.05,
+              0.05,
+              0.1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mWingsRoot",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mWing1Right",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.05,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mWing1Left",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.05,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 45,
+    "id": 119,
+    "valueMin": 0,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 30119,
+        "valueMin": 0,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceEyebrowOuterRight",
+            "scale": [
+              0,
+              0,
+              0.5
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterRight",
+            "scale": [
+              0,
+              0,
+              0.5
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerRight",
+            "scale": [
+              0,
+              0,
+              0.5
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterLeft",
+            "scale": [
+              0,
+              0,
+              0.5
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterLeft",
+            "scale": [
+              0,
+              0,
+              0.5
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerLeft",
+            "scale": [
+              0,
+              0,
+              0.5
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 59,
+    "id": 155,
+    "valueMin": -0.9,
+    "valueMax": 1.3,
+    "drivenParams": [
+      {
+        "id": 30155,
+        "valueMin": -0.9,
+        "valueMax": 1.3,
+        "bones": [
+          {
+            "name": "mFaceLipCornerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.005,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.003,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.003,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.003,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.003,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipCornerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.005,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 73,
+    "id": 185,
+    "valueMin": -1,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 30185,
+        "valueMin": -1,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceChin",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.025
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 75,
+    "id": 193,
+    "valueMin": 0,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 30193,
+        "valueMin": -1,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceChin",
+            "scale": [
+              0,
+              -0.2,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceRoot",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceCheekLowerRight",
+            "scale": [
+              0,
+              -0.2,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceCheekLowerLeft",
+            "scale": [
+              0,
+              -0.2,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceForeheadRight",
+            "scale": [
+              0,
+              -1,
+              0
+            ],
+            "offset": [
+              0,
+              0.01,
+              -0.01
+            ]
+          },
+          {
+            "name": "mFaceForeheadLeft",
+            "scale": [
+              0,
+              -1,
+              0
+            ],
+            "offset": [
+              0,
+              -0.01,
+              -0.01
+            ]
+          },
+          {
+            "name": "mFaceJawShaper",
+            "scale": [
+              0,
+              -0.3,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 76,
+    "id": 196,
+    "valueMin": -2,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 195,
+        "valueMin": -1,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mEyeLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.009,
+              0
+            ]
+          },
+          {
+            "name": "mEyeRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.009,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeAltLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.009,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeAltRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.009,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.009,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.009,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.009,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.009,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.009,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.009,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.009,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.009,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.005,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.005,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.008,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.008,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 77,
+    "id": 198,
+    "valueMin": 0,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 197,
+        "valueMin": 0,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFootRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.08
+            ]
+          },
+          {
+            "name": "mFootLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.08
+            ]
+          },
+          {
+            "name": "mHindLimb4Left",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.08
+            ]
+          },
+          {
+            "name": "mHindLimb4Right",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.08
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 78,
+    "id": 503,
+    "valueMin": 0,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 502,
+        "valueMin": 0,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFootRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.07
+            ]
+          },
+          {
+            "name": "mFootLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.07
+            ]
+          },
+          {
+            "name": "mHindLimb4Left",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.07
+            ]
+          },
+          {
+            "name": "mHindLimb4Right",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.07
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 79,
+    "id": 505,
+    "valueMin": 0,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 30505,
+        "valueMin": 0,
+        "valueMax": 0.7,
+        "bones": [
+          {
+            "name": "mFaceLipCornerLeft",
+            "scale": [
+              0.2,
+              0,
+              -0.6
+            ],
+            "offset": [
+              -0.01,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperLeft",
+            "scale": [
+              0.2,
+              0,
+              -0.6
+            ],
+            "offset": [
+              -0.012,
+              0,
+              -0.005
+            ]
+          },
+          {
+            "name": "mFaceLipUpperCenter",
+            "scale": [
+              0.2,
+              0,
+              -0.6
+            ],
+            "offset": [
+              -0.015,
+              0,
+              -0.005
+            ]
+          },
+          {
+            "name": "mFaceLipUpperRight",
+            "scale": [
+              0.2,
+              0,
+              -0.6
+            ],
+            "offset": [
+              -0.012,
+              0,
+              -0.005
+            ]
+          },
+          {
+            "name": "mFaceLipCornerRight",
+            "scale": [
+              0.2,
+              0,
+              -0.6
+            ],
+            "offset": [
+              -0.01,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerLeft",
+            "scale": [
+              0.2,
+              0,
+              -0.6
+            ],
+            "offset": [
+              -0.01,
+              0,
+              0.008
+            ]
+          },
+          {
+            "name": "mFaceLipLowerCenter",
+            "scale": [
+              0.2,
+              0,
+              -0.6
+            ],
+            "offset": [
+              -0.01,
+              0,
+              0.008
+            ]
+          },
+          {
+            "name": "mFaceLipLowerRight",
+            "scale": [
+              0.2,
+              0,
+              -0.6
+            ],
+            "offset": [
+              -0.01,
+              0,
+              0.008
+            ]
+          }
+        ],
+        "min1": 0,
+        "max1": 0,
+        "max2": 0,
+        "min2": 0.5
+      },
+      {
+        "id": 31505,
+        "valueMin": 0,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceLipCornerLeft",
+            "scale": [
+              0.2,
+              0,
+              0.1
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperLeft",
+            "scale": [
+              0.2,
+              0,
+              0.4
+            ],
+            "offset": [
+              0.004,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceLipUpperCenter",
+            "scale": [
+              0.2,
+              0,
+              0.4
+            ],
+            "offset": [
+              0.004,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceLipUpperRight",
+            "scale": [
+              0.2,
+              0,
+              0.4
+            ],
+            "offset": [
+              0.004,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceLipCornerRight",
+            "scale": [
+              0.2,
+              0,
+              0.1
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerLeft",
+            "scale": [
+              0.2,
+              0,
+              0.3
+            ],
+            "offset": [
+              0.006,
+              0,
+              -0.003
+            ]
+          },
+          {
+            "name": "mFaceLipLowerCenter",
+            "scale": [
+              0.2,
+              0,
+              0.3
+            ],
+            "offset": [
+              0.006,
+              0,
+              -0.003
+            ]
+          },
+          {
+            "name": "mFaceLipLowerRight",
+            "scale": [
+              0.2,
+              0,
+              0.3
+            ],
+            "offset": [
+              0.006,
+              0,
+              -0.003
+            ]
+          }
+        ],
+        "min1": 0.5,
+        "max1": 1,
+        "max2": 1,
+        "min2": 1
+      }
+    ]
+  },
+  {
+    "byteIndex": 80,
+    "id": 506,
+    "valueMin": -2,
+    "valueMax": 2,
+    "drivenParams": [
+      {
+        "id": 30506,
+        "valueMin": -2,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mFaceTeethUpper",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.006
+            ]
+          },
+          {
+            "name": "mFaceTeethLower",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.006
+            ]
+          },
+          {
+            "name": "mFaceNoseBase",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.001
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 86,
+    "id": 517,
+    "valueMin": -0.5,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 30517,
+        "valueMin": -0.5,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceNoseCenter",
+            "scale": [
+              0.1,
+              0.85,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.001,
+              0.013,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.001,
+              -0.013,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 100,
+    "id": 629,
+    "valueMin": 0,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 31629,
+        "valueMin": 0,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceForeheadLeft",
+            "scale": [
+              0,
+              0,
+              0.08
+            ],
+            "offset": [
+              0.02,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceForeheadCenter",
+            "scale": [
+              0.01,
+              0,
+              0.08
+            ],
+            "offset": [
+              0.002,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceForeheadRight",
+            "scale": [
+              0,
+              0,
+              0.08
+            ],
+            "offset": [
+              0.02,
+              0,
+              0
+            ]
+          }
+        ],
+        "min1": 0,
+        "max1": 0,
+        "max2": 0,
+        "min2": 0.5
+      },
+      {
+        "id": 32629,
+        "valueMin": 0,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceForeheadLeft",
+            "scale": [
+              0,
+              0,
+              0.2
+            ],
+            "offset": [
+              -0.01,
+              0,
+              -0.01
+            ]
+          },
+          {
+            "name": "mFaceForeheadCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.001,
+              0,
+              0.001
+            ]
+          },
+          {
+            "name": "mFaceForeheadRight",
+            "scale": [
+              0,
+              0,
+              0.2
+            ],
+            "offset": [
+              -0.01,
+              0,
+              -0.01
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.002
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.002
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.003
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.003
+            ]
+          }
+        ],
+        "min1": 0.5,
+        "max1": 1,
+        "max2": 1,
+        "min2": 1
+      }
+    ]
+  },
+  {
+    "byteIndex": 103,
+    "id": 646,
+    "valueMin": -1.3,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 30646,
+        "valueMin": -1.3,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceRoot",
+            "scale": [
+              0,
+              -0.07,
+              0.07
+            ],
+            "offset": [
+              0,
+              0,
+              -0.005
+            ]
+          },
+          {
+            "name": "mFaceForeheadLeft",
+            "scale": [
+              0,
+              0,
+              0.2
+            ],
+            "offset": [
+              -0.01,
+              0,
+              -0.01
+            ]
+          },
+          {
+            "name": "mFaceForeheadCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.001,
+              0,
+              0.001
+            ]
+          },
+          {
+            "name": "mFaceForeheadRight",
+            "scale": [
+              0,
+              0,
+              0.2
+            ],
+            "offset": [
+              -0.01,
+              0,
+              -0.01
+            ]
+          },
+          {
+            "name": "mFaceChin",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.015,
+              0,
+              0.005
+            ]
+          },
+          {
+            "name": "mFaceEyeAltRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.0033,
+              0.0025
+            ]
+          },
+          {
+            "name": "mFaceEyeAltLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.0033,
+              0.0025
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.0033,
+              0.0025
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.0033,
+              0.002
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.0017,
+              0.0025
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.004,
+              0.0014
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.00377,
+              0.00061
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.00225,
+              0.001
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.0033,
+              0.0025
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.0033,
+              0.002
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.0017,
+              0.0025
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.004,
+              0.0014
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.00377,
+              0.00061
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.00225,
+              0.001
+            ]
+          },
+          {
+            "name": "mFaceLipLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceTeethUpper",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.0075
+            ]
+          },
+          {
+            "name": "mFaceTeethLower",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.0061
+            ]
+          },
+          {
+            "name": "mFaceTongueBase",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceCheekLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.0085
+            ]
+          },
+          {
+            "name": "mFaceCheekLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.0085
+            ]
+          },
+          {
+            "name": "mFaceCheekUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.005
+            ]
+          },
+          {
+            "name": "mFaceCheekUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.005
+            ]
+          },
+          {
+            "name": "mFaceNoseCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.005
+            ]
+          },
+          {
+            "name": "mFaceNoseRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.005
+            ]
+          },
+          {
+            "name": "mFaceNoseLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.005
+            ]
+          },
+          {
+            "name": "mFaceNoseBase",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.006
+            ]
+          },
+          {
+            "name": "mFaceJawShaper",
+            "scale": [
+              0,
+              0.2,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          }
+        ],
+        "min1": -1.3,
+        "max1": -1.3,
+        "max2": -1.3,
+        "min2": 1
+      }
+    ]
+  },
+  {
+    "byteIndex": 104,
+    "id": 647,
+    "valueMin": -0.5,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 30647,
+        "valueMin": -0.5,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceRoot",
+            "scale": [
+              0,
+              -0.1,
+              0.1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceChin",
+            "scale": [
+              0,
+              -0.1,
+              0.5
+            ],
+            "offset": [
+              0,
+              0,
+              -0.005
+            ]
+          },
+          {
+            "name": "mFaceForeheadCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.006
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.0053,
+              -0.0047
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.0045,
+              -0.0053
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.00225,
+              -0.0048
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.0053,
+              -0.0047
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.0045,
+              -0.0053
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.00225,
+              -0.0048
+            ]
+          },
+          {
+            "name": "mFaceEyeAltRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.0042,
+              -0.0035
+            ]
+          },
+          {
+            "name": "mFaceEyeAltLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.0042,
+              -0.0035
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.0039,
+              -0.0032
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.0039,
+              -0.0032
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.0039,
+              -0.0032
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.0039,
+              -0.0032
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.00225,
+              -0.0032
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.00225,
+              -0.0032
+            ]
+          },
+          {
+            "name": "mFaceNoseBridge",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.002
+            ]
+          },
+          {
+            "name": "mFaceNoseRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.002,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.002,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseBase",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.002
+            ]
+          },
+          {
+            "name": "mFaceCheekUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.003,
+              0
+            ]
+          },
+          {
+            "name": "mFaceCheekUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.003,
+              0
+            ]
+          },
+          {
+            "name": "mFaceCheekLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.003,
+              0.0032
+            ]
+          },
+          {
+            "name": "mFaceCheekLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.003,
+              0.0032
+            ]
+          },
+          {
+            "name": "mFaceTeethUpper",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.0032
+            ]
+          },
+          {
+            "name": "mFaceTeethLower",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.0016
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 106,
+    "id": 650,
+    "valueMin": -1.3,
+    "valueMax": 1.2,
+    "drivenParams": [
+      {
+        "id": 30650,
+        "valueMin": -1.3,
+        "valueMax": 1.2,
+        "bones": [
+          {
+            "name": "mFaceEyebrowOuterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 108,
+    "id": 653,
+    "valueMin": -1,
+    "valueMax": 2,
+    "drivenParams": [
+      {
+        "id": 30653,
+        "valueMin": -1,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mFaceLipCornerLeft",
+            "scale": [
+              0.2,
+              0,
+              0.2
+            ],
+            "offset": [
+              -0.008,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperLeft",
+            "scale": [
+              0.2,
+              0,
+              0.2
+            ],
+            "offset": [
+              -0.009,
+              0,
+              0.0025
+            ]
+          },
+          {
+            "name": "mFaceLipUpperCenter",
+            "scale": [
+              0.2,
+              0,
+              0.2
+            ],
+            "offset": [
+              -0.009,
+              0,
+              0.0025
+            ]
+          },
+          {
+            "name": "mFaceLipUpperRight",
+            "scale": [
+              0.2,
+              0,
+              0.2
+            ],
+            "offset": [
+              -0.009,
+              0,
+              0.0025
+            ]
+          },
+          {
+            "name": "mFaceLipCornerRight",
+            "scale": [
+              0.2,
+              0,
+              0.2
+            ],
+            "offset": [
+              -0.008,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerLeft",
+            "scale": [
+              0.2,
+              0,
+              0.2
+            ],
+            "offset": [
+              -0.008,
+              0,
+              -0.0015
+            ]
+          },
+          {
+            "name": "mFaceLipLowerCenter",
+            "scale": [
+              0.2,
+              0,
+              0.2
+            ],
+            "offset": [
+              -0.008,
+              0,
+              -0.0025
+            ]
+          },
+          {
+            "name": "mFaceLipLowerRight",
+            "scale": [
+              0.2,
+              0,
+              0.2
+            ],
+            "offset": [
+              -0.008,
+              0,
+              -0.0015
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 110,
+    "id": 656,
+    "valueMin": -2,
+    "valueMax": 2,
+    "drivenParams": [
+      {
+        "id": 30656,
+        "valueMin": -2,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mFaceNoseCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.009,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseBase",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.007,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.005,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.005,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipCornerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.001,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.002,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.003,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.002,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipCornerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.001,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.0008,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.0008,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseBridge",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.004,
+              0
+            ]
+          },
+          {
+            "name": "mFaceTeethUpper",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.003,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.001,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.001,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 111,
+    "id": 659,
+    "valueMin": 0,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 30658,
+        "valueMin": 0,
+        "valueMax": 1.4,
+        "bones": [
+          {
+            "name": "mFaceLipCornerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.005
+            ]
+          },
+          {
+            "name": "mFaceLipCornerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.005
+            ]
+          },
+          {
+            "name": "mFaceLipUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.001
+            ]
+          },
+          {
+            "name": "mFaceLipLowerCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.002
+            ]
+          },
+          {
+            "name": "mFaceLipLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.001
+            ]
+          }
+        ],
+        "min1": 0,
+        "max1": 0,
+        "max2": 0,
+        "min2": 0.5
+      },
+      {
+        "id": 30657,
+        "valueMin": 0,
+        "valueMax": 1.4,
+        "bones": [
+          {
+            "name": "mFaceLipCornerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.005,
+              0.002
+            ]
+          },
+          {
+            "name": "mFaceLipCornerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.005,
+              0.002
+            ]
+          },
+          {
+            "name": "mFaceLipUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.002,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.0005
+            ]
+          },
+          {
+            "name": "mFaceLipUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.002,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.001,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.001
+            ]
+          },
+          {
+            "name": "mFaceLipLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.001,
+              0
+            ]
+          }
+        ],
+        "min1": 0.5,
+        "max1": 1,
+        "max2": 1,
+        "min2": 1
+      }
+    ]
+  },
+  {
+    "byteIndex": 112,
+    "id": 662,
+    "valueMin": 0,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 661,
+        "valueMin": -2,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mEyeLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mEyeRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceEyeAltLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceEyeAltRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceNoseRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceNoseLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceEar1Left",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceEar1Right",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceLipUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceLipUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceLipLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceLipLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceLipCornerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceLipCornerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceCheekLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceCheekLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceCheekUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceCheekUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceForeheadLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceForeheadRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 113,
+    "id": 663,
+    "valueMin": -2,
+    "valueMax": 2,
+    "drivenParams": [
+      {
+        "id": 31663,
+        "valueMin": 0,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mFaceNoseCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.003,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseBase",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.004,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.003,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.003,
+              0
+            ]
+          },
+          {
+            "name": "mFaceTeethUpper",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.006,
+              0
+            ]
+          },
+          {
+            "name": "mFaceTeethLower",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              -0.006,
+              0
+            ]
+          }
+        ],
+        "min1": -2,
+        "max1": -2,
+        "max2": -2,
+        "min2": 0
+      },
+      {
+        "id": 32663,
+        "valueMin": 0,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mFaceNoseCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.003,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseBase",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.004,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.003,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.003,
+              0
+            ]
+          },
+          {
+            "name": "mFaceTeethUpper",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.006,
+              0
+            ]
+          },
+          {
+            "name": "mFaceTeethLower",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0.006,
+              0
+            ]
+          }
+        ],
+        "min1": 0,
+        "max1": 2,
+        "max2": 2,
+        "min2": 2
+      }
+    ]
+  },
+  {
+    "byteIndex": 115,
+    "id": 665,
+    "valueMin": -2,
+    "valueMax": 2,
+    "drivenParams": [
+      {
+        "id": 30665,
+        "valueMin": -2,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mFaceTeethLower",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.008,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceChin",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.008,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 117,
+    "id": 675,
+    "valueMin": -0.3,
+    "valueMax": 0.3,
+    "bones": [
+      {
+        "name": "mWristRight",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mWristLeft",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandThumb1Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandThumb2Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandThumb3Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandIndex1Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandIndex2Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandIndex3Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandMiddle1Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandMiddle2Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandMiddle3Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandRing1Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandRing2Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandRing3Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandPinky1Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandPinky2Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandPinky3Right",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandThumb1Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandThumb2Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandThumb3Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandIndex1Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandIndex2Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandIndex3Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandMiddle1Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandMiddle2Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandMiddle3Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandRing1Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandRing2Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandRing3Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandPinky1Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandPinky2Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHandPinky3Left",
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 120,
+    "id": 682,
+    "valueMin": 0,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 655,
+        "valueMin": -0.25,
+        "valueMax": 0.1,
+        "bones": [
+          {
+            "name": "mFaceTeethLower",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceTeethUpper",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseBridge",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseBase",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mSkull",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0.1
+            ]
+          },
+          {
+            "name": "mHead",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceRoot",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mEyeLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mEyeRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeAltLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              -0.001
+            ]
+          },
+          {
+            "name": "mFaceEyeAltRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              -0.001
+            ]
+          },
+          {
+            "name": "mFaceForeheadLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceForeheadCenter",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceForeheadRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseCenter",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceCheekLowerLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceCheekUpperLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceCheekLowerRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceCheekUpperRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceTongueBase",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceTongueTip",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceJaw",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceJawShaper",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceChin",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperCenter",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipCornerLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipCornerRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerLeft",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerCenter",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerRight",
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 121,
+    "id": 683,
+    "valueMin": -0.4,
+    "valueMax": 0.2,
+    "bones": [
+      {
+        "name": "mNeck",
+        "scale": [
+          1,
+          1,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 124,
+    "id": 690,
+    "valueMin": 0,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 689,
+        "valueMin": -1,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mEyeLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mEyeRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeAltLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeAltRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerRight",
+            "scale": [
+              0,
+              0.3,
+              0.7
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerLeft",
+            "scale": [
+              0,
+              0.3,
+              0.7
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperRight",
+            "scale": [
+              0,
+              0.3,
+              0.7
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperLeft",
+            "scale": [
+              0,
+              0.3,
+              0.7
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.005,
+              -0.008,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.005,
+              0.008,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "id": 30689,
+        "valueMin": -1.1,
+        "valueMax": 1.1,
+        "bones": [
+          {
+            "name": "mEyeLeft",
+            "scale": [
+              0.248,
+              0.25,
+              0.25
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mEyeRight",
+            "scale": [
+              0.248,
+              0.25,
+              0.25
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeAltLeft",
+            "scale": [
+              0.248,
+              0.25,
+              0.25
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeAltRight",
+            "scale": [
+              0.248,
+              0.25,
+              0.25
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 125,
+    "id": 692,
+    "valueMin": -1,
+    "valueMax": 1,
+    "bones": [
+      {
+        "name": "mHipLeft",
+        "scale": [
+          0,
+          0,
+          0.2
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHipRight",
+        "scale": [
+          0,
+          0,
+          0.2
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mKneeRight",
+        "scale": [
+          0,
+          0,
+          0.2
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mKneeLeft",
+        "scale": [
+          0,
+          0,
+          0.2
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb1Left",
+        "scale": [
+          0,
+          0,
+          0.2
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb1Right",
+        "scale": [
+          0,
+          0,
+          0.2
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb2Right",
+        "scale": [
+          0,
+          0,
+          0.2
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimb2Left",
+        "scale": [
+          0,
+          0,
+          0.2
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 126,
+    "id": 693,
+    "valueMin": -1,
+    "valueMax": 1,
+    "bones": [
+      {
+        "name": "mShoulderLeft",
+        "scale": [
+          0,
+          0.2,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mShoulderRight",
+        "scale": [
+          0,
+          0.2,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mElbowRight",
+        "scale": [
+          0,
+          0.3,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mElbowLeft",
+        "scale": [
+          0,
+          0.3,
+          0
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 148,
+    "id": 756,
+    "valueMin": -1,
+    "valueMax": 1,
+    "bones": [
+      {
+        "name": "mNeck",
+        "scale": [
+          0,
+          0,
+          0.5
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 149,
+    "id": 757,
+    "valueMin": -4,
+    "valueMax": 2,
+    "drivenParams": [
+      {
+        "id": 30757,
+        "valueMin": -4,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mFaceEyebrowOuterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.001
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.002
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.001
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.001
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.002
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.001
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 150,
+    "id": 758,
+    "valueMin": -1.5,
+    "valueMax": 1.5,
+    "drivenParams": [
+      {
+        "id": 30758,
+        "valueMin": -1.5,
+        "valueMax": 1.5,
+        "bones": [
+          {
+            "name": "mFaceNoseBridge",
+            "scale": [
+              0,
+              0,
+              0.2
+            ],
+            "offset": [
+              0.0025,
+              0,
+              -0.001
+            ]
+          },
+          {
+            "name": "mFaceNoseCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.004,
+              0,
+              0.001
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 151,
+    "id": 759,
+    "valueMin": -1,
+    "valueMax": 1.5,
+    "drivenParams": [
+      {
+        "id": 30759,
+        "valueMin": -1,
+        "valueMax": 1.5,
+        "bones": [
+          {
+            "name": "mFaceNoseBase",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              -0.004
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 152,
+    "id": 760,
+    "valueMin": -1.2,
+    "valueMax": 2,
+    "drivenParams": [
+      {
+        "id": 30760,
+        "valueMin": -1.2,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mFaceJawShaper",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.03
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 155,
+    "id": 764,
+    "valueMin": -0.5,
+    "valueMax": 1.2,
+    "drivenParams": [
+      {
+        "id": 30764,
+        "valueMin": -1,
+        "valueMax": 1.2,
+        "bones": [
+          {
+            "name": "mFaceLipUpperLeft",
+            "scale": [
+              0,
+              0,
+              0.3
+            ],
+            "offset": [
+              0,
+              0,
+              0.003
+            ]
+          },
+          {
+            "name": "mFaceLipUpperCenter",
+            "scale": [
+              0,
+              0,
+              -0.1
+            ],
+            "offset": [
+              0,
+              0,
+              -0.001
+            ]
+          },
+          {
+            "name": "mFaceLipUpperRight",
+            "scale": [
+              0,
+              0,
+              0.3
+            ],
+            "offset": [
+              0,
+              0,
+              0.003
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 156,
+    "id": 765,
+    "valueMin": -0.3,
+    "valueMax": 2.5,
+    "drivenParams": [
+      {
+        "id": 30765,
+        "valueMin": -0.3,
+        "valueMax": 2.5,
+        "bones": [
+          {
+            "name": "mFaceEyeLidLowerLeft",
+            "scale": [
+              0.05,
+              0.05,
+              0.05
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerRight",
+            "scale": [
+              0.05,
+              0.05,
+              0.05
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerLeft",
+            "scale": [
+              0.05,
+              0.05,
+              0.05
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerRight",
+            "scale": [
+              0.05,
+              0.05,
+              0.05
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 157,
+    "id": 769,
+    "valueMin": 0,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 768,
+        "valueMin": -2,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mEyeLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mEyeRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeAltLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeAltRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.002,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.002,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.001,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowCenterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.001,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.0013,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyebrowOuterLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.0013,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 158,
+    "id": 773,
+    "valueMin": 0,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 772,
+        "valueMin": -1,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mEyeLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.016,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mEyeRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.016,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "id": 30772,
+        "valueMin": -1,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceRoot",
+            "scale": [
+              0.25,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.0038,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.0038,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.0038,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeLidLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.0038,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.01,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceNoseBase",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipCornerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipCornerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.005,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.01,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.01,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceLipLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.01,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceCheekLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.007,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceCheekLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.007,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceChin",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.014,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceTeethUpper",
+            "scale": [
+              0.28,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceTeethLower",
+            "scale": [
+              0.28,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceTongueBase",
+            "scale": [
+              0.3,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceTongueTip",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.004,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "id": 31772,
+        "valueMin": 0,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceEyeAltLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.0058,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeAltRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0.0058,
+              0,
+              0
+            ]
+          }
+        ],
+        "min1": 0,
+        "max1": 0,
+        "max2": 0,
+        "min2": 0.45
+      },
+      {
+        "id": 32772,
+        "valueMin": 0,
+        "valueMax": 1,
+        "bones": [
+          {
+            "name": "mFaceEyeAltLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.0032,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "mFaceEyeAltRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.0032,
+              0,
+              0
+            ]
+          }
+        ],
+        "min1": 0.5,
+        "max1": 1,
+        "max2": 1,
+        "min2": 1
+      }
+    ]
+  },
+  {
+    "byteIndex": 166,
+    "id": 796,
+    "valueMin": -0.4,
+    "valueMax": 3,
+    "drivenParams": [
+      {
+        "id": 30796,
+        "valueMin": -0.4,
+        "valueMax": 3,
+        "bones": [
+          {
+            "name": "mFaceEar2Left",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.0149,
+              0.001,
+              0.016
+            ]
+          },
+          {
+            "name": "mFaceEar2Right",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.0149,
+              -0.001,
+              0.016
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 167,
+    "id": 799,
+    "valueMin": 0,
+    "valueMax": 1,
+    "drivenParams": [
+      {
+        "id": 30797,
+        "valueMin": 0,
+        "valueMax": 1.5,
+        "bones": [
+          {
+            "name": "mFaceLipCornerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.002,
+              0,
+              0.001
+            ]
+          },
+          {
+            "name": "mFaceLipCornerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.002,
+              0,
+              0.001
+            ]
+          },
+          {
+            "name": "mFaceLipUpperLeft",
+            "scale": [
+              0.1,
+              0,
+              0.6
+            ],
+            "offset": [
+              -0.004,
+              0,
+              0.006
+            ]
+          },
+          {
+            "name": "mFaceLipUpperCenter",
+            "scale": [
+              0.1,
+              0,
+              0.4
+            ],
+            "offset": [
+              -0.004,
+              0,
+              0.003
+            ]
+          },
+          {
+            "name": "mFaceLipUpperRight",
+            "scale": [
+              0.1,
+              0,
+              0.6
+            ],
+            "offset": [
+              -0.004,
+              0,
+              0.006
+            ]
+          },
+          {
+            "name": "mFaceLipLowerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.002,
+              0,
+              0.001
+            ]
+          },
+          {
+            "name": "mFaceLipLowerCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.002,
+              0,
+              0.001
+            ]
+          },
+          {
+            "name": "mFaceLipLowerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.002,
+              0,
+              0.001
+            ]
+          }
+        ],
+        "min1": 0,
+        "max1": 0,
+        "max2": 0,
+        "min2": 0.5
+      },
+      {
+        "id": 30798,
+        "valueMin": 0,
+        "valueMax": 1.5,
+        "bones": [
+          {
+            "name": "mFaceLipCornerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.002,
+              0,
+              -0.002
+            ]
+          },
+          {
+            "name": "mFaceLipCornerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.002,
+              0,
+              -0.002
+            ]
+          },
+          {
+            "name": "mFaceLipUpperLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.002,
+              0,
+              -0.003
+            ]
+          },
+          {
+            "name": "mFaceLipUpperCenter",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.002,
+              0,
+              -0.003
+            ]
+          },
+          {
+            "name": "mFaceLipUpperRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              -0.002,
+              0,
+              -0.003
+            ]
+          },
+          {
+            "name": "mFaceLipLowerLeft",
+            "scale": [
+              0.1,
+              0,
+              0.25
+            ],
+            "offset": [
+              -0.005,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceLipLowerCenter",
+            "scale": [
+              0.1,
+              0,
+              0.25
+            ],
+            "offset": [
+              -0.005,
+              0,
+              -0.004
+            ]
+          },
+          {
+            "name": "mFaceLipLowerRight",
+            "scale": [
+              0.1,
+              0,
+              0.25
+            ],
+            "offset": [
+              -0.005,
+              0,
+              -0.004
+            ]
+          }
+        ],
+        "min1": 0.5,
+        "max1": 1,
+        "max2": 1,
+        "min2": 1
+      }
+    ]
+  },
+  {
+    "byteIndex": 201,
+    "id": 842,
+    "valueMin": -1,
+    "valueMax": 1,
+    "bones": [
+      {
+        "name": "mPelvis",
+        "scale": [
+          0,
+          0,
+          0.3
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mHindLimbsRoot",
+        "scale": [
+          0,
+          0,
+          0.3
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mSpine1",
+        "scale": [
+          0,
+          0,
+          0.3
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "mSpine2",
+        "scale": [
+          0,
+          0,
+          0.3
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 213,
+    "id": 879,
+    "valueMin": -0.5,
+    "valueMax": 2,
+    "drivenParams": [
+      {
+        "id": 30879,
+        "valueMin": -0.5,
+        "valueMax": 2,
+        "bones": [
+          {
+            "name": "mGroin",
+            "scale": [
+              0.5,
+              0.25,
+              0.1
+            ],
+            "offset": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "byteIndex": 214,
+    "id": 880,
+    "valueMin": -1.3,
+    "valueMax": 1.2,
+    "drivenParams": [
+      {
+        "id": 30880,
+        "valueMin": -1.3,
+        "valueMax": 1.2,
+        "bones": [
+          {
+            "name": "mFaceEyecornerInnerLeft",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          },
+          {
+            "name": "mFaceEyecornerInnerRight",
+            "scale": [
+              0,
+              0,
+              0
+            ],
+            "offset": [
+              0,
+              0,
+              0.004
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

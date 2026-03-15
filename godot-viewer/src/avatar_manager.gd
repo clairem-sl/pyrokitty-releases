@@ -227,7 +227,10 @@ func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
 
 		if rsi:
 			rsi.pos = godot_pos
-			rsi.rot = godot_rot
+			# Self avatar rotation is client-authoritative (set_self_avatar_yaw)
+			# unless sitting, where the server controls the sit pose.
+			if avatar_id != sm.self_avatar_id or seat_rsi != null:
+				rsi.rot = godot_rot
 
 		var target: Dictionary = {}
 		target["pos"] = godot_pos
@@ -365,8 +368,10 @@ func _apply_shape_to_skeleton(skeleton: Skeleton3D, bones: Dictionary, avatar_id
 
 
 ## Re-apply joint overrides from all rigged meshes on an avatar after shape change.
-## Meshes with joint overrides take precedence over shape (last mesh wins, same as SL).
+## Override priority: lowest mesh UUID wins (matches SL's std::map<LLUUID> ordering).
 func _reapply_joint_overrides(root_local_id: int, shared_skel: Skeleton3D, avatar_id: String) -> void:
+	# Clear override ownership — shape just reset all bones, start fresh
+	sm.bone_override_owner.erase(root_local_id)
 	for mesh_lid: int in sm.animesh_mesh_instances:
 		if sm.animesh_root_for.get(mesh_lid, 0) != root_local_id:
 			continue
@@ -393,7 +398,7 @@ func _reapply_joint_overrides(root_local_id: int, shared_skel: Skeleton3D, avata
 			continue
 		var glb_skel: Skeleton3D = sm.object_mgr._find_node_of_type(scene, "Skeleton3D")
 		if glb_skel != null:
-			sm.animation_mgr._apply_joint_overrides(glb_skel, shared_skel, override_joints)
+			sm.animation_mgr._apply_joint_overrides(glb_skel, shared_skel, override_joints, mesh_id)
 		scene.queue_free()
 
 

@@ -35,7 +35,7 @@ interface SkeletonJoint {
 }
 
 let skeletonCache: Map<string, SkeletonJoint> | null = null;
-// Attachment point name → parent joint name (from avatar_lad.xml)
+// Attachment point name → parent joint name (from avatar_lad_attachments.json)
 let attachmentPointCache: Map<string, string> | null = null;
 // Joint alias map: alternative name → canonical name (from XML aliases + attachment points + case fallback)
 let jointAliasCache: Map<string, string> | null = null;
@@ -50,6 +50,18 @@ function findCharacterFile(filename: string): string {
     path.join(__dirname, '..', '..', 'viewer', 'character', filename),
     path.join(__dirname, '..', '..', '..', 'viewer', 'character', filename),
     path.join(__dirname, '..', '..', '..', '..', 'indra', 'newview', 'character', filename),
+  ];
+  for (const p of candidates) {
+    try { return fs.readFileSync(p, 'utf8'); } catch { /* try next */ }
+  }
+  return '';
+}
+
+function findSharedFile(filename: string): string {
+  const candidates = [
+    ...(process.resourcesPath ? [path.join(process.resourcesPath, 'shared', filename)] : []),
+    path.join(__dirname, '..', '..', '..', 'shared', filename),
+    path.join(__dirname, '..', '..', '..', '..', 'shared', filename),
   ];
   for (const p of candidates) {
     try { return fs.readFileSync(p, 'utf8'); } catch { /* try next */ }
@@ -94,7 +106,7 @@ function getJointAliasMap(): Map<string, string> {
     }
   }
 
-  // 2. Attachment point underscore variants (from avatar_lad.xml)
+  // 2. Attachment point underscore variants (from avatar_lad_attachments.json)
   // Firestorm only adds underscore variants of multi-word attachment names
   // (llavatarappearance.cpp:1781-1786). Single-word names like "Pelvis" and
   // "Mouth" are NOT aliases — they remain as orphan joints with their own IBMs.
@@ -141,37 +153,21 @@ function resolveJointName(name: string): string {
   return name;  // unknown — keep original
 }
 
-/** Get attachment point name → parent joint name mapping from avatar_lad.xml */
+/** Get attachment point name → parent joint name mapping from avatar_lad_attachments.json */
 export function getAttachmentPoints(): Map<string, string> {
   if (attachmentPointCache) return attachmentPointCache;
 
-  const xml = findCharacterFile('avatar_lad.xml');
-  if (!xml) {
-    console.warn('[mesh-converter] avatar_lad.xml not found, attachment points unavailable');
+  const json = findSharedFile('avatar_lad_attachments.json');
+  if (!json) {
+    console.warn('[mesh-converter] avatar_lad_attachments.json not found, attachment points unavailable');
     attachmentPointCache = new Map();
     return attachmentPointCache;
   }
 
-  attachmentPointCache = parseAttachmentPoints(xml);
+  const obj = JSON.parse(json) as Record<string, string>;
+  attachmentPointCache = new Map(Object.entries(obj));
   console.log(`[mesh-converter] Loaded attachment points: ${attachmentPointCache.size} points`);
   return attachmentPointCache;
-}
-
-/** Parse avatar_lad.xml for attachment_point tags: name → joint (parent bone) */
-function parseAttachmentPoints(xml: string): Map<string, string> {
-  const points = new Map<string, string>();
-  // attachment_point tags span multiple lines, so collect each tag's full content
-  const tagRegex = /<attachment_point\b([\s\S]*?)\/>/g;
-  let match;
-  while ((match = tagRegex.exec(xml)) !== null) {
-    const attrs = match[1];
-    const nameMatch = attrs.match(/\bname="([^"]+)"/);
-    const jointMatch = attrs.match(/\bjoint="([^"]+)"/);
-    if (nameMatch && jointMatch) {
-      points.set(nameMatch[1], jointMatch[1]);
-    }
-  }
-  return points;
 }
 
 function parseSkeletonXml(xml: string): Map<string, SkeletonJoint> {
@@ -1014,6 +1010,7 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
     // Tag mesh node with joints that have alt IBM overrides (for Godot pipeline).
     // In SL, every joint with an alt_inverse_bind_matrix gets an override —
     // the mesh's position is authoritative regardless of distance from XML default.
+    // The Godot side filters out near-default overrides (aboveJointPosThreshold).
     const overriddenJointNames: string[] = [];
     if (skin!.altInverseBindMatrix && skin!.altInverseBindMatrix.length > 0) {
       for (let i = 0; i < resolvedJointNames.length; i++) {

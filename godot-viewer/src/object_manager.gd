@@ -303,9 +303,25 @@ func handle_object_create(msg: Dictionary) -> void:
 	# where the ControlAvatar for a worn animesh shares the avatar's skeleton.
 	if msg.get("animesh", false):
 		if parent_id > 0 and sm.animesh_roots.has(parent_id):
-			# Worn animesh attachment — use avatar's animesh root and shared skeleton
-			sm.animesh_root_for[local_id] = parent_id
-			print("[Animesh] Worn animesh %d uuid=%s → using avatar root %d" % [local_id, _uuid_short(local_id), parent_id])
+			# Worn animesh attachment — gets its OWN skeleton, parented under the avatar's
+			# root node so it follows the avatar's transform. Its child prims' joint
+			# overrides must NOT affect the avatar's skeleton (they define a separate
+			# rigged mesh, e.g. animated tail/wings on a dog avatar).
+			var avatar_node: Node3D = sm.animesh_roots[parent_id]
+			var animesh_node := Node3D.new()
+			animesh_node.name = "worn_animesh_%d" % local_id
+			avatar_node.add_child(animesh_node)
+			animesh_node.position = Vector3.ZERO
+			animesh_node.quaternion = Quaternion.IDENTITY
+			animesh_node.scale = Vector3.ONE
+			sm.animesh_roots[local_id] = animesh_node
+			sm.animesh_root_for[local_id] = local_id
+			if not sm.animesh_shared_skeleton.has(local_id):
+				var shared_skel: Skeleton3D = sm.skeleton_builder.create_shared_skeleton()
+				animesh_node.add_child(shared_skel)
+				sm.animesh_shared_skeleton[local_id] = shared_skel
+			_register_animesh_descendants(local_id, local_id)
+			print("[Animesh] Worn animesh %d uuid=%s → own skeleton under avatar root %d" % [local_id, _uuid_short(local_id), parent_id])
 		else:
 			# Standalone animesh object (rezzed on ground) — own root + skeleton
 			var animesh_node := Node3D.new()
@@ -329,8 +345,10 @@ func handle_object_create(msg: Dictionary) -> void:
 			# Retroactively register existing children + grandchildren (attachment linksets)
 			_register_animesh_descendants(local_id, local_id)
 
-	# Track children of animesh roots (direct children AND grandchildren of linksets)
-	if parent_id > 0:
+	# Track children of animesh roots (direct children AND grandchildren of linksets).
+	# Skip if this object already has a root assigned (e.g. worn animesh that just
+	# created its own root above — don't let child tracking overwrite it).
+	if parent_id > 0 and not sm.animesh_root_for.has(local_id):
 		if sm.animesh_roots.has(parent_id):
 			sm.animesh_root_for[local_id] = parent_id
 		elif sm.animesh_root_for.has(parent_id):
@@ -609,17 +627,9 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	# Override list comes from mesh_ready message, stored on scene_manager.
 	var override_joints: Array = sm.mesh_joint_overrides.get(mesh_id, [])
 	if override_joints.size() > 0:
-		print("[JointOverride] Applying %d overrides for mesh %s (avatar root=%d)" % [override_joints.size(), mesh_id.substr(0, 16), animesh_root_id])
-		sm.animation_mgr._apply_joint_overrides(glb_skeleton, shared_skel, override_joints)
-		# Check if any leg bones were overridden
-		var leg_overrides: Array = []
-		for jn in override_joints:
-			if "Hip" in (jn as String) or "Knee" in (jn as String) or "Pelvis" in (jn as String):
-				leg_overrides.append(jn)
-		if leg_overrides.size() > 0:
-			var av_uuid: String = sm.object_uuid.get(animesh_root_id, "?")
-			print("[JointOverride] Leg bones overridden for avatar %s: %s" % [av_uuid.substr(0, 8), str(leg_overrides)])
-			sm.avatar_mgr._log_bone_rests(shared_skel, av_uuid, "after_override")
+		var av_uuid: String = sm.object_uuid.get(animesh_root_id, "?")
+		print("[JointOverride] Applying %d overrides for mesh %s (avatar root=%d uuid=%s)" % [override_joints.size(), mesh_id.substr(0, 16), animesh_root_id, av_uuid.substr(0, 8)])
+		sm.animation_mgr._apply_joint_overrides(glb_skeleton, shared_skel, override_joints, mesh_id)
 
 	# Duplicate skin and remap bone indices to shared skeleton order.
 	# Bones not in the shared skeleton (e.g. attachment point joints like "Pelvis",
