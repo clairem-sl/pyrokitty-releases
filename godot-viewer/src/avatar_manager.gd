@@ -306,10 +306,8 @@ func handle_avatar_shape(msg: Dictionary) -> void:
 ## Reset skeleton bone rests to XML baseline + shape scale/offset deltas.
 ## In SL (xform.cpp), a joint's scale affects its CHILDREN's positions:
 ##   child.worldPos = parent.worldRot * (child.localPos * parent.scale) + parent.worldPos
-## where parent.scale is the parent's LOCAL scale (not world/cumulative).
-## We bake the immediate parent scale into each bone's rest position.
-## We do NOT put scale into the basis — Godot's rest basis scale would cascade
-## through the entire subtree, which is not how SL works.
+## We bake the immediate parent scale into each bone's rest position because
+## Godot doesn't apply parent-scale-on-child automatically.
 func _apply_shape_to_skeleton(skeleton: Skeleton3D, bones: Dictionary, avatar_id: String) -> void:
 	var xml_bones: Array = sm.skeleton_builder.get_bone_data()
 	var xml_by_name: Dictionary = {}
@@ -323,47 +321,29 @@ func _apply_shape_to_skeleton(skeleton: Skeleton3D, bones: Dictionary, avatar_id
 		var s: Array = shape_data.get("scale", [1, 1, 1])
 		parent_scale[bname] = Vector3(s[0], s[1], s[2])
 
-	var debug_bones: Array = ["mPelvis", "mHipLeft", "mHipRight", "mKneeLeft", "mKneeRight", "mAnkleLeft", "mAnkleRight", "mFootLeft", "mFootRight"]
-
 	for bi in range(skeleton.get_bone_count()):
 		var bname: String = skeleton.get_bone_name(bi)
 		var xml_data: Dictionary = xml_by_name.get(bname, {})
 		if xml_data.is_empty():
-			continue  # dynamically-added bone, skip
+			continue
 
 		var rest := Transform3D()
 		var sp: Vector3 = xml_data["pos"]  # SL space local position
-		var is_debug: bool = debug_bones.has(bname)
-
-		if is_debug:
-			print("[ShapeDebug] %s %s: xml_pos_sl=(%s, %s, %s)" % [avatar_id.substr(0, 8), bname, "%.6f" % sp.x, "%.6f" % sp.y, "%.6f" % sp.z])
 
 		# Apply shape offset to this bone's position (in SL space)
 		if bones.has(bname):
 			var shape_data: Dictionary = bones[bname]
 			var o: Array = shape_data.get("offset", [0, 0, 0])
-			var offset := Vector3(o[0], o[1], o[2])
-			if is_debug:
-				print("[ShapeDebug] %s %s: shape_offset_sl=(%s, %s, %s)" % [avatar_id.substr(0, 8), bname, "%.6f" % offset.x, "%.6f" % offset.y, "%.6f" % offset.z])
-			sp += offset
+			sp += Vector3(o[0], o[1], o[2])
 
-		# Apply immediate parent's shape scale to this bone's position (in SL space).
-		# SL xform.cpp: mWorldPosition.scaleVec(mParent->getScale()) where getScale()
-		# returns the parent's LOCAL scale. The cascading through ancestors happens
-		# naturally via each parent's already-scaled world position.
+		# Apply immediate parent's shape scale to this bone's position (in SL space)
 		var pname: String = xml_data.get("parent_name", "")
 		if not pname.is_empty() and parent_scale.has(pname):
 			var ps: Vector3 = parent_scale[pname]
-			if is_debug:
-				print("[ShapeDebug] %s %s: parent=%s parent_scale_sl=(%s, %s, %s) pos_before_scale=(%s, %s, %s)" % [avatar_id.substr(0, 8), bname, pname, "%.6f" % ps.x, "%.6f" % ps.y, "%.6f" % ps.z, "%.6f" % sp.x, "%.6f" % sp.y, "%.6f" % sp.z])
 			sp = Vector3(sp.x * ps.x, sp.y * ps.y, sp.z * ps.z)
-			if is_debug:
-				print("[ShapeDebug] %s %s: pos_after_scale=(%s, %s, %s)" % [avatar_id.substr(0, 8), bname, "%.6f" % sp.x, "%.6f" % sp.y, "%.6f" % sp.z])
 
 		# SL → Godot position conversion
 		rest.origin = Vector3(sp.x, sp.z, -sp.y)
-		if is_debug:
-			print("[ShapeDebug] %s %s: final_godot=(%s, %s, %s)" % [avatar_id.substr(0, 8), bname, "%.6f" % rest.origin.x, "%.6f" % rest.origin.y, "%.6f" % rest.origin.z])
 		skeleton.set_bone_rest(bi, rest)
 
 

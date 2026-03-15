@@ -364,9 +364,31 @@ func process_animesh(delta: float) -> void:
 		var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(root_id)
 		if shared_skel != null:
 			_evaluate_skeleton_animation(shared_skel, sl_local_rot, sl_local_pos)
+			_apply_global_pose_overrides(shared_skel)
 			_update_bone_attachments(root_id, shared_skel)
 			if _debug_skeleton_visible:
 				_update_debug_bone_markers(shared_skel)
+
+
+# ─── Global Pose Overrides ────────────────────────────
+
+## Compute and apply global pose overrides for a skeleton.
+## Called every frame for ALL skeletons so that skinning and attachments
+## always see correct bone positions (not just rest).
+func _apply_global_pose_overrides(skeleton: Skeleton3D) -> void:
+	var bone_globals: Array[Transform3D] = []
+	bone_globals.resize(skeleton.get_bone_count())
+	for bi in range(skeleton.get_bone_count()):
+		var rest_xf: Transform3D = skeleton.get_bone_rest(bi)
+		var pose_rot: Quaternion = skeleton.get_bone_pose_rotation(bi)
+		var pose_pos: Vector3 = skeleton.get_bone_pose_position(bi)
+		var local_xf: Transform3D = rest_xf * Transform3D(Basis(pose_rot), pose_pos)
+		var parent_bi: int = skeleton.get_bone_parent(bi)
+		if parent_bi >= 0:
+			bone_globals[bi] = bone_globals[parent_bi] * local_xf
+		else:
+			bone_globals[bi] = local_xf
+		skeleton.set_bone_global_pose_override(bi, bone_globals[bi], 1.0, true)
 
 
 # ─── Skeleton Evaluation ─────────────────────────────
@@ -443,23 +465,8 @@ func _evaluate_skeleton_animation(skeleton: Skeleton3D, sl_local_rot: Dictionary
 			var rest_origin: Vector3 = skeleton.get_bone_rest(bi).origin
 			skeleton.set_bone_pose_position(bi, absolute_godot - rest_origin)
 
-	# Compute and apply global pose overrides (same as marker code).
-	# Godot's internal pose_global doesn't include rest transforms when we set
-	# bone poses manually after the skeleton update step. Override with our own
-	# correctly computed values so the skin pipeline uses them.
-	var bone_globals: Array[Transform3D] = []
-	bone_globals.resize(skeleton.get_bone_count())
-	for bi in range(skeleton.get_bone_count()):
-		var rest_xf: Transform3D = skeleton.get_bone_rest(bi)
-		var pose_rot: Quaternion = skeleton.get_bone_pose_rotation(bi)
-		var pose_pos: Vector3 = skeleton.get_bone_pose_position(bi)
-		var local_xf: Transform3D = rest_xf * Transform3D(Basis(pose_rot), pose_pos)
-		var parent_bi: int = skeleton.get_bone_parent(bi)
-		if parent_bi >= 0:
-			bone_globals[bi] = bone_globals[parent_bi] * local_xf
-		else:
-			bone_globals[bi] = local_xf
-		skeleton.set_bone_global_pose_override(bi, bone_globals[bi], 1.0, true)
+	# Global pose overrides are applied separately in _apply_global_pose_overrides,
+	# called unconditionally for ALL skeletons every frame (not just during anim eval).
 
 
 # ─── Bone Attachments ────────────────────────────────
@@ -601,15 +608,14 @@ func _get_bone_global_rest_xf(skel: Skeleton3D, bi: int) -> Transform3D:
 ## We simulate this by applying parent shape scale to the override position,
 ## just as we do for non-overridden bones in _apply_shape_to_skeleton.
 func _apply_joint_overrides(glb_skel: Skeleton3D, shared_skel: Skeleton3D, override_joints: Array, mesh_id: String) -> void:
-	# Gather parent shape scales for parent-scale application.
-	# SL xform.cpp: child.worldPos = parent.worldRot * (child.localPos * parent.scale) + parent.worldPos
-	# We bake parent.scale into the child rest position because Godot doesn't do this automatically.
+	# Find the avatar root for priority tracking and shape scale lookup
 	var avatar_root_id: int = -1
 	for av_lid: int in sm.animesh_shared_skeleton:
 		if sm.animesh_shared_skeleton[av_lid] == shared_skel:
 			avatar_root_id = av_lid
 			break
 
+	# Gather parent shape scales for parent-scale application (same baking as _apply_shape_to_skeleton)
 	var parent_scale: Dictionary = {}  # bone_name -> Vector3 (SL space scale)
 	if avatar_root_id >= 0:
 		var avatar_uuid: String = sm.object_uuid.get(avatar_root_id, "")
@@ -661,13 +667,12 @@ func _apply_joint_overrides(glb_skel: Skeleton3D, shared_skel: Skeleton3D, overr
 			continue
 		owners[bone_key] = mesh_id
 
-		# Apply immediate parent's shape scale (same as _apply_shape_to_skeleton does)
+		# Apply immediate parent's shape scale (same baking as _apply_shape_to_skeleton)
 		var pname: String = xml_parent.get(jname as String, "")
 		if not pname.is_empty() and parent_scale.has(pname):
 			var ps: Vector3 = parent_scale[pname]
 			sl_pos = Vector3(sl_pos.x * ps.x, sl_pos.y * ps.y, sl_pos.z * ps.z)
 
-		# Convert back to Godot space
 		var final_godot := Vector3(sl_pos.x, sl_pos.z, -sl_pos.y)
 
 		var new_rest := Transform3D()
