@@ -112,6 +112,23 @@ for (const node of allParamNodes) {
     if (parsed.length > 0) param.bones = parsed;
   }
 
+  // Volume morphs (collision volume scale/position changes from morph params)
+  const morph = node.param_morph;
+  if (morph && morph.volume_morph) {
+    const vms = Array.isArray(morph.volume_morph) ? morph.volume_morph : [morph.volume_morph];
+    const parsed = [];
+    for (const vm of vms) {
+      const name = vm['@_name'];
+      if (name) {
+        const entry = { name };
+        if (vm['@_scale']) entry.scale = parseVec3(vm['@_scale']);
+        if (vm['@_pos']) entry.pos = parseVec3(vm['@_pos']);
+        if (entry.scale || entry.pos) parsed.push(entry);
+      }
+    }
+    if (parsed.length > 0) param.volumeMorphs = parsed;
+  }
+
   // Raw driver → driven references
   const driver = node.param_driver;
   if (driver && driver.driven) {
@@ -149,26 +166,29 @@ transmittedParams.forEach((p, i) => byteIndexMap.set(p.id, i));
 // ── Pass 3: Build skeleton output with nested driven params ──
 // Include a param if:
 //   (a) it has bones directly, OR
-//   (b) it drives at least one param that has bones
+//   (b) it has volumeMorphs directly, OR
+//   (c) it drives at least one param that has bones or volumeMorphs
 
 const skeletonOutput = [];
 
 for (const param of transmittedParams) {
   const hasBones = !!param.bones;
+  const hasVolumeMorphs = !!param.volumeMorphs;
   let drivenParams;
 
   if (param.driverEntries) {
-    // Resolve driven targets that have skeleton bones
+    // Resolve driven targets that have skeleton bones or volume morphs
     const resolved = [];
     for (const entry of param.driverEntries) {
       const driven = paramMap.get(entry.id);
-      if (driven && driven.bones) {
+      if (driven && (driven.bones || driven.volumeMorphs)) {
         const nested = {
           id: driven.id,
           valueMin: driven.valueMin,
           valueMax: driven.valueMax,
-          bones: driven.bones,
         };
+        if (driven.bones) nested.bones = driven.bones;
+        if (driven.volumeMorphs) nested.volumeMorphs = driven.volumeMorphs;
         if (driven.sex) nested.sex = driven.sex;
         // Merge activation params onto the nested driven object
         if (entry.min1 !== undefined) nested.min1 = entry.min1;
@@ -181,7 +201,7 @@ for (const param of transmittedParams) {
     if (resolved.length > 0) drivenParams = resolved;
   }
 
-  if (!hasBones && !drivenParams) continue;  // not skeleton-relevant
+  if (!hasBones && !hasVolumeMorphs && !drivenParams) continue;  // not relevant
 
   const out = {
     byteIndex: byteIndexMap.get(param.id),
@@ -191,6 +211,7 @@ for (const param of transmittedParams) {
   };
   if (param.sex) out.sex = param.sex;
   if (param.bones) out.bones = param.bones;
+  if (param.volumeMorphs) out.volumeMorphs = param.volumeMorphs;
   if (drivenParams) out.drivenParams = drivenParams;
 
   skeletonOutput.push(out);

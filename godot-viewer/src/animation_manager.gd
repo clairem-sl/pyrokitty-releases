@@ -11,6 +11,10 @@ var _debug_skeleton_visible: bool = false
 # Used as fallback for unanimated CV bones in animation evaluation.
 var _sl_cv_rest_rotations: Dictionary = {}
 
+# CV bone default SL-space scales — cached from skeleton_builder XML data.
+# Used by _apply_global_pose_overrides for CV scale inheritance + volume morphs.
+var _cv_default_scales: Dictionary = {}  # cvName -> Vector3 (SL space)
+
 # Per-root previous SL local rotations for crossfade blending.
 # When the winning animation for a joint changes, we slerp from the old
 # rotation to the new one to avoid visual snapping (mimics Firestorm's
@@ -418,15 +422,53 @@ func _apply_global_pose_overrides(skeleton: Skeleton3D, root_id: int) -> void:
 		# Apply this bone's OWN shape scale to the skinning transform basis.
 		# SL puts scale into the world matrix for vertex deformation but does NOT
 		# cascade it to children (worldScale = localScale, not parent * local).
+		#
+		# Apply this bone's shape scale to the skinning transform basis.
+		# Standard bones: use shape scale directly (default is 1,1,1 so scale IS deformation).
+		# CV bones: IBM fixup already cancels the CV's default scale, so we need the
+		# DEFORMATION RATIO (current/default), not the absolute scale.
+		# Formula: deformation = parent_shape + vm_delta / cv_default (element-wise).
+		# CVs use UPPER_CASE names; standard bones use mCamelCase.
 		var bname: String = skeleton.get_bone_name(bi)
 		var final_xf: Transform3D = pos_globals[bi]
-		if shape_scales.has(bname):
-			var bs: Vector3 = shape_scales[bname]  # SL space (sx, sy, sz)
-			var godot_scale := Vector3(bs.x, bs.z, bs.y)  # SL→Godot scale axis mapping
-			final_xf = Transform3D(
-				pos_globals[bi].basis * Basis.from_scale(godot_scale),
-				pos_globals[bi].origin
-			)
+		var is_cv: bool = bname == bname.to_upper() and not bname.begins_with("m")
+		if not is_cv:
+			# Standard bone: shape scale IS the deformation (default = 1,1,1)
+			if shape_scales.has(bname):
+				var bs: Vector3 = shape_scales[bname]
+				var godot_scale := Vector3(bs.x, bs.z, bs.y)
+				final_xf = Transform3D(
+					pos_globals[bi].basis * Basis.from_scale(godot_scale),
+					pos_globals[bi].origin
+				)
+		else:
+			# CV bone: compute deformation ratio = (cv_default * parent_shape + vm_delta) / cv_default
+			# = parent_shape + vm_delta / cv_default
+			# This is needed because the IBM fixup cancels the CV's default scale.
+			var cv_default: Vector3 = _get_cv_default_scale(bname)
+			var deformation: Vector3 = Vector3.ONE
+			# Inherit parent shape scale (same ratio as parent)
+			if parent_bi >= 0:
+				var parent_name: String = skeleton.get_bone_name(parent_bi)
+				if shape_scales.has(parent_name):
+					deformation = shape_scales[parent_name]
+			# Add volume morph contribution: vm_delta / cv_default (element-wise)
+			var vol_morphs: Dictionary = sm.cv_volume_morphs.get(root_id, {})
+			if vol_morphs.has(bname):
+				var vm: Dictionary = vol_morphs[bname]
+				var vm_s: Array = vm.get("scale", [0, 0, 0])
+				if cv_default.x > 0.0001:
+					deformation.x += vm_s[0] / cv_default.x
+				if cv_default.y > 0.0001:
+					deformation.y += vm_s[1] / cv_default.y
+				if cv_default.z > 0.0001:
+					deformation.z += vm_s[2] / cv_default.z
+			if deformation != Vector3.ONE:
+				var godot_scale := Vector3(deformation.x, deformation.z, deformation.y)
+				final_xf = Transform3D(
+					pos_globals[bi].basis * Basis.from_scale(godot_scale),
+					pos_globals[bi].origin
+				)
 
 		skeleton.set_bone_global_pose_override(bi, final_xf, 1.0, true)
 
@@ -605,6 +647,16 @@ func _get_ap_world_transform(ap_id: int, bone_world_pos: Vector3, bone_world_rot
 	var ap_world_pos: Vector3 = bone_world_pos + bone_world_rot * ap_pos_godot
 	var ap_world_rot: Quaternion = bone_world_rot * ap_rot_godot
 	return [ap_world_pos, bone_world_rot, ap_world_rot]
+
+
+## Get the XML default scale for a collision volume bone (lazy-cached).
+func _get_cv_default_scale(cv_name: String) -> Vector3:
+	if _cv_default_scales.is_empty():
+		# Build cache from skeleton builder bone data
+		for bd: Dictionary in sm.skeleton_builder.get_bone_data():
+			if bd.get("is_cv", false):
+				_cv_default_scales[bd["name"]] = bd["scale"] as Vector3
+	return _cv_default_scales.get(cv_name, Vector3.ONE)
 
 
 ## Convert SL Euler angles (roll, pitch, yaw in degrees, ZYX order) to a Godot quaternion.

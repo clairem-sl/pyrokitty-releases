@@ -105,6 +105,18 @@ SL→Godot scale axis mapping: `Vector3(sl_sx, sl_sz, sl_sy)` (SL X→Godot X, S
 
 Shape scales stored in `sm.bone_shape_scales[root_id]` as SL-space `Vector3(sx, sy, sz)` per bone name.
 
+### Collision Volume Scale (IMPLEMENTED 2026-03-15)
+
+CV bones get their skinning scale from three sources, combined as a **deformation ratio** (because the IBM fixup already cancels the CV's default scale):
+
+1. **Inherited parent shape scale** — CV inherits parent skeleton bone's shape scale (Firestorm: `inheritScale()=true`, `llpolyskeletaldistortion.cpp:162-171`)
+2. **Volume morph deltas** — direct CV scale changes from morph params (Firestorm: `LLPolyMorphTarget::applyVolumeChanges()`, avatar_lad.xml `<volume_morph>` tags)
+3. **Deformation ratio** — `(cv_default * parent_shape + vm_delta) / cv_default` = `parent_shape + vm_delta / cv_default`
+
+The ratio is needed because the GLB IBM fixup (`blenderFixJoint`) cancels the CV's XML default scale. Putting the absolute CV scale (e.g., 0.042) into the global pose would double-apply the default, producing stick-thin limbs. The deformation ratio (e.g., 0.7) correctly represents the shape change from default.
+
+Volume morph deltas are extracted by `convert-avatar-lad.js` from `<volume_morph>` tags, computed in `computeVolumeMorphDeltas()`, buffered in `avatarVolumeMorphs` alongside bone shapes, and stored in `sm.cv_volume_morphs[root_id]` on the Godot side.
+
 ### Critical Implementation Details
 
 **Byte array = groups 0 + 3 (NOT 0 + 2).** The enum naming is misleading:
@@ -314,8 +326,9 @@ Issues 1-4 and 6 were resolved by implementing dynamic parent scale + bone scale
 ### Remaining Issues
 
 - **Ball avatar before animations** — `set_bone_global_pose_override` only called during anim eval
-- **Morph targets** — Face detail vertex morphs (blend shapes)
+- **Vertex morph targets** — Face detail vertex morphs (blend shapes) for system avatar meshes. Volume morphs (CV scale/position) are implemented; vertex morphs are not.
 - **Hover height** — `AppearanceHover` separate from shape params
+- **Volume morph position** — `<volume_morph pos=...>` entries modify CV position but only scale is currently applied
 
 ### Test Avatars
 

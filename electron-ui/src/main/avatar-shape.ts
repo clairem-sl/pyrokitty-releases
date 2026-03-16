@@ -11,11 +11,18 @@ interface BoneEntry {
   offset: Vec3;
 }
 
+interface VolumeMorphEntry {
+  name: string;
+  scale?: Vec3;
+  pos?: Vec3;
+}
+
 interface DrivenParam {
   id: number;
   valueMin: number;
   valueMax: number;
-  bones: BoneEntry[];
+  bones?: BoneEntry[];
+  volumeMorphs?: VolumeMorphEntry[];
   sex?: 'male' | 'female';
   // Trapezoidal activation: ramp up [min1→max1], hold [max1→max2], ramp down [max2→min2]
   // When not specified, defaults to full driver range (simple linear remap).
@@ -32,10 +39,16 @@ interface SkeletonParam {
   valueMax: number;
   sex?: 'male' | 'female';
   bones?: BoneEntry[];
+  volumeMorphs?: VolumeMorphEntry[];
   drivenParams?: DrivenParam[];
 }
 
 export interface BoneDelta {
+  scale: Vec3;
+  offset: Vec3;
+}
+
+export interface VolumeDelta {
   scale: Vec3;
   offset: Vec3;
 }
@@ -140,7 +153,12 @@ export function computeSkeletonDeltas(visualParamBytes: number[]): Record<string
   const accScale: Record<string, Vec3> = {};
   const accOffset: Record<string, Vec3> = {};
 
-  function accumulateBones(bones: BoneEntry[], weight: number): void {
+  // Accumulators for collision volume morphs (separate from skeleton bones)
+  const vmScale: Record<string, Vec3> = {};
+  const vmOffset: Record<string, Vec3> = {};
+
+  function accumulateBones(bones: BoneEntry[] | undefined, weight: number): void {
+    if (!bones) return;
     for (const bone of bones) {
       if (!accScale[bone.name]) {
         accScale[bone.name] = [0, 0, 0];
@@ -155,6 +173,26 @@ export function computeSkeletonDeltas(visualParamBytes: number[]): Record<string
     }
   }
 
+  function accumulateVolumeMorphs(morphs: VolumeMorphEntry[] | undefined, weight: number): void {
+    if (!morphs) return;
+    for (const vm of morphs) {
+      if (!vmScale[vm.name]) {
+        vmScale[vm.name] = [0, 0, 0];
+        vmOffset[vm.name] = [0, 0, 0];
+      }
+      if (vm.scale) {
+        vmScale[vm.name][0] += weight * vm.scale[0];
+        vmScale[vm.name][1] += weight * vm.scale[1];
+        vmScale[vm.name][2] += weight * vm.scale[2];
+      }
+      if (vm.pos) {
+        vmOffset[vm.name][0] += weight * vm.pos[0];
+        vmOffset[vm.name][1] += weight * vm.pos[1];
+        vmOffset[vm.name][2] += weight * vm.pos[2];
+      }
+    }
+  }
+
   for (const param of params) {
     const byte = visualParamBytes[param.byteIndex];
     if (byte === undefined) continue;
@@ -166,11 +204,12 @@ export function computeSkeletonDeltas(visualParamBytes: number[]): Record<string
     const weight = (param.sex && param.sex !== avatarSex) ? 0 : rawWeight;
 
     // Direct skeleton bones
-    if (param.bones) {
-      accumulateBones(param.bones, weight);
-    }
+    accumulateBones(param.bones, weight);
 
-    // Driven params with nested bone data
+    // Direct volume morphs
+    accumulateVolumeMorphs(param.volumeMorphs, weight);
+
+    // Driven params with nested bone and volume morph data
     if (param.drivenParams) {
       for (const driven of param.drivenParams) {
         let drivenWeight = getDrivenWeight(weight, param, driven);
@@ -179,6 +218,7 @@ export function computeSkeletonDeltas(visualParamBytes: number[]): Record<string
           drivenWeight = 0;
         }
         accumulateBones(driven.bones, drivenWeight);
+        accumulateVolumeMorphs(driven.volumeMorphs, drivenWeight);
       }
     }
   }
@@ -195,6 +235,67 @@ export function computeSkeletonDeltas(visualParamBytes: number[]): Record<string
     };
   }
 
+  return result;
+}
+
+/**
+ * Compute collision volume morph deltas from VisualParam bytes.
+ * Returns a map of CV name → { scale: [sx,sy,sz], offset: [x,y,z] } (additive deltas).
+ * These are applied ON TOP of the CV's XML default scale and any inherited parent scale.
+ */
+export function computeVolumeMorphDeltas(visualParamBytes: number[]): Record<string, VolumeDelta> {
+  // Run the full computation to populate vmScale/vmOffset
+  // (computeSkeletonDeltas already does this as a side effect, but we need
+  // a clean separate call for the volume morph data)
+  ensureLoaded();
+  const params = skeletonParams!;
+  const avatarSex = determineAvatarSex(visualParamBytes);
+
+  const vmScaleAcc: Record<string, Vec3> = {};
+  const vmOffsetAcc: Record<string, Vec3> = {};
+
+  function accVM(morphs: VolumeMorphEntry[] | undefined, weight: number): void {
+    if (!morphs) return;
+    for (const vm of morphs) {
+      if (!vmScaleAcc[vm.name]) {
+        vmScaleAcc[vm.name] = [0, 0, 0];
+        vmOffsetAcc[vm.name] = [0, 0, 0];
+      }
+      if (vm.scale) {
+        vmScaleAcc[vm.name][0] += weight * vm.scale[0];
+        vmScaleAcc[vm.name][1] += weight * vm.scale[1];
+        vmScaleAcc[vm.name][2] += weight * vm.scale[2];
+      }
+      if (vm.pos) {
+        vmOffsetAcc[vm.name][0] += weight * vm.pos[0];
+        vmOffsetAcc[vm.name][1] += weight * vm.pos[1];
+        vmOffsetAcc[vm.name][2] += weight * vm.pos[2];
+      }
+    }
+  }
+
+  for (const param of params) {
+    const byte = visualParamBytes[param.byteIndex];
+    if (byte === undefined) continue;
+    const rawWeight = (byte / 255.0) * (param.valueMax - param.valueMin) + param.valueMin;
+    const weight = (param.sex && param.sex !== avatarSex) ? 0 : rawWeight;
+    accVM(param.volumeMorphs, weight);
+    if (param.drivenParams) {
+      for (const driven of param.drivenParams) {
+        let drivenWeight = getDrivenWeight(weight, param, driven);
+        if (driven.sex && driven.sex !== avatarSex) drivenWeight = 0;
+        accVM(driven.volumeMorphs, drivenWeight);
+      }
+    }
+  }
+
+  const result: Record<string, VolumeDelta> = {};
+  for (const name of Object.keys({ ...vmScaleAcc, ...vmOffsetAcc })) {
+    result[name] = {
+      scale: vmScaleAcc[name] || [0, 0, 0],
+      offset: vmOffsetAcc[name] || [0, 0, 0],
+    };
+  }
   return result;
 }
 

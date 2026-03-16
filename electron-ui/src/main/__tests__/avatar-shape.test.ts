@@ -72,7 +72,7 @@ describe('avatar-shape', () => {
   describe('computeSkeletonDeltas', () => {
     it('loads param definitions successfully', () => {
       const params = getVisualParams();
-      expect(params.length).toBe(68);
+      expect(params.length).toBe(82);
     });
 
     it('returns empty result for empty byte array', () => {

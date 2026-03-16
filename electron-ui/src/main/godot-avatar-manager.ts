@@ -14,7 +14,7 @@ import type { GodotMaterialPipeline } from './godot-material-pipeline';
 import type { TextureFetchQueue } from './texture-fetch-queue';
 import type { SendFn } from './godot-bridge-types';
 import { isHudAttachment, BAKE_MAGIC_UUIDS, BAKE_CHANNEL_NAMES, BAKE_CHANNEL_TO_TE_FACE, ZERO_UUID } from './godot-bridge-types';
-import { computeSkeletonDeltas } from './avatar-shape';
+import { computeSkeletonDeltas, computeVolumeMorphDeltas } from './avatar-shape';
 
 export class GodotAvatarManager {
   private avatarAttachSubs = new Map<string, Subscription>();
@@ -27,6 +27,7 @@ export class GodotAvatarManager {
   private avatarBakeObjects = new Map<string, Set<number>>();
   // Avatar shape: avatarUuid → pre-computed bone deltas (buffered until connected)
   private avatarShapes = new Map<string, Record<string, { scale: [number, number, number]; offset: [number, number, number] }>>();
+  private avatarVolumeMorphs = new Map<string, Record<string, { scale: [number, number, number]; offset: [number, number, number] }>>();
 
   private materialPipeline: GodotMaterialPipeline | null = null;
   private textureFetchQueue: TextureFetchQueue | null = null;
@@ -56,7 +57,8 @@ export class GodotAvatarManager {
     // Flush buffered avatar shapes on (re)connect
     if (connected && this.avatarShapes.size > 0) {
       for (const [avatarId, bones] of this.avatarShapes) {
-        this.send({ type: 'avatar_shape', avatarId, bones });
+        const volumeMorphs = this.avatarVolumeMorphs.get(avatarId) || {};
+        this.send({ type: 'avatar_shape', avatarId, bones, volumeMorphs });
       }
       console.log(`[AvatarShape] Flushed ${this.avatarShapes.size} buffered shapes on connect`);
     }
@@ -119,10 +121,12 @@ export class GodotAvatarManager {
           try {
             const bytes = msg.VisualParam.map((vp: { ParamValue: number }) => vp.ParamValue);
             const bones = computeSkeletonDeltas(bytes);
+            const volumeMorphs = computeVolumeMorphDeltas(bytes);
             const boneCount = Object.keys(bones).length;
             if (boneCount > 0) {
               this.avatarShapes.set(avatarId, bones);
-              this.send({ type: 'avatar_shape', avatarId, bones });
+              this.avatarVolumeMorphs.set(avatarId, volumeMorphs);
+              this.send({ type: 'avatar_shape', avatarId, bones, volumeMorphs });
               // Debug: log key bone deltas for leg and body bones
               const debugBones = ['mPelvis', 'mHipLeft', 'mHipRight', 'mKneeLeft', 'mKneeRight', 'mAnkleLeft', 'mAnkleRight', 'mFootLeft', 'mFootRight', 'mTorso', 'mChest', 'mNeck'];
               for (const b of debugBones) {
@@ -130,7 +134,7 @@ export class GodotAvatarManager {
                   console.log(`[AvatarShape] ${avatarId.slice(0, 8)} bone=${b} scale=[${bones[b].scale.map((v: number) => v.toFixed(6)).join(', ')}] offset=[${bones[b].offset.map((v: number) => v.toFixed(6)).join(', ')}]`);
                 }
               }
-              console.log(`[AvatarShape] ${avatarId.slice(0, 8)} total: ${bytes.length} params, ${boneCount} bones`);
+              console.log(`[AvatarShape] ${avatarId.slice(0, 8)} total: ${bytes.length} params, ${boneCount} bones, ${Object.keys(volumeMorphs).length} volume morphs`);
             }
           } catch (shapeErr) {
             console.warn('[AvatarShape] Error computing shape:', (shapeErr as Error).message);
@@ -160,6 +164,10 @@ export class GodotAvatarManager {
         const bones = computeSkeletonDeltas(bytes);
         if (Object.keys(bones).length > 0) {
           this.avatarShapes.set(avatarId, bones);
+          const volumeMorphs = computeVolumeMorphDeltas(bytes);
+          if (Object.keys(volumeMorphs).length > 0) {
+            this.avatarVolumeMorphs.set(avatarId, volumeMorphs);
+          }
         }
       } catch (err) {
         console.warn(`[AvatarShape] Error computing shape for ${avatarId.slice(0, 8)}:`, (err as Error).message);
@@ -392,6 +400,7 @@ export class GodotAvatarManager {
           this.avatarBakedTextures.delete(id);
           this.avatarBakeObjects.delete(id);
           this.avatarShapes.delete(id);
+          this.avatarVolumeMorphs.delete(id);
         }
       }
     } catch { /* bot may be disconnected */ }

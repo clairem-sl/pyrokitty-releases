@@ -9,6 +9,7 @@ var _first_person_mode: bool = false
 
 # Avatar shape deformation — per-avatar bone scale/offset from VisualParam
 var _avatar_shapes: Dictionary = {}  # avatarId (String) -> bones Dictionary
+var _avatar_volume_morphs: Dictionary = {}  # avatarId (String) -> volumeMorphs Dictionary
 
 func _init(scene_manager) -> void:
 	sm = scene_manager
@@ -160,6 +161,9 @@ func handle_avatar_create(msg: Dictionary) -> void:
 			print("[AvatarShape] Applying pending shape for %s at avatar_create" % avatar_id.substr(0, 8))
 			_apply_shape_to_skeleton(shared_skel, _avatar_shapes[avatar_id], avatar_id)
 			_log_bone_rests(shared_skel, avatar_id, "after_shape")
+		# Apply pending volume morphs
+		if _avatar_volume_morphs.has(avatar_id):
+			sm.cv_volume_morphs[local_id] = _avatar_volume_morphs[avatar_id]
 		if avatar_id == sm.self_avatar_id:
 			print("[SelfAvatar] === Skeleton root created: localId=%d bones=%d ===" % [local_id, shared_skel.get_bone_count()])
 
@@ -287,8 +291,10 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 			sm.animesh_pending_anims.erase(av_lid)
 			sm.animesh_worn_anims.erase(av_lid)
 		sm.bone_shape_scales.erase(av_lid)
+		sm.cv_volume_morphs.erase(av_lid)
 		sm.avatar_local_ids.erase(avatar_id)
 		_avatar_shapes.erase(avatar_id)
+		_avatar_volume_morphs.erase(avatar_id)
 
 
 # ─── Avatar Shape ─────────────────────────────────────
@@ -300,7 +306,16 @@ func handle_avatar_shape(msg: Dictionary) -> void:
 	var bones: Dictionary = msg.get("bones", {})
 	_avatar_shapes[avatar_id] = bones
 
+	# Buffer volume morph deltas by UUID (same pattern as _avatar_shapes)
+	var volume_morphs: Dictionary = msg.get("volumeMorphs", {})
+	if not volume_morphs.is_empty():
+		_avatar_volume_morphs[avatar_id] = volume_morphs
+
 	var av_lid: int = sm.avatar_local_ids.get(avatar_id, 0)
+	# Store volume morphs by av_lid when available (for _apply_global_pose_overrides)
+	if av_lid > 0 and _avatar_volume_morphs.has(avatar_id):
+		sm.cv_volume_morphs[av_lid] = _avatar_volume_morphs[avatar_id]
+
 	if av_lid <= 0:
 		return
 	var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(av_lid)
