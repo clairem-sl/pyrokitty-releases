@@ -158,6 +158,35 @@ func _apply_pending_animations(obj_id: int) -> void:
 				if not joint_best_pos.has(jname) or jpri >= joint_best_pos[jname]["priority"]:
 					joint_best_pos[jname] = {"priority": jpri, "data_idx": ai, "joint_data": joint_data}
 
+	# ─── Synthetic head_rot (Firestorm built-in, computed per-frame) ───
+	# Inject a placeholder at MEDIUM_PRIORITY (1) so the priority system
+	# correctly lets it win over pri-0 standing anims but lose to pri-2+
+	# body animations.  Actual rotation values are computed per-frame in
+	# process_animesh via compute_head_rot().
+	var _hr_idx: int = available.size()
+	var _hr_placeholder_key: Array = [{"time": 0.0, "value": [0.0, 0.0, 0.0]}]
+	available.append({
+		"uuid": HEAD_ROT_ANIM_UUID,
+		"priority": HEAD_ROT_PRIORITY,
+		"duration": 0.0,
+		"loop": true,
+		"loopInPoint": 0.0,
+		"loopOutPoint": 0.0,
+		"easeInTime": 0.0,
+		"easeOutTime": 0.0,
+		"joints": [
+			{"name": "mHead", "priority": HEAD_ROT_PRIORITY, "rotationKeys": _hr_placeholder_key, "positionKeys": []},
+			{"name": "mNeck", "priority": HEAD_ROT_PRIORITY, "rotationKeys": _hr_placeholder_key, "positionKeys": []},
+			{"name": "mTorso", "priority": HEAD_ROT_PRIORITY, "rotationKeys": _hr_placeholder_key, "positionKeys": []},
+		],
+	})
+	for _hr_jd: Dictionary in (available[_hr_idx] as Dictionary).get("joints", []):
+		var _hr_jname: String = str(_hr_jd.get("name", ""))
+		var _hr_jpri: int = HEAD_ROT_PRIORITY
+		if (_hr_jd.get("rotationKeys", []) as Array).size() > 0:
+			if not joint_best_rot.has(_hr_jname) or _hr_jpri >= joint_best_rot[_hr_jname]["priority"]:
+				joint_best_rot[_hr_jname] = {"priority": _hr_jpri, "data_idx": _hr_idx, "joint_data": _hr_jd}
+
 	# Build merged joint keyframe map (SL space — NOT coordinate-converted)
 	# Rotation and position may come from different animations. Each channel
 	# uses the winning animation's timing for keyframe interpolation.
@@ -296,6 +325,23 @@ func process_animesh(delta: float) -> void:
 			if pos_keys.size() > 0:
 				sl_local_pos[jname] = _interp_sl_position(pos_keys, t)
 
+		# ─── Per-frame head_rot computation ───
+		# Replace placeholder keyframe values with computed "look forward" rotation
+		# based on the current body animation state and head position offset.
+		var _hr_active: bool = false
+		for _hr_jn: String in ["mHead", "mNeck", "mTorso"]:
+			if joints.has(_hr_jn) and str((joints[_hr_jn] as Dictionary).get("anim_uuid", "")) == HEAD_ROT_ANIM_UUID:
+				_hr_active = true
+				break
+		if _hr_active:
+			var _hr_skel: Skeleton3D = sm.animesh_shared_skeleton.get(root_id)
+			if _hr_skel != null and is_instance_valid(_hr_skel):
+				var _hr_scales: Dictionary = sm.bone_shape_scales.get(root_id, {})
+				var hr_rotations: Dictionary = compute_head_rot(sl_local_rot, sl_local_pos, _hr_skel, _hr_scales)
+				for _hr_jn2: String in hr_rotations:
+					if joints.has(_hr_jn2) and str((joints[_hr_jn2] as Dictionary).get("anim_uuid", "")) == HEAD_ROT_ANIM_UUID:
+						sl_local_rot[_hr_jn2] = hr_rotations[_hr_jn2]
+
 		# TEMP DEBUG: log finger joint state every ~3 seconds
 		if Engine.get_frames_drawn() % 180 == 0:
 			var finger_in_joints: int = 0
@@ -366,7 +412,7 @@ func process_animesh(delta: float) -> void:
 
 		# Evaluate on shared skeleton — all meshes bind to it via Godot skinning
 		var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(root_id)
-		if shared_skel != null:
+		if shared_skel != null and is_instance_valid(shared_skel):
 			_evaluate_skeleton_animation(shared_skel, sl_local_rot, sl_local_pos)
 			_apply_global_pose_overrides(shared_skel, root_id)
 			_update_bone_attachments(root_id, shared_skel)
@@ -482,12 +528,14 @@ func _evaluate_skeleton_animation(skeleton: Skeleton3D, sl_local_rot: Dictionary
 		_sl_cv_rest_rotations = sm.skeleton_builder.get_sl_rest_rotations()
 
 	# TAG 100
-	# Reset all bone poses to identity so that bones no longer in the current
-	# animation set return to rest pose (prevents stale walking/standing poses
-	# persisting after animation transitions).
+	# Reset ROTATION poses to identity so bones not in the current animation set
+	# return to rest rotation (prevents stale walking/standing rotations persisting).
+	# POSITION poses are NOT reset — Firestorm's blendJointStates starts from the
+	# joint's current position, so positions persist from previous animations.
+	# This matches SL behavior where position-only "snap pose" animations (dur=0,
+	# loop=false) set positions once and they stick even after the animation stops.
 	for bi in range(skeleton.get_bone_count()):
 		skeleton.set_bone_pose_rotation(bi, Quaternion.IDENTITY)
-		skeleton.set_bone_pose_position(bi, Vector3.ZERO)
 
 	var sl_world: Dictionary = {}     # bone_idx -> Quaternion (SL space)
 	var godot_world: Dictionary = {}  # bone_idx -> Quaternion (Godot space)
@@ -861,6 +909,125 @@ func _interp_sl_position(keys: Array, t: float) -> Vector3:
 	var p1 := Vector3(float(v1[0]), float(v1[1]), float(v1[2]))
 
 	return p0.lerp(p1, frac)
+
+
+# ─── Built-in head_rot Motion ────────────────────────
+
+## Unique identifier for the synthetic head_rot animation.
+const HEAD_ROT_ANIM_UUID: String = "_builtin_head_rot"
+## Priority matches Firestorm's LLJoint::MEDIUM_PRIORITY.
+const HEAD_ROT_PRIORITY: int = 1
+## Firestorm constants for distributing rotation across joints.
+const HEAD_ROT_TORSO_LAG: float = 0.35
+const HEAD_ROT_NECK_LAG: float = 0.5
+## Max rotation angle (Firestorm: F_PI_BY_TWO * 0.8 = ~72°)
+const HEAD_ROT_MAX_ANGLE: float = 1.2566
+
+## Compute head_rot joint rotations to face a target direction.
+## Returns a Dictionary { "mTorso": Quaternion, "mNeck": Quaternion, "mHead": Quaternion }
+## in SL local-rotation space.
+##
+## [param sl_local_rot] Current SL local rotations from animation evaluation.
+## [param sl_local_pos] Current SL local positions from animation evaluation.
+## [param skeleton] The shared Skeleton3D (used for bone rest positions).
+## [param shape_scales] Per-bone shape scales (parent scale affects child position).
+## [param target_sl] Target direction in SL world space from head position
+##                   (default: null = "look forward" = compute direction from
+##                   head position toward 2.5m in front of root, matching
+##                   Firestorm's privacy-spoofed look-at target).
+##
+## The rotation compensates for body animation rotations in the
+## pelvis→torso→chest→neck chain so the head faces the target regardless
+## of what the body is doing (e.g. sitting, dancing).
+func compute_head_rot(sl_local_rot: Dictionary, sl_local_pos: Dictionary, skeleton: Skeleton3D, shape_scales: Dictionary, target_sl: Variant = null) -> Dictionary:
+	# Walk the pelvis→head chain accumulating SL world rotations AND positions.
+	# SL standard bones have identity rest rotation, so:
+	#   world_rot = parent_world_rot * anim_local_rot
+	#   world_pos = parent_world_pos + parent_world_rot * rest_offset
+	var chain: Array = ["mPelvis", "mTorso", "mChest", "mNeck", "mHead"]
+	var world_rot: Dictionary = {}
+	var world_pos: Dictionary = {}
+
+	for ci in range(chain.size()):
+		var cname: String = chain[ci]
+		var local_rot: Quaternion = sl_local_rot.get(cname, Quaternion.IDENTITY)
+		if ci == 0:
+			world_rot[cname] = local_rot
+			# Use animation position if available, else zero
+			if sl_local_pos.has(cname):
+				var p: Vector3 = sl_local_pos[cname]
+				world_pos[cname] = Vector3(p.x, p.y, p.z)
+			else:
+				world_pos[cname] = Vector3.ZERO
+		else:
+			var pname: String = chain[ci - 1]
+			world_rot[cname] = world_rot[pname] * local_rot
+			# Get bone offset: use animation position if available, else rest offset
+			var bone_offset := Vector3.ZERO
+			if sl_local_pos.has(cname):
+				bone_offset = sl_local_pos[cname]
+			else:
+				var bi: int = skeleton.find_bone(cname)
+				if bi >= 0:
+					var godot_rest: Vector3 = skeleton.get_bone_rest(bi).origin
+					# Godot (x,z,-y) → SL (x,-z,y)
+					bone_offset = Vector3(godot_rest.x, -godot_rest.z, godot_rest.y)
+			# Apply parent shape scale to child offset (matches xform.cpp:76)
+			var parent_scale: Vector3 = shape_scales.get(pname, Vector3.ONE)
+			bone_offset *= parent_scale
+			world_pos[cname] = world_pos[pname] + world_rot[pname] * bone_offset
+
+	var pelvis_rot: Quaternion = world_rot["mPelvis"]
+	var neck_world_rot: Quaternion = world_rot["mNeck"]
+	var head_pos: Vector3 = world_pos["mHead"]
+
+	# Compute look-at direction from head position.
+	var look_dir: Vector3
+	if target_sl != null:
+		look_dir = (target_sl as Vector3).normalized()
+	else:
+		# Default: "look forward" = target is 2.5m in front of root.
+		# Firestorm privacy-spoofed target: avatar_pos + rootRot * (2.5, 0, 0).
+		# In root-local space, root forward is always +X regardless of pelvis
+		# animation rotation (the pelvis sits UNDER the root).
+		var target_pos := Vector3(2.5, 0.0, 0.0)  # root forward in root-local space
+		look_dir = (target_pos - head_pos)
+		if look_dir.length_squared() < 0.01:
+			look_dir = Vector3(1.0, 0.0, 0.0)
+		else:
+			look_dir = look_dir.normalized()
+
+	# Build rotation quaternion facing look_dir in root-local space.
+	# SL: +X = forward, +Z = up.
+	var root_up := Vector3(0.0, 0.0, 1.0)  # root-local up is just +Z
+	var left: Vector3 = root_up.cross(look_dir)
+	if left.length_squared() < 0.15:
+		# Look direction nearly parallel to up — blend toward root forward
+		var root_fwd2 := Vector3(1.0, 0.0, 0.0)
+		look_dir = look_dir.lerp(root_fwd2, 0.4).normalized()
+		left = root_up.cross(look_dir)
+	left = left.normalized()
+	var adjusted_up: Vector3 = look_dir.cross(left)
+	# LL uses row-major (axes as rows), Godot Basis takes columns.
+	# Transpose to match LL's quaternion-from-basis convention.
+	var head_rot_local: Quaternion = Basis(look_dir, left, adjusted_up).transposed().get_rotation_quaternion()
+	# head_rot_local is already in root-local space (we computed everything there)
+
+	# Constrain to ±72°
+	var angle: float = head_rot_local.get_angle()
+	if angle > HEAD_ROT_MAX_ANGLE:
+		head_rot_local = Quaternion.IDENTITY.slerp(head_rot_local, HEAD_ROT_MAX_ANGLE / angle)
+
+	# Distribute torso portion (usually overridden by higher-pri body anims)
+	var torso_rot: Quaternion = Quaternion.IDENTITY.slerp(head_rot_local, HEAD_ROT_TORSO_LAG)
+
+	# Remove torso's contribution from the chain, split remainder between neck and head
+	# (Matches Firestorm: head_rot_local *= ~torsoRotLocal, then split 50/50)
+	var remaining: Quaternion = head_rot_local
+	var neck_rot: Quaternion = Quaternion.IDENTITY.slerp(remaining, HEAD_ROT_NECK_LAG)
+	var head_rot: Quaternion = Quaternion.IDENTITY.slerp(remaining, 1.0 - HEAD_ROT_NECK_LAG)
+
+	return {"mTorso": torso_rot, "mNeck": neck_rot, "mHead": head_rot}
 
 
 ## Reconstruct SL quaternion from xyz components (w = sqrt(1 - x² - y² - z²), always >= 0)

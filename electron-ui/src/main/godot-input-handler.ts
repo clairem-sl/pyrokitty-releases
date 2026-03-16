@@ -201,8 +201,22 @@ export class GodotInputHandler {
     this._sittingOnLocalId = 0;
     this._sitPosition = null;
     this._sitRotation = null;
+    this._groundSitting = false;
     this.send({ type: 'sitting_state', sitting: false });
     console.log('[GodotBridge] Stood up');
+  }
+
+  private _groundSitting = false;
+
+  handleSitOrStand(): void {
+    if (this.isSitting || this._groundSitting) {
+      this.handleStandUp();
+    } else {
+      this.bot.clientCommands.movement.sitOnGround();
+      this._groundSitting = true;
+      this.send({ type: 'sitting_state', sitting: true });
+      console.log('[GodotBridge] Sat on ground');
+    }
   }
 
   get isSitting(): boolean { return this._sittingOnLocalId !== 0; }

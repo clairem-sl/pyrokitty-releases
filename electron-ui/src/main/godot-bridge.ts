@@ -425,6 +425,9 @@ export class GodotBridge extends EventEmitter {
       case 'stand_up':
         this.inputHandler.handleStandUp();
         break;
+      case 'sit_or_stand':
+        this.inputHandler.handleSitOrStand();
+        break;
       case 'window_bounds':
         saveExternalBounds('godot', {
           x: msg.x, y: msg.y,

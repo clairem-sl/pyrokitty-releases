@@ -56,7 +56,7 @@ q.z = cos(xr)cos(yr)sin(zr) - sin(xr)sin(yr)cos(zr)
 Single evaluation pass per skeleton in `process_animesh`. Animations are priority-merged per joint.
 
 ### Key Behaviors
-- **Position keyframes are ADDITIVE offsets from rest**, not absolute. Compressed to [-5, 5] meters via UInt16.
+- **Position keyframes are ABSOLUTE joint positions** (replace, not add). Compressed to [-5, 5] meters via UInt16. Godot's pose position is additive on rest, so we subtract rest origin to convert.
 - **Rotation keyframes**: UInt16 compressed [-1, 1] per component (NOT Euler). Decoded as quaternion directly.
 - **Per-channel priority**: Rotation and position priority tracked INDEPENDENTLY per joint. An animation with position keys but no rotation keys claims position only — does NOT block lower-priority rotation.
 - **Bone rotation order**: SL `operator*` is reversed Hamilton; our code uses standard `parent_world * local` which is equivalent.
@@ -67,6 +67,40 @@ SL hand/finger poses are micro-loops (duration ~0.083s) with an identity first k
 **Fix**: Clamp animations with `duration < 0.2s` to `loop_out` pose after first pass.
 
 **Future**: Proper ease-in/ease-out system would fix this generically.
+
+### Position Persistence (IMPLEMENTED 2026-03-16)
+
+SL position-only animations (dur=0, loop=false) set bone positions once and they **persist** even after the animation stops. Firestorm's `blendJointStates()` starts from `target_joint->getPosition()` (current value), so positions never reset to zero.
+
+**Fix**: Only reset bone pose ROTATIONS to identity each frame in `_evaluate_skeleton_animation()`. Position poses are NOT reset — they persist from previous animations. This prevents face collapse on avatars with position-only "snap pose" animations that toggle on/off periodically.
+
+### Built-in head_rot Motion (IMPLEMENTED 2026-03-16)
+
+Firestorm has 5 procedural motions generated locally by the viewer (not sent via AvatarAnimation messages):
+
+| Motion | UUID prefix | Priority | Effect |
+|--------|------------|----------|--------|
+| head_rot | e6e8d1dd | 1 (MEDIUM) | Head/neck/torso toward look-at target |
+| eye | 5c780ea8 | 1 | Eye tracking + jitter + blink |
+| breathe_rot | 4c5a103e | 1 | Chest breathing |
+| hand_motion | ce986325 | 1 | Default hand poses |
+| pelvis_fix | 0c5dd2a2 | 0 (LOW) | Pelvis position → zero |
+
+**head_rot** is implemented via `compute_head_rot()` in `animation_manager.gd`. It computes per-skeleton "look forward" rotation by:
+
+1. Walking the pelvis→torso→chest→neck→head chain to find the head's position in root-local space (using animation positions + rest offsets + parent shape scale)
+2. Computing direction from head position toward target (default: 2.5m forward from root, matching Firestorm's privacy-spoofed look-at)
+3. Building a rotation quaternion from the direction (LL uses row-major matrices → `.transposed()` before Godot's `get_rotation_quaternion()`)
+4. Constraining to ±72° (`F_PI_BY_TWO * 0.8`)
+5. Distributing: torso 35%, neck 50%, head 50% (usually torso is overridden by higher-priority body anims)
+
+**Gotchas**:
+- Target must be relative to ROOT, not pelvis — pelvis animation rotation is not the avatar's facing direction
+- LL's `a * b` = Hamilton `b * a` (reversed multiplication convention)
+- The head position offset from root matters for non-humanoid skeletons (quadruped dogs need ~30° correction vs ~0° for humans)
+- Injected as a synthetic animation at priority 1 via placeholder keyframes; actual values computed per-frame in `process_animesh`
+
+**TODO**: Replace static "look forward" with real look-at targets from ViewerEffect messages. Pass target direction to `compute_head_rot(target_sl=...)`. Still missing: eye, breathe_rot, hand_motion.
 
 ### Degenerate CV Bone Bases
 Collision volume bones can have zero-column bases from IBM scale amplification (10-20x scale values). `_safe_basis_rotation()` falls back to `Quaternion.IDENTITY` when `determinant() < 0.5`. This prevents 20k+/session errors.

@@ -832,14 +832,7 @@ func _cleanup_object(local_id: int) -> void:
 		var animesh_ref = sm.animesh_roots[local_id]
 		if animesh_ref is Node3D and is_instance_valid(animesh_ref):
 			animesh_ref.queue_free()
-		sm.animesh_roots.erase(local_id)
-		sm.animesh_shared_skeleton.erase(local_id)
-		sm.animesh_pending_anims.erase(local_id)
-		sm.animesh_worn_anims.erase(local_id)
-		sm.bone_global_overrides.erase(local_id)
-		sm.animesh_eval.erase(local_id)
-		if sm.animesh_eval.is_empty():
-			sm.animesh_eval_active = false
+		sm.erase_animesh_state(local_id)
 
 	# Clean up all tracking dicts
 	if sm.pending_meshes.has(local_id):

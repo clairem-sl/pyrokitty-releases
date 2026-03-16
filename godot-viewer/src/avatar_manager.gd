@@ -98,7 +98,7 @@ func handle_avatar_create(msg: Dictionary) -> void:
 			var old_node: Node3D = sm.animesh_roots[old_lid]
 			if old_node and is_instance_valid(old_node):
 				old_node.queue_free()
-			sm.animesh_roots.erase(old_lid)
+			sm.erase_animesh_state(old_lid)
 
 	_crumb("avatar_create id=%s lid=%d step=RSInstance" % [avatar_id.substr(0, 8), local_id])
 	var rsi = sm.RSInstance.new(sm._scenario, sm._vis_far, sm._vis_fade)
@@ -289,11 +289,7 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 			var node_ref = sm.animesh_roots[av_lid]
 			if node_ref is Node3D and is_instance_valid(node_ref):
 				node_ref.queue_free()  # Also frees shared skeleton + per-mesh skeletons + meshes
-			sm.animesh_roots.erase(av_lid)
-			sm.animesh_shared_skeleton.erase(av_lid)
-			sm.animesh_eval.erase(av_lid)
-			sm.animesh_pending_anims.erase(av_lid)
-			sm.animesh_worn_anims.erase(av_lid)
+			sm.erase_animesh_state(av_lid)
 		sm.bone_shape_scales.erase(av_lid)
 		sm.cv_volume_morphs.erase(av_lid)
 		sm.avatar_local_ids.erase(avatar_id)

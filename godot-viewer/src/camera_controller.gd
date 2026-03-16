@@ -295,13 +295,13 @@ func _input(event: InputEvent) -> void:
 			always_run = not always_run
 			move_dirty = true
 			print("[CameraCtrl] Ctrl+R → always_run=%s" % always_run)
-		# Stand up: Ctrl+Alt+S or Alt+Shift+S (matches Firestorm)
+		# Ctrl+Alt+S or Alt+Shift+S: toggle ground sit / stand up (matches Firestorm)
 		if ke.keycode == KEY_S and ke.pressed and not ke.echo:
 			var ctrl := Input.is_key_pressed(KEY_CTRL)
 			var alt := Input.is_key_pressed(KEY_ALT)
 			var shift := Input.is_key_pressed(KEY_SHIFT)
 			if (ctrl and alt) or (alt and shift):
-				main_node.send_message({"type": "stand_up"})
+				main_node.send_message({"type": "sit_or_stand"})
 
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton

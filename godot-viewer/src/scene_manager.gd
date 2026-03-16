@@ -169,6 +169,21 @@ var terrain_env: RefCounted        # TerrainEnvironment
 var object_picker: RefCounted      # ObjectPicker
 
 
+## Erase all animesh-related dictionary entries for a given root localId.
+## Call after queue_free()ing the root node.
+func erase_animesh_state(root_lid: int) -> void:
+	animesh_roots.erase(root_lid)
+	animesh_shared_skeleton.erase(root_lid)
+	animesh_eval.erase(root_lid)
+	animesh_pending_anims.erase(root_lid)
+	animesh_worn_anims.erase(root_lid)
+	bone_global_overrides.erase(root_lid)
+	bone_shape_scales.erase(root_lid)
+	cv_volume_morphs.erase(root_lid)
+	if animesh_eval.is_empty():
+		animesh_eval_active = false
+
+
 func _exit_tree() -> void:
 	asset_pipeline.shutdown()
 	# Skip all cleanup — process is about to die anyway.
