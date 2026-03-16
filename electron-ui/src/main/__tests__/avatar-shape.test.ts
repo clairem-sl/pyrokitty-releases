@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeSkeletonDeltas, getVisualParams } from '../avatar-shape';
+import { computeShapeDeltas, getVisualParams } from '../avatar-shape';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -69,36 +69,36 @@ describe('avatar-shape', () => {
     });
   });
 
-  describe('computeSkeletonDeltas', () => {
+  describe('computeShapeDeltas', () => {
     it('loads param definitions successfully', () => {
       const params = getVisualParams();
       expect(params.length).toBe(82);
     });
 
     it('returns empty result for empty byte array', () => {
-      const result = computeSkeletonDeltas([]);
-      expect(Object.keys(result).length).toBe(0);
+      const { bones } = computeShapeDeltas([]);
+      expect(Object.keys(bones).length).toBe(0);
     });
 
     it('default bytes (128) produce near-neutral scales', () => {
       // All params at byte 128 = middle of their range
       // For most params, the middle value should produce moderate scale
       const bytes = new Array(253).fill(128);
-      const result = computeSkeletonDeltas(bytes);
+      const { bones } = computeShapeDeltas(bytes);
 
       // mPelvis should exist and have scale values
-      expect(result.mPelvis).toBeDefined();
-      expect(result.mPelvis.scale).toHaveLength(3);
-      expect(result.mPelvis.offset).toHaveLength(3);
+      expect(bones.mPelvis).toBeDefined();
+      expect(bones.mPelvis.scale).toHaveLength(3);
+      expect(bones.mPelvis.offset).toHaveLength(3);
 
       // Log all bone scales for inspection
-      const boneNames = Object.keys(result).sort();
+      const boneNames = Object.keys(bones).sort();
       console.log(`[DefaultShape] ${boneNames.length} bones affected`);
       for (const name of ['mPelvis', 'mHipLeft', 'mHipRight', 'mKneeLeft', 'mKneeRight',
                            'mTorso', 'mChest', 'mNeck', 'mHead', 'mShoulderLeft']) {
-        if (result[name]) {
-          const s = result[name].scale;
-          const o = result[name].offset;
+        if (bones[name]) {
+          const s = bones[name].scale;
+          const o = bones[name].offset;
           console.log(`[DefaultShape] ${name}: scale=(${s.map(v => v.toFixed(6)).join(', ')}) offset=(${o.map(v => v.toFixed(6)).join(', ')})`);
         }
       }
@@ -106,21 +106,21 @@ describe('avatar-shape', () => {
 
     it('all-zero bytes produce minimum scales', () => {
       const bytes = new Array(253).fill(0);
-      const result = computeSkeletonDeltas(bytes);
-      expect(result.mPelvis).toBeDefined();
-      console.log(`[MinShape] mPelvis scale=(${result.mPelvis.scale.map(v => v.toFixed(6)).join(', ')})`);
+      const { bones } = computeShapeDeltas(bytes);
+      expect(bones.mPelvis).toBeDefined();
+      console.log(`[MinShape] mPelvis scale=(${bones.mPelvis.scale.map(v => v.toFixed(6)).join(', ')})`);
     });
 
     it('all-255 bytes produce maximum scales', () => {
       const bytes = new Array(253).fill(255);
-      const result = computeSkeletonDeltas(bytes);
-      expect(result.mPelvis).toBeDefined();
-      console.log(`[MaxShape] mPelvis scale=(${result.mPelvis.scale.map(v => v.toFixed(6)).join(', ')})`);
+      const { bones } = computeShapeDeltas(bytes);
+      expect(bones.mPelvis).toBeDefined();
+      console.log(`[MaxShape] mPelvis scale=(${bones.mPelvis.scale.map(v => v.toFixed(6)).join(', ')})`);
     });
 
     it('scale is symmetric: left/right bones get same scale for uniform bytes', () => {
       const bytes = new Array(253).fill(128);
-      const result = computeSkeletonDeltas(bytes);
+      const { bones } = computeShapeDeltas(bytes);
 
       const pairs = [
         ['mHipLeft', 'mHipRight'],
@@ -131,10 +131,10 @@ describe('avatar-shape', () => {
       ];
 
       for (const [left, right] of pairs) {
-        if (result[left] && result[right]) {
-          expect(result[left].scale[0]).toBeCloseTo(result[right].scale[0], 6);
-          expect(result[left].scale[1]).toBeCloseTo(result[right].scale[1], 6);
-          expect(result[left].scale[2]).toBeCloseTo(result[right].scale[2], 6);
+        if (bones[left] && bones[right]) {
+          expect(bones[left].scale[0]).toBeCloseTo(bones[right].scale[0], 6);
+          expect(bones[left].scale[1]).toBeCloseTo(bones[right].scale[1], 6);
+          expect(bones[left].scale[2]).toBeCloseTo(bones[right].scale[2], 6);
         }
       }
     });
@@ -151,15 +151,15 @@ describe('avatar-shape', () => {
 
       tallBytes[heightParam!.byteIndex] = 255;  // Max height
 
-      const defaultResult = computeSkeletonDeltas(defaultBytes);
-      const tallResult = computeSkeletonDeltas(tallBytes);
+      const defaultBones = computeShapeDeltas(defaultBytes).bones;
+      const tallBones = computeShapeDeltas(tallBytes).bones;
 
       // Compare and log which bones changed
-      const allBones = new Set([...Object.keys(defaultResult), ...Object.keys(tallResult)]);
+      const allBones = new Set([...Object.keys(defaultBones), ...Object.keys(tallBones)]);
       const changed: string[] = [];
       for (const bone of allBones) {
-        const ds = defaultResult[bone]?.scale || [1, 1, 1];
-        const ts = tallResult[bone]?.scale || [1, 1, 1];
+        const ds = defaultBones[bone]?.scale || [1, 1, 1];
+        const ts = tallBones[bone]?.scale || [1, 1, 1];
         const diff = Math.max(
           Math.abs(ds[0] - ts[0]),
           Math.abs(ds[1] - ts[1]),
@@ -217,30 +217,30 @@ describe('avatar-shape', () => {
     const HUMAN_BYTES = [94,180,173,20,153,114,0,255,130,48,0,129,79,127,0,165,84,135,147,0,130,127,0,181,127,0,0,63,94,137,0,255,203,255,79,127,0,0,127,0,0,127,130,0,0,127,0,0,0,0,0,0,0,0,0,0,0,35,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,255,89,0,0,130,160,109,85,127,127,61,122,0,100,216,214,204,204,204,51,25,89,76,204,0,0,0,0,9,0,127,115,38,68,0,127,150,127,127,127,104,0,51,0,76,58,63,47,162,117,0,0,63,0,0,0,0,127,127,0,0,0,0,127,0,159,0,0,0,127,35,0,0,0,152,137,84,163,0,0,134,127,127,130,0,214,204,198,0,0,89,30,196,226,255,198,255,255,255,255,255,255,255,255,255,204,0,255,255,255,255,255,255,255,255,255,255,255,0,255,255,255,255,255,0,127,38,255,25,100,255,255,255,255,84,0,0,0,127,142,255,255,255,0,0,25,0,25,23,51,0,25,23,51,0,0,25,0,25,23,51,0,0,25,0,25,23,51,0,25,23,51,0,25,23,51,1,119];
 
     it('dog avatar 8f99e602: scale values match production log', () => {
-      const result = computeSkeletonDeltas(DOG_BYTES);
+      const { bones } = computeShapeDeltas(DOG_BYTES);
 
       // Known values from production log:
       // [AvatarShape] 8f99e602 bone=mPelvis scale=[1.127569, 1.127569, 1.400000]
-      expect(result.mPelvis.scale[0]).toBeCloseTo(1.127569, 4);
-      expect(result.mPelvis.scale[1]).toBeCloseTo(1.127569, 4);
-      expect(result.mPelvis.scale[2]).toBeCloseTo(1.400000, 4);
+      expect(bones.mPelvis.scale[0]).toBeCloseTo(1.127569, 4);
+      expect(bones.mPelvis.scale[1]).toBeCloseTo(1.127569, 4);
+      expect(bones.mPelvis.scale[2]).toBeCloseTo(1.400000, 4);
 
       // [AvatarShape] 8f99e602 bone=mHipLeft scale=[1.165839, 1.165839, 1.300000]
-      expect(result.mHipLeft.scale[0]).toBeCloseTo(1.165839, 4);
-      expect(result.mHipLeft.scale[2]).toBeCloseTo(1.300000, 4);
+      expect(bones.mHipLeft.scale[0]).toBeCloseTo(1.165839, 4);
+      expect(bones.mHipLeft.scale[2]).toBeCloseTo(1.300000, 4);
 
       // [AvatarShape] 8f99e602 bone=mKneeLeft scale=[1.153082, 1.153082, 1.350000]
-      expect(result.mKneeLeft.scale[2]).toBeCloseTo(1.350000, 4);
+      expect(bones.mKneeLeft.scale[2]).toBeCloseTo(1.350000, 4);
 
       // Left/right symmetry
-      expect(result.mHipLeft.scale).toEqual(result.mHipRight.scale);
-      expect(result.mKneeLeft.scale).toEqual(result.mKneeRight.scale);
+      expect(bones.mHipLeft.scale).toEqual(bones.mHipRight.scale);
+      expect(bones.mKneeLeft.scale).toEqual(bones.mKneeRight.scale);
 
       // Log ALL bone scales for comparison with Firestorm
       console.log(`[DogShape] All bone scales:`);
-      for (const name of Object.keys(result).sort()) {
-        const s = result[name].scale;
-        const o = result[name].offset;
+      for (const name of Object.keys(bones).sort()) {
+        const s = bones[name].scale;
+        const o = bones[name].offset;
         const hasScale = s.some(v => Math.abs(v - 1) > 0.0001);
         const hasOffset = o.some(v => Math.abs(v) > 0.0001);
         if (hasScale || hasOffset) {
@@ -250,24 +250,24 @@ describe('avatar-shape', () => {
     });
 
     it('human avatar 27df63dc: scale values match production log', () => {
-      const result = computeSkeletonDeltas(HUMAN_BYTES);
+      const { bones } = computeShapeDeltas(HUMAN_BYTES);
 
       // Known values from production log:
       // [AvatarShape] 27df63dc bone=mPelvis scale=[0.930000, 0.932353, 0.689412]
-      expect(result.mPelvis.scale[0]).toBeCloseTo(0.930000, 4);
-      expect(result.mPelvis.scale[1]).toBeCloseTo(0.932353, 4);
-      expect(result.mPelvis.scale[2]).toBeCloseTo(0.689412, 4);
+      expect(bones.mPelvis.scale[0]).toBeCloseTo(0.930000, 4);
+      expect(bones.mPelvis.scale[1]).toBeCloseTo(0.932353, 4);
+      expect(bones.mPelvis.scale[2]).toBeCloseTo(0.689412, 4);
 
       // Left/right symmetry
-      expect(result.mHipLeft.scale).toEqual(result.mHipRight.scale);
-      expect(result.mKneeLeft.scale).toEqual(result.mKneeRight.scale);
+      expect(bones.mHipLeft.scale).toEqual(bones.mHipRight.scale);
+      expect(bones.mKneeLeft.scale).toEqual(bones.mKneeRight.scale);
 
       console.log(`[HumanShape] Key bone scales:`);
       for (const name of ['mPelvis', 'mHipLeft', 'mHipRight', 'mKneeLeft', 'mKneeRight',
                            'mAnkleLeft', 'mAnkleRight', 'mTorso', 'mChest', 'mNeck', 'mHead']) {
-        if (result[name]) {
-          const s = result[name].scale;
-          const o = result[name].offset;
+        if (bones[name]) {
+          const s = bones[name].scale;
+          const o = bones[name].offset;
           console.log(`  ${name}: scale=(${s.map(v => v.toFixed(6)).join(', ')}) offset=(${o.map(v => v.toFixed(6)).join(', ')})`);
         }
       }

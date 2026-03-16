@@ -2,15 +2,19 @@
 
 Version is set in `godot-viewer/godot-version.txt`.
 
-Run tests (headless, no window):
+Run all tests (headless, no window):
 
 ```bash
-cd godot-viewer && GODOT=$(cat godot-version.txt | tr -d '[:space:]') && ./$GODOT/${GODOT}_console.exe --headless --quit-after 5 --scene tests/test_prim_mesh.tscn
+cd godot-viewer && GODOT=$(cat godot-version.txt | tr -d '[:space:]') && for s in tests/test_*.tscn; do ./$GODOT/${GODOT}_console.exe --headless --quit-after 5 --scene "$s" 2>&1 | grep -E "passed|failed"; done
 ```
 
 Test run with window:
 ```bash
+# Using saved account (first account in accounts.json)
 cd /c/DeeDrive/dev/phoenix-firestorm/electron-ui && AUTO_LOGIN=1 npm start &>/dev/null
+
+# Using CLI credentials (--grid defaults to first configured grid)
+cd /c/DeeDrive/dev/phoenix-firestorm/electron-ui && npm start -- --login FirstName LastName password [--grid agni]
 ```
 
 ## Building Firestorm (Windows)

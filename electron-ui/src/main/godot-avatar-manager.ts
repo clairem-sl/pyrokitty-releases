@@ -14,7 +14,7 @@ import type { GodotMaterialPipeline } from './godot-material-pipeline';
 import type { TextureFetchQueue } from './texture-fetch-queue';
 import type { SendFn } from './godot-bridge-types';
 import { isHudAttachment, BAKE_MAGIC_UUIDS, BAKE_CHANNEL_NAMES, BAKE_CHANNEL_TO_TE_FACE, ZERO_UUID } from './godot-bridge-types';
-import { computeSkeletonDeltas, computeVolumeMorphDeltas } from './avatar-shape';
+import { computeShapeDeltas } from './avatar-shape';
 
 export class GodotAvatarManager {
   private avatarAttachSubs = new Map<string, Subscription>();
@@ -120,13 +120,18 @@ export class GodotAvatarManager {
         if (msg.VisualParam && msg.VisualParam.length > 0) {
           try {
             const bytes = msg.VisualParam.map((vp: { ParamValue: number }) => vp.ParamValue);
-            const bones = computeSkeletonDeltas(bytes);
-            const volumeMorphs = computeVolumeMorphDeltas(bytes);
+            const { bones, volumeMorphs } = computeShapeDeltas(bytes);
             const boneCount = Object.keys(bones).length;
             if (boneCount > 0) {
               this.avatarShapes.set(avatarId, bones);
               this.avatarVolumeMorphs.set(avatarId, volumeMorphs);
-              this.send({ type: 'avatar_shape', avatarId, bones, volumeMorphs });
+              // AppearanceHover includes the shape Hover slider (param 11001).
+              // Sent via AgentPreferences cap → server → AppearanceHover.HoverHeight.Z
+              let hoverHeight = 0;
+              if (msg.AppearanceHover && msg.AppearanceHover.length > 0) {
+                hoverHeight = msg.AppearanceHover[0].HoverHeight.z || 0;
+              }
+              this.send({ type: 'avatar_shape', avatarId, bones, volumeMorphs, hoverHeight });
               // Debug: log key bone deltas for leg and body bones
               const debugBones = ['mPelvis', 'mHipLeft', 'mHipRight', 'mKneeLeft', 'mKneeRight', 'mAnkleLeft', 'mAnkleRight', 'mFootLeft', 'mFootRight', 'mTorso', 'mChest', 'mNeck'];
               for (const b of debugBones) {
@@ -161,10 +166,9 @@ export class GodotAvatarManager {
   seedVisualParams(buffer: Map<string, number[]>): void {
     for (const [avatarId, bytes] of buffer) {
       try {
-        const bones = computeSkeletonDeltas(bytes);
+        const { bones, volumeMorphs } = computeShapeDeltas(bytes);
         if (Object.keys(bones).length > 0) {
           this.avatarShapes.set(avatarId, bones);
-          const volumeMorphs = computeVolumeMorphDeltas(bytes);
           if (Object.keys(volumeMorphs).length > 0) {
             this.avatarVolumeMorphs.set(avatarId, volumeMorphs);
           }

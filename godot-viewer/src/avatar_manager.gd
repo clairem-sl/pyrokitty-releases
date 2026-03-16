@@ -161,6 +161,10 @@ func handle_avatar_create(msg: Dictionary) -> void:
 			print("[AvatarShape] Applying pending shape for %s at avatar_create" % avatar_id.substr(0, 8))
 			_apply_shape_to_skeleton(shared_skel, _avatar_shapes[avatar_id], avatar_id)
 			_log_bone_rests(shared_skel, avatar_id, "after_shape")
+			# Body size offset (same as handle_avatar_shape, no hover at create time)
+			var body_offset: float = _compute_body_z_offset(shared_skel, _avatar_shapes[avatar_id])
+			shared_skel.position.y = -body_offset
+			print("[AvatarShape] Pending body_offset=%.4f for %s" % [body_offset, avatar_id.substr(0, 8)])
 		# Apply pending volume morphs
 		if _avatar_volume_morphs.has(avatar_id):
 			sm.cv_volume_morphs[local_id] = _avatar_volume_morphs[avatar_id]
@@ -326,7 +330,48 @@ func handle_avatar_shape(msg: Dictionary) -> void:
 	_log_bone_rests(shared_skel, avatar_id, "after_shape")
 	_reapply_joint_overrides(av_lid, shared_skel, avatar_id)
 	_log_bone_rests(shared_skel, avatar_id, "after_reapply_overrides")
-	print("[AvatarShape] Applied shape for avatar %s (%d bones modified)" % [avatar_id.substr(0, 8), bones.size()])
+
+	# Body size offset (Firestorm: root_pos.Z -= 0.5*bodyH - pelvisToFoot) + hover
+	var body_offset: float = _compute_body_z_offset(shared_skel, bones)
+	var hover_height: float = float(msg.get("hoverHeight", 0.0))
+	shared_skel.position.y = -body_offset + hover_height
+
+	print("[AvatarShape] Applied shape for avatar %s (%d bones, hover=%.4f, body_offset=%.4f)" % [avatar_id.substr(0, 8), bones.size(), hover_height, body_offset])
+
+
+## Compute the vertical offset from bounding box center to pelvis.
+## Matches Firestorm: root_pos.Z -= (0.5 * bodyHeight - pelvisToFoot)
+## See llavatarappearance.cpp computeBodySize() for the original formula.
+func _compute_body_z_offset(skel: Skeleton3D, bones: Dictionary) -> float:
+	# Helper: get bone local Z in SL space from skeleton rest (Godot Y = SL Z)
+	var _get_z = func(bname: String) -> float:
+		var bi: int = skel.find_bone(bname)
+		if bi < 0: return 0.0
+		return skel.get_bone_rest(bi).origin.y
+
+	# Helper: get bone shape scale Z
+	var _scale_z = func(bname: String) -> float:
+		if bones.has(bname):
+			return (bones[bname].get("scale", [1, 1, 1]) as Array)[2]
+		return 1.0
+
+	var pelvis_to_foot: float = (
+		_get_z.call("mHipLeft") * _scale_z.call("mPelvis") -
+		_get_z.call("mKneeLeft") * _scale_z.call("mHipLeft") -
+		_get_z.call("mAnkleLeft") * _scale_z.call("mKneeLeft") -
+		_get_z.call("mFootLeft") * _scale_z.call("mAnkleLeft")
+	)
+
+	var body_height: float = pelvis_to_foot + (
+		sqrt(2.0) * _get_z.call("mSkull") * _scale_z.call("mHead") +
+		_get_z.call("mHead") * _scale_z.call("mNeck") +
+		_get_z.call("mNeck") * _scale_z.call("mChest") +
+		_get_z.call("mChest") * _scale_z.call("mTorso") +
+		_get_z.call("mTorso") * _scale_z.call("mPelvis")
+	)
+
+	var offset: float = 0.5 * body_height - pelvis_to_foot
+	return offset
 
 
 ## Reset skeleton bone rests to XML baseline + shape offset deltas.

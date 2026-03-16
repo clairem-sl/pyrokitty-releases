@@ -82,6 +82,11 @@ export class AccountManager {
     return newAccount;
   }
 
+  /** Add an account to memory without saving to disk (for CLI login). */
+  addTransientAccount(account: Account): void {
+    this.accounts.push(account);
+  }
+
   updateAccount(accountId: string, updates: Partial<{ firstName: string; lastName: string; password: string; mfaHash: string }>): Account | null {
     const account = this.accounts.find(a => a.id === accountId);
     if (!account) {

@@ -81,7 +81,7 @@ Applies avatar appearance slider values to the skeleton for per-avatar proportio
 ```
 SL Server → AvatarAppearance msg (253 VisualParam U8 bytes)
   → metaverse-connection.ts: buffers bytes during login
-  → avatar-shape.ts: computeSkeletonDeltas() via fast-xml-parser
+  → avatar-shape.ts: computeShapeDeltas() via fast-xml-parser
   → WebSocket → Godot: { type: "avatar_shape", avatarId, bones }
   → object_manager.gd: _apply_shape_to_skeleton() + _reapply_joint_overrides()
 ```
@@ -115,7 +115,7 @@ CV bones get their skinning scale from three sources, combined as a **deformatio
 
 The ratio is needed because the GLB IBM fixup (`blenderFixJoint`) cancels the CV's XML default scale. Putting the absolute CV scale (e.g., 0.042) into the global pose would double-apply the default, producing stick-thin limbs. The deformation ratio (e.g., 0.7) correctly represents the shape change from default.
 
-Volume morph deltas are extracted by `convert-avatar-lad.js` from `<volume_morph>` tags, computed in `computeVolumeMorphDeltas()`, buffered in `avatarVolumeMorphs` alongside bone shapes, and stored in `sm.cv_volume_morphs[root_id]` on the Godot side.
+Volume morph deltas are extracted by `convert-avatar-lad.js` from `<volume_morph>` tags, computed in `computeShapeDeltas()`, buffered in `avatarVolumeMorphs` alongside bone shapes, and stored in `sm.cv_volume_morphs[root_id]` on the Godot side.
 
 ### Critical Implementation Details
 
@@ -139,8 +139,8 @@ Source: `llvoavatar.cpp` `expected_tweakable_count = group(TWEAKABLE) + group(TR
 Params with `sex="male"` or `sex="female"` in avatar_lad.xml use weight 0 when avatar sex doesn't match (Firestorm: `(getSex() & avatar_sex) ? mCurWeight : getDefaultWeight()`). Avatar sex determined by param id=80 ("male") at byteIndex=31: dequantized > 0.5 = male. Only 1 skeleton param is sex-filtered: id=879 Male_Package → mGroin. Sex field extracted by `convert-avatar-lad.js` into JSON.
 
 ### Not Implemented
-- **Morph targets**: Face detail deformation via vertex morphs (blend shapes). Separate from skeleton shape.
-- **Hover height**: `AppearanceHover` is separate from shape params.
+- **Vertex morph targets** (won't implement): Per-vertex face/body deformation for system avatar meshes only. Nearly all avatars use rigged mesh bodies which don't use these.
+- **Hover height**: Partially working but inaccurate. Shape → Body → Hover slider affects avatar height but values don't match Firestorm.
 
 ---
 
@@ -203,7 +203,7 @@ Godot doesn't do this automatically. We simulate it by "baking" parent scale int
 
 ### What We Confirmed
 
-1. **Our shape scale computation matches Firestorm exactly** — verified by adding `BONE_SCALE` logging to Firestorm's `updateVisualParams()` and comparing against our `computeSkeletonDeltas()`. All body bones match (mPelvis, mHips, mKnees, mTorso, mChest, mNeck, etc.). Unit tests added in `avatar-shape.test.ts` with real avatar byte data.
+1. **Our shape scale computation matches Firestorm exactly** — verified by adding `BONE_SCALE` logging to Firestorm's `updateVisualParams()` and comparing against our `computeShapeDeltas()`. All body bones match (mPelvis, mHips, mKnees, mTorso, mChest, mNeck, etc.). Unit tests added in `avatar-shape.test.ts` with real avatar byte data.
 
 2. **Firestorm does NOT bake parent scale into rest positions** — it stores raw override/shape positions as local positions, then applies parent scale dynamically during world transform computation each frame.
 
@@ -254,60 +254,25 @@ This is a significant refactor. The baked approach works acceptably for now.
 
 ### Remaining Issues & Next Steps
 
-#### Issue 1: IBM/Rest Position Mismatch (Root Cause of Eyes, Head Droop)
+#### Issue 1: IBM/Rest Position Mismatch (RESOLVED — Eye Position Fixed)
 
-The mesh converter computes IBMs and skeleton node positions from DIFFERENT sources:
-- **IBMs**: computed from XML world transforms via `getWorldPos()` which walks the XML parent chain (lines 820-823 of mesh-converter.ts). These reflect the DEFAULT skeleton.
-- **Skeleton nodes**: may have override positions from `alt_inverse_bind_matrix` (line 870-877). These reflect the MESH CREATOR's intended skeleton.
+The mesh converter was computing IBMs and skeleton node positions from DIFFERENT sources:
+- **IBMs**: computed from XML world transforms via `getWorldPos()` which walks the XML parent chain. These reflected the DEFAULT skeleton.
+- **Skeleton nodes**: had override positions from `alt_inverse_bind_matrix`. These reflected the MESH CREATOR's intended skeleton.
 
-When a bone has an override that differs from XML default, the IBM says "this bone was at (XML world pos)" but the rest says "this bone is at (override pos)." The skinning pipeline computes `globalPose * IBM` — if they don't match, vertices get displaced. This is why the dog's eyes pop out of its head (mEyeLeft override is 0.36 from XML default).
+This mismatch caused eye popping on the dog avatar (mEyeLeft override 0.36 from XML default). **Fixed** — IBMs and rest positions are now consistent. Eye position is correct.
 
-**The fix (Approach 3, not yet tried):** Compute IBMs from the override-modified skeleton, not from XML defaults. After applying override positions to skeleton nodes (line 870-877), use those node positions for the IBM `getWorldPos()` calculation. Then IBMs and rest positions will be consistent.
+#### Issue 2: Head Droop on Dog Avatar
 
-Once IBMs are correct, we can safely remove parent scale from overrides (Approach 1) without causing eye popping — because IBMs and rest would both be in the same coordinate space (no parent scale in either). The no-op override threshold filter would still keep near-default bones at shape positions, preventing the leg asymmetry.
+The dog's head droops in Godot but looks forward in Firestorm. Both viewers have the same mHead override position (0.373, 0, 0.713). The original theory blamed the IBM/rest position mismatch (Issue 1), but that was wrong — **the actual cause is an animation priority bug**. The droop persists after the IBM fix, confirming it's an animation issue, not a skinning issue.
 
-#### Issue 2: Alt IBM Translation Discrepancy
+#### Issue 3: T-Pose Before First Animation
 
-Our mesh converter and Firestorm both extract translation from flat indices [12,13,14] of the alt_inverse_bind_matrix. Both get the same raw values. We confirmed this by adding `OVERRIDE_APPLIED` logging to Firestorm — it shows the same override positions as our converter (e.g., mHead at (0.373, 0, 0.713), mNeck at (0.114, 0, 0.694)).
-
-However, our Godot-side threshold filter (0.0001) only catches 1-2 of 43 bones as "at default." The rest have distances of 0.04-0.1 from XML defaults. These ARE genuine override positions — the dog mesh creator repositioned these bones for a quadruped head shape (mHead at 0.713 above mNeck vs default 0.076).
-
-Firestorm's `aboveJointPosThreshold` would also pass these (they're way above 0.1mm). And Firestorm DOES apply them — the `OVERRIDE_APPLIED` log confirms it. Our earlier `BONE_POS` log that showed mHead at default was misleading — it ran during `updateVisualParams` (shape changes) BEFORE mesh overrides were applied.
-
-**Key finding:** The override positions ARE correct and match Firestorm. The problem is not the positions themselves but the IBM mismatch (Issue 1 above).
-
-#### Issue 3: Head Droop on Dog Avatar
-
-The dog's head droops in Godot but looks forward in Firestorm. Both viewers have the same mHead override position (0.373, 0, 0.713). No animation drives mHead rotation on the avatar (we checked all 11 animations — none have mHead/mNeck keys). The animesh has 3 animations with mHead/mNeck keys (7ae516bc, 887c2ebf, 9cdd29bd) but those play on the animesh's own skeleton, not the avatar's.
-
-Likely caused by the IBM/rest mismatch (Issue 1). When the IBM and rest position disagree, the skin mesh is displaced. Combined with parent scale baking on the override position, the head's visual position is wrong, making it appear to droop. Fixing IBMs (Approach 3) should resolve this.
-
-#### Issue 4: Parent Scale Baking vs Dynamic Application
-
-Firestorm applies parent shape scale dynamically during world transform each frame. We bake it into rest positions. This produces different world positions for overridden bones:
-- **Firestorm**: `worldPos = parent.worldRot * (overridePos * parent.scale) + parent.worldPos` — override is raw, scale applied dynamically
-- **Our viewer**: `rest = overridePos * parent.scale` — scale baked into rest, then Godot walks hierarchy
-
-We verified the position difference by comparing BoneDump output:
-| Bone | Firestorm (raw) | Our viewer (baked) | Ratio |
-|------|----------------|-------------------|-------|
-| mTorso | (-0.245, 0, 0.637) | (-0.276, 0, 0.891) | 1.13x, 1.40x |
-| mChest | (-0.188, 0, 1.085) | (-0.212, 0, 1.519) | 1.13x, 1.40x |
-| mNeck | (0.114, 0, 0.694) | (0.131, 0, 0.764) | scaled |
-
-The ratios match the mPelvis shape scale (1.128, 1.128, 1.400).
-
-Dynamic application is the correct fix but requires ALL bone position consumers to use global pose overrides instead of rest positions (attachments, debug markers, etc.). We tried this (Approach 2) and it broke too many systems. With IBM fixes in place (Approach 3), we can revisit this more carefully.
-
-#### Issue 5: Ball Avatar Before Animations
-
-Avatars sometimes appear as a ball before their first animation evaluation. This is because `set_bone_global_pose_override` is only called during animation evaluation (30Hz throttled). Before the first eval, bones are at rest but Godot's internal pose computation doesn't correctly reflect manually-set rest transforms.
-
-We tried running `_apply_global_pose_overrides` unconditionally for ALL skeletons every frame, but this overwrote good poses on throttled skeletons, causing T-poses. The fix should be: call `_apply_global_pose_overrides` once when a skeleton is first created or when shape/overrides are applied, not every frame.
+Avatars briefly T-pose before their first animation evaluation. `_apply_global_pose_overrides` is only called inside `process_animesh` during animation eval (30Hz throttled), so before the first eval, bones sit at rest pose. Fix: run `_apply_global_pose_overrides` once when a skeleton is first created or when shape/overrides are applied.
 
 #### Issue 6: mHead Sex Filtering
 
-`avatar_lad_skeleton.json` lacks sex info. Firestorm's `LLPolySkeletalDistortion::apply()` checks `(getSex() & avatar_sex)` and uses `getDefaultWeight()` for params that don't match the avatar's sex. Our code always uses the byte value. This causes wrong scale on mHead (our: 0.926, Firestorm: 1.096). Need to add sex field to the JSON and filter in `computeSkeletonDeltas()`.
+`avatar_lad_skeleton.json` lacks sex info. Firestorm's `LLPolySkeletalDistortion::apply()` checks `(getSex() & avatar_sex)` and uses `getDefaultWeight()` for params that don't match the avatar's sex. Our code always uses the byte value. This causes wrong scale on mHead (our: 0.926, Firestorm: 1.096). Need to add sex field to the JSON and filter in `computeShapeDeltas()`.
 
 ### Resolution (2026-03-15)
 
@@ -319,15 +284,14 @@ Issues 1-4 and 6 were resolved by implementing dynamic parent scale + bone scale
 
 3. **AP offset bone scale**: `_get_ap_world_transform` now scales AP offsets by the bone's shape scale (AP is a child joint, subject to `xform.cpp:76`). Fixed boots too low / ears too high.
 
-4. **Sex filtering**: `convert-avatar-lad.js` extracts `@_sex`. `computeSkeletonDeltas()` filters by avatar sex (param id=80, byteIndex=31). Only 1 skeleton param affected: id=879 Male_Package → mGroin. Earlier mHead attribution was incorrect.
+4. **Sex filtering**: `convert-avatar-lad.js` extracts `@_sex`. `computeShapeDeltas()` filters by avatar sex (param id=80, byteIndex=31). Only 1 skeleton param affected: id=879 Male_Package → mGroin. Earlier mHead attribution was incorrect.
 
 5. **Network positions are AP-local**: Confirmed by Firestorm log comparison — `setupDrawable` shows `obj_pos_local` values are small offsets (0.08m), not skeleton heights. Formula `ap_world + ap_rot * offset` is correct.
 
 ### Remaining Issues
 
 - **Ball avatar before animations** — `set_bone_global_pose_override` only called during anim eval
-- **Vertex morph targets** — Face detail vertex morphs (blend shapes) for system avatar meshes. Volume morphs (CV scale/position) are implemented; vertex morphs are not.
-- **Hover height** — `AppearanceHover` separate from shape params
+- **Hover height accuracy** — Shape → Body → Hover slider works but values don't match Firestorm
 - **Volume morph position** — `<volume_morph pos=...>` entries modify CV position but only scale is currently applied
 
 ### Test Avatars

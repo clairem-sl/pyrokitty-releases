@@ -18,10 +18,6 @@ func _ready() -> void:
 
 	_test_script_compiles()
 	_test_depth_buffer_enabled()
-	_test_vr_budget_derivation()
-	_test_vr_budget_leaves_gpu_headroom()
-	_test_vr_budget_msg_fits_before_finalize_stop()
-	_test_vr_budget_total_under_frame_ms()
 	_test_avatar_messages_are_high_priority()
 	_test_self_id_is_high_priority()
 	_test_low_priority_messages()

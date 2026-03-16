@@ -67,6 +67,20 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let cleanupDone = false;
 
+/** Parse --login First Last password [--grid nick] from process.argv */
+function parseCliLogin(argv: string[]): { firstName: string; lastName: string; password: string; grid?: string } | null {
+  const idx = argv.indexOf('--login');
+  if (idx < 0 || idx + 3 >= argv.length) return null;
+  const firstName = argv[idx + 1];
+  const lastName = argv[idx + 2];
+  const password = argv[idx + 3];
+  // Don't treat flags as credentials
+  if (firstName.startsWith('-') || lastName.startsWith('-') || password.startsWith('-')) return null;
+  const gridIdx = argv.indexOf('--grid');
+  const grid = (gridIdx >= 0 && gridIdx + 1 < argv.length) ? argv[gridIdx + 1] : undefined;
+  return { firstName, lastName, password, grid };
+}
+
 function createMapWindow(): void {
   const existing = getMapWindow();
   if (existing) {
@@ -184,35 +198,78 @@ async function createWindow(): Promise<void> {
     mainWindow.webContents.openDevTools();
   }
 
-  // Auto-login for automated testing: AUTO_LOGIN=accountId or AUTO_LOGIN=1 (first account)
-  const autoLogin = process.env.AUTO_LOGIN;
-  if (autoLogin) {
+  // CLI login: --login First Last password [--grid gridnick]
+  // Also supports AUTO_LOGIN env var for saved accounts
+  const cliLogin = parseCliLogin(process.argv);
+  const autoLogin = cliLogin ? null : process.env.AUTO_LOGIN;
+
+  if (cliLogin || autoLogin) {
     setTimeout(async () => {
       try {
-        const accounts = accountManager.getAllAccounts();
-        const account = autoLogin === '1'
-          ? accounts[0]
-          : accounts.find(a => a.id === autoLogin || a.firstName.toLowerCase() === autoLogin.toLowerCase());
-        if (account) {
-          console.log(`[AutoLogin] Launching ${account.firstName} ${account.lastName}...`);
-          await viewerManager.launchViewer(account.id, account.password, { launchViewer: false });
-          console.log('[AutoLogin] Login complete');
-          // Auto-launch Godot viewer after a brief delay
-          const instances = viewerManager.getInstances();
-          if (instances.length > 0) {
-            const inst = instances[0];
-            setTimeout(async () => {
-              try {
-                console.log('[AutoLogin] Launching Godot viewer...');
-                await viewerManager.launchGodotViewerForInstance(inst.id);
-                console.log('[AutoLogin] Godot viewer launched');
-              } catch (e: any) {
-                console.error('[AutoLogin] Godot launch failed:', e.message);
-              }
-            }, 5000);
+        let accountId: string;
+        let password: string;
+
+        if (cliLogin) {
+          // CLI credentials — find or create a temporary account entry
+          const grids = gridManager.getAllGrids();
+          const grid = cliLogin.grid
+            ? grids.find(g => g.nick.toLowerCase() === cliLogin.grid!.toLowerCase() || g.id === cliLogin.grid)
+            : grids[0];
+          if (!grid) {
+            console.error(`[AutoLogin] Grid not found: ${cliLogin.grid}`);
+            return;
           }
+          // Look for existing saved account
+          let account = accountManager.getAllAccounts().find(
+            a => a.firstName.toLowerCase() === cliLogin.firstName.toLowerCase()
+              && a.lastName.toLowerCase() === cliLogin.lastName.toLowerCase()
+              && a.gridId === grid.id
+          );
+          if (!account) {
+            // Create a transient account (in-memory only, not saved to disk)
+            accountId = `cli_${Date.now()}`;
+            accountManager.addTransientAccount({
+              id: accountId,
+              gridId: grid.id,
+              firstName: cliLogin.firstName,
+              lastName: cliLogin.lastName,
+            });
+            console.log(`[AutoLogin] Created transient account for ${cliLogin.firstName} ${cliLogin.lastName} on ${grid.name}`);
+          } else {
+            accountId = account.id;
+          }
+          password = cliLogin.password;
+          console.log(`[AutoLogin] CLI login: ${cliLogin.firstName} ${cliLogin.lastName} on ${grid.name}`);
         } else {
-          console.warn(`[AutoLogin] Account not found: ${autoLogin}`);
+          // ENV-based auto-login with saved accounts
+          const accounts = accountManager.getAllAccounts();
+          const account = autoLogin === '1'
+            ? accounts[0]
+            : accounts.find(a => a.id === autoLogin || a.firstName.toLowerCase() === autoLogin!.toLowerCase());
+          if (!account) {
+            console.warn(`[AutoLogin] Account not found: ${autoLogin}`);
+            return;
+          }
+          accountId = account.id;
+          password = account.password || '';
+          console.log(`[AutoLogin] Launching ${account.firstName} ${account.lastName}...`);
+        }
+
+        await viewerManager.launchViewer(accountId, password, { launchViewer: false });
+        console.log('[AutoLogin] Login complete');
+        // Auto-launch Godot viewer after a brief delay
+        const instances = viewerManager.getInstances();
+        if (instances.length > 0) {
+          const inst = instances[0];
+          setTimeout(async () => {
+            try {
+              console.log('[AutoLogin] Launching Godot viewer...');
+              await viewerManager.launchGodotViewerForInstance(inst.id);
+              console.log('[AutoLogin] Godot viewer launched');
+            } catch (e: any) {
+              console.error('[AutoLogin] Godot launch failed:', e.message);
+            }
+          }, 5000);
         }
       } catch (e: any) {
         console.error('[AutoLogin] Failed:', e.message);
