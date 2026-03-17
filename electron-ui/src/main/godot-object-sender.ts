@@ -15,7 +15,8 @@ import type { GodotMaterialPipeline } from './godot-material-pipeline';
 import type { GodotAnimationManager } from './godot-animation-manager';
 import type { GodotAvatarManager } from './godot-avatar-manager';
 import type { SendFn } from './godot-bridge-types';
-import { isHudAttachment, BAKE_MAGIC_UUIDS, ZERO_UUID } from './godot-bridge-types';
+import { isHudAttachment, BAKE_MAGIC_UUIDS, ZERO_UUID, slPos, slQuat, slScale } from './godot-bridge-types';
+import type { ObjectReadinessTracker } from './object-readiness-tracker';
 
 export class GodotObjectSender {
   private deferredTextures = new Map<number, any>();
@@ -27,6 +28,7 @@ export class GodotObjectSender {
   private textureFetchQueue: TextureFetchQueue | null = null;
   private updateCoalescer: GodotUpdateCoalescer | null = null;
   private avatarManager: GodotAvatarManager | null = null;
+  private readinessTracker: ObjectReadinessTracker | null = null;
 
   // Self-avatar tracking for [SelfAvatar] logging
   selfAvatarLocalId: number = 0;
@@ -58,6 +60,10 @@ export class GodotObjectSender {
     this.sculptFetchQueue = sculptFetchQueue;
     this.textureFetchQueue = textureFetchQueue;
     this.updateCoalescer = updateCoalescer;
+  }
+
+  setReadinessTracker(tracker: ObjectReadinessTracker): void {
+    this.readinessTracker = tracker;
   }
 
   /** Returns mesh asset UUID if obj is a mesh, else undefined */
@@ -251,21 +257,64 @@ export class GodotObjectSender {
       console.log(`[Animesh] Detected animesh object localId=${obj.ID} uuid=${objUuid} meshId=${meshId || 'none'} parentId=${parentLocalId}`);
     }
 
+    // Distance gate: determine if textures should be deferred for far objects
+    let skipTextures = false;
+    try {
+      const botPos = this.getBotPosition();
+      if (botPos) {
+        const globalPos = this.getGlobalPosition(obj);
+        if (globalPos) {
+          const dist = globalPos.distance(botPos);
+          if (dist > this.TEXTURE_FETCH_RANGE) {
+            skipTextures = true;
+            this.deferredTextures.set(obj.ID, obj);
+          }
+        }
+      }
+    } catch { /* bot may not be fully connected yet */ }
+
+    // Phase 1: lightweight object_create with spatial info only
     this.send({
       type: 'object_create',
       localId: obj.ID,
       uuid: objUuid,
       parentId: parentLocalId,
-      position: [pos.x, pos.y, pos.z],
-      rotation: rot ? [rot.x, rot.y, rot.z, rot.w] : [0, 0, 0, 1],
-      scale: scl ? [scl.x, scl.y, scl.z] : [0.5, 0.5, 0.5],
-      ...(meshId ? { meshId } : sculpt_meshId ? { meshId: sculpt_meshId } : {}),
-      ...(shapeParams ? { shape: shapeParams } : {}),
-      ...(texInfo ? { faces: texInfo.faces } : {}),
+      position: slPos(pos),
+      rotation: rot ? slQuat(rot) : [0, 0, 0, 1],
+      scale: scl ? slScale(scl) : [0.5, 0.5, 0.5],
       ...(lightInfo ? { light: lightInfo } : {}),
       ...(isAnimesh ? { animesh: true } : {}),
       ...(obj.attachmentPoint > 0 ? { attachmentPoint: obj.attachmentPoint } : {}),
     });
+
+    // Phase 2: build full message for deferred object_complete
+    const effectiveMeshId = meshId || sculpt_meshId || undefined;
+    const completeMsg: any = {
+      type: 'object_complete',
+      localId: obj.ID,
+      ...(effectiveMeshId ? { meshId: effectiveMeshId } : {}),
+      ...(shapeParams ? { shape: shapeParams } : {}),
+      ...(texInfo ? { faces: texInfo.faces } : {}),
+    };
+
+    // Collect texture IDs for readiness tracking
+    const textureIds = new Set<string>();
+    if (texInfo && !skipTextures) {
+      for (const face of texInfo.faces) {
+        if (face.textureId && face.textureId !== ZERO_UUID) textureIds.add(face.textureId);
+        if (face.normalTextureId) textureIds.add(face.normalTextureId);
+        if (face.ormTextureId) textureIds.add(face.ormTextureId);
+        if (face.emissiveTextureId) textureIds.add(face.emissiveTextureId);
+      }
+    }
+
+    // Register with readiness tracker
+    if (this.readinessTracker) {
+      this.readinessTracker.track(obj.ID, effectiveMeshId || null, textureIds, completeMsg);
+    } else {
+      // No tracker — send immediately (backward compat)
+      this.send(completeMsg);
+    }
     if (lightInfo) {
       this.updateCoalescer?.trackLight(obj.ID);
     }
@@ -298,22 +347,6 @@ export class GodotObjectSender {
       console.log(`[GodotBridge] Requesting proj texture ${lightInfo.projTexture} for localId=${obj.ID}`);
       this.textureFetchQueue.request(lightInfo.projTexture, obj.ID);
     }
-
-    // Distance gate: skip texture fetches for objects beyond render range
-    let skipTextures = false;
-    try {
-      const botPos = this.getBotPosition();
-      if (botPos) {
-        const globalPos = this.getGlobalPosition(obj);
-        if (globalPos) {
-          const dist = globalPos.distance(botPos);
-          if (dist > this.TEXTURE_FETCH_RANGE) {
-            skipTextures = true;
-            this.deferredTextures.set(obj.ID, obj);
-          }
-        }
-      }
-    } catch { /* bot may not be fully connected yet */ }
 
     if (!skipTextures) {
       this.materialPipeline.fetchTexturesForObject(obj, texInfo);
@@ -473,6 +506,7 @@ export class GodotObjectSender {
             this.textureUpdateSubs.delete(localId);
             this.animationManager.cleanupLocalId(localId);
             this.avatarManager?.removeBakeObject(localId);
+            this.readinessTracker?.remove(localId);
           }
         } catch {
           this.send({ type: 'object_kill', localId });
@@ -481,6 +515,7 @@ export class GodotObjectSender {
           this.textureUpdateSubs.delete(localId);
           this.animationManager.cleanupLocalId(localId);
           this.avatarManager?.removeBakeObject(localId);
+          this.readinessTracker?.remove(localId);
         }
       }
     } catch { /* bot may be disconnected */ }
@@ -539,6 +574,21 @@ export class GodotObjectSender {
           }
 
           this.materialPipeline.fetchTexturesForObject(live, texInfo);
+
+          // Add texture requirements to readiness tracker for promoted objects
+          if (this.readinessTracker && texInfo) {
+            const promotedTexIds = new Set<string>();
+            for (const face of texInfo.faces) {
+              if (face.textureId && face.textureId !== ZERO_UUID) promotedTexIds.add(face.textureId);
+              if (face.normalTextureId) promotedTexIds.add(face.normalTextureId);
+              if (face.ormTextureId) promotedTexIds.add(face.ormTextureId);
+              if (face.emissiveTextureId) promotedTexIds.add(face.emissiveTextureId);
+            }
+            if (promotedTexIds.size > 0) {
+              this.readinessTracker.addTextures(localId, promotedTexIds);
+            }
+          }
+
           promoted++;
         }
       }
@@ -553,6 +603,10 @@ export class GodotObjectSender {
     return this.deferredTextures.size;
   }
 
+  get readinessPendingCount(): number {
+    return this.readinessTracker?.pendingCount ?? 0;
+  }
+
   /** Light reset for region change — clear tracking but keep queues alive */
   clearForRegionChange(): void {
     for (const sub of this.textureUpdateSubs.values()) {
@@ -562,6 +616,7 @@ export class GodotObjectSender {
     this.deferredTextures.clear();
     this.meshFetchQueue?.clearPending();
     this.sculptFetchQueue?.clearPending();
+    this.readinessTracker?.clearAll();
   }
 
   cleanup(): void {

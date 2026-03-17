@@ -28,6 +28,11 @@ export class GodotMaterialPipeline {
   private textureFetchQueue: TextureFetchQueue | null = null;
   private avatarManager: GodotAvatarManager | null = null;
 
+  // Face update batching — coalesces per-object face updates into a single message per flush
+  private faceUpdateBuffer = new Map<number, any[]>(); // localId → faces (latest per face index wins)
+  private faceUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly FACE_UPDATE_FLUSH_MS = 50;
+
   constructor(
     private bot: Bot,
     private send: SendFn,
@@ -362,7 +367,7 @@ export class GodotMaterialPipeline {
               if (updatedFaces.length > 0) {
                 // Re-apply BoM substitution since getTextureInfo reads original magic UUIDs
                 this.substituteBakeUuids(updatedFaces, localId);
-                this.send({ type: 'object_update_faces', localId, faces: updatedFaces });
+                this.queueFaceUpdate(localId, updatedFaces);
               }
             }
           }
@@ -519,11 +524,7 @@ export class GodotMaterialPipeline {
     }
 
     for (const [localId, faces] of byObject) {
-      this.send({
-        type: 'object_update_faces',
-        localId,
-        faces,
-      });
+      this.queueFaceUpdate(localId, faces);
     }
 
     this.materialToFaces.delete(materialUuid);
@@ -536,11 +537,7 @@ export class GodotMaterialPipeline {
     if (!texInfo) return;
     // Re-apply BoM substitution since getTextureInfo reads original magic UUIDs
     this.substituteBakeUuids(texInfo.faces, obj.ID);
-    this.send({
-      type: 'object_update_faces',
-      localId: obj.ID,
-      faces: texInfo.faces,
-    });
+    this.queueFaceUpdate(obj.ID, texInfo.faces);
     this.fetchTexturesForObject(obj, texInfo);
   }
 
@@ -573,6 +570,41 @@ export class GodotMaterialPipeline {
     } catch { /* object may not exist */ }
   }
 
+  /** Queue a face update for batched delivery to Godot. Multiple updates for the same
+   *  object within the flush window are coalesced (latest per face index wins). */
+  queueFaceUpdate(localId: number, faces: any[]): void {
+    const existing = this.faceUpdateBuffer.get(localId);
+    if (existing) {
+      // Merge: latest face data wins per face index
+      for (const face of faces) {
+        const idx = existing.findIndex((f: any) => f.index === face.index);
+        if (idx >= 0) {
+          existing[idx] = face;
+        } else {
+          existing.push(face);
+        }
+      }
+    } else {
+      this.faceUpdateBuffer.set(localId, [...faces]);
+    }
+    if (!this.faceUpdateTimer) {
+      this.faceUpdateTimer = setTimeout(() => this.flushFaceUpdates(), GodotMaterialPipeline.FACE_UPDATE_FLUSH_MS);
+    }
+  }
+
+  private flushFaceUpdates(): void {
+    this.faceUpdateTimer = null;
+    if (this.faceUpdateBuffer.size === 0) return;
+
+    const objects: any[] = [];
+    for (const [localId, faces] of this.faceUpdateBuffer) {
+      objects.push({ localId, faces });
+    }
+    this.faceUpdateBuffer.clear();
+
+    this.send({ type: 'object_update_faces_batch', objects });
+  }
+
   get totalPbrFaceCount(): number {
     return this.pbrFaceCount;
   }
@@ -581,6 +613,11 @@ export class GodotMaterialPipeline {
     this.materialToFaces.clear();
     this.legacyMaterialPending.clear();
     this.legacyMaterialToFaces.clear();
+    if (this.faceUpdateTimer) {
+      clearTimeout(this.faceUpdateTimer);
+      this.faceUpdateTimer = null;
+    }
+    this.faceUpdateBuffer.clear();
     if (this.materialFetchQueue) {
       this.materialFetchQueue.destroy();
       this.materialFetchQueue = null;

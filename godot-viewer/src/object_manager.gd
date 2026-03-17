@@ -116,24 +116,9 @@ func _is_self_avatar(local_id: int) -> bool:
 	return root_id == self_lid
 
 
-# ─── Coordinate Conversion ───────────────────────────
-
-## Convert SL position array [x, y, z] to Godot Vector3
-func sl_to_godot_pos(sl_pos: Array) -> Vector3:
-	return Vector3(sl_pos[0], sl_pos[2], -sl_pos[1])
-
-
-## Convert SL quaternion array [x, y, z, w] to Godot Quaternion
-func sl_to_godot_quat(sl_rot: Array) -> Quaternion:
-	return Quaternion(sl_rot[0], sl_rot[2], -sl_rot[1], sl_rot[3])
-
-
-## Convert SL scale array [x, y, z] to Godot Vector3
-func sl_to_godot_scale(sl_scale: Array) -> Vector3:
-	return Vector3(sl_scale[0], sl_scale[2], sl_scale[1])
-
-
 # ─── Object Handlers ──────────────────────────────────
+# Note: Coordinate conversion (SL→Godot) is done on the TypeScript side before sending.
+# All position/rotation/scale arrays arrive pre-converted to Godot space.
 
 func handle_object_create(msg: Dictionary) -> void:
 	var local_id: int = int(msg.get("localId", 0))
@@ -158,66 +143,19 @@ func handle_object_create(msg: Dictionary) -> void:
 		"description": "",
 	}
 
-	var mesh_id: String = msg.get("meshId", "")
-	if not mesh_id.is_empty():
-		sm.object_mesh_id[local_id] = mesh_id
-	var shape: Dictionary = msg.get("shape", {})
+	# Phase 1 placeholder — mesh, shape, and faces arrive later via object_complete
 	var rsi = sm.RSInstance.new(sm._scenario, sm._vis_far, sm._vis_fade)
-
-	# Will this object be an animesh child? Check early so we can skip RSI mesh for rigged animesh.
-	var will_be_animesh: bool = false
-	if parent_id > 0:
-		if sm.animesh_roots.has(parent_id) or sm.animesh_root_for.has(parent_id):
-			will_be_animesh = true
-
-	if not mesh_id.is_empty() and sm.mesh_cache.has(mesh_id):
-		var is_rigged: bool = sm.rigged_mesh_paths.has(mesh_id)
-		# Animesh child with rigged mesh: use placeholder — the real mesh goes on Skeleton3D
-		if is_rigged and will_be_animesh:
-			rsi.set_mesh(sm.object_mesh)
-		elif is_rigged and not msg.get("animesh", false):
-			# Non-animesh rigged: use cached mesh with AABB correction for prim scale
-			var cached_mesh: Mesh = sm.mesh_cache[mesh_id]
-			rsi.set_mesh(cached_mesh)
-			var aabb: AABB = cached_mesh.get_aabb()
-			if aabb.size.x > 0.001 and aabb.size.y > 0.001 and aabb.size.z > 0.001:
-				rsi.scl_divisor = aabb.size
-				rsi.scl_center = aabb.get_center()
-		else:
-			# Animesh root, or unrigged — use normal mesh
-			rsi.set_mesh(sm.mesh_cache[mesh_id])
-	elif not mesh_id.is_empty():
-		# Mesh placeholder while waiting for mesh data
-		rsi.set_mesh(sm.object_mesh)
-		if not sm.mesh_load_failed.has(mesh_id):
-			sm.pending_meshes[local_id] = mesh_id
-			if not sm._pending_by_mesh.has(mesh_id):
-				sm._pending_by_mesh[mesh_id] = []
-			sm._pending_by_mesh[mesh_id].append(local_id)
-	elif not shape.is_empty():
-		# Procedural prim geometry from shape parameters
-		rsi.set_mesh(sm.prim_generator.get_or_generate(shape))
-	else:
-		# Ultimate fallback — box placeholder
-		rsi.set_mesh(sm.object_mesh)
-
-	# Apply per-face texture materials
-	var faces: Array = msg.get("faces", [])
-	if faces.size() > 0:
-		sm.object_faces[local_id] = faces
-		sm.asset_pipeline.apply_face_materials(rsi, local_id, faces)
-	else:
-		# No texture info — use default gray
-		rsi.set_material_override(sm.object_material)
+	rsi.set_mesh(sm.object_mesh)
+	rsi.set_material_override(sm.object_material)
 
 	# Apply transform
 	var pos: Array = msg.get("position", [0, 0, 0])
 	var rot: Array = msg.get("rotation", [0, 0, 0, 1])
 	var scl: Array = msg.get("scale", [0.5, 0.5, 0.5])
 
-	var godot_pos := sl_to_godot_pos(pos)
-	var godot_rot := sl_to_godot_quat(rot)
-	var godot_scale := sl_to_godot_scale(scl)
+	var godot_pos := Vector3(pos[0], pos[1], pos[2])
+	var godot_rot := Quaternion(rot[0], rot[1], rot[2], rot[3])
+	var godot_scale := Vector3(scl[0], scl[1], scl[2])
 
 	rsi.scl = godot_scale  # SL prims have independent scale — no compensation
 
@@ -363,29 +301,7 @@ func handle_object_create(msg: Dictionary) -> void:
 
 	# [SelfAvatar] log when an attachment is registered for the self avatar
 	if _is_self_avatar(local_id):
-		print("[SelfAvatar] Attachment created: localId=%d uuid=%s meshId=%s parentId=%d" % [local_id, _uuid_short(local_id), mesh_id.substr(0, 8) if not mesh_id.is_empty() else "none", parent_id])
-
-	# If this object has a cached rigged mesh and belongs to an animesh linkset, instantiate now
-	# (bypasses _apply_mesh_to_pending which only runs for uncached meshes)
-	if sm.animesh_root_for.has(local_id):
-		var ar_id: int = sm.animesh_root_for[local_id]
-		var _is_self: bool = _is_self_avatar(local_id)
-		if not mesh_id.is_empty() and sm.mesh_cache.has(mesh_id) and sm.rigged_mesh_paths.has(mesh_id):
-			if _is_self:
-				print("[SelfAvatar] Rigged mesh %s CACHED, instantiating immediately for localId=%d uuid=%s" % [mesh_id.substr(0, 8), local_id, _uuid_short(local_id)])
-			_instantiate_animesh_mesh(local_id, mesh_id, ar_id)
-			# Re-apply face materials — they were applied before MeshInstance3D existed
-			if sm.object_faces.has(local_id):
-				sm.asset_pipeline.apply_face_materials(rsi, local_id, sm.object_faces[local_id])
-		elif not mesh_id.is_empty() and sm.rigged_mesh_paths.has(mesh_id):
-			if _is_self:
-				print("[SelfAvatar] Rigged mesh %s NOT cached yet, will wait for mesh_ready (localId=%d uuid=%s)" % [mesh_id.substr(0, 8), local_id, _uuid_short(local_id)])
-		elif not mesh_id.is_empty():
-			if _is_self:
-				print("[SelfAvatar] Mesh %s not in rigged_mesh_paths yet (localId=%d uuid=%s)" % [mesh_id.substr(0, 8), local_id, _uuid_short(local_id)])
-		else:
-			if _is_self:
-				print("[SelfAvatar] No meshId (prim/sculpt) for localId=%d uuid=%s, animesh root=%d" % [local_id, _uuid_short(local_id), ar_id])
+		print("[SelfAvatar] Attachment created: localId=%d uuid=%s parentId=%d" % [local_id, _uuid_short(local_id), parent_id])
 
 	# Create light if this object is a light source
 	if msg.has("light") and msg["light"] is Dictionary:
@@ -440,28 +356,31 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 		var ang_vel := Vector3.ZERO
 		if obj.has("velocity"):
 			var sv: Array = obj["velocity"]
-			vel = Vector3(sv[0], sv[2], -sv[1])
+			vel = Vector3(sv[0], sv[1], sv[2])
 			if vel.length_squared() > 0.0001:
 				has_motion = true
 		if obj.has("acceleration"):
 			var sa: Array = obj["acceleration"]
-			accel = Vector3(sa[0], sa[2], -sa[1])
+			accel = Vector3(sa[0], sa[1], sa[2])
 			if accel.length_squared() > 0.0001:
 				has_motion = true
 		if obj.has("angularVelocity"):
 			var sav: Array = obj["angularVelocity"]
-			ang_vel = Vector3(sav[0], sav[2], -sav[1])
+			ang_vel = Vector3(sav[0], sav[1], sav[2])
 			if ang_vel.length_squared() > 0.0001:
 				has_motion = true
 
 		if sm.object_parent.has(local_id):
 			# Child prim — update offsets, parent interpolation handles world pos
 			if obj.has("position"):
-				sm.child_offset_pos[local_id] = sl_to_godot_pos(obj["position"])
+				var cp: Array = obj["position"]
+				sm.child_offset_pos[local_id] = Vector3(cp[0], cp[1], cp[2])
 			if obj.has("rotation"):
-				sm.child_offset_rot[local_id] = sl_to_godot_quat(obj["rotation"])
+				var cr: Array = obj["rotation"]
+				sm.child_offset_rot[local_id] = Quaternion(cr[0], cr[1], cr[2], cr[3])
 			if obj.has("scale"):
-				rsi.scl = sl_to_godot_scale(obj["scale"])
+				var cs: Array = obj["scale"]
+				rsi.scl = Vector3(cs[0], cs[1], cs[2])
 			# Recompute world transform from parent
 			var parent_rsi = sm.objects.get(sm.object_parent[local_id])
 			if parent_rsi and sm.child_offset_pos.has(local_id):
@@ -472,10 +391,12 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 			# Root prim with motion — blend from current visual pos toward server pos
 			var server_pos: Vector3 = rsi.pos
 			if obj.has("position"):
-				server_pos = sl_to_godot_pos(obj["position"])
+				var sp: Array = obj["position"]
+				server_pos = Vector3(sp[0], sp[1], sp[2])
 			var server_rot: Quaternion = rsi.rot
 			if obj.has("rotation"):
-				server_rot = sl_to_godot_quat(obj["rotation"])
+				var sr: Array = obj["rotation"]
+				server_rot = Quaternion(sr[0], sr[1], sr[2], sr[3])
 
 			# Blend offset = how far visual pos is from server pos
 			var blend_offset: Vector3 = rsi.pos - server_pos
@@ -494,7 +415,8 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 			sm.object_targets[local_id] = target
 			# Scale always snaps
 			if obj.has("scale"):
-				rsi.scl = sl_to_godot_scale(obj["scale"])
+				var ms: Array = obj["scale"]
+				rsi.scl = Vector3(ms[0], ms[1], ms[2])
 				rsi.push_transform()
 		else:
 			# Root prim, no motion — snap immediately
@@ -504,15 +426,19 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 			if sm.object_targets.has(local_id):
 				# Only allow scale changes from stale batch updates
 				if obj.has("scale"):
-					rsi.scl = sl_to_godot_scale(obj["scale"])
+					var ss: Array = obj["scale"]
+					rsi.scl = Vector3(ss[0], ss[1], ss[2])
 					rsi.push_transform()
 			else:
 				if obj.has("position"):
-					rsi.pos = sl_to_godot_pos(obj["position"])
+					var np: Array = obj["position"]
+					rsi.pos = Vector3(np[0], np[1], np[2])
 				if obj.has("rotation"):
-					rsi.rot = sl_to_godot_quat(obj["rotation"])
+					var nr: Array = obj["rotation"]
+					rsi.rot = Quaternion(nr[0], nr[1], nr[2], nr[3])
 				if obj.has("scale"):
-					rsi.scl = sl_to_godot_scale(obj["scale"])
+					var ns: Array = obj["scale"]
+					rsi.scl = Vector3(ns[0], ns[1], ns[2])
 				rsi.push_transform()
 
 			# Propagate root movement to all children
@@ -588,7 +514,7 @@ func _register_animesh_descendants(parent_id: int, root_id: int) -> void:
 ## GLB skeleton to the shared skeleton, and binds the mesh to the shared skeleton.
 ## The GLB's per-mesh Skeleton3D is discarded — only the shared skeleton is used.
 func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: int) -> void:
-	# Guard against double instantiation (can be called from cache hit + _apply_mesh_to_pending)
+	# Guard against double instantiation (can be called from cache hit + retry)
 	if sm.animesh_mesh_instances.has(local_id):
 		return
 	var glb_path: String = sm.rigged_mesh_paths.get(mesh_id, "")
@@ -729,6 +655,62 @@ func _find_node_of_type(node: Node, type_name: String) -> Node:
 	return null
 
 
+# ─── Object Complete (Phase 2) ────────────────────────
+
+## Handle object_complete — applies mesh, shape, and face materials to an existing placeholder.
+## Sent by the readiness tracker once all assets (mesh + textures) are cached on disk.
+func handle_object_complete(msg: Dictionary) -> void:
+	var local_id: int = int(msg.get("localId", 0))
+	var rsi = sm.objects.get(local_id)
+	if rsi == null:
+		return  # killed before completion
+
+	var mesh_id: String = msg.get("meshId", "")
+	var faces: Array = msg.get("faces", [])
+	var shape: Dictionary = msg.get("shape", {})
+
+	# Apply mesh
+	if not mesh_id.is_empty():
+		if sm.mesh_cache.has(mesh_id):
+			var is_rigged: bool = sm.rigged_mesh_paths.has(mesh_id)
+			var will_be_animesh: bool = sm.animesh_root_for.has(local_id)
+
+			if is_rigged and will_be_animesh and not sm.animesh_roots.has(local_id):
+				# Animesh child with rigged mesh: use placeholder — real mesh goes on Skeleton3D
+				pass  # keep existing placeholder mesh
+			elif is_rigged and not sm.animesh_roots.has(local_id) and not will_be_animesh:
+				# Non-animesh rigged: use cached mesh with AABB correction
+				var cached_mesh: Mesh = sm.mesh_cache[mesh_id]
+				rsi.set_mesh(cached_mesh)
+				var aabb: AABB = cached_mesh.get_aabb()
+				if aabb.size.x > 0.001 and aabb.size.y > 0.001 and aabb.size.z > 0.001:
+					rsi.scl_divisor = aabb.size
+					rsi.scl_center = aabb.get_center()
+				rsi.push_transform()
+			else:
+				rsi.set_mesh(sm.mesh_cache[mesh_id])
+
+			sm.object_mesh_id[local_id] = mesh_id
+
+			# Animesh rigged mesh instantiation
+			if sm.animesh_root_for.has(local_id) and sm.rigged_mesh_paths.has(mesh_id):
+				var ar_id: int = sm.animesh_root_for[local_id]
+				if not sm.animesh_mesh_instances.has(local_id):
+					_instantiate_animesh_mesh(local_id, mesh_id, ar_id)
+		else:
+			# mesh_ready hasn't been processed yet — retry when mesh loads
+			if not sm.asset_pipeline._pending_complete_by_mesh.has(mesh_id):
+				sm.asset_pipeline._pending_complete_by_mesh[mesh_id] = []
+			sm.asset_pipeline._pending_complete_by_mesh[mesh_id].append(msg)
+	elif not shape.is_empty():
+		rsi.set_mesh(sm.prim_generator.get_or_generate(shape))
+
+	# Apply face materials (textures should be cached)
+	if faces.size() > 0:
+		sm.object_faces[local_id] = faces
+		sm.asset_pipeline.apply_face_materials(rsi, local_id, faces)
+
+
 # ─── Face/Material Updates ───────────────────────────
 
 ## Handle face updates from material asset fetch (PBR materials resolved after initial object_create)
@@ -741,34 +723,7 @@ func handle_update_faces(msg: Dictionary) -> void:
 	if faces.size() == 0:
 		return
 
-	# Purge stale _pending_by_texture entries for faces being replaced.
-	# Without this, the old legacy texture arriving later would overwrite PBR.
-	var replaced_indices: Dictionary = {}  # face index -> true
-	for new_face: Dictionary in faces:
-		replaced_indices[int(new_face.get("index", -1))] = true
-	var tex_keys_to_check: Array = sm._pending_by_texture.keys()
-	for tid: String in tex_keys_to_check:
-		var entries: Array = sm._pending_by_texture[tid]
-		var filtered: Array = []
-		for entry: Dictionary in entries:
-			if entry["localId"] == local_id and replaced_indices.has(entry["faceInfo"]["faceIndex"]):
-				continue  # drop stale entry
-			filtered.append(entry)
-		if filtered.size() == 0:
-			sm._pending_by_texture.erase(tid)
-		else:
-			sm._pending_by_texture[tid] = filtered
-
-	# Also remove from per-object pending list
-	if sm.pending_textures.has(local_id):
-		var pt: Array = sm.pending_textures[local_id]
-		pt = pt.filter(func(fi: Dictionary) -> bool: return not replaced_indices.has(fi["faceIndex"]))
-		if pt.size() == 0:
-			sm.pending_textures.erase(local_id)
-		else:
-			sm.pending_textures[local_id] = pt
-
-	# Merge into existing face data so texture_ready callbacks still work
+	# Merge into existing face data so apply_face_materials picks up PBR updates
 	if not sm.object_faces.has(local_id):
 		sm.object_faces[local_id] = faces
 	else:
@@ -785,6 +740,13 @@ func handle_update_faces(msg: Dictionary) -> void:
 			if not found:
 				existing.append(new_face)
 	sm.asset_pipeline.apply_face_materials(rsi, local_id, sm.object_faces[local_id])
+
+
+## Handle batched face updates (multiple objects in one message)
+func handle_update_faces_batch(msg: Dictionary) -> void:
+	var obj_list: Array = msg.get("objects", [])
+	for entry: Dictionary in obj_list:
+		handle_update_faces(entry)
 
 
 # ─── Object Cleanup ──────────────────────────────────
@@ -834,24 +796,20 @@ func _cleanup_object(local_id: int) -> void:
 			animesh_ref.queue_free()
 		sm.erase_animesh_state(local_id)
 
-	# Clean up all tracking dicts
-	if sm.pending_meshes.has(local_id):
-		var mid: String = sm.pending_meshes[local_id]
-		sm.pending_meshes.erase(local_id)
-		if sm._pending_by_mesh.has(mid):
-			sm._pending_by_mesh[mid].erase(local_id)
-			if sm._pending_by_mesh[mid].size() == 0:
-				sm._pending_by_mesh.erase(mid)
-	# Remove from reverse texture index when cleaning up pending_textures
-	if sm.pending_textures.has(local_id):
-		for fi: Dictionary in sm.pending_textures[local_id]:
-			var tid: String = fi["textureId"]
-			if sm._pending_by_texture.has(tid):
-				sm._pending_by_texture[tid] = sm._pending_by_texture[tid].filter(
-					func(e: Dictionary) -> bool: return e["localId"] != local_id)
-				if sm._pending_by_texture[tid].size() == 0:
-					sm._pending_by_texture.erase(tid)
-		sm.pending_textures.erase(local_id)
+	# Clean up asset pipeline retry queues
+	var mid: String = sm.object_mesh_id.get(local_id, "")
+	if not mid.is_empty() and sm.asset_pipeline._pending_complete_by_mesh.has(mid):
+		var msgs: Array = sm.asset_pipeline._pending_complete_by_mesh[mid]
+		msgs = msgs.filter(func(m: Dictionary) -> bool: return int(m.get("localId", 0)) != local_id)
+		if msgs.size() == 0:
+			sm.asset_pipeline._pending_complete_by_mesh.erase(mid)
+		else:
+			sm.asset_pipeline._pending_complete_by_mesh[mid] = msgs
+	# Remove from texture waiting lists
+	for tid: String in sm.asset_pipeline._tex_waiting.keys():
+		sm.asset_pipeline._tex_waiting[tid].erase(local_id)
+		if sm.asset_pipeline._tex_waiting[tid].size() == 0:
+			sm.asset_pipeline._tex_waiting.erase(tid)
 	sm.object_faces.erase(local_id)
 	sm.object_meta.erase(local_id)
 	sm.object_uuid.erase(local_id)

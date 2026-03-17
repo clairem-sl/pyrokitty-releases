@@ -303,6 +303,8 @@ func _handle_message(text: String) -> void:
 			scene_manager.set_self_avatar_id(msg.get("id", ""))
 		"object_create":
 			scene_manager.handle_object_create(msg)
+		"object_complete":
+			scene_manager.handle_object_complete(msg)
 		"object_update_batch", "object_update_physics":
 			scene_manager.handle_object_update_batch(msg)
 		"object_kill":
@@ -321,6 +323,8 @@ func _handle_message(text: String) -> void:
 			scene_manager.handle_texture_ready(msg)
 		"object_update_faces":
 			scene_manager.handle_update_faces(msg)
+		"object_update_faces_batch":
+			scene_manager.handle_update_faces_batch(msg)
 		"terrain_ready":
 			scene_manager.handle_terrain_ready(msg)
 		"environment_data":

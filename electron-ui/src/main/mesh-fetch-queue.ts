@@ -21,6 +21,11 @@ export class MeshFetchQueue {
   private notified = new Set<string>(); // UUIDs already sent to Godot
   private destroyed = false;
 
+  /** Called when a mesh is resolved (downloaded or cache hit). */
+  onResolved?: (meshUuid: string) => void;
+  /** Called when a mesh download fails. */
+  onFailed?: (meshUuid: string) => void;
+
   constructor(bot: Bot, onReady: MeshReadyCallback) {
     this.bot = bot;
     this.onReady = onReady;
@@ -42,6 +47,7 @@ export class MeshFetchQueue {
       this.notified.add(meshUuid);
       const meta = readMeshMeta(meshUuid);
       this.onReady(meshUuid, meshCachePath(meshUuid), meta?.isRigged, meta?.jointNames, meta?.jointOverrides);
+      this.onResolved?.(meshUuid);
       return;
     }
 
@@ -78,10 +84,12 @@ export class MeshFetchQueue {
       if (!this.destroyed) {
         this.notified.add(meshUuid);
         this.onReady(meshUuid, result.cachePath, result.isRigged, result.jointNames, result.jointOverrides);
+        this.onResolved?.(meshUuid);
       }
     } catch (err) {
       console.error(`[MeshFetchQueue] Failed ${meshUuid}:`, (err as Error).message || err);
       this.failed.add(meshUuid);
+      this.onFailed?.(meshUuid);
     }
   }
 

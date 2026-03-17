@@ -24,6 +24,11 @@ export class SculptFetchQueue {
   private notified = new Set<string>(); // dedupKeys already sent to Godot
   private destroyed = false;
 
+  /** Called when a sculpt mesh is resolved (downloaded or cache hit). */
+  onResolved?: (sculptMeshId: string) => void;
+  /** Called when a sculpt mesh download fails. */
+  onFailed?: (sculptMeshId: string) => void;
+
   constructor(bot: Bot, onReady: SculptReadyCallback, decodePool: DecodePool) {
     this.bot = bot;
     this.onReady = onReady;
@@ -48,6 +53,7 @@ export class SculptFetchQueue {
     if (isSculptCached(textureUuid, sculptType)) {
       this.notified.add(dedupKey);
       this.onReady(dedupKey, sculptCachePath(textureUuid, sculptType));
+      this.onResolved?.(dedupKey);
       return;
     }
 
@@ -90,10 +96,12 @@ export class SculptFetchQueue {
         this.notified.add(dedupKey);
         console.log(`[SculptFetchQueue] Ready: ${dedupKey}`);
         this.onReady(dedupKey, cachePath);
+        this.onResolved?.(dedupKey);
       }
     } catch (err) {
       console.error(`[SculptFetchQueue] Failed ${dedupKey}:`, (err as Error).message || err);
       this.failed.add(dedupKey);
+      this.onFailed?.(dedupKey);
     }
   }
 

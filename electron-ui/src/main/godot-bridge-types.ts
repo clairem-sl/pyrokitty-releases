@@ -33,6 +33,29 @@ export const SOLID_COLOR_TEXTURES = new Set([IMG_WHITE, IMG_DEFAULT]);
 
 export const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
 
+// ─── SL → Godot coordinate conversion ────────────────────
+// SL: X=East, Y=North, Z=Up.  Godot: X=Right, Y=Up, Z=-Forward.
+
+/** Convert SL position {x,y,z} to Godot [x, z, -y] */
+export function slPos(p: { x: number; y: number; z: number }): [number, number, number] {
+  return [p.x, p.z, -p.y];
+}
+
+/** Convert SL quaternion {x,y,z,w} to Godot [x, z, -y, w] */
+export function slQuat(q: { x: number; y: number; z: number; w: number }): [number, number, number, number] {
+  return [q.x, q.z, -q.y, q.w];
+}
+
+/** Convert SL scale {x,y,z} to Godot [x, z, y] */
+export function slScale(s: { x: number; y: number; z: number }): [number, number, number] {
+  return [s.x, s.z, s.y];
+}
+
+/** Convert SL velocity/acceleration array [x,y,z] to Godot [x, z, -y] */
+export function slVec3(v: [number, number, number]): [number, number, number] {
+  return [v[0], v[2], -v[1]];
+}
+
 /**
  * Magic bake texture UUIDs — when an attachment face uses one of these,
  * it means "substitute the avatar's actual baked texture for this channel."

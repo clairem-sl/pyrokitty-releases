@@ -13,7 +13,7 @@ import type { GodotAnimationManager } from './godot-animation-manager';
 import type { GodotMaterialPipeline } from './godot-material-pipeline';
 import type { TextureFetchQueue } from './texture-fetch-queue';
 import type { SendFn } from './godot-bridge-types';
-import { isHudAttachment, BAKE_MAGIC_UUIDS, BAKE_CHANNEL_NAMES, BAKE_CHANNEL_TO_TE_FACE, ZERO_UUID } from './godot-bridge-types';
+import { isHudAttachment, BAKE_MAGIC_UUIDS, BAKE_CHANNEL_NAMES, BAKE_CHANNEL_TO_TE_FACE, ZERO_UUID, slPos, slQuat } from './godot-bridge-types';
 import { computeShapeDeltas } from './avatar-shape';
 
 export class GodotAvatarManager {
@@ -255,8 +255,8 @@ export class GodotAvatarManager {
         }
 
         if (hadSub) {
-          // Send updated faces to Godot
-          this.send({ type: 'object_update_faces', localId, faces: texInfo.faces });
+          // Queue face update for batched delivery to Godot
+          this.materialPipeline!.queueFaceUpdate(localId, texInfo.faces);
 
           // Fetch the new baked texture assets via appearance service
           for (const face of texInfo.faces) {
@@ -302,8 +302,8 @@ export class GodotAvatarManager {
       id,
       localId,
       name: avatar.getName(),
-      position: [pos.x, pos.y, pos.z],
-      rotation: [rot.x, rot.y, rot.z, rot.w],
+      position: slPos(pos),
+      rotation: slQuat(rot),
       parentId,
     });
     this.trackedAvatars.add(id);

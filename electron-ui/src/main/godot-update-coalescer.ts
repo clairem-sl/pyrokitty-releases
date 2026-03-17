@@ -5,6 +5,7 @@
  */
 
 import type { Subscription } from 'rxjs';
+import { slPos, slQuat, slScale, slVec3 } from './godot-bridge-types';
 
 export interface UpdateCoalescerDeps {
   /** Check if an object localId is being tracked */
@@ -75,9 +76,9 @@ export class GodotUpdateCoalescer {
           const vel = obj.Velocity;
           this.avatarUpdateBuffer.set(avatarId, {
             id: avatarId,
-            ...(pos ? { position: [pos.x, pos.y, pos.z] } : {}),
-            ...(rot ? { rotation: [rot.x, rot.y, rot.z, rot.w] } : {}),
-            ...(vel ? { velocity: [vel.x, vel.y, vel.z] } : {}),
+            ...(pos ? { position: slPos(pos) } : {}),
+            ...(rot ? { rotation: slQuat(rot) } : {}),
+            ...(vel ? { velocity: slPos(vel) } : {}),
             parentId: obj.ParentID || 0,
           });
           if (!this.avatarUpdateTimer) {
@@ -115,12 +116,12 @@ export class GodotUpdateCoalescer {
 
       this.updateBuffer.set(obj.ID, {
         localId: obj.ID,
-        ...(pos ? { position: [pos.x, pos.y, pos.z] } : {}),
-        ...(rot ? { rotation: [rot.x, rot.y, rot.z, rot.w] } : {}),
-        ...(scl ? { scale: [scl.x, scl.y, scl.z] } : {}),
-        ...(vel ? { velocity: [vel.x, vel.y, vel.z] } : {}),
-        ...(accel ? { acceleration: [accel.x, accel.y, accel.z] } : {}),
-        ...(angVel ? { angularVelocity: [angVel.x, angVel.y, angVel.z] } : {}),
+        ...(pos ? { position: slPos(pos) } : {}),
+        ...(rot ? { rotation: slQuat(rot) } : {}),
+        ...(scl ? { scale: slScale(scl) } : {}),
+        ...(vel ? { velocity: slPos(vel) } : {}),
+        ...(accel ? { acceleration: slPos(accel) } : {}),
+        ...(angVel ? { angularVelocity: slPos(angVel) } : {}),
       });
       this.recentTerse.add(obj.ID);
 
@@ -202,12 +203,12 @@ export class GodotUpdateCoalescer {
       this.updateBuffer.set(obj.ID, {
         ...(existing || {}),
         localId: obj.ID,
-        ...(!terseHasMotion && pos ? { position: [pos.x, pos.y, pos.z] } : {}),
-        ...(!terseHasMotion && rot ? { rotation: [rot.x, rot.y, rot.z, rot.w] } : {}),
-        ...(scl ? { scale: [scl.x, scl.y, scl.z] } : {}),
-        ...(!terseHasMotion && vel ? { velocity: [vel.x, vel.y, vel.z] } : {}),
-        ...(!terseHasMotion && accel ? { acceleration: [accel.x, accel.y, accel.z] } : {}),
-        ...(!terseHasMotion && angVel ? { angularVelocity: [angVel.x, angVel.y, angVel.z] } : {}),
+        ...(!terseHasMotion && pos ? { position: slPos(pos) } : {}),
+        ...(!terseHasMotion && rot ? { rotation: slQuat(rot) } : {}),
+        ...(scl ? { scale: slScale(scl) } : {}),
+        ...(!terseHasMotion && vel ? { velocity: slPos(vel) } : {}),
+        ...(!terseHasMotion && accel ? { acceleration: slPos(accel) } : {}),
+        ...(!terseHasMotion && angVel ? { angularVelocity: slPos(angVel) } : {}),
         ...lightField,
       });
 

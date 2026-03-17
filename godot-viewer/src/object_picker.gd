@@ -263,7 +263,7 @@ func get_object_debug_info(local_id: int) -> Dictionary:
 		"pos": rsi.pos,
 		"rot": rsi.rot,
 		"scl": rsi.scl,
-		"meshId": sm.pending_meshes.get(local_id, ""),
+		"meshId": sm.object_mesh_id.get(local_id, ""),
 		"parentId": sm.object_parent.get(local_id, 0),
 		"surfaceCount": surface_count,
 	}

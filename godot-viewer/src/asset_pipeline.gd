@@ -41,10 +41,10 @@ var _budget_used_ms: float = 0.0
 var _budget_elapsed_ms: float = 0.0
 # Per-operation main-thread timing (accumulated between stats reports)
 var _fin_tex_create_ms: float = 0.0    # ImageTexture.create_from_image
-var _fin_tex_apply_ms: float = 0.0     # _apply_texture_to_pending
+var _fin_tex_apply_ms: float = 0.0     # _apply_texture_to_waiting
 var _fin_tex_count: int = 0
 var _fin_mesh_extract_ms: float = 0.0  # ImporterMesh.get_mesh
-var _fin_mesh_apply_ms: float = 0.0    # _apply_mesh_to_pending
+var _fin_mesh_apply_ms: float = 0.0    # _retry_pending_complete
 var _fin_mesh_count: int = 0
 
 # Async mesh loading (WorkerThreadPool)
@@ -67,6 +67,10 @@ var _placeholder_cache: Dictionary = {}
 
 # Double-sided shader cache
 var _double_sided_shader_cache: Dictionary = {}  # Shader -> Shader (cull_back -> cull_disabled variant)
+
+# Two-phase object creation: retry queues for async asset loading races
+var _pending_complete_by_mesh: Dictionary = {}  # meshId (String) -> Array[Dictionary] (object_complete msgs)
+var _tex_waiting: Dictionary = {}               # textureId (String) -> Array[int] (localIds needing re-apply)
 
 
 func _init(scene_manager) -> void:
@@ -102,10 +106,10 @@ func handle_mesh_ready(msg: Dictionary) -> void:
 		# Check how many pending objects need this rigged mesh
 		var waiting: int = 0
 		var self_waiting: bool = false
-		if sm._pending_by_mesh.has(mesh_id):
-			waiting = sm._pending_by_mesh[mesh_id].size()
-			for lid: int in sm._pending_by_mesh[mesh_id]:
-				if sm.object_mgr._is_self_avatar(lid):
+		if _pending_complete_by_mesh.has(mesh_id):
+			waiting = _pending_complete_by_mesh[mesh_id].size()
+			for m: Dictionary in _pending_complete_by_mesh[mesh_id]:
+				if sm.object_mgr._is_self_avatar(int(m.get("localId", 0))):
 					self_waiting = true
 					break
 		if self_waiting:
@@ -119,65 +123,14 @@ func handle_mesh_ready(msg: Dictionary) -> void:
 	_mesh_queue.append({ "meshId": mesh_id, "path": glb_path })
 
 
-## Apply a loaded mesh to all pending objects waiting for it
-func _apply_mesh_to_pending(mesh_id: String) -> void:
-	if not sm._pending_by_mesh.has(mesh_id):
+## Re-invoke handle_object_complete for objects that were waiting for this mesh.
+func _retry_pending_complete(mesh_id: String) -> void:
+	if not _pending_complete_by_mesh.has(mesh_id):
 		return
-	var loaded_mesh: Mesh = sm.mesh_cache[mesh_id]
-	var local_ids: Array = sm._pending_by_mesh[mesh_id]
-	sm._pending_by_mesh.erase(mesh_id)
-	var is_rigged: bool = sm.rigged_mesh_paths.has(mesh_id)
-	for local_id: int in local_ids:
-		sm.pending_meshes.erase(local_id)
-
-		# Check if this object belongs to an animesh linkset and the mesh is rigged
-		var animesh_root_id: int = _get_animesh_root(local_id)
-		if animesh_root_id > 0 and is_rigged:
-			if sm.object_mgr._is_self_avatar(local_id):
-				print("[SelfAvatar] Applying rigged mesh: localId=%d uuid=%s meshId=%s → root %d uuid=%s" % [local_id, sm.object_uuid.get(local_id, "?").substr(0, 8), mesh_id.substr(0, 8), animesh_root_id, sm.object_uuid.get(animesh_root_id, "?").substr(0, 8)])
-			sm.object_mgr._instantiate_animesh_mesh(local_id, mesh_id, animesh_root_id)
-			# Apply face materials to the animesh MeshInstance3D (not the RSI)
-			if sm.object_faces.has(local_id):
-				var rsi_for_faces = sm.objects.get(local_id)
-				if rsi_for_faces != null:
-					apply_face_materials(rsi_for_faces, local_id, sm.object_faces[local_id])
-			continue  # Don't touch RSI — animesh mesh is on the Skeleton3D, not the RSI
-		elif is_rigged:
-			if sm.object_mgr._is_self_avatar(local_id):
-				print("[SelfAvatar] Rigged mesh %s for localId=%d uuid=%s but NOT animesh (root=%d)" % [mesh_id.substr(0, 8), local_id, sm.object_uuid.get(local_id, "?").substr(0, 8), animesh_root_id])
-
-		var rsi = sm.objects.get(local_id)
-		if rsi != null:
-			rsi.set_mesh(loaded_mesh)
-			# Rigged non-animesh — needs AABB correction for prim scale
-			if is_rigged and not sm.animesh_root_for.has(local_id):
-				var aabb: AABB = loaded_mesh.get_aabb()
-				if aabb.size.x > 0.001 and aabb.size.y > 0.001 and aabb.size.z > 0.001:
-					rsi.scl_divisor = aabb.size
-					rsi.scl_center = aabb.get_center()
-				rsi.push_transform()
-			# Reapply per-face materials now that we have real mesh with proper surfaces
-			if sm.object_faces.has(local_id):
-				rsi.set_material_override(null)
-				apply_face_materials(rsi, local_id, sm.object_faces[local_id])
-			else:
-				rsi.set_material_override(null)
-
-
-## Find the animesh root for a given object (0 if not part of an animesh linkset)
-func _get_animesh_root(local_id: int) -> int:
-	if sm.animesh_roots.has(local_id):
-		return local_id
-	# Check animesh_root_for first (handles grandchildren of attachment linksets)
-	if sm.animesh_root_for.has(local_id):
-		return sm.animesh_root_for[local_id]
-	# Walk up parent chain
-	var parent_id: int = sm.object_parent.get(local_id, 0)
-	if sm.animesh_roots.has(parent_id):
-		return parent_id
-	if sm.animesh_root_for.has(parent_id):
-		return sm.animesh_root_for[parent_id]
-	return 0
+	var msgs: Array = _pending_complete_by_mesh[mesh_id]
+	_pending_complete_by_mesh.erase(mesh_id)
+	for msg: Dictionary in msgs:
+		sm.object_mgr.handle_object_complete(msg)
 
 
 ## Submit queued meshes to WorkerThreadPool (throttled)
@@ -350,86 +303,24 @@ func _load_bctex(bctex_path: String) -> Image:
 	return Image.create_from_data(width, height, has_mipmaps, godot_format, data)
 
 
-## Apply a cached texture to all pending objects waiting for it (O(1) via reverse index).
-## For PBR faces, this may be called multiple times as albedo/normal/ORM/emissive arrive.
-## Each call creates a material with all currently-cached textures (progressive refinement).
-func _apply_texture_to_pending(texture_id: String) -> void:
-	# Apply projection texture to any lights waiting for it (check BEFORE early return)
+## Re-apply face materials for all objects waiting on a newly-cached texture.
+func _apply_texture_to_waiting(texture_id: String) -> void:
+	# Apply projection texture to any lights waiting for it
 	sm.light_mgr.apply_pending_proj_texture(texture_id)
 
-	if not sm._pending_by_texture.has(texture_id):
+	if not _tex_waiting.has(texture_id):
 		return
 
-	var entries: Array = sm._pending_by_texture[texture_id]
-	sm._pending_by_texture.erase(texture_id)
+	var local_ids: Array = _tex_waiting[texture_id]
+	_tex_waiting.erase(texture_id)
 
-	for entry: Dictionary in entries:
-		var local_id: int = entry["localId"]
-		var face_info: Dictionary = entry["faceInfo"]
+	for local_id: int in local_ids:
 		var rsi = sm.objects.get(local_id)
-		if rsi != null:
-			var albedo_id: String = face_info["textureId"]
-			# Only apply material once albedo is cached (minimum requirement)
-			if sm.texture_cache.has(albedo_id):
-				var face_idx: int = face_info["faceIndex"]
-				var uv: Dictionary = face_info.get("uv", {})
-				var am: int = int(face_info.get("alphaMode", -1))
-				var ac: float = float(face_info.get("alphaCutoff", 0.5))
-				var pbr: Dictionary = face_info.get("pbr", {})
-				var mt: int = int(face_info.get("mappingType", 0))
-				var mat: Material = _get_or_create_material(
-					albedo_id, face_info["color"], face_info["fullBright"],
-					face_info["doubleSided"], uv, am, ac, pbr, mt)
-				rsi.set_surface_material(face_idx, mat)
-				# Also apply to animesh MeshInstance3D
-				var ami: MeshInstance3D = sm.animesh_mesh_instances.get(local_id)
-				if ami and ami.mesh and face_idx < ami.mesh.get_surface_count():
-					ami.set_surface_override_material(face_idx, mat)
-				if sm.object_mgr._is_self_avatar(local_id):
-					print("[SelfAvatar] Texture applied: localId=%d uuid=%s face=%d textureId=%s" % [local_id, sm.object_uuid.get(local_id, "?").substr(0, 8), face_idx, texture_id.substr(0, 8)])
-
-		# Check if this face still has uncached textures
-		var still_pending := false
-		var pbr_info: Dictionary = face_info.get("pbr", {})
-		for tid: String in _get_face_texture_ids(face_info["textureId"], pbr_info):
-			if not sm.texture_cache.has(tid) and not sm.texture_load_failed.has(tid):
-				still_pending = true
-				# Re-register under remaining uncached texture IDs
-				if not sm._pending_by_texture.has(tid):
-					sm._pending_by_texture[tid] = []
-				# Avoid duplicate entries
-				var already := false
-				for existing: Dictionary in sm._pending_by_texture[tid]:
-					if existing["localId"] == local_id and existing["faceInfo"]["faceIndex"] == face_info["faceIndex"]:
-						already = true
-						break
-				if not already:
-					sm._pending_by_texture[tid].append(entry)
-
-		# Remove from per-object pending list only when ALL textures are resolved
-		if not still_pending and sm.pending_textures.has(local_id):
-			var face_list: Array = sm.pending_textures[local_id]
-			var face_idx_to_remove: int = face_info["faceIndex"]
-			face_list = face_list.filter(func(fi: Dictionary) -> bool: return fi["faceIndex"] != face_idx_to_remove)
-			if face_list.size() == 0:
-				sm.pending_textures.erase(local_id)
-			else:
-				sm.pending_textures[local_id] = face_list
-
-
-## Get all texture IDs a face needs (albedo + PBR textures)
-func _get_face_texture_ids(albedo_id: String, pbr: Dictionary) -> Array:
-	var ids: Array = [albedo_id]
-	var nid: String = pbr.get("normalTextureId", "")
-	var oid: String = pbr.get("ormTextureId", "")
-	var eid: String = pbr.get("emissiveTextureId", "")
-	if not nid.is_empty():
-		ids.append(nid)
-	if not oid.is_empty():
-		ids.append(oid)
-	if not eid.is_empty():
-		ids.append(eid)
-	return ids
+		if rsi == null:
+			continue
+		if not sm.object_faces.has(local_id):
+			continue
+		apply_face_materials(rsi, local_id, sm.object_faces[local_id])
 
 
 # ─── Finalization (_process budget) ──────────────────
@@ -510,7 +401,7 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 				var _t0 := Time.get_ticks_usec()
 				sm.texture_cache[texture_id] = ImageTexture.create_from_image(img)
 				var _t1 := Time.get_ticks_usec()
-				_apply_texture_to_pending(texture_id)
+				_apply_texture_to_waiting(texture_id)
 				var _t2 := Time.get_ticks_usec()
 				_fin_tex_create_ms += (_t1 - _t0) / 1000.0
 				_fin_tex_apply_ms += (_t2 - _t1) / 1000.0
@@ -552,7 +443,7 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 							sm.mesh_load_failed[mesh_id] = true
 						else:
 							sm.mesh_cache[mesh_id] = m
-							_apply_mesh_to_pending(mesh_id)
+							_retry_pending_complete(mesh_id)
 							var _t2 := Time.get_ticks_usec()
 							_fin_mesh_extract_ms += (_t1 - _t0) / 1000.0
 							_fin_mesh_apply_ms += (_t2 - _t1) / 1000.0
@@ -571,7 +462,7 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 # ─── Face Materials ──────────────────────────────────
 
 ## Apply per-face materials to an RSInstance.
-## Faces with cached textures are applied immediately; others go to pending_textures.
+## Faces with cached textures get real materials; uncached ones get placeholders and register in _tex_waiting.
 func apply_face_materials(rsi, local_id: int, faces: Array) -> void:
 	rsi.set_material_override(null)
 	var surface_count: int = rsi.mesh.get_surface_count() if rsi.mesh else 0
@@ -580,7 +471,6 @@ func apply_face_materials(rsi, local_id: int, faces: Array) -> void:
 	var ami: MeshInstance3D = sm.animesh_mesh_instances.get(local_id)
 	if ami and ami.mesh:
 		surface_count = maxi(surface_count, ami.mesh.get_surface_count())
-	var pending: Array = []
 
 	for fi: Dictionary in faces:
 		var face_idx: int = int(fi.get("index", 0))
@@ -652,36 +542,14 @@ func apply_face_materials(rsi, local_id: int, faces: Array) -> void:
 		if ami and ami.mesh and face_idx < ami.mesh.get_surface_count():
 			ami.set_surface_override_material(face_idx, mat)
 
-		# Register under any not-yet-cached texture IDs for progressive refinement
-		var has_pending := false
-		var pending_info := {
-			"faceIndex": face_idx,
-			"textureId": texture_id,
-			"color": color,
-			"fullBright": full_bright,
-			"doubleSided": double_sided,
-			"alphaMode": alpha_mode,
-			"alphaCutoff": alpha_cutoff,
-			"uv": uv_info,
-			"pbr": pbr,
-			"mappingType": mapping_type
-		}
+		# Register under uncached texture IDs for re-apply when they load
 		for tid: String in all_tex_ids:
 			if not sm.texture_cache.has(tid) and not sm.texture_load_failed.has(tid):
-				has_pending = true
-				if not sm._pending_by_texture.has(tid):
-					sm._pending_by_texture[tid] = []
-				sm._pending_by_texture[tid].append({ "localId": local_id, "faceInfo": pending_info })
-
-		if has_pending:
-			pending.append(pending_info)
-
-	if sm.object_mgr._is_self_avatar(local_id):
-		var applied_count: int = faces.size() - pending.size()
-		print("[SelfAvatar] Face materials: localId=%d uuid=%s — %d faces total, %d applied now, %d pending textures" % [local_id, sm.object_uuid.get(local_id, "?").substr(0, 8), faces.size(), applied_count, pending.size()])
-
-	if pending.size() > 0:
-		sm.pending_textures[local_id] = pending
+				if not _tex_waiting.has(tid):
+					_tex_waiting[tid] = []
+				# Avoid duplicate entries
+				if local_id not in _tex_waiting[tid]:
+					_tex_waiting[tid].append(local_id)
 
 
 func _get_double_sided_shader(shader: Shader) -> Shader:
@@ -976,7 +844,7 @@ func get_pipeline_stats() -> Dictionary:
 		"texDone": _tex_finalized_count,
 		"texCached": sm.texture_cache.size(),
 		"texFailed": sm.texture_load_failed.size(),
-		"texPending": sm.pending_textures.size(),
+		"texPending": _tex_waiting.size(),
 		"texFinalize": "%.2f/%.2fms create/apply (n=%d)" % [avg_tex_create, avg_tex_apply, fin_tex_n],
 		"meshWorkers": _mesh_tasks.size(),
 		"meshReady": mesh_ready,
@@ -984,7 +852,7 @@ func get_pipeline_stats() -> Dictionary:
 		"meshDone": _mesh_finalized_count,
 		"meshCached": sm.mesh_cache.size(),
 		"meshFailed": sm.mesh_load_failed.size(),
-		"meshPending": sm.pending_meshes.size(),
+		"meshPending": _pending_complete_by_mesh.size(),
 		"meshFinalize": "%.2f/%.2fms extract/apply (n=%d)" % [avg_mesh_extract, avg_mesh_apply, fin_mesh_n],
 		"budgetElapsed": avg_elapsed,
 		"budgetAvail": avg_budget,

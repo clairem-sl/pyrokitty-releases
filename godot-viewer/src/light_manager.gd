@@ -248,7 +248,7 @@ func update_light_transform(local_id: int, rsi) -> void:
 
 
 ## Apply pending projection textures when a texture finishes loading.
-## Called from asset_pipeline._apply_texture_to_pending.
+## Called from asset_pipeline._apply_texture_to_waiting.
 func apply_pending_proj_texture(texture_id: String) -> void:
 	if not _pending_proj_textures.has(texture_id):
 		return

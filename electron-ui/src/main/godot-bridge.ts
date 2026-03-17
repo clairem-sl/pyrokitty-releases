@@ -33,7 +33,8 @@ import { GodotAnimationManager } from './godot-animation-manager';
 import { GodotMaterialPipeline } from './godot-material-pipeline';
 import { GodotObjectSender } from './godot-object-sender';
 import { GodotAvatarManager } from './godot-avatar-manager';
-import { isHudAttachment } from './godot-bridge-types';
+import { ObjectReadinessTracker } from './object-readiness-tracker';
+import { isHudAttachment, slPos, slQuat } from './godot-bridge-types';
 
 const GODOT_WS_PORT_BASE = 9200;
 let nextPort = GODOT_WS_PORT_BASE;
@@ -112,6 +113,7 @@ export class GodotBridge extends EventEmitter {
 
   // Fetch queues (owned by bridge, initialized in connectWebSocket)
   private textureFetchQueue: TextureFetchQueue | null = null;
+  private readinessTracker: ObjectReadinessTracker | null = null;
 
   // Asset ready batching
   private assetReadyBuffer: object[] = [];
@@ -353,6 +355,17 @@ export class GodotBridge extends EventEmitter {
       this.animationManager.checkAnimBatchReady(animUuid);
     });
 
+    // Create readiness tracker and wire to fetch queue callbacks
+    this.readinessTracker = new ObjectReadinessTracker((msg) => this.send(msg));
+    const readinessTracker = this.readinessTracker;
+    meshFetchQueue.onResolved = (uuid) => readinessTracker.onMeshReady(uuid);
+    meshFetchQueue.onFailed = (uuid) => readinessTracker.onMeshFailed(uuid);
+    this.textureFetchQueue.onResolved = (uuid) => readinessTracker.onTextureReady(uuid);
+    this.textureFetchQueue.onFailed = (uuid) => readinessTracker.onTextureFailed(uuid);
+    sculptFetchQueue.onResolved = (uuid) => readinessTracker.onMeshReady(uuid);
+    sculptFetchQueue.onFailed = (uuid) => readinessTracker.onMeshFailed(uuid);
+    this.objectSender.setReadinessTracker(readinessTracker);
+
     // Wire fetch queues to sub-modules
     this.materialPipeline.initQueues(materialFetchQueue, this.textureFetchQueue);
     this.animationManager.initFetchQueue(animationFetchQueue);
@@ -550,6 +563,7 @@ export class GodotBridge extends EventEmitter {
       this.avatarManager.sweepAvatarDepartures();
       this.objectSender.rescanChildren();
       this.objectSender.sweepDeferredTextures();
+      this.readinessTracker?.sweepTimeouts();
 
       // Log memory stats every 30s
       if (++memLogCounter % 15 === 0) {
@@ -568,7 +582,7 @@ export class GodotBridge extends EventEmitter {
     const godotStr = gs
       ? ` | godot(${gs.fps?.toFixed(0) ?? '?'}fps budget:${gs.budgetElapsed?.toFixed(1) ?? '?'}/${gs.budgetAvail?.toFixed(1) ?? '?'}/${gs.budgetUsed?.toFixed(1) ?? '?'}ms el/av/us): tex: w=${gs.texWorkers}(${gs.texReady ?? '?'}rdy) q=${gs.texQueue} done=${gs.texDone} cached=${gs.texCached} fail=${gs.texFailed} pending=${gs.texPending} [${gs.texTiming ?? '?'}] | mesh: w=${gs.meshWorkers}(${gs.meshReady ?? '?'}rdy) q=${gs.meshQueue} done=${gs.meshDone} cached=${gs.meshCached} fail=${gs.meshFailed} pending=${gs.meshPending} | mats=${gs.materials}(${gs.materialReuse ?? '?'}reuse) opaque=${gs.texOpaque ?? '?'}`
       : '';
-    console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | pbr: ${this.materialPipeline.totalPbrFaceCount} faces | deferred: ${this.objectSender.deferredCount}${godotStr}`);
+    console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | pbr: ${this.materialPipeline.totalPbrFaceCount} faces | deferred: ${this.objectSender.deferredCount} pending: ${this.objectSender.readinessPendingCount}${godotStr}`);
   }
 
   /**
@@ -610,8 +624,8 @@ export class GodotBridge extends EventEmitter {
 
         this.inputHandler.setSittingState(
           true, seatLocalId,
-          [sitPos.x, sitPos.y, sitPos.z],
-          [sitRot.x, sitRot.y, sitRot.z, sitRot.w],
+          slPos(sitPos) as any,
+          slQuat(sitRot) as any,
         );
         this.send({ type: 'sitting_state', sitting: true });
 
@@ -620,8 +634,8 @@ export class GodotBridge extends EventEmitter {
           this.send({
             type: 'avatar_update',
             id: selfId,
-            position: [sitPos.x, sitPos.y, sitPos.z],
-            rotation: [sitRot.x, sitRot.y, sitRot.z, sitRot.w],
+            position: slPos(sitPos),
+            rotation: slQuat(sitRot),
             parentId: seatLocalId,
           });
         }
@@ -711,6 +725,7 @@ export class GodotBridge extends EventEmitter {
     this.avatarManager.cleanup();
     this.animationManager.cleanup();
     this.materialPipeline.cleanup();
+    this.readinessTracker = null;
 
     // Clean up managers
     this.updateCoalescer?.cleanup();

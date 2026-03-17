@@ -77,6 +77,11 @@ export class TextureFetchQueue {
   // Bake texture metadata: textureUuid → { avatarUuid, channel }
   private bakeInfo = new Map<string, { avatarUuid: string; channel: number }>();
 
+  /** Called when a texture is resolved (downloaded or cache hit). */
+  onResolved?: (textureUuid: string) => void;
+  /** Called when a texture download fails. */
+  onFailed?: (textureUuid: string) => void;
+
   constructor(bot: Bot, onReady: TextureReadyCallback) {
     this.bot = bot;
     this.onReady = onReady;
@@ -104,6 +109,7 @@ export class TextureFetchQueue {
     if (isTextureCached(textureUuid)) {
       this.notified.add(textureUuid);
       this.onReady(textureUuid, resolvedCachePath(textureUuid));
+      this.onResolved?.(textureUuid);
       return;
     }
 
@@ -127,6 +133,7 @@ export class TextureFetchQueue {
     if (isTextureCached(textureUuid)) {
       this.notified.add(textureUuid);
       this.onReady(textureUuid, resolvedCachePath(textureUuid));
+      this.onResolved?.(textureUuid);
       return;
     }
 
@@ -200,6 +207,7 @@ export class TextureFetchQueue {
           if (!this.destroyed) {
             this.notified.add(textureUuid);
             this.onReady(textureUuid, cachePath);
+            this.onResolved?.(textureUuid);
           }
           return;
         } catch (gpuErr: any) {
@@ -218,11 +226,13 @@ export class TextureFetchQueue {
       if (!this.destroyed) {
         this.notified.add(textureUuid);
         this.onReady(textureUuid, cachePath);
+        this.onResolved?.(textureUuid);
       }
     } catch (err: any) {
       const msg = err?.message || err?.code || String(err);
       console.error(`[TextureFetchQueue] Failed ${textureUuid}: ${msg}`);
       this.failed.add(textureUuid);
+      this.onFailed?.(textureUuid);
     }
   }
 

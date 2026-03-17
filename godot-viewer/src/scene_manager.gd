@@ -91,7 +91,6 @@ var object_material: StandardMaterial3D
 var avatar_material: StandardMaterial3D
 
 # Mesh pipeline
-var pending_meshes: Dictionary = {}    # localId (int) -> meshId (String)
 var mesh_cache: Dictionary = {}        # meshId (String) -> Mesh resource
 var mesh_load_failed: Dictionary = {}  # meshId (String) -> bool
 
@@ -100,12 +99,7 @@ var texture_cache: Dictionary = {}        # textureId (String) -> ImageTexture
 var material_cache: Dictionary = {}       # "uuid_colorhex_fb_ds_uv" (String) -> StandardMaterial3D
 var object_meta: Dictionary = {}          # localId (int) -> { uuid, name, description }
 var object_faces: Dictionary = {}         # localId (int) -> Array[face_info dicts]
-var pending_textures: Dictionary = {}     # localId (int) -> Array[{ faceIndex, textureId, color, ... }]
 var texture_load_failed: Dictionary = {}  # textureId (String) -> bool
-
-# Reverse indices
-var _pending_by_texture: Dictionary = {}  # textureId -> Array[{ localId, faceInfo }]
-var _pending_by_mesh: Dictionary = {}     # meshId -> Array[localId]
 
 # Animesh (rigged mesh with skeleton animation)
 var animesh_roots: Dictionary = {}         # root localId (int) -> Node3D (scene tree parent)
@@ -305,16 +299,6 @@ func _update_loading_fade(delta: float) -> void:
 
 # ─── Public API (delegates to sub-managers) ──────────
 
-# Coordinate conversion (exposed for external callers)
-func sl_to_godot_pos(sl_pos: Array) -> Vector3:
-	return object_mgr.sl_to_godot_pos(sl_pos)
-
-func sl_to_godot_quat(sl_rot: Array) -> Quaternion:
-	return object_mgr.sl_to_godot_quat(sl_rot)
-
-func sl_to_godot_scale(sl_scale: Array) -> Vector3:
-	return object_mgr.sl_to_godot_scale(sl_scale)
-
 # Region change — clear entire scene for cross-region teleport
 func handle_region_change() -> void:
 	print("[SceneManager] Region change — clearing all objects, avatars, and lights")
@@ -364,10 +348,6 @@ func handle_region_change() -> void:
 	child_offset_pos.clear()
 	child_offset_rot.clear()
 	pending_seated_avatars.clear()
-	pending_meshes.clear()
-	pending_textures.clear()
-	_pending_by_texture.clear()
-	_pending_by_mesh.clear()
 	object_faces.clear()
 	object_meta.clear()
 	object_uuid.clear()
@@ -378,6 +358,10 @@ func handle_region_change() -> void:
 
 	# Clear animesh crossfade blending state
 	animation_mgr._prev_sl_local_rot.clear()
+
+	# Clear asset pipeline retry queues
+	asset_pipeline._pending_complete_by_mesh.clear()
+	asset_pipeline._tex_waiting.clear()
 
 	# Keep caches (mesh_cache, texture_cache, material_cache, rigged_mesh_paths)
 	# — assets are UUID-keyed and valid across regions
@@ -392,11 +376,17 @@ func handle_region_change() -> void:
 func handle_object_create(msg: Dictionary) -> void:
 	object_mgr.handle_object_create(msg)
 
+func handle_object_complete(msg: Dictionary) -> void:
+	object_mgr.handle_object_complete(msg)
+
 func handle_object_update_batch(msg: Dictionary) -> void:
 	object_mgr.handle_object_update_batch(msg)
 
 func handle_update_faces(msg: Dictionary) -> void:
 	object_mgr.handle_update_faces(msg)
+
+func handle_update_faces_batch(msg: Dictionary) -> void:
+	object_mgr.handle_update_faces_batch(msg)
 
 func handle_object_kill(msg: Dictionary) -> void:
 	object_mgr.handle_object_kill(msg)

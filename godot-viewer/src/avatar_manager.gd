@@ -107,11 +107,12 @@ func handle_avatar_create(msg: Dictionary) -> void:
 	rsi.set_mesh(sm.avatar_mesh)
 	rsi.set_material_override(sm.avatar_material)
 
-	var pos: Array = msg.get("position", [128, 128, 25])
-	var godot_pos: Vector3 = sm.object_mgr.sl_to_godot_pos(pos)
+	var pos: Array = msg.get("position", [128, 25, -128])
+	var godot_pos := Vector3(pos[0], pos[1], pos[2])
 	var godot_rot := Quaternion.IDENTITY
 	if msg.has("rotation"):
-		godot_rot = sm.object_mgr.sl_to_godot_quat(msg["rotation"])
+		var r: Array = msg["rotation"]
+		godot_rot = Quaternion(r[0], r[1], r[2], r[3])
 
 	# If avatar is sitting, transform local offset into world space
 	var seat_id: int = int(msg.get("parentId", 0))
@@ -219,24 +220,25 @@ func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
 	var rsi = sm.avatars.get(avatar_id)
 
 	if data.has("position"):
-		var raw_pos: Vector3 = sm.object_mgr.sl_to_godot_pos(data["position"])
+		var rp: Array = data["position"]
+		var raw_pos := Vector3(rp[0], rp[1], rp[2])
 		var seat_id: int = int(data.get("parentId", 0))
 		var seat_rsi = sm.objects.get(seat_id) if seat_id > 0 else null
 
 		var godot_pos: Vector3
 		var godot_rot: Quaternion
 		if seat_rsi != null:
-			# Sitting: position and rotation are in the seat's local space.
-			# World = seat_pos + seat_rot * local_offset (same as child prims).
 			godot_pos = seat_rsi.pos + seat_rsi.rot * raw_pos
 			if data.has("rotation"):
-				godot_rot = seat_rsi.rot * sm.object_mgr.sl_to_godot_quat(data["rotation"])
+				var sr: Array = data["rotation"]
+				godot_rot = seat_rsi.rot * Quaternion(sr[0], sr[1], sr[2], sr[3])
 			else:
 				godot_rot = rsi.rot if rsi else Quaternion.IDENTITY
 		else:
 			godot_pos = raw_pos
 			if data.has("rotation"):
-				godot_rot = sm.object_mgr.sl_to_godot_quat(data["rotation"])
+				var sr: Array = data["rotation"]
+				godot_rot = Quaternion(sr[0], sr[1], sr[2], sr[3])
 			else:
 				godot_rot = rsi.rot if rsi else Quaternion.IDENTITY
 
@@ -260,8 +262,8 @@ func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
 		target["blend_offset"] = blend_offset
 		target["blend_time"] = 0.0
 		if data.has("velocity"):
-			var sl_vel: Array = data["velocity"]
-			target["vel"] = Vector3(sl_vel[0], sl_vel[2], -sl_vel[1])
+			var sv: Array = data["velocity"]
+			target["vel"] = Vector3(sv[0], sv[1], sv[2])
 		else:
 			target["vel"] = Vector3.ZERO
 		target["age"] = 0.0
@@ -270,7 +272,8 @@ func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
 		# Rotation-only update
 		if data.has("rotation"):
 			var target: Dictionary = sm.avatar_targets.get(avatar_id, {})
-			target["rot"] = sm.object_mgr.sl_to_godot_quat(data["rotation"])
+			var rr: Array = data["rotation"]
+			target["rot"] = Quaternion(rr[0], rr[1], rr[2], rr[3])
 			sm.avatar_targets[avatar_id] = target
 
 
