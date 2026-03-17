@@ -14,6 +14,8 @@ var _ocean_quad_tree = null  # QuadTree3D
 var _ocean_logged_ready: bool = false
 var _water_height: float = 20.0       # SL water surface Y (Godot coords), set by handle_terrain_ready
 var _camera_underwater: bool = false   # true when camera is below water surface
+var _underwater_fog_color: Color = Color(0.03, 0.06, 0.12)  # EEP waterFogColor
+var _underwater_fog_density: float = 0.12                     # EEP waterFogDensity
 
 # Sun/ambient fade-in — starts at 0, ramps to target over 10s
 var _sun_target_energy: float = 0.0
@@ -260,8 +262,8 @@ func _update_underwater_fog() -> void:
 
 	if is_underwater:
 		env.fog_enabled = true
-		env.fog_light_color = Color(0.03, 0.06, 0.12)
-		env.fog_density = 0.12
+		env.fog_light_color = _underwater_fog_color
+		env.fog_density = _underwater_fog_density
 		env.fog_light_energy = 0.6
 	else:
 		# Reset underwater fog color back to defaults
@@ -348,3 +350,38 @@ func handle_environment_data(msg: Dictionary) -> void:
 		var amb_lum: float = amb_c.r * 0.2126 + amb_c.g * 0.7152 + amb_c.b * 0.0722
 		_ambient_target_energy = clampf(amb_lum * 2.0, 0.05, 1.0)
 		env.ambient_light_energy = _ambient_energy
+
+	# --- Water settings from EEP ---
+	# Underwater fog color/density
+	if msg.has("waterFogColor"):
+		var wfc: Array = msg["waterFogColor"]
+		_underwater_fog_color = Color(float(wfc[0]), float(wfc[1]), float(wfc[2]))
+	if msg.has("waterFogDensity"):
+		# SL fog density is an exponential factor (typically 1-16); map to Godot's 0-1 range
+		var sl_density: float = float(msg["waterFogDensity"])
+		_underwater_fog_density = clampf(sl_density * 0.02, 0.01, 0.5)
+
+	# Ocean wave direction and shader params
+	if _ocean != null and _ocean.initialized:
+		# Derive wind direction from wave1Direction (dominant wave propagation)
+		if msg.has("wave1Direction"):
+			var w1: Array = msg["wave1Direction"]
+			var wx: float = float(w1[0])
+			var wy: float = float(w1[1])
+			var mag: float = sqrt(wx * wx + wy * wy)
+			if mag > 0.001:
+				var dir_rad: float = atan2(wy, wx)
+				_ocean.wind_direction_degrees = rad_to_deg(dir_rad)
+				# Scale wind speed by wave direction magnitude (typical range ~0.5-2.0)
+				_ocean.wind_speed = clampf(mag * 10.0, 3.0, 30.0)
+				print("[Water] EEP wave direction: %.1f° speed: %.1f" % [rad_to_deg(dir_rad), _ocean.wind_speed])
+
+		# Fresnel parameters
+		var mat: ShaderMaterial = _ocean.material
+		if msg.has("fresnelOffset"):
+			mat.set_shader_parameter("fresnel_strength", clampf(float(msg["fresnelOffset"]) + float(msg.get("fresnelScale", 0.4)), 0.1, 2.0))
+
+		# Deep water color from fog color
+		if msg.has("waterFogColor"):
+			var wfc: Array = msg["waterFogColor"]
+			mat.set_shader_parameter("deep_color", Color(float(wfc[0]) * 0.3, float(wfc[1]) * 0.3, float(wfc[2]) * 0.3))

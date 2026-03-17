@@ -168,6 +168,14 @@ export class GodotEnvironmentManager {
       let sunColor = [1.0, 0.95, 0.8];
       let ambientColor = [0.3, 0.35, 0.4];
 
+      // Water defaults (will be overridden by EEP water track 0)
+      let waterFogColor: number[] | null = null;
+      let waterFogDensity: number | null = null;
+      let fresnelOffset: number | null = null;
+      let fresnelScale: number | null = null;
+      let wave1Direction: number[] | null = null;
+      let wave2Direction: number[] | null = null;
+
       if (dayCycle && dayCycle.tracks && dayCycle.frames && env!.dayLength) {
         const dayLength = env!.dayLength;   // seconds
         const dayOffset = env!.dayOffset ?? 0; // seconds
@@ -229,6 +237,52 @@ export class GodotEnvironmentManager {
             ambientColor = GodotEnvironmentManager.lerpColor(ac1, ac2, t);
           }
         }
+        // Water track is track 0
+        const waterTrack = dayCycle.tracks[0];
+        if (waterTrack && waterTrack.length > 0) {
+          // Water settings rarely animate — use nearest keyframe or interpolate
+          let waterFrame: any = null;
+          if (waterTrack.length === 1) {
+            waterFrame = dayCycle.frames.get(waterTrack[0].keyName);
+          } else {
+            // Find surrounding keyframes and lerp (same logic as sky)
+            const wkfs = waterTrack.map((kf: any) => ({
+              pos: kf.keyKeyframe,
+              frame: dayCycle.frames.get(kf.keyName),
+            })).filter((k: any) => k.frame).sort((a: any, b: any) => a.pos - b.pos);
+
+            if (wkfs.length === 1) {
+              waterFrame = wkfs[0].frame;
+            } else if (wkfs.length >= 2) {
+              // Just use the nearest keyframe for water — interpolating fog colors
+              // is overkill for the typical single-keyframe water track
+              let nearest = wkfs[0];
+              let minDist = Math.abs(position - nearest.pos);
+              for (const wk of wkfs) {
+                const d = Math.min(Math.abs(position - wk.pos), Math.abs(position - wk.pos + 1), Math.abs(position - wk.pos - 1));
+                if (d < minDist) { nearest = wk; minDist = d; }
+              }
+              waterFrame = nearest.frame;
+            }
+          }
+          if (waterFrame) {
+            if (waterFrame.waterFogColor) {
+              const c = waterFrame.waterFogColor;
+              waterFogColor = [c.x ?? 0, c.y ?? 0, c.z ?? 0];
+            }
+            if (waterFrame.waterFogDensity != null) waterFogDensity = waterFrame.waterFogDensity;
+            if (waterFrame.fresnelOffset != null) fresnelOffset = waterFrame.fresnelOffset;
+            if (waterFrame.fresnelScale != null) fresnelScale = waterFrame.fresnelScale;
+            if (waterFrame.wave1Direction) {
+              const w = waterFrame.wave1Direction;
+              wave1Direction = [w.x ?? 0, w.y ?? 0];
+            }
+            if (waterFrame.wave2Direction) {
+              const w = waterFrame.wave2Direction;
+              wave2Direction = [w.x ?? 0, w.y ?? 0];
+            }
+          }
+        }
       } else if (dayCycle) {
         let sunRot = dayCycle.sunRotation;
         let slColor = dayCycle.sunlightColor;
@@ -248,14 +302,38 @@ export class GodotEnvironmentManager {
         const haze = (dayCycle as any).legacyHaze;
         const ac = GodotEnvironmentManager.extractColor(haze?.ambient);
         if (ac) ambientColor = ac;
+
+        // Water settings may live directly on a single-frame dayCycle
+        if (dayCycle.waterFogColor) {
+          const c = dayCycle.waterFogColor;
+          waterFogColor = [(c as any).x ?? 0, (c as any).y ?? 0, (c as any).z ?? 0];
+        }
+        if (dayCycle.waterFogDensity != null) waterFogDensity = dayCycle.waterFogDensity;
+        if (dayCycle.fresnelOffset != null) fresnelOffset = dayCycle.fresnelOffset;
+        if (dayCycle.fresnelScale != null) fresnelScale = dayCycle.fresnelScale;
+        if (dayCycle.wave1Direction) {
+          const w = dayCycle.wave1Direction;
+          wave1Direction = [(w as any).x ?? 0, (w as any).y ?? 0];
+        }
+        if (dayCycle.wave2Direction) {
+          const w = dayCycle.wave2Direction;
+          wave2Direction = [(w as any).x ?? 0, (w as any).y ?? 0];
+        }
       }
 
-      this.send({
+      const msg: Record<string, any> = {
         type: 'environment_data',
         sunDirection: sunDir,
         sunColor,
         ambientColor,
-      });
+      };
+      if (waterFogColor) msg.waterFogColor = waterFogColor;
+      if (waterFogDensity != null) msg.waterFogDensity = waterFogDensity;
+      if (fresnelOffset != null) msg.fresnelOffset = fresnelOffset;
+      if (fresnelScale != null) msg.fresnelScale = fresnelScale;
+      if (wave1Direction) msg.wave1Direction = wave1Direction;
+      if (wave2Direction) msg.wave2Direction = wave2Direction;
+      this.send(msg);
     } catch (err) {
       console.error('[GodotBridge] Error sending environment:', err);
     }
