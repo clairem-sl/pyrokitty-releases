@@ -165,6 +165,8 @@ Source: `llvoavatar.cpp` `expected_tweakable_count = group(TWEAKABLE) + group(TR
 
 **Use a real XML parser.** `avatar_lad.xml` has multiline tags (e.g., id=702 spans 12 lines). Line-by-line and regex parsers both fail. We use `fast-xml-parser`.
 
+**Hover height is VisualParam 11001, byte index 252** (the last byte). Range [-2, +2], default 0. Dequantize: `(byte/255) * 4 - 2`. Firestorm reads it via `getVisualParamWeight(AVATAR_HOVER)` in `computeBodySize()` and stores in `mAvatarOffset.mV[VZ]`. It has an empty `<param_skeleton />` (no bone deltas) so `convert-avatar-lad.js` skips it — extracted separately in `computeShapeDeltas()`. The AppearanceHover message block is redundant — same data is already in the VisualParam bytes.
+
 **Driver weight = trapezoidal activation, NOT linear remap.** SL's `getDrivenWeight()` uses piecewise min1/max1/max2/min2 activation. 135 of 360 driven entries have explicit ranges. Without this, bidirectional sliders (Shift_Mouth, Pop_Eye) activate BOTH directions simultaneously → crooked nose, asymmetric eyes.
 
 **Login timing.** AvatarAppearance arrives before GodotBridge subscribes. `metaverse-connection.ts` buffers `avatarVisualParamBuffer`, seeded to avatar manager on bridge init.
@@ -199,6 +201,8 @@ CV rotation/scale is baked into GLB IBMs via Hippolyzer-style fixup. Rest transf
 
 ## Known Issues
 
+- **Hover height not gated on sit state**: Firestorm skips hover when `isSitting()` or `sit_ground_constrained` is active (`llvoavatar.cpp:5535`). We always apply hover, which causes sitting avatars (especially large quadrupeds like the Dog) to float. Need proper sit state tracking per avatar (server-confirmed ParentID changes, not animation-based) before gating hover.
+- **Missing ObjectUpdate for some avatars**: AvatarAppearance and AvatarAnimation arrive but ObjectUpdate never does (`localId=undefined`). Avatar never renders. Intermittent — same avatar loads on restart. Possibly a race condition in region handshake or a dropped UDP packet.
 - **Degenerate CV bone poses**: Falling back to IDENTITY/rest instead of animated
 - **519 missing children on rescan**: Attachment routing incomplete on startup
 - **Debug logging**: Multiple log categories (`[AttachDebug]`, `[AttachBone]`, `[AvatarDebug]`, `[ShapeDebug]`, etc.) still active

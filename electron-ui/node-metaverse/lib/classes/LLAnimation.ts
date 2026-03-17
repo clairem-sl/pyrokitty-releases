@@ -61,7 +61,7 @@ export class LLAnimation
         for (let x = 0; x < this.jointCount; x++)
         {
             const joint = new LLAnimationJoint();
-            joint.readFromBuffer(buf, this.inPoint, this.outPoint);
+            joint.readFromBuffer(buf, 0, this.length);
             this.joints.push(joint);
         }
 
@@ -105,7 +105,7 @@ export class LLAnimation
 
         for (const joint of this.joints)
         {
-            joint.writeToBuffer(writer, this.inPoint, this.outPoint);
+            joint.writeToBuffer(writer, 0, this.length);
         }
 
         writer.writeInt32LE(this.constraints.length);

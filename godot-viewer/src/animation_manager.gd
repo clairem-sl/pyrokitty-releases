@@ -822,6 +822,14 @@ func _apply_joint_overrides(glb_skel: Skeleton3D, shared_skel: Skeleton3D, overr
 	if override_count > 0 or skipped_default > 0 or skipped_priority > 0:
 		print("[JointOverride] mesh=%s applied=%d/%d (skipped: %d default, %d priority)" % [mesh_id.substr(0, 8), override_count, override_joints.size(), skipped_default, skipped_priority])
 
+	# Recompute body size offset — mesh body overrides change hip/knee/ankle/head
+	# rest positions which feed into the pelvisToFoot and bodyHeight formulas.
+	# Only for avatars (not animesh objects which don't use body offset).
+	if override_count > 0 and avatar_root_id > 0:
+		var _avatar_uuid: String = str(sm.object_uuid.get(avatar_root_id, ""))
+		if sm.avatar_local_ids.has(_avatar_uuid):
+			sm.avatar_mgr._recompute_body_offset(avatar_root_id, shared_skel)
+
 ## Convert a Basis to its rotation quaternion safely.
 ## Returns IDENTITY if the basis is degenerate (zero or near-zero columns from
 ## collision volume IBM scale amplification or failed matrix inversion in GLB export).

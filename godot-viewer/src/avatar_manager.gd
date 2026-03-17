@@ -10,6 +10,7 @@ var _first_person_mode: bool = false
 # Avatar shape deformation — per-avatar bone scale/offset from VisualParam
 var _avatar_shapes: Dictionary = {}  # avatarId (String) -> bones Dictionary
 var _avatar_volume_morphs: Dictionary = {}  # avatarId (String) -> volumeMorphs Dictionary
+var _avatar_hover_heights: Dictionary = {}  # avatarId (String) -> float
 
 func _init(scene_manager) -> void:
 	sm = scene_manager
@@ -161,10 +162,13 @@ func handle_avatar_create(msg: Dictionary) -> void:
 			print("[AvatarShape] Applying pending shape for %s at avatar_create" % avatar_id.substr(0, 8))
 			_apply_shape_to_skeleton(shared_skel, _avatar_shapes[avatar_id], avatar_id)
 			_log_bone_rests(shared_skel, avatar_id, "after_shape")
-			# Body size offset (same as handle_avatar_shape, no hover at create time)
+			# Body size offset + hover (hover from VisualParam 11001, byte 252)
+			# TODO: Firestorm skips hover when sitting (isSitting || sit_ground_constrained).
+			# We need proper sit state tracking before gating this.
 			var body_offset: float = _compute_body_z_offset(shared_skel, _avatar_shapes[avatar_id])
-			shared_skel.position.y = -body_offset
-			print("[AvatarShape] Pending body_offset=%.4f for %s" % [body_offset, avatar_id.substr(0, 8)])
+			var hover: float = _avatar_hover_heights.get(avatar_id, 0.0)
+			shared_skel.position.y = -body_offset + hover
+			print("[AvatarShape] Pending body_offset=%.4f hover=%.4f for %s" % [body_offset, hover, avatar_id.substr(0, 8)])
 		# Apply pending volume morphs
 		if _avatar_volume_morphs.has(avatar_id):
 			sm.cv_volume_morphs[local_id] = _avatar_volume_morphs[avatar_id]
@@ -295,6 +299,7 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 		sm.avatar_local_ids.erase(avatar_id)
 		_avatar_shapes.erase(avatar_id)
 		_avatar_volume_morphs.erase(avatar_id)
+		_avatar_hover_heights.erase(avatar_id)
 
 
 # ─── Avatar Shape ─────────────────────────────────────
@@ -306,10 +311,12 @@ func handle_avatar_shape(msg: Dictionary) -> void:
 	var bones: Dictionary = msg.get("bones", {})
 	_avatar_shapes[avatar_id] = bones
 
-	# Buffer volume morph deltas by UUID (same pattern as _avatar_shapes)
+	# Buffer volume morph deltas and hover height by UUID (same pattern as _avatar_shapes)
 	var volume_morphs: Dictionary = msg.get("volumeMorphs", {})
 	if not volume_morphs.is_empty():
 		_avatar_volume_morphs[avatar_id] = volume_morphs
+	var hover_height: float = float(msg.get("hoverHeight", 0.0))
+	_avatar_hover_heights[avatar_id] = hover_height
 
 	var av_lid: int = sm.avatar_local_ids.get(avatar_id, 0)
 	# Store volume morphs by av_lid when available (for _apply_global_pose_overrides)
@@ -328,11 +335,24 @@ func handle_avatar_shape(msg: Dictionary) -> void:
 	_log_bone_rests(shared_skel, avatar_id, "after_reapply_overrides")
 
 	# Body size offset (Firestorm: root_pos.Z -= 0.5*bodyH - pelvisToFoot) + hover
+	# TODO: Firestorm skips hover when sitting (isSitting || sit_ground_constrained).
 	var body_offset: float = _compute_body_z_offset(shared_skel, bones)
-	var hover_height: float = float(msg.get("hoverHeight", 0.0))
 	shared_skel.position.y = -body_offset + hover_height
 
 	print("[AvatarShape] Applied shape for avatar %s (%d bones, hover=%.4f, body_offset=%.4f)" % [avatar_id.substr(0, 8), bones.size(), hover_height, body_offset])
+
+
+## Recompute body size offset after joint overrides change bone rest positions.
+## Called from animation_manager._apply_joint_overrides when mesh body/head
+## overrides modify hip/knee/ankle/foot positions.
+func _recompute_body_offset(root_local_id: int, shared_skel: Skeleton3D) -> void:
+	var avatar_id: String = str(sm.object_uuid.get(root_local_id, ""))
+	var bones: Dictionary = _avatar_shapes.get(avatar_id, {})
+	var body_offset: float = _compute_body_z_offset(shared_skel, bones)
+	# Preserve hover height if we have it (from AvatarAppearance message)
+	var hover_height: float = _avatar_hover_heights.get(avatar_id, 0.0)
+	shared_skel.position.y = -body_offset + hover_height
+	print("[AvatarShape] Recomputed body_offset=%.4f (hover=%.4f) for %s after joint overrides" % [body_offset, hover_height, avatar_id.substr(0, 8)])
 
 
 ## Compute the vertical offset from bounding box center to pelvis.

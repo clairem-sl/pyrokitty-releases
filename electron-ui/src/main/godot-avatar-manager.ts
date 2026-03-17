@@ -28,6 +28,7 @@ export class GodotAvatarManager {
   // Avatar shape: avatarUuid → pre-computed bone deltas (buffered until connected)
   private avatarShapes = new Map<string, Record<string, { scale: [number, number, number]; offset: [number, number, number] }>>();
   private avatarVolumeMorphs = new Map<string, Record<string, { scale: [number, number, number]; offset: [number, number, number] }>>();
+  private avatarHoverHeights = new Map<string, number>(); // avatarUuid → hover height Z (meters)
 
   private materialPipeline: GodotMaterialPipeline | null = null;
   private textureFetchQueue: TextureFetchQueue | null = null;
@@ -58,7 +59,8 @@ export class GodotAvatarManager {
     if (connected && this.avatarShapes.size > 0) {
       for (const [avatarId, bones] of this.avatarShapes) {
         const volumeMorphs = this.avatarVolumeMorphs.get(avatarId) || {};
-        this.send({ type: 'avatar_shape', avatarId, bones, volumeMorphs });
+        const hoverHeight = this.avatarHoverHeights.get(avatarId) || 0;
+        this.send({ type: 'avatar_shape', avatarId, bones, volumeMorphs, hoverHeight });
       }
       console.log(`[AvatarShape] Flushed ${this.avatarShapes.size} buffered shapes on connect`);
     }
@@ -120,17 +122,12 @@ export class GodotAvatarManager {
         if (msg.VisualParam && msg.VisualParam.length > 0) {
           try {
             const bytes = msg.VisualParam.map((vp: { ParamValue: number }) => vp.ParamValue);
-            const { bones, volumeMorphs } = computeShapeDeltas(bytes);
+            const { bones, volumeMorphs, hoverHeight } = computeShapeDeltas(bytes);
             const boneCount = Object.keys(bones).length;
             if (boneCount > 0) {
               this.avatarShapes.set(avatarId, bones);
               this.avatarVolumeMorphs.set(avatarId, volumeMorphs);
-              // AppearanceHover includes the shape Hover slider (param 11001).
-              // Sent via AgentPreferences cap → server → AppearanceHover.HoverHeight.Z
-              let hoverHeight = 0;
-              if (msg.AppearanceHover && msg.AppearanceHover.length > 0) {
-                hoverHeight = msg.AppearanceHover[0].HoverHeight.z || 0;
-              }
+              this.avatarHoverHeights.set(avatarId, hoverHeight);
               this.send({ type: 'avatar_shape', avatarId, bones, volumeMorphs, hoverHeight });
               // Debug: log key bone deltas for leg and body bones
               const debugBones = ['mPelvis', 'mHipLeft', 'mHipRight', 'mKneeLeft', 'mKneeRight', 'mAnkleLeft', 'mAnkleRight', 'mFootLeft', 'mFootRight', 'mTorso', 'mChest', 'mNeck'];
@@ -166,13 +163,14 @@ export class GodotAvatarManager {
   seedVisualParams(buffer: Map<string, number[]>): void {
     for (const [avatarId, bytes] of buffer) {
       try {
-        const { bones, volumeMorphs } = computeShapeDeltas(bytes);
+        const { bones, volumeMorphs, hoverHeight } = computeShapeDeltas(bytes);
         if (Object.keys(bones).length > 0) {
           this.avatarShapes.set(avatarId, bones);
           if (Object.keys(volumeMorphs).length > 0) {
             this.avatarVolumeMorphs.set(avatarId, volumeMorphs);
           }
         }
+        this.avatarHoverHeights.set(avatarId, hoverHeight);
       } catch (err) {
         console.warn(`[AvatarShape] Error computing shape for ${avatarId.slice(0, 8)}:`, (err as Error).message);
       }

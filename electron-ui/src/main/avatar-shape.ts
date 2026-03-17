@@ -137,6 +137,8 @@ function determineAvatarSex(visualParamBytes: number[]): 'male' | 'female' {
 export interface ShapeResult {
   bones: Record<string, BoneDelta>;
   volumeMorphs: Record<string, VolumeDelta>;
+  /** Hover height in meters, from VisualParam 11001 (byte 252). Range [-2, +2]. */
+  hoverHeight: number;
 }
 
 /**
@@ -218,7 +220,16 @@ export function computeShapeDeltas(visualParamBytes: number[]): ShapeResult {
     volumeMorphs[name] = { scale: vmScale[name] || [0, 0, 0], offset: vmOffset[name] || [0, 0, 0] };
   }
 
-  return { bones, volumeMorphs };
+  // Extract hover height from VisualParam 11001 (byte 252, range [-2, +2])
+  const HOVER_BYTE_INDEX = 252;
+  const HOVER_MIN = -2.0;
+  const HOVER_MAX = 2.0;
+  let hoverHeight = 0;
+  if (visualParamBytes.length > HOVER_BYTE_INDEX) {
+    hoverHeight = (visualParamBytes[HOVER_BYTE_INDEX] / 255.0) * (HOVER_MAX - HOVER_MIN) + HOVER_MIN;
+  }
+
+  return { bones, volumeMorphs, hoverHeight };
 }
 
 /**
