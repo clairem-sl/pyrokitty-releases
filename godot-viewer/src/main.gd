@@ -11,10 +11,11 @@ var tcp_peer: StreamPeerTCP  # underlying TCP connection
 var ws_port: int = 9200
 
 @onready var scene_manager: Node3D = $SceneManager
-var fps_timer: float = 0.0
+@onready var _stats_bar: CanvasLayer = $StatsBar
+@onready var _stats_label: Label = $StatsBar/Label
 var _planar_debug_mode: int = 0
-var stats_timer: float = 0.0
-const STATS_INTERVAL: float = 5.0  # send pipeline stats every 5s
+var _stats_update_timer: float = 0.0
+var _stats_send_timer: float = 0.0  # send pipeline_stats to Electron every 5s
 
 # Low-priority message backlog — object_create / mesh_ready / texture_ready etc.
 # Avatar and identity messages bypass this queue and are always dispatched immediately.
@@ -31,6 +32,7 @@ var _breadcrumb_path: String = ""
 var _breadcrumb_file: FileAccess
 var _msg_count: int = 0
 var _frame_count: int = 0
+var _ws_welcomed: bool = false
 
 func write_breadcrumb(text: String) -> void:
 	if _breadcrumb_file:
@@ -60,6 +62,7 @@ func _exit_tree() -> void:
 func _ready() -> void:
 	# We handle WM_CLOSE_REQUEST in _notification to send quit to Electron first
 	get_tree().auto_accept_quit = false
+	scene_manager.send_fn = send_message
 
 	# Crash breadcrumb file — survives process death, tells us the last message processed
 	_breadcrumb_path = OS.get_user_data_dir() + "/crash_breadcrumb.txt"
@@ -174,25 +177,21 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	_frame_count += 1
 	write_breadcrumb("_process START msgs=%d queued=%d" % [_msg_count, _low_priority_queue.size()])
-	fps_timer += _delta
-	# Send pipeline stats to Electron for logging
-	stats_timer += _delta
-	if stats_timer >= STATS_INTERVAL:
-		stats_timer = 0.0
-		var stats: Dictionary = scene_manager.get_pipeline_stats()
-		print("[Main] FPS: %.1f | objs: %d mats: %d meshC: %d | tex: %s | mesh: %s | budget: %.1f/%.1fms" % [
-			Engine.get_frames_per_second(),
-			stats.get("objects", 0),
-			stats.get("materials", 0),
-			stats.get("meshCached", 0),
-			stats.get("texFinalize", "n/a"),
-			stats.get("meshFinalize", "n/a"),
-			stats.get("budgetUsed", 0.0),
-			stats.get("budgetAvail", 0.0)])
+	# Consolidated stats: update label + console log every 1s
+	_stats_update_timer += _delta
+	if _stats_update_timer >= 1.0:
+		_stats_update_timer = 0.0
+		_update_stats_bar()
+	# Send pipeline_stats to Electron every 5s
+	_stats_send_timer += _delta
+	if _stats_send_timer >= 5.0:
+		_stats_send_timer = 0.0
 		if ws_peer and ws_peer.get_ready_state() == WebSocketPeer.STATE_OPEN:
+			var stats: Dictionary = scene_manager.get_pipeline_stats()
 			stats["type"] = "pipeline_stats"
 			stats["fps"] = Engine.get_frames_per_second()
 			send_message(stats)
+
 	# Report window bounds changes (debounced, every 0.5s max)
 	_window_bounds_timer += _delta
 	if _window_bounds_timer >= 0.5:
@@ -274,6 +273,59 @@ func _process(_delta: float) -> void:
 ## Classify a raw JSON string as high-priority without full parsing.
 ## Peeks at the first 40 bytes — enough to see any "type":"avatar_*" or "self_id".
 ## High-priority messages are dispatched immediately, bypassing the time-budgeted queue.
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_1 and event.ctrl_pressed and event.shift_pressed:
+			_stats_bar.visible = not _stats_bar.visible
+
+
+func _update_stats_bar() -> void:
+	var ap = scene_manager.asset_pipeline
+	var fps := Engine.get_frames_per_second()
+	var obj_count: int = scene_manager.objects.size()
+	var avatar_count: int = scene_manager.avatars.size()
+	var tex_cached: int = scene_manager.texture_cache.size()
+	var tex_loading: int = (ap._texture_in_flight as Dictionary).size()
+	var tex_waiting: int = (ap._tex_waiting as Dictionary).size()
+	var tex_failed: int = scene_manager.texture_load_failed.size()
+	var mesh_cached: int = scene_manager.mesh_cache.size()
+	var mesh_loading: int = (ap._mesh_tasks as Dictionary).size()
+	var mesh_pending: int = (ap._pending_complete_by_mesh as Dictionary).size()
+	var mesh_failed: int = scene_manager.mesh_load_failed.size()
+	var mat_count: int = scene_manager.material_cache.size()
+	var msg_q := _low_priority_queue.size()
+	var lights_active: int = scene_manager.light_mgr._light_count
+	var lights_total: int = scene_manager.light_mgr._object_light_data.size()
+
+	# VRAM usage
+	var tex_mem: int = 0
+	var buf_mem: int = 0
+	var rd := RenderingServer.get_rendering_device()
+	if rd:
+		tex_mem = rd.get_memory_usage(RenderingDevice.MEMORY_TEXTURES)
+		buf_mem = rd.get_memory_usage(RenderingDevice.MEMORY_BUFFERS)
+
+	var tex_fail_str := ("  %d FAILED" % tex_failed) if tex_failed > 0 else ""
+	var mesh_fail_str := ("  %d FAILED" % mesh_failed) if mesh_failed > 0 else ""
+
+	# Update on-screen label (compact)
+	if _stats_bar.visible:
+		_stats_label.text = "FPS: %.0f  |  Obj: %d  Av: %d  Lights: %d/%d  |  VRAM: %.0fMB  |  Tex: %d done  %d decoding  %d placeholder%s  |  Mesh: %d done  %d decoding  %d pending%s  |  MsgQ: %d" % [
+			fps, obj_count, avatar_count, lights_active, lights_total,
+			(tex_mem + buf_mem) / 1048576.0,
+			tex_cached, tex_loading, tex_waiting, tex_fail_str,
+			mesh_cached, mesh_loading, mesh_pending, mesh_fail_str,
+			msg_q]
+
+	# Console log (detailed, once per second)
+	print("[Stats] FPS: %.0f | Obj: %d Av: %d Lights: %d/%d Mat: %d | VRAM: tex=%.1fMB buf=%.1fMB | Tex: %d cached %d decoding %d placeholder%s | Mesh: %d cached %d decoding %d pending%s | MsgQ: %d" % [
+		fps, obj_count, avatar_count, lights_active, lights_total, mat_count,
+		tex_mem / 1048576.0, buf_mem / 1048576.0,
+		tex_cached, tex_loading, tex_waiting, tex_fail_str,
+		mesh_cached, mesh_loading, mesh_pending, mesh_fail_str,
+		msg_q])
+
+
 func _is_high_priority(text: String) -> bool:
 	var prefix := text.left(40)
 	return '"avatar_' in prefix or '"self_id"' in prefix or '"object_update_p' in prefix or '"sitting_state"' in prefix

@@ -144,9 +144,15 @@ func handle_object_create(msg: Dictionary) -> void:
 	}
 
 	# Phase 1 placeholder — mesh, shape, and faces arrive later via object_complete
-	var rsi = sm.RSInstance.new(sm._scenario, sm._vis_far, sm._vis_fade)
-	rsi.set_mesh(sm.object_mesh)
-	rsi.set_material_override(sm.object_material)
+	# Sculpts skip the placeholder box — their real mesh may be a megaprim and the
+	# placeholder box at that scale wrecks the scene until the sculpt mesh loads.
+	var is_sculpt: bool = msg.get("sculpt", false)
+	var _vfar: float = sm.FrameBudget.VR_CAMERA_FAR if sm._vr_mode else sm._vis_far
+	var _vfade: float = sm.FrameBudget.VR_VISIBILITY_FADE_MARGIN if sm._vr_mode else sm._vis_fade
+	var rsi = sm.RSInstance.new(sm._scenario, _vfar, _vfade)
+	if not is_sculpt:
+		rsi.set_mesh(sm.object_mesh)
+		rsi.set_material_override(sm.object_material)
 
 	# Apply transform
 	var pos: Array = msg.get("position", [0, 0, 0])
@@ -702,6 +708,9 @@ func handle_object_complete(msg: Dictionary) -> void:
 			if not sm.asset_pipeline._pending_complete_by_mesh.has(mesh_id):
 				sm.asset_pipeline._pending_complete_by_mesh[mesh_id] = []
 			sm.asset_pipeline._pending_complete_by_mesh[mesh_id].append(msg)
+			# Re-request from TS if not in-flight (may have been evicted)
+			if not sm.asset_pipeline._mesh_in_flight.has(mesh_id):
+				sm.asset_pipeline._request_mesh(mesh_id)
 	elif not shape.is_empty():
 		rsi.set_mesh(sm.prim_generator.get_or_generate(shape))
 

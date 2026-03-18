@@ -72,6 +72,10 @@ var _double_sided_shader_cache: Dictionary = {}  # Shader -> Shader (cull_back -
 var _pending_complete_by_mesh: Dictionary = {}  # meshId (String) -> Array[Dictionary] (object_complete msgs)
 var _tex_waiting: Dictionary = {}               # textureId (String) -> Array[int] (localIds needing re-apply)
 
+# Re-request dedup: avoids sending duplicate texture_request/mesh_request to TS
+var _tex_requested: Dictionary = {}   # textureId -> true, cleared when texture_ready arrives
+var _mesh_requested: Dictionary = {}  # meshId -> true, cleared when mesh_ready arrives
+
 
 func _init(scene_manager) -> void:
 	sm = scene_manager
@@ -120,6 +124,7 @@ func handle_mesh_ready(msg: Dictionary) -> void:
 		return
 
 	_mesh_in_flight[mesh_id] = true
+	_mesh_requested.erase(mesh_id)
 	_mesh_queue.append({ "meshId": mesh_id, "path": glb_path })
 
 
@@ -170,6 +175,7 @@ func handle_texture_ready(msg: Dictionary) -> void:
 		return
 
 	_texture_in_flight[texture_id] = true
+	_tex_requested.erase(texture_id)
 	_texture_queue_lock.lock()
 	_texture_queue.append({ "textureId": texture_id, "path": tex_path })
 	_texture_queue_lock.unlock()
@@ -550,6 +556,9 @@ func apply_face_materials(rsi, local_id: int, faces: Array) -> void:
 				# Avoid duplicate entries
 				if local_id not in _tex_waiting[tid]:
 					_tex_waiting[tid].append(local_id)
+				# Re-request if not already in-flight (may have been evicted)
+				if not _texture_in_flight.has(tid):
+					_request_texture(tid)
 
 
 func _get_double_sided_shader(shader: Shader) -> Shader:
@@ -777,6 +786,72 @@ func _make_placeholder_material(color: Array, full_bright: bool, double_sided: b
 
 	_placeholder_cache[key] = mat
 	return mat
+
+
+# ─── Eviction ────────────────────────────────────────
+
+## Evict textures and meshes not referenced by any live object.
+## Safe to call after region change or periodically during a session.
+func evict_unused_assets() -> void:
+	# Build set of texture IDs in use by live objects
+	var tex_in_use: Dictionary = {}
+	for faces: Array in sm.object_faces.values():
+		for fi: Dictionary in faces:
+			for key: String in ["textureId", "normalTextureId", "ormTextureId", "emissiveTextureId"]:
+				var tid: String = str(fi.get(key, ""))
+				if not tid.is_empty():
+					tex_in_use[tid] = true
+
+	# Evict unreferenced textures (skip in-flight)
+	var evicted_tex: Array = []
+	for tid: String in sm.texture_cache.keys():
+		if not tex_in_use.has(tid) and not _texture_in_flight.has(tid):
+			sm.texture_cache.erase(tid)
+			_texture_opaque.erase(tid)
+			evicted_tex.append(tid)
+
+	# Evict materials whose albedo texture was evicted (key starts with textureId)
+	if evicted_tex.size() > 0:
+		var evicted_set: Dictionary = {}
+		for tid: String in evicted_tex:
+			evicted_set[tid] = true
+		for key: String in sm.material_cache.keys().duplicate():
+			if evicted_set.has(key.left(36)):
+				sm.material_cache.erase(key)
+
+	# Build set of mesh IDs in use by live objects
+	var mesh_in_use: Dictionary = {}
+	for mid: String in sm.object_mesh_id.values():
+		mesh_in_use[mid] = true
+
+	# Evict unreferenced meshes (skip in-flight)
+	var evicted_mesh_count: int = 0
+	for mid: String in sm.mesh_cache.keys():
+		if not mesh_in_use.has(mid) and not _mesh_in_flight.has(mid):
+			sm.mesh_cache.erase(mid)
+			evicted_mesh_count += 1
+
+	if evicted_tex.size() > 0 or evicted_mesh_count > 0:
+		print("[AssetPipeline] Evicted %d textures (%d materials), %d meshes" % [
+			evicted_tex.size(), sm.material_cache.size(), evicted_mesh_count])
+
+
+## Send texture_request to TS so it re-sends texture_ready from disk cache.
+func _request_texture(texture_id: String) -> void:
+	if _tex_requested.has(texture_id):
+		return
+	_tex_requested[texture_id] = true
+	if sm.send_fn.is_valid():
+		sm.send_fn.call({"type": "texture_request", "textureId": texture_id})
+
+
+## Send mesh_request to TS so it re-sends mesh_ready from disk cache.
+func _request_mesh(mesh_id: String) -> void:
+	if _mesh_requested.has(mesh_id):
+		return
+	_mesh_requested[mesh_id] = true
+	if sm.send_fn.is_valid():
+		sm.send_fn.call({"type": "mesh_request", "meshId": mesh_id})
 
 
 # ─── Stats ───────────────────────────────────────────

@@ -36,8 +36,6 @@ const DESKTOP_FRAME_MS: float = 33.3
 const DESKTOP_MSG_BUDGET_MS: float = 12.0
 
 ## Desktop visibility range. Objects fade from
-## (VISIBILITY_FAR - VISIBILITY_FADE_MARGIN) to VISIBILITY_FAR, then cull.
-const VISIBILITY_FAR: float = 128.0
 const VISIBILITY_FADE_MARGIN: float = 32.0
 
 # ---------------------------------------------------------------------------

@@ -43,6 +43,7 @@ export default [
 
         rules: {
             "@typescript-eslint/prefer-destructuring": "off",
+            "@typescript-eslint/member-ordering": "off",
             "@typescript-eslint/strict-boolean-expressions": "off",
             "@typescript-eslint/no-unnecessary-condition": "off",
             "@typescript-eslint/no-magic-numbers": "off",
@@ -72,22 +73,6 @@ export default [
                 {
                     'allow': ['public readonly', 'private readonly']
                 },
-            ],
-            "@typescript-eslint/member-ordering": [
-                "error",
-                {
-                    "default": [
-                        "public-static-field",
-                        "public-instance-field",
-                        "private-static-field",
-                        "private-instance-field",
-                        "constructor",
-                        "public-static-method",
-                        "public-instance-method",
-                        "private-static-method",
-                        "private-instance-method"
-                    ]
-                }
             ],
             "@typescript-eslint/no-unused-vars": ["error", {
                 caughtErrorsIgnorePattern: "^_",

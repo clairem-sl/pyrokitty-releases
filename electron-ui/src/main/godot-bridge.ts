@@ -113,6 +113,7 @@ export class GodotBridge extends EventEmitter {
 
   // Fetch queues (owned by bridge, initialized in connectWebSocket)
   private textureFetchQueue: TextureFetchQueue | null = null;
+  private meshFetchQueue: MeshFetchQueue | null = null;
   private readinessTracker: ObjectReadinessTracker | null = null;
 
   // Asset ready batching
@@ -314,7 +315,7 @@ export class GodotBridge extends EventEmitter {
     this.send({ type: 'settings', draw_distance: this.bot.agent.cameraFar });
 
     // Init fetch queues
-    const meshFetchQueue = new MeshFetchQueue(this.bot, (meshUuid, cachePath, isRigged, jointNames, jointOverrides) => {
+    this.meshFetchQueue = new MeshFetchQueue(this.bot, (meshUuid, cachePath, isRigged, jointNames, jointOverrides) => {
       const fwdPath = cachePath.replace(/\\/g, '/');
       const msg: any = { type: 'mesh_ready', meshId: meshUuid, path: fwdPath };
       if (isRigged) {
@@ -358,8 +359,8 @@ export class GodotBridge extends EventEmitter {
     // Create readiness tracker and wire to fetch queue callbacks
     this.readinessTracker = new ObjectReadinessTracker((msg) => this.send(msg));
     const readinessTracker = this.readinessTracker;
-    meshFetchQueue.onResolved = (uuid) => readinessTracker.onMeshReady(uuid);
-    meshFetchQueue.onFailed = (uuid) => readinessTracker.onMeshFailed(uuid);
+    this.meshFetchQueue.onResolved = (uuid) => readinessTracker.onMeshReady(uuid);
+    this.meshFetchQueue.onFailed = (uuid) => readinessTracker.onMeshFailed(uuid);
     this.textureFetchQueue.onResolved = (uuid) => readinessTracker.onTextureReady(uuid);
     this.textureFetchQueue.onFailed = (uuid) => readinessTracker.onTextureFailed(uuid);
     sculptFetchQueue.onResolved = (uuid) => readinessTracker.onMeshReady(uuid);
@@ -384,7 +385,7 @@ export class GodotBridge extends EventEmitter {
       },
     });
 
-    this.objectSender.initQueues(meshFetchQueue, sculptFetchQueue, this.textureFetchQueue, this.updateCoalescer);
+    this.objectSender.initQueues(this.meshFetchQueue, sculptFetchQueue, this.textureFetchQueue, this.updateCoalescer);
 
     // Send initial snapshot and subscribe to events
     this.objectSender.sendInitialSnapshot((avatar, id) => this.avatarManager.sendAvatarCreate(avatar, id));
@@ -446,6 +447,12 @@ export class GodotBridge extends EventEmitter {
           x: msg.x, y: msg.y,
           width: msg.width, height: msg.height,
         });
+        break;
+      case 'texture_request':
+        this.textureFetchQueue?.renotify(msg.textureId);
+        break;
+      case 'mesh_request':
+        this.meshFetchQueue?.renotify(msg.meshId);
         break;
       case 'quit':
         console.log('[GodotBridge] Godot requested immediate quit');

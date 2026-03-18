@@ -248,7 +248,7 @@ export class GodotEnvironmentManager {
             // Find surrounding keyframes and lerp (same logic as sky)
             const wkfs = waterTrack.map((kf: any) => ({
               pos: kf.keyKeyframe,
-              frame: dayCycle.frames.get(kf.keyName),
+              frame: dayCycle.frames?.get(kf.keyName),
             })).filter((k: any) => k.frame).sort((a: any, b: any) => a.pos - b.pos);
 
             if (wkfs.length === 1) {

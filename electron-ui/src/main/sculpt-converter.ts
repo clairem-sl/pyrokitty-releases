@@ -6,7 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
-import sharp from 'sharp';
+
 import { SculptType } from '../../node-metaverse/dist/lib';
 import type { DecodePool } from './decode-pool';
 
@@ -31,6 +31,8 @@ export function sculptMeshId(textureUuid: string, sculptType: number): string {
 
 // ─── Sculpt map decode ───────────────────────────────────────────────
 
+/** Decode sculpt texture pixels into a vertex grid at native resolution.
+ *  Each pixel's RGB maps to an XYZ vertex position in [-0.5, 0.5]. */
 export function decodeSculptMap(
   pixels: Buffer, width: number, height: number, channels: number
 ): Vec3[][] {
@@ -39,7 +41,6 @@ export function decodeSculptMap(
     const gridRow: Vec3[] = [];
     for (let col = 0; col < width; col++) {
       const idx = (row * width + col) * channels;
-      // RGB -> XYZ, normalized from [0,255] to [-0.5, 0.5]
       const x = (pixels[idx] / 255) - 0.5;
       const y = (pixels[idx + 1] / 255) - 0.5;
       const z = (pixels[idx + 2] / 255) - 0.5;
@@ -274,22 +275,10 @@ export async function ensureSculptCached(
   if (fs.existsSync(cachePath)) return cachePath;
 
   const raw = await decodePool.decodeRaw(j2cBuffer);
-  let pixels: Buffer = raw.rgbaPixels;
-  let width = raw.width;
-  let height = raw.height;
-  let channels = 4; // decodeRaw always returns RGBA
-
-  // Downsample large sculpt textures (SL viewer uses 64x64 max)
-  const MAX_SCULPT_RES = 128;
-  if (width > MAX_SCULPT_RES || height > MAX_SCULPT_RES) {
-    const resized = await sharp(pixels, { raw: { width, height, channels: channels as 1 | 2 | 3 | 4 } })
-      .resize(MAX_SCULPT_RES, MAX_SCULPT_RES, { fit: 'fill' })
-      .raw().toBuffer({ resolveWithObject: true });
-    pixels = resized.data;
-    width = resized.info.width;
-    height = resized.info.height;
-    channels = resized.info.channels;
-  }
+  const pixels: Buffer = raw.rgbaPixels;
+  const width = raw.width;
+  const height = raw.height;
+  const channels = 4; // decodeRaw always returns RGBA
 
   const grid = decodeSculptMap(pixels, width, height, channels);
   const mesh = buildSculptMesh(grid, sculptType);

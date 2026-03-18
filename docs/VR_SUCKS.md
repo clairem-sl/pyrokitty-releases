@@ -23,16 +23,6 @@ in `test_main.gd` catches it if someone removes it again.
 
 ---
 
-### 2. Fix `far` plane: 2048m → 256m
-**Theory:** 2048m far plane wastes depth buffer precision in the 0–128m range where all
-geometry lives, making ATW reprojection unreliable.
-**Result:** No direct impact on flickering, but correct and kept.
-`XRCamera3D.far` is now set at runtime from `SceneManager.VISIBILITY_FAR * 2.0` so the
-camera far and the object visibility range can't silently diverge again.
-The `.tscn` default is also updated to 256m as a fallback.
-
----
-
 ### 3. `openxr/enabled=false`
 **Theory:** Suppress "No viewport marked with use_xr" spam in non-VR mode.
 **Result:** Completely broke VR. `XRServer.find_interface("OpenXR")` returns null

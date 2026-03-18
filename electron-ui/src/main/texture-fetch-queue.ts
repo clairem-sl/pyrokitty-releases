@@ -273,6 +273,16 @@ export class TextureFetchQueue {
   }
 
   /** Drop pending queue and failed set for region change. In-flight downloads may still 403 — harmless. */
+  /** Re-notify Godot for an evicted texture — re-sends texture_ready from disk cache. */
+  renotify(textureUuid: string): void {
+    if (this.destroyed) return;
+    if (!isTextureCached(textureUuid)) return;
+    // Remove from notified so request() will re-send
+    this.notified.delete(textureUuid);
+    this.failed.delete(textureUuid);
+    this.request(textureUuid, 0);
+  }
+
   clearPending(): void {
     this.queue = [];
     this.pending.clear();

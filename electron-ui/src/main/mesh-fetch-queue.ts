@@ -7,7 +7,7 @@ import { AssetType, LLMesh } from '../../node-metaverse/dist/lib';
 import type { Bot } from '../../node-metaverse/dist/lib';
 import { isMeshCached, meshCachePath, readMeshMeta, ensureMeshCached } from './mesh-converter';
 
-const MAX_CONCURRENT = 4;
+const MAX_CONCURRENT = 8;
 
 export type MeshReadyCallback = (meshUuid: string, cachePath: string, isRigged?: boolean, jointNames?: string[], jointOverrides?: string[]) => void;
 
@@ -37,10 +37,19 @@ export class MeshFetchQueue {
   get notifiedCount(): number { return this.notified.size; }
 
   request(meshUuid: string, localId: number): void {
-    if (this.destroyed || this.failed.has(meshUuid)) return;
+    if (this.destroyed) return;
 
-    // Already cached and Godot notified — nothing to do
-    if (this.notified.has(meshUuid)) return;
+    // Already failed — notify readiness tracker so it doesn't timeout
+    if (this.failed.has(meshUuid)) {
+      this.onFailed?.(meshUuid);
+      return;
+    }
+
+    // Already cached and Godot notified — still fire onResolved for readiness tracker
+    if (this.notified.has(meshUuid)) {
+      this.onResolved?.(meshUuid);
+      return;
+    }
 
     // On disk but Godot doesn't know yet — notify once (with rigged info from meta)
     if (isMeshCached(meshUuid)) {
@@ -91,6 +100,14 @@ export class MeshFetchQueue {
       this.failed.add(meshUuid);
       this.onFailed?.(meshUuid);
     }
+  }
+
+  /** Re-notify Godot for an evicted mesh — re-sends mesh_ready from disk cache. */
+  renotify(meshUuid: string): void {
+    if (this.destroyed || !isMeshCached(meshUuid)) return;
+    this.notified.delete(meshUuid);
+    this.failed.delete(meshUuid);
+    this.request(meshUuid, 0);
   }
 
   clearPending(): void {

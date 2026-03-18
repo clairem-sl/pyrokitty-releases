@@ -139,12 +139,12 @@ var prim_generator: RefCounted
 var _scenario: RID
 var _target_frame_ms: float = FrameBudget.DESKTOP_FRAME_MS
 var _vr_mode: bool = false
-var _vis_far: float = FrameBudget.VISIBILITY_FAR
-var _vis_fade: float = FrameBudget.VISIBILITY_FADE_MARGIN
+var _vis_far: float = 128.0   # SL draw distance; VR overrides computed at call sites via _vr_mode
+var _vis_fade: float = 32.0
+var send_fn: Callable  # set by main.gd; routes messages back to TS over WebSocket
+var _evict_timer: float = 0.0
+const EVICT_INTERVAL: float = 60.0
 
-# Periodic stats reporting
-var _stats_timer: float = 0.0
-const STATS_INTERVAL: float = 10.0
 
 # Loading fade-in overlay (opaque black → transparent)
 var _fade_overlay: ColorRect = null
@@ -232,33 +232,6 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	# Periodic VRAM / scene stats (skipped in VR — no console visible, avoid driver stalls)
-	_stats_timer += delta
-	if _stats_timer >= STATS_INTERVAL and not _vr_mode:
-		_stats_timer = 0.0
-		var tex_mem: int = 0
-		var buf_mem: int = 0
-		var rd := RenderingServer.get_rendering_device()
-		if rd:
-			tex_mem = rd.get_memory_usage(RenderingDevice.MEMORY_TEXTURES)
-			buf_mem = rd.get_memory_usage(RenderingDevice.MEMORY_BUFFERS)
-		print("[Stats] VRAM: tex=%.1fMB buf=%.1fMB | Objects: %d | Avatars: %d | Lights: %d/%d | Tex cache: %d | Mat cache: %d | Mesh cache: %d | FPS: %.0f" % [
-			tex_mem / 1048576.0, buf_mem / 1048576.0,
-			objects.size(), avatars.size(), light_mgr._light_count, light_mgr._object_light_data.size(),
-			texture_cache.size(), material_cache.size(), mesh_cache.size(),
-			Engine.get_frames_per_second()])
-		# Avatar pipeline summary
-		var n_shared: int = animesh_shared_skeleton.size()
-		var n_roots: int = animesh_roots.size()
-		var n_eval: int = animesh_eval.size()
-		var n_rigged_paths: int = rigged_mesh_paths.size()
-		var n_meshes: int = animesh_mesh_instances.size()
-		var self_lid: int = avatar_local_ids.get(self_avatar_id, 0)
-		if self_lid > 0 and animesh_shared_skeleton.has(self_lid):
-			var skel: Skeleton3D = animesh_shared_skeleton[self_lid]
-			print("[SelfAvatar] roots=%d | shared_skels=%d | eval=%d | rigged_meshes=%d | bones=%d" % [
-				n_roots, n_shared, n_eval, n_meshes, skel.get_bone_count()])
-
 	# Terrain/water/sky processing
 	terrain_env.process(delta)
 
@@ -277,6 +250,12 @@ func _process(delta: float) -> void:
 	if light_mgr._light_cull_timer >= light_mgr.LIGHT_CULL_INTERVAL:
 		light_mgr._light_cull_timer = 0.0
 		light_mgr.sweep_light_culling()
+
+	# Periodic eviction of unreferenced GPU assets
+	_evict_timer += delta
+	if _evict_timer >= EVICT_INTERVAL:
+		_evict_timer = 0.0
+		asset_pipeline.evict_unused_assets()
 
 	# Submit queued mesh work to WorkerThreadPool + finalize textures/meshes
 	asset_pipeline.finalize_frame(delta, _vr_mode, _target_frame_ms)
@@ -363,8 +342,9 @@ func handle_region_change() -> void:
 	asset_pipeline._pending_complete_by_mesh.clear()
 	asset_pipeline._tex_waiting.clear()
 
-	# Keep caches (mesh_cache, texture_cache, material_cache, rigged_mesh_paths)
-	# — assets are UUID-keyed and valid across regions
+	# Evict unreferenced assets now that all objects are cleared
+	asset_pipeline.evict_unused_assets()
+	_evict_timer = 0.0
 
 	# Clear terrain (new region will send new heightmap + environment)
 	terrain_env.clear()

@@ -90,16 +90,9 @@ export class Agent {
         attachments: Wearable[];
         serialNumber: number
     };
-    private agentUpdateTimer: NodeJS.Timeout | null = null;
-
-    private controlFlags: ControlFlags = 0;
-
     // Animation transition tracking (mirrors Firestorm's FSPreJumpDelayMs)
-    private _transitionStartMs: number = 0;
-    private _inTransition: boolean = false;
-    private _finishAnimRemaining: number = 0; // send FINISH_ANIM this many more times
-    private static readonly TRANSITION_DELAY_MS = 100; // ms before sending FINISH_ANIM
-    private static readonly FINISH_ANIM_REPEATS = 4; // repeat to survive packet loss
+    // While a transition anim is active and the delay has elapsed, every AgentUpdate
+    // includes FINISH_ANIM — matching Firestorm's getControlFlags() behavior.
     private static readonly TRANSITION_ANIMS = new Set<string>([
         BuiltInAnimations.STANDUP,
         BuiltInAnimations.PRE_JUMP,
@@ -115,6 +108,11 @@ export class Agent {
         }
         return m;
     })();
+
+    private agentUpdateTimer: NodeJS.Timeout | null = null;
+    private controlFlags: ControlFlags = 0;
+    private _transitionStartMs = 0;
+    private _inTransition = false;
 
     private readonly clientEvents: ClientEvents;
     private animSubscription?: Subscription;
@@ -366,21 +364,15 @@ export class Agent {
             this.cameraCenter = selfAvatar.position;
         }
 
-        // If in a transition animation and delay has elapsed, inject FINISH_ANIM
-        // for several consecutive updates to survive unreliable packet loss.
-        let flags = this.controlFlags;
-        if (this._inTransition) {
-            const elapsed = Date.now() - this._transitionStartMs;
-            if (elapsed >= Agent.TRANSITION_DELAY_MS) {
-                this._inTransition = false;
-                this._finishAnimRemaining = Agent.FINISH_ANIM_REPEATS;
-                console.log(`[Agent] Transition done (elapsed=${elapsed}ms) — sending FINISH_ANIM x${Agent.FINISH_ANIM_REPEATS}`);
-            }
-        }
-        if (this._finishAnimRemaining > 0) {
-            flags |= ControlFlags.AGENT_CONTROL_FINISH_ANIM;
-            this._finishAnimRemaining--;
-        }
+        // Always include FINISH_ANIM on every AgentUpdate. On the server
+        // (ScenePresenceAnimator.cs) this flag causes the landing state machine
+        // to skip the recovery timer (up to 3s for hard falls) and immediately
+        // transition to standing. Without it, the avatar freezes after falls
+        // because our AO replaces transition animations before we see them,
+        // preventing us from sending FINISH_ANIM reactively like Firestorm does.
+        // The flag is harmless when not landing — it just calls
+        // UpdateMovementAnimations() which no-ops if state hasn't changed.
+        const flags = this.controlFlags | ControlFlags.AGENT_CONTROL_FINISH_ANIM;
 
         const circuit = this.currentRegion.circuit;
         const agentUpdate: AgentUpdateMessage = new AgentUpdateMessage();
@@ -468,15 +460,11 @@ export class Agent {
                 if (hasTransition && !this._inTransition) {
                     this._inTransition = true;
                     this._transitionStartMs = Date.now();
-                    console.log(`[Agent] Transition started — will send FINISH_ANIM after ${Agent.TRANSITION_DELAY_MS}ms`);
-                    // Schedule rapid updates after the delay so FINISH_ANIM is sent
-                    // promptly even when idle (no movement keys pressed).
-                    for (let i = 0; i < Agent.FINISH_ANIM_REPEATS; i++) {
-                        setTimeout(() => this.sendAgentUpdate(), Agent.TRANSITION_DELAY_MS + i * 100);
-                    }
+                    console.log(`[Agent] Transition started (${transitionNames.join(', ')})`);
                 } else if (!hasTransition && this._inTransition) {
+                    const elapsed = Date.now() - this._transitionStartMs;
                     this._inTransition = false;
-                    console.log(`[Agent] Transition cleared after ${Date.now() - this._transitionStartMs}ms`);
+                    console.log(`[Agent] Transition ended (${elapsed}ms)`);
                 }
             }
         }

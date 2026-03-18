@@ -21,7 +21,7 @@ import type { ObjectReadinessTracker } from './object-readiness-tracker';
 export class GodotObjectSender {
   private deferredTextures = new Map<number, any>();
   private textureUpdateSubs = new Map<number, Subscription>();
-  private readonly TEXTURE_FETCH_RANGE = 160;
+  private get TEXTURE_FETCH_RANGE(): number { return this.bot.agent?.cameraFar ?? 128; }
 
   private meshFetchQueue: MeshFetchQueue | null = null;
   private sculptFetchQueue: SculptFetchQueue | null = null;
@@ -64,6 +64,39 @@ export class GodotObjectSender {
 
   setReadinessTracker(tracker: ObjectReadinessTracker): void {
     this.readinessTracker = tracker;
+  }
+
+  /** Build the object_complete message for an object */
+  private buildCompleteMsg(obj: any, meshId: string | undefined, sculptInfo: ReturnType<GodotObjectSender['getSculptInfo']>, texInfo: any): any {
+    const sculpt_meshId = sculptInfo ? sculptMeshId(sculptInfo.textureUuid, sculptInfo.sculptType) : undefined;
+    const effectiveMeshId = meshId || sculpt_meshId || undefined;
+    const shapeParams = (!meshId && !sculptInfo) ? {
+      pathCurve: obj.PathCurve ?? 16,
+      profileCurve: obj.ProfileCurve ?? 1,
+      pathBegin: obj.PathBegin ?? 0,
+      pathEnd: obj.PathEnd ?? 1,
+      pathScaleX: obj.PathScaleX ?? 1,
+      pathScaleY: obj.PathScaleY ?? 1,
+      pathShearX: obj.PathShearX ?? 0,
+      pathShearY: obj.PathShearY ?? 0,
+      pathTwist: obj.PathTwist ?? 0,
+      pathTwistBegin: obj.PathTwistBegin ?? 0,
+      pathRadiusOffset: obj.PathRadiusOffset ?? 0,
+      pathTaperX: obj.PathTaperX ?? 0,
+      pathTaperY: obj.PathTaperY ?? 0,
+      pathRevolutions: obj.PathRevolutions ?? 1,
+      pathSkew: obj.PathSkew ?? 0,
+      profileBegin: obj.ProfileBegin ?? 0,
+      profileEnd: obj.ProfileEnd ?? 1,
+      profileHollow: obj.ProfileHollow ?? 0,
+    } : undefined;
+    return {
+      type: 'object_complete',
+      localId: obj.ID,
+      ...(effectiveMeshId ? { meshId: effectiveMeshId } : {}),
+      ...(shapeParams ? { shape: shapeParams } : {}),
+      ...(texInfo ? { faces: texInfo.faces } : {}),
+    };
   }
 
   /** Returns mesh asset UUID if obj is a mesh, else undefined */
@@ -157,7 +190,6 @@ export class GodotObjectSender {
     const scl = obj.Scale;
     const meshId = this.getMeshId(obj);
     const sculptInfo = this.getSculptInfo(obj);
-    const sculpt_meshId = sculptInfo ? sculptMeshId(sculptInfo.textureUuid, sculptInfo.sculptType) : undefined;
     const texInfo = this.materialPipeline.getTextureInfo(obj);
 
     // BoM: substitute magic bake UUIDs with actual baked textures for avatar attachments
@@ -205,27 +237,6 @@ export class GodotObjectSender {
 
     const lightInfo = this.getLightInfo(obj);
 
-    const shapeParams = (!meshId && !sculptInfo) ? {
-      pathCurve: obj.PathCurve ?? 16,
-      profileCurve: obj.ProfileCurve ?? 1,
-      pathBegin: obj.PathBegin ?? 0,
-      pathEnd: obj.PathEnd ?? 1,
-      pathScaleX: obj.PathScaleX ?? 1,
-      pathScaleY: obj.PathScaleY ?? 1,
-      pathShearX: obj.PathShearX ?? 0,
-      pathShearY: obj.PathShearY ?? 0,
-      pathTwist: obj.PathTwist ?? 0,
-      pathTwistBegin: obj.PathTwistBegin ?? 0,
-      pathRadiusOffset: obj.PathRadiusOffset ?? 0,
-      pathTaperX: obj.PathTaperX ?? 0,
-      pathTaperY: obj.PathTaperY ?? 0,
-      pathRevolutions: obj.PathRevolutions ?? 1,
-      pathSkew: obj.PathSkew ?? 0,
-      profileBegin: obj.ProfileBegin ?? 0,
-      profileEnd: obj.ProfileEnd ?? 1,
-      profileHollow: obj.ProfileHollow ?? 0,
-    } : undefined;
-
     const isAnimesh = !!(obj.extraParams?.extendedMeshData?.flags & 0x1);
     const objUuid = obj.FullID?.toString() || '';
 
@@ -257,8 +268,9 @@ export class GodotObjectSender {
       console.log(`[Animesh] Detected animesh object localId=${obj.ID} uuid=${objUuid} meshId=${meshId || 'none'} parentId=${parentLocalId}`);
     }
 
-    // Distance gate: determine if textures should be deferred for far objects
-    let skipTextures = false;
+    // Distance gate: skip all asset fetching for far objects.
+    // object_create is always sent; object_complete is deferred until sweepDeferredTextures promotes.
+    let skipAssets = false;
     try {
       const botPos = this.getBotPosition();
       if (botPos) {
@@ -266,7 +278,7 @@ export class GodotObjectSender {
         if (globalPos) {
           const dist = globalPos.distance(botPos);
           if (dist > this.TEXTURE_FETCH_RANGE) {
-            skipTextures = true;
+            skipAssets = true;
             this.deferredTextures.set(obj.ID, obj);
           }
         }
@@ -284,36 +296,19 @@ export class GodotObjectSender {
       scale: scl ? slScale(scl) : [0.5, 0.5, 0.5],
       ...(lightInfo ? { light: lightInfo } : {}),
       ...(isAnimesh ? { animesh: true } : {}),
+      ...(sculptInfo ? { sculpt: true } : {}),
       ...(obj.attachmentPoint > 0 ? { attachmentPoint: obj.attachmentPoint } : {}),
     });
 
-    // Phase 2: build full message for deferred object_complete
-    const effectiveMeshId = meshId || sculpt_meshId || undefined;
-    const completeMsg: any = {
-      type: 'object_complete',
-      localId: obj.ID,
-      ...(effectiveMeshId ? { meshId: effectiveMeshId } : {}),
-      ...(shapeParams ? { shape: shapeParams } : {}),
-      ...(texInfo ? { faces: texInfo.faces } : {}),
-    };
-
-    // Collect texture IDs for readiness tracking
-    const textureIds = new Set<string>();
-    if (texInfo && !skipTextures) {
-      for (const face of texInfo.faces) {
-        if (face.textureId && face.textureId !== ZERO_UUID) textureIds.add(face.textureId);
-        if (face.normalTextureId) textureIds.add(face.normalTextureId);
-        if (face.ormTextureId) textureIds.add(face.ormTextureId);
-        if (face.emissiveTextureId) textureIds.add(face.emissiveTextureId);
+    // Phase 2: build and track object_complete (skip deferred — tracked on promotion)
+    if (!skipAssets) {
+      const completeMsg = this.buildCompleteMsg(obj, meshId, sculptInfo, texInfo);
+      const effectiveMeshId = completeMsg.meshId || undefined;
+      if (this.readinessTracker) {
+        this.readinessTracker.track(obj.ID, effectiveMeshId || null, new Set(), completeMsg);
+      } else {
+        this.send(completeMsg);
       }
-    }
-
-    // Register with readiness tracker
-    if (this.readinessTracker) {
-      this.readinessTracker.track(obj.ID, effectiveMeshId || null, textureIds, completeMsg);
-    } else {
-      // No tracker — send immediately (backward compat)
-      this.send(completeMsg);
     }
     if (lightInfo) {
       this.updateCoalescer?.trackLight(obj.ID);
@@ -337,18 +332,17 @@ export class GodotObjectSender {
       this.textureUpdateSubs.set(obj.ID, texSub);
     }
 
-    if (meshId && this.meshFetchQueue) {
-      this.meshFetchQueue.request(meshId, obj.ID);
-    }
-    if (sculptInfo && this.sculptFetchQueue) {
-      this.sculptFetchQueue.request(sculptInfo.textureUuid, sculptInfo.sculptType, obj.ID);
-    }
-    if (lightInfo?.isSpot && lightInfo.projTexture && this.textureFetchQueue) {
-      console.log(`[GodotBridge] Requesting proj texture ${lightInfo.projTexture} for localId=${obj.ID}`);
-      this.textureFetchQueue.request(lightInfo.projTexture, obj.ID);
-    }
-
-    if (!skipTextures) {
+    if (!skipAssets) {
+      if (meshId && this.meshFetchQueue) {
+        this.meshFetchQueue.request(meshId, obj.ID);
+      }
+      if (sculptInfo && this.sculptFetchQueue) {
+        this.sculptFetchQueue.request(sculptInfo.textureUuid, sculptInfo.sculptType, obj.ID);
+      }
+      if (lightInfo?.isSpot && lightInfo.projTexture && this.textureFetchQueue) {
+        console.log(`[GodotBridge] Requesting proj texture ${lightInfo.projTexture} for localId=${obj.ID}`);
+        this.textureFetchQueue.request(lightInfo.projTexture, obj.ID);
+      }
       this.materialPipeline.fetchTexturesForObject(obj, texInfo);
     }
   }
@@ -573,20 +567,24 @@ export class GodotObjectSender {
             }
           }
 
+          // Request mesh and sculpt (deferred at sendObject time)
+          const liveMeshId = this.getMeshId(live);
+          const liveSculptInfo = this.getSculptInfo(live);
+          if (liveMeshId && this.meshFetchQueue) {
+            this.meshFetchQueue.request(liveMeshId, localId);
+          }
+          if (liveSculptInfo && this.sculptFetchQueue) {
+            this.sculptFetchQueue.request(liveSculptInfo.textureUuid, liveSculptInfo.sculptType, localId);
+          }
           this.materialPipeline.fetchTexturesForObject(live, texInfo);
 
-          // Add texture requirements to readiness tracker for promoted objects
-          if (this.readinessTracker && texInfo) {
-            const promotedTexIds = new Set<string>();
-            for (const face of texInfo.faces) {
-              if (face.textureId && face.textureId !== ZERO_UUID) promotedTexIds.add(face.textureId);
-              if (face.normalTextureId) promotedTexIds.add(face.normalTextureId);
-              if (face.ormTextureId) promotedTexIds.add(face.ormTextureId);
-              if (face.emissiveTextureId) promotedTexIds.add(face.emissiveTextureId);
-            }
-            if (promotedTexIds.size > 0) {
-              this.readinessTracker.addTextures(localId, promotedTexIds);
-            }
+          // Build object_complete and register with readiness tracker (was skipped at sendObject time)
+          const completeMsg = this.buildCompleteMsg(live, liveMeshId, liveSculptInfo, texInfo);
+          const effectiveMeshId = completeMsg.meshId || undefined;
+          if (this.readinessTracker) {
+            this.readinessTracker.track(localId, effectiveMeshId || null, new Set(), completeMsg);
+          } else {
+            this.send(completeMsg);
           }
 
           promoted++;

@@ -44,10 +44,18 @@ export class SculptFetchQueue {
     if (this.destroyed) return;
 
     const dedupKey = sculptMeshId(textureUuid, sculptType);
-    if (this.failed.has(dedupKey)) return;
 
-    // Already cached and Godot notified
-    if (this.notified.has(dedupKey)) return;
+    // Already failed — notify readiness tracker so it doesn't timeout
+    if (this.failed.has(dedupKey)) {
+      this.onFailed?.(dedupKey);
+      return;
+    }
+
+    // Already cached and Godot notified — still fire onResolved for readiness tracker
+    if (this.notified.has(dedupKey)) {
+      this.onResolved?.(dedupKey);
+      return;
+    }
 
     // On disk but Godot doesn't know yet — notify once
     if (isSculptCached(textureUuid, sculptType)) {

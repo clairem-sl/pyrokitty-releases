@@ -21,12 +21,12 @@ func set_vr_mode(enabled: bool) -> void:
 	sm._vr_mode = enabled
 	var FrameBudget = sm.FrameBudget
 	sm._target_frame_ms = FrameBudget.DESKTOP_FRAME_MS
-	sm._vis_far = FrameBudget.VR_CAMERA_FAR if enabled else FrameBudget.VISIBILITY_FAR
-	sm._vis_fade = FrameBudget.VR_VISIBILITY_FADE_MARGIN if enabled else FrameBudget.VISIBILITY_FADE_MARGIN
+	var vfar: float = FrameBudget.VR_CAMERA_FAR if enabled else sm._vis_far
+	var vfade: float = FrameBudget.VR_VISIBILITY_FADE_MARGIN if enabled else sm._vis_fade
 	for rsi in sm.objects.values():
-		rsi.set_vis_range(sm._vis_far, sm._vis_fade)
+		rsi.set_vis_range(vfar, vfade)
 	for rsi in sm.avatars.values():
-		rsi.set_vis_range(sm._vis_far, sm._vis_fade)
+		rsi.set_vis_range(vfar, vfade)
 
 
 func set_first_person_mode(enabled: bool) -> void:
@@ -102,7 +102,9 @@ func handle_avatar_create(msg: Dictionary) -> void:
 			sm.erase_animesh_state(old_lid)
 
 	_crumb("avatar_create id=%s lid=%d step=RSInstance" % [avatar_id.substr(0, 8), local_id])
-	var rsi = sm.RSInstance.new(sm._scenario, sm._vis_far, sm._vis_fade)
+	var _vfar: float = sm.FrameBudget.VR_CAMERA_FAR if sm._vr_mode else sm._vis_far
+	var _vfade: float = sm.FrameBudget.VR_VISIBILITY_FADE_MARGIN if sm._vr_mode else sm._vis_fade
+	var rsi = sm.RSInstance.new(sm._scenario, _vfar, _vfade)
 	# Small blue placeholder so we can see avatar position while attachments load
 	rsi.set_mesh(sm.avatar_mesh)
 	rsi.set_material_override(sm.avatar_material)
