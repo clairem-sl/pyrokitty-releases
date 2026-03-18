@@ -381,7 +381,7 @@ func _input(event: InputEvent) -> void:
 			var yaw_delta := mm.relative.x * orbit_speed
 			avatar_yaw -= yaw_delta
 			yaw -= yaw_delta  # Camera follows avatar instantly
-			pitch -= mm.relative.y * orbit_speed
+			pitch += mm.relative.y * orbit_speed
 			pitch = clamp(pitch, -PI * 0.49, PI * 0.49)
 			move_dirty = true
 			_update_camera()
