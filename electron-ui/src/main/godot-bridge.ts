@@ -700,6 +700,10 @@ export class GodotBridge extends EventEmitter {
       try {
         console.log('[GodotBridge] New region ready, sending initial snapshot');
         this.objectSender.sendInitialSnapshot((avatar, id) => this.avatarManager.sendAvatarCreate(avatar, id));
+        // Re-send terrain + water + environment for the new region
+        this.environmentMgr?.sendTerrain().catch(err => {
+          console.error('[GodotBridge] Error sending terrain after region change:', err);
+        });
       } catch (e) {
         console.error('[GodotBridge] Failed to send initial snapshot after region change:', e);
       }
