@@ -12,7 +12,7 @@ interface AccountListProps {
   onAddAccount: () => void;
   onStopInstance: (instanceId: string) => void;
   onLoginAccount: (accountId: string) => void;
-  onLaunchViewer: (instanceId: string) => void;
+  onLaunchFirestorm: (instanceId: string) => void;
   onLaunchGodotViewer: (instanceId: string, vrMode?: boolean) => void;
 }
 
@@ -25,7 +25,7 @@ export const AccountList: React.FC<AccountListProps> = ({
   onAddAccount,
   onStopInstance,
   onLoginAccount,
-  onLaunchViewer,
+  onLaunchFirestorm,
   onLaunchGodotViewer,
 }) => {
   const getInstanceForAccount = (accountId: string): ViewerInstance | undefined => {
@@ -108,7 +108,7 @@ export const AccountList: React.FC<AccountListProps> = ({
                       className="account-launch-btn"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onLaunchViewer(instance.id);
+                        onLaunchFirestorm(instance.id);
                       }}
                       disabled={!canLaunchViewer}
                     >

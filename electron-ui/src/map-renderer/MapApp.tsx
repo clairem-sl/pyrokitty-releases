@@ -53,6 +53,7 @@ function updateMarkerGroup(group: L.LayerGroup, markers: MapMarker[], botColorMa
   for (const pos of markers) {
     const mapX = pos.gridX + pos.localX / 256;
     const mapY = pos.gridY + pos.localY / 256;
+    if (!isFinite(mapX) || !isFinite(mapY)) continue;
     const isAccount = pos.type === 'account';
     const color = isAccount && pos.instanceId ? (botColorMap.get(pos.instanceId) ?? NEARBY_COLOR) : (isAccount ? MAP_COLORS.SELF : NEARBY_COLOR);
     const marker = L.circleMarker([mapY, mapX], {
@@ -235,9 +236,12 @@ export const MapApp: React.FC = () => {
     const handler = (_event: any, data: { instanceId: string; regionInfo: { x: number; y: number; agentPosition?: { x: number; y: number; z: number } } }) => {
       const pos = data.regionInfo.agentPosition;
       if (!pos) return;
+      const gridX = data.regionInfo.x;
+      const gridY = data.regionInfo.y;
+      if (!isFinite(gridX) || !isFinite(gridY) || !isFinite(pos.x) || !isFinite(pos.y)) return;
       setMarkers(prev => prev.map(m =>
         m.type === 'account' && m.instanceId === data.instanceId
-          ? { ...m, gridX: data.regionInfo.x, gridY: data.regionInfo.y, localX: pos.x, localY: pos.y, localZ: pos.z }
+          ? { ...m, gridX, gridY, localX: pos.x, localY: pos.y, localZ: pos.z }
           : m
       ));
     };

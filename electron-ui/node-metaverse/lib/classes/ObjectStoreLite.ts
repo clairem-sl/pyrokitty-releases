@@ -628,6 +628,15 @@ export class ObjectStoreLite implements IObjectStore
         return this.objects.size;
     }
 
+    /** Iterate all objects in the store without filtering */
+    public forEachObject(fn: (obj: GameObject, localId: number) => void): void
+    {
+        for (const [localId, obj] of this.objects)
+        {
+            fn(obj, localId);
+        }
+    }
+
     public getObjectsInArea(minX: number, maxX: number, minY: number, maxY: number, minZ: number, maxZ: number): GameObject[]
     {
         if (!this.rtree)
@@ -1080,79 +1089,74 @@ export class ObjectStoreLite implements IObjectStore
                 }
             }
         }
+        // Avatar attachment resolution (only for children of avatars)
         const parentObj = this.objects.get(obj.ParentID ?? 0);
-        if (obj.ParentID === 0 || (obj.ParentID !== undefined && parentObj !== undefined && parentObj.PCode === PCode.Avatar))
+        if (newObject && obj.IsAttachment && obj.ParentID !== undefined && parentObj !== undefined && parentObj.PCode === PCode.Avatar)
         {
-            if (newObject)
+            const avatar = this.agent.currentRegion.agents.get(parentObj.FullID.toString());
+
+            let invItemID = UUID.zero();
+            const attach = obj.NameValue.get('AttachItemID');
+            if (attach)
             {
-                if (obj.IsAttachment && obj.ParentID !== undefined)
+                invItemID = new UUID(attach.value);
+            }
+
+            this.agent.currentRegion.clientCommands.region.resolveObject(obj, {}).then(() =>
+            {
+                try
                 {
-                    if (parentObj !== undefined && parentObj.PCode === PCode.Avatar)
+                    if (obj.itemID === undefined)
                     {
-                        const avatar = this.agent.currentRegion.agents.get(parentObj.FullID.toString());
-
-                        let invItemID = UUID.zero();
-                        const attach = obj.NameValue.get('AttachItemID');
-                        if (attach)
-                        {
-                            invItemID = new UUID(attach.value);
-                        }
-
-                        this.agent.currentRegion.clientCommands.region.resolveObject(obj, {}).then(() =>
-                        {
-                            try
-                            {
-                                if (obj.itemID === undefined)
-                                {
-                                    obj.itemID = UUID.zero();
-                                }
-                                obj.itemID = invItemID;
-                                if (avatar !== undefined)
-                                {
-                                    avatar.addAttachment(obj);
-                                }
-                            }
-                            catch (err)
-                            {
-                                console.error(err);
-                            }
-                        }).catch(() =>
-                        {
-                            console.error('Failed to resolve new avatar attachment');
-                        });
-
+                        obj.itemID = UUID.zero();
+                    }
+                    obj.itemID = invItemID;
+                    if (avatar !== undefined)
+                    {
+                        avatar.addAttachment(obj);
                     }
                 }
-
-                const newObj = new NewObjectEvent();
-                newObj.localID = obj.ID;
-                newObj.objectID = obj.FullID;
-                newObj.object = obj;
-                // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
-                newObj.createSelected = obj.Flags !== undefined && (obj.Flags & PrimFlags.CreateSelected) === PrimFlags.CreateSelected;
-                obj.createdSelected = newObj.createSelected;
-                               // noinspection JSBitwiseOperatorUsage
-                if (obj.Flags !== undefined && obj.Flags & PrimFlags.CreateSelected && !this.pendingObjectProperties.get(obj.FullID.toString()))
+                catch (err)
                 {
-                    this.selectedPrimsWithoutUpdate.set(obj.ID, true);
+                    console.error(err);
                 }
-                this.clientEvents.onNewObjectEvent.next(newObj);
-            }
-            else
+            }).catch(() =>
             {
-                const updObj = new ObjectUpdatedEvent();
-                updObj.localID = obj.ID;
-                updObj.objectID = obj.FullID;
-                updObj.object = obj;
-                updObj.sequenceNumber = sequenceNumber;
-                this.clientEvents.onObjectUpdatedEvent.next(updObj);
-            }
-            const pendingProp = this.pendingObjectProperties.get(obj.FullID.toString());
-            if (pendingProp)
+                console.error('Failed to resolve new avatar attachment');
+            });
+        }
+
+        // Emit events for ALL objects (not just roots/avatar-attachments)
+        if (newObject)
+        {
+            const newObj = new NewObjectEvent();
+            newObj.localID = obj.ID;
+            newObj.objectID = obj.FullID;
+            newObj.object = obj;
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
+            newObj.createSelected = obj.Flags !== undefined && (obj.Flags & PrimFlags.CreateSelected) === PrimFlags.CreateSelected;
+            obj.createdSelected = newObj.createSelected;
+                           // noinspection JSBitwiseOperatorUsage
+            if (obj.Flags !== undefined && obj.Flags & PrimFlags.CreateSelected && !this.pendingObjectProperties.get(obj.FullID.toString()))
             {
-                this.applyObjectProperties(obj, pendingProp);
-                this.pendingObjectProperties.delete(obj.FullID.toString());
+                this.selectedPrimsWithoutUpdate.set(obj.ID, true);
             }
+            this.clientEvents.onNewObjectEvent.next(newObj);
+        }
+        else
+        {
+            const updObj = new ObjectUpdatedEvent();
+            updObj.localID = obj.ID;
+            updObj.objectID = obj.FullID;
+            updObj.object = obj;
+            updObj.sequenceNumber = sequenceNumber;
+            this.clientEvents.onObjectUpdatedEvent.next(updObj);
+        }
+        const pendingProp = this.pendingObjectProperties.get(obj.FullID.toString());
+        if (pendingProp)
+        {
+            this.applyObjectProperties(obj, pendingProp);
+            this.pendingObjectProperties.delete(obj.FullID.toString());
         }
     }
 

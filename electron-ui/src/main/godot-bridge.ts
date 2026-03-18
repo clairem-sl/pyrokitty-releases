@@ -114,15 +114,19 @@ export class GodotBridge extends EventEmitter {
   // Fetch queues (owned by bridge, initialized in connectWebSocket)
   private textureFetchQueue: TextureFetchQueue | null = null;
   private meshFetchQueue: MeshFetchQueue | null = null;
+  private sculptFetchQueue: SculptFetchQueue | null = null;
+  private materialFetchQueue: MaterialFetchQueue | null = null;
+  private animationFetchQueue: AnimationFetchQueue | null = null;
   private readinessTracker: ObjectReadinessTracker | null = null;
 
   // Asset ready batching
-  private assetReadyBuffer: object[] = [];
-  private assetReadyTimer: ReturnType<typeof setTimeout> | null = null;
+  private sendBuffer: object[] = [];
+  private sendTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Stats
   private lastGodotStats: any = null;
   private killSweepTimer: ReturnType<typeof setInterval> | null = null;
+  private electronStatsCounter = 0;
 
   constructor(bot: Bot, options: { vrMode?: boolean; objectAnimationBuffer?: Map<string, { animId: string; sequenceId: number }[]>; avatarAppearanceBuffer?: Map<string, string[]>; visualParamBuffer?: Map<string, number[]> } = {}) {
     super();
@@ -331,7 +335,7 @@ export class GodotBridge extends EventEmitter {
       if (this.objectSender.selfMeshIds.has(meshUuid)) {
         console.log(`[SelfAvatar] Mesh ready: meshId=${meshUuid.slice(0, 8)} isRigged=${isRigged} joints=${jointNames?.length ?? 0} overrides=${jointOverrides?.length ?? 0}`);
       }
-      this.queueAssetReady(msg);
+      this.send(msg);
     });
 
     this.textureFetchQueue = new TextureFetchQueue(this.bot, (textureUuid, cachePath) => {
@@ -339,19 +343,19 @@ export class GodotBridge extends EventEmitter {
       if (this.objectSender.selfTextureIds.has(textureUuid)) {
         console.log(`[SelfAvatar] Texture ready: textureId=${textureUuid.slice(0, 8)}`);
       }
-      this.queueAssetReady({ type: 'texture_ready', textureId: textureUuid, path: fwdPath });
+      this.send({ type: 'texture_ready', textureId: textureUuid, path: fwdPath });
     });
 
-    const sculptFetchQueue = new SculptFetchQueue(this.bot, (meshId, cachePath) => {
+    this.sculptFetchQueue = new SculptFetchQueue(this.bot, (meshId, cachePath) => {
       const fwdPath = cachePath.replace(/\\/g, '/');
-      this.queueAssetReady({ type: 'mesh_ready', meshId, path: fwdPath });
+      this.send({ type: 'mesh_ready', meshId, path: fwdPath });
     }, this.textureFetchQueue.decodePool);
 
-    const materialFetchQueue = new MaterialFetchQueue(this.bot, (materialUuid, data) => {
+    this.materialFetchQueue = new MaterialFetchQueue(this.bot, (materialUuid, data) => {
       this.materialPipeline.handleMaterialReady(materialUuid, data);
     });
 
-    const animationFetchQueue = new AnimationFetchQueue(this.bot, (animUuid, data) => {
+    this.animationFetchQueue = new AnimationFetchQueue(this.bot, (animUuid, data) => {
       console.log(`[Animesh] animation_ready: ${animUuid.slice(0, 8)} (${data.joints.length} joints, ${data.duration.toFixed(1)}s, loop=${data.loop}, pri=${data.priority ?? '?'})`);
       this.animationManager.checkAnimBatchReady(animUuid);
     });
@@ -363,13 +367,13 @@ export class GodotBridge extends EventEmitter {
     this.meshFetchQueue.onFailed = (uuid) => readinessTracker.onMeshFailed(uuid);
     this.textureFetchQueue.onResolved = (uuid) => readinessTracker.onTextureReady(uuid);
     this.textureFetchQueue.onFailed = (uuid) => readinessTracker.onTextureFailed(uuid);
-    sculptFetchQueue.onResolved = (uuid) => readinessTracker.onMeshReady(uuid);
-    sculptFetchQueue.onFailed = (uuid) => readinessTracker.onMeshFailed(uuid);
+    this.sculptFetchQueue.onResolved = (uuid) => readinessTracker.onMeshReady(uuid);
+    this.sculptFetchQueue.onFailed = (uuid) => readinessTracker.onMeshFailed(uuid);
     this.objectSender.setReadinessTracker(readinessTracker);
 
     // Wire fetch queues to sub-modules
-    this.materialPipeline.initQueues(materialFetchQueue, this.textureFetchQueue);
-    this.animationManager.initFetchQueue(animationFetchQueue);
+    this.materialPipeline.initQueues(this.materialFetchQueue, this.textureFetchQueue);
+    this.animationManager.initFetchQueue(this.animationFetchQueue);
     this.avatarManager.initBom(this.materialPipeline, this.textureFetchQueue);
 
     this.environmentMgr = new GodotEnvironmentManager(this.bot, (msg) => this.send(msg));
@@ -385,7 +389,7 @@ export class GodotBridge extends EventEmitter {
       },
     });
 
-    this.objectSender.initQueues(this.meshFetchQueue, sculptFetchQueue, this.textureFetchQueue, this.updateCoalescer);
+    this.objectSender.initQueues(this.meshFetchQueue, this.sculptFetchQueue, this.textureFetchQueue, this.updateCoalescer);
 
     // Send initial snapshot and subscribe to events
     this.objectSender.sendInitialSnapshot((avatar, id) => this.avatarManager.sendAvatarCreate(avatar, id));
@@ -467,31 +471,33 @@ export class GodotBridge extends EventEmitter {
     this.avatarManager.setConnected(connected);
   }
 
-  private send(msg: object): void {
+  /** Low-level WebSocket send — only called by flushSendBuffer */
+  private sendRaw(msg: object): void {
     if (this.ws && this.connected) {
       this.ws.send(JSON.stringify(msg));
     }
   }
 
-  private queueAssetReady(msg: object): void {
-    this.assetReadyBuffer.push(msg);
-    if (!this.assetReadyTimer) {
-      this.assetReadyTimer = setTimeout(() => this.flushAssetReady(), 50);
+  /** Queue a message to Godot. All messages go through the buffer to preserve ordering. */
+  private send(msg: object): void {
+    this.sendBuffer.push(msg);
+    if (!this.sendTimer) {
+      this.sendTimer = setTimeout(() => this.flushSendBuffer(), 50);
     }
   }
 
-  private flushAssetReady(): void {
-    this.assetReadyTimer = null;
-    if (this.assetReadyBuffer.length === 0) return;
+  private flushSendBuffer(): void {
+    this.sendTimer = null;
+    if (this.sendBuffer.length === 0) return;
 
     const BATCH_SIZE = 200;
-    const batch = this.assetReadyBuffer.splice(0, BATCH_SIZE);
+    const batch = this.sendBuffer.splice(0, BATCH_SIZE);
     for (const msg of batch) {
-      this.send(msg);
+      this.sendRaw(msg);
     }
 
-    if (this.assetReadyBuffer.length > 0) {
-      this.assetReadyTimer = setTimeout(() => this.flushAssetReady(), 50);
+    if (this.sendBuffer.length > 0) {
+      this.sendTimer = setTimeout(() => this.flushSendBuffer(), 50);
     }
   }
 
@@ -563,14 +569,16 @@ export class GodotBridge extends EventEmitter {
     });
     this.subscriptions.push(teleportSub);
 
-    // Kill sweep + child rescan: every 2s
+    // Kill sweep + deferred promotion: every 2s
     let memLogCounter = 0;
     this.killSweepTimer = setInterval(() => {
       this.objectSender.sweepDeletedObjects();
       this.avatarManager.sweepAvatarDepartures();
-      this.objectSender.rescanChildren();
       this.objectSender.sweepDeferredTextures();
       this.readinessTracker?.sweepTimeouts();
+
+      // Send electron stats to Godot every 2s (every tick)
+      this.sendElectronStats();
 
       // Log memory stats every 30s
       if (++memLogCounter % 15 === 0) {
@@ -590,6 +598,53 @@ export class GodotBridge extends EventEmitter {
       ? ` | godot(${gs.fps?.toFixed(0) ?? '?'}fps budget:${gs.budgetElapsed?.toFixed(1) ?? '?'}/${gs.budgetAvail?.toFixed(1) ?? '?'}/${gs.budgetUsed?.toFixed(1) ?? '?'}ms el/av/us): tex: w=${gs.texWorkers}(${gs.texReady ?? '?'}rdy) q=${gs.texQueue} done=${gs.texDone} cached=${gs.texCached} fail=${gs.texFailed} pending=${gs.texPending} [${gs.texTiming ?? '?'}] | mesh: w=${gs.meshWorkers}(${gs.meshReady ?? '?'}rdy) q=${gs.meshQueue} done=${gs.meshDone} cached=${gs.meshCached} fail=${gs.meshFailed} pending=${gs.meshPending} | mats=${gs.materials}(${gs.materialReuse ?? '?'}reuse) opaque=${gs.texOpaque ?? '?'}`
       : '';
     console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | pbr: ${this.materialPipeline.totalPbrFaceCount} faces | deferred: ${this.objectSender.deferredCount} pending: ${this.objectSender.readinessPendingCount}${godotStr}`);
+  }
+
+  /** Send electron-side fetch queue stats to Godot for the stats bar */
+  private sendElectronStats(): void {
+    const tq = this.textureFetchQueue;
+    const mq = this.meshFetchQueue;
+    const sq = this.sculptFetchQueue;
+    const matq = this.materialFetchQueue;
+    const aq = this.animationFetchQueue;
+    this.send({
+      type: 'electron_stats',
+      tex: {
+        queue: tq?.queueDepth ?? 0,
+        active: tq?.activeCount ?? 0,
+        done: tq?.notifiedCount ?? 0,
+        failed: tq?.failedCount ?? 0,
+        decodeQueue: tq?.decodePool?.queueDepth ?? 0,
+        decodeActive: tq?.decodePool?.activeCount ?? 0,
+        gpuQueue: tq?.gpuQueueDepth ?? 0,
+        gpuActive: tq?.gpuQueueActive ?? 0,
+      },
+      mesh: {
+        queue: mq?.queueDepth ?? 0,
+        active: mq?.activeCount ?? 0,
+        done: mq?.notifiedCount ?? 0,
+        failed: mq?.failedCount ?? 0,
+      },
+      sculpt: {
+        queue: sq?.queueDepth ?? 0,
+        active: sq?.activeCount ?? 0,
+        done: sq?.notifiedCount ?? 0,
+        failed: sq?.failedCount ?? 0,
+      },
+      material: {
+        queue: matq?.queueDepth ?? 0,
+        active: matq?.activeCount ?? 0,
+        failed: matq?.failedCount ?? 0,
+      },
+      anim: {
+        queue: aq?.queueDepth ?? 0,
+        active: aq?.activeCount ?? 0,
+        failed: aq?.failedCount ?? 0,
+      },
+      deferred: this.objectSender.deferredCount,
+      readinessPending: this.objectSender.readinessPendingCount,
+      tracked: this.trackedObjects.size,
+    });
   }
 
   /**
@@ -661,8 +716,16 @@ export class GodotBridge extends EventEmitter {
    * then re-snapshot once the new region's objects start arriving.
    */
   private handleRegionChange(): void {
-    // Tell Godot to wipe everything
-    this.send({ type: 'region_change' });
+    // Flush any pending messages from the old region, then tell Godot to wipe
+    this.flushSendBuffer();
+    this.sendRaw({ type: 'region_change' });
+
+    // Clear the send buffer (any new messages from old region callbacks)
+    this.sendBuffer = [];
+    if (this.sendTimer) {
+      clearTimeout(this.sendTimer);
+      this.sendTimer = null;
+    }
 
     // Reset bridge-side tracking
     this.trackedObjects.clear();
@@ -677,13 +740,6 @@ export class GodotBridge extends EventEmitter {
     // Clear pending downloads (old caps URLs will 403)
     this.textureFetchQueue?.clearPending();
 
-    // Clear asset ready buffer
-    this.assetReadyBuffer = [];
-    if (this.assetReadyTimer) {
-      clearTimeout(this.assetReadyTimer);
-      this.assetReadyTimer = null;
-    }
-
     // Clear environment cache (parcel env is per-region)
     this.environmentMgr?.clearParcelCache();
 
@@ -697,15 +753,19 @@ export class GodotBridge extends EventEmitter {
       eqSub.unsubscribe();
 
       if (!this.connected) return;
+
+      // Re-send terrain + water + environment immediately
+      this.environmentMgr?.sendTerrain().catch(err => {
+        console.error('[GodotBridge] Error sending terrain after region change:', err);
+      });
+
+      // Send initial snapshot — objects arriving via onNewObjectEvent are handled
+      // live (no hold). The snapshot catches anything already in the store.
       try {
         console.log('[GodotBridge] New region ready, sending initial snapshot');
         this.objectSender.sendInitialSnapshot((avatar, id) => this.avatarManager.sendAvatarCreate(avatar, id));
-        // Re-send terrain + water + environment for the new region
-        this.environmentMgr?.sendTerrain().catch(err => {
-          console.error('[GodotBridge] Error sending terrain after region change:', err);
-        });
       } catch (e) {
-        console.error('[GodotBridge] Failed to send initial snapshot after region change:', e);
+        console.error('[GodotBridge] Failed to send snapshot after region change:', e);
       }
     });
     this.subscriptions.push(eqSub);
@@ -731,12 +791,15 @@ export class GodotBridge extends EventEmitter {
       this.killSweepTimer = null;
     }
 
-    // Clean up sub-modules
+    // Clean up sub-modules (these destroy their owned fetch queues internally)
     this.objectSender.cleanup();
     this.avatarManager.cleanup();
     this.animationManager.cleanup();
     this.materialPipeline.cleanup();
     this.readinessTracker = null;
+    this.sculptFetchQueue = null;
+    this.materialFetchQueue = null;
+    this.animationFetchQueue = null;
 
     // Clean up managers
     this.updateCoalescer?.cleanup();
@@ -757,10 +820,10 @@ export class GodotBridge extends EventEmitter {
     this.setConnected(false);
     this.trackedObjects.clear();
     this.trackedAvatars.clear();
-    this.assetReadyBuffer = [];
-    if (this.assetReadyTimer) {
-      clearTimeout(this.assetReadyTimer);
-      this.assetReadyTimer = null;
+    this.sendBuffer = [];
+    if (this.sendTimer) {
+      clearTimeout(this.sendTimer);
+      this.sendTimer = null;
     }
   }
 

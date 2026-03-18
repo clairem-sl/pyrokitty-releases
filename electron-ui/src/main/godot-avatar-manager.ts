@@ -306,9 +306,12 @@ export class GodotAvatarManager {
       rotation: slQuat(rot),
       parentId,
     });
-    this.trackedAvatars.add(id);
     if (localId > 0) {
+      this.trackedAvatars.add(id);
       this.avatarLocalIds.set(id, localId);
+    } else {
+      // Don't mark as tracked — onAvatarEnteredRegion will re-create with real localId
+      console.log(`[Avatar] ${id.slice(0, 8)} has localId=0, deferring tracking until ObjectUpdate arrives`);
     }
 
     // Track self-avatar localId for attachment tagging

@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Modal, Button, TextInput, Text, Group, Alert } from '@mantine/core';
+import { Modal, Button, TextInput, Text, Group, Alert, Checkbox } from '@mantine/core';
 
 interface MfaModalProps {
   opened: boolean;
   onClose: () => void;
-  onSubmit: (token: string) => Promise<void>;
+  onSubmit: (token: string, remember: boolean) => Promise<void>;
   accountName?: string;
 }
 
@@ -15,6 +15,7 @@ export const MfaModal: React.FC<MfaModalProps> = ({
   accountName,
 }) => {
   const [token, setToken] = useState('');
+  const [remember, setRemember] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,7 +30,7 @@ export const MfaModal: React.FC<MfaModalProps> = ({
     setLoading(true);
     setError(null);
     try {
-      await onSubmit(token);
+      await onSubmit(token, remember);
       setToken('');
     } catch (err: any) {
       setError(err.message || 'MFA verification failed');
@@ -65,6 +66,12 @@ export const MfaModal: React.FC<MfaModalProps> = ({
         maxLength={6}
         autoFocus
         styles={{ input: { textAlign: 'center', fontSize: '1.5rem', letterSpacing: '0.5em' } }}
+        mb="md"
+      />
+      <Checkbox
+        label="Remember this device"
+        checked={remember}
+        onChange={(e) => setRemember(e.currentTarget.checked)}
         mb="lg"
       />
       <Group justify="flex-end">

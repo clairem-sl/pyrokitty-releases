@@ -12,10 +12,11 @@ var ws_port: int = 9200
 
 @onready var scene_manager: Node3D = $SceneManager
 @onready var _stats_bar: CanvasLayer = $StatsBar
-@onready var _stats_label: Label = $StatsBar/Label
+@onready var _stats_label: RichTextLabel = $StatsBar/Label
 var _planar_debug_mode: int = 0
 var _stats_update_timer: float = 0.0
 var _stats_send_timer: float = 0.0  # send pipeline_stats to Electron every 5s
+var _electron_stats: Dictionary = {}  # latest electron_stats from bridge
 
 # Low-priority message backlog — object_create / mesh_ready / texture_ready etc.
 # Avatar and identity messages bypass this queue and are always dispatched immediately.
@@ -238,24 +239,17 @@ func _process(_delta: float) -> void:
 		var _msg_budget: float = FrameBudget.DESKTOP_MSG_BUDGET_MS
 		var _msg_start := Time.get_ticks_usec() / 1000.0
 
-		# Drain ALL incoming packets every frame.  High-priority messages
-		# (avatar, physics, self_id) are always dispatched immediately.
-		# Low-priority messages are queued once the budget is spent, but we
-		# keep reading so high-priority packets behind them aren't delayed.
-		var over_budget := false
+		# Drain backlog from previous frames FIRST to preserve message ordering.
+		# New incoming messages are appended to the same queue so they always
+		# execute after older messages.
 		while ws_peer.get_available_packet_count() > 0:
 			var text := ws_peer.get_packet().get_string_from_utf8()
 			if _is_high_priority(text):
 				_handle_message(text)
 				continue
-			if not over_budget and (Time.get_ticks_usec() / 1000.0) - _msg_start >= _msg_budget:
-				over_budget = true
-			if over_budget:
-				_low_priority_queue.append(text)
-			else:
-				_handle_message(text)
+			_low_priority_queue.append(text)
 
-		# Process anything already queued from previous frames.
+		# Process queued messages in order (old backlog + newly arrived)
 		while _low_priority_queue.size() > 0:
 			if (Time.get_ticks_usec() / 1000.0) - _msg_start >= _msg_budget:
 				break
@@ -305,30 +299,115 @@ func _update_stats_bar() -> void:
 		tex_mem = rd.get_memory_usage(RenderingDevice.MEMORY_TEXTURES)
 		buf_mem = rd.get_memory_usage(RenderingDevice.MEMORY_BUFFERS)
 
+	# Electron-side fetch queue stats
+	var es := _electron_stats
+	var es_tex: Dictionary = es.get("tex", {})
+	var es_mesh: Dictionary = es.get("mesh", {})
+	var es_sculpt: Dictionary = es.get("sculpt", {})
+	var e_tex_q: int = int(es_tex.get("queue", 0))
+	var e_tex_dl: int = int(es_tex.get("active", 0))
+	var e_tex_dec: int = int(es_tex.get("decodeQueue", 0)) + int(es_tex.get("decodeActive", 0))
+	var e_tex_gpu: int = int(es_tex.get("gpuQueue", 0)) + int(es_tex.get("gpuActive", 0))
+	var e_tex_done: int = int(es_tex.get("done", 0))
+	var e_tex_fail: int = int(es_tex.get("failed", 0))
+	var e_mesh_q: int = int(es_mesh.get("queue", 0))
+	var e_mesh_dl: int = int(es_mesh.get("active", 0))
+	var e_mesh_done: int = int(es_mesh.get("done", 0))
+	var e_mesh_fail: int = int(es_mesh.get("failed", 0))
+	var e_sculpt_q: int = int(es_sculpt.get("queue", 0)) + int(es_sculpt.get("active", 0))
+	var e_deferred: int = int(es.get("deferred", 0))
+
+	# BBCode color helpers
+	const C_GREEN := "color=#88ee88"   # done / cached
+	const C_YELLOW := "color=#eedd66"  # loading / in-flight
+	const C_RED := "color=#ee6666"     # failed
+	const C_BLUE := "color=#66aaee"    # deferred / waiting
+	const C_WHITE := "color=#dddddd"   # labels
+	const C_CYAN := "color=#66dddd"    # counts
+
+	# Update on-screen label (BBCode)
+	if _stats_bar.visible:
+		var bb := ""
+		# FPS + scene
+		bb += "[%s]FPS:[/color] [%s]%.0f[/color]  " % [C_WHITE, C_CYAN, fps]
+		bb += "[%s]Obj:[/color] [%s]%d[/color]  " % [C_WHITE, C_CYAN, obj_count]
+		bb += "[%s]Av:[/color] [%s]%d[/color]  " % [C_WHITE, C_CYAN, avatar_count]
+		bb += "[%s]Lights:[/color] [%s]%d/%d[/color]  " % [C_WHITE, C_CYAN, lights_active, lights_total]
+		bb += "[%s]VRAM:[/color] [%s]%.0fMB[/color]" % [C_WHITE, C_CYAN, (tex_mem + buf_mem) / 1048576.0]
+		bb += "  |  "
+		# Textures — Godot side
+		bb += "[%s]Tex:[/color] " % C_WHITE
+		bb += "[%s]%d done[/color]  " % [C_GREEN, tex_cached]
+		if tex_loading > 0:
+			bb += "[%s]%d decoding[/color]  " % [C_YELLOW, tex_loading]
+		if tex_waiting > 0:
+			bb += "[%s]%d placeholder[/color]  " % [C_BLUE, tex_waiting]
+		if tex_failed > 0:
+			bb += "[%s]%d FAILED[/color]  " % [C_RED, tex_failed]
+		# Textures — Electron side
+		var e_tex_busy: int = e_tex_dl + e_tex_q + e_tex_dec + e_tex_gpu
+		if e_tex_busy > 0 or e_tex_done > 0 or e_tex_fail > 0:
+			bb += "[%s]DL:[/color] " % C_WHITE
+			if e_tex_dl > 0:
+				bb += "[%s]%d active[/color] " % [C_YELLOW, e_tex_dl]
+			if e_tex_q > 0:
+				bb += "[%s]%d queued[/color] " % [C_YELLOW, e_tex_q]
+			if e_tex_dec > 0:
+				bb += "[%s]%d dec[/color] " % [C_YELLOW, e_tex_dec]
+			if e_tex_gpu > 0:
+				bb += "[%s]%d gpu[/color] " % [C_YELLOW, e_tex_gpu]
+			bb += "[%s]%d sent[/color] " % [C_GREEN, e_tex_done]
+			if e_tex_fail > 0:
+				bb += "[%s]%d fail[/color] " % [C_RED, e_tex_fail]
+		bb += " |  "
+		# Meshes — Godot side
+		bb += "[%s]Mesh:[/color] " % C_WHITE
+		bb += "[%s]%d done[/color]  " % [C_GREEN, mesh_cached]
+		if mesh_loading > 0:
+			bb += "[%s]%d decoding[/color]  " % [C_YELLOW, mesh_loading]
+		if mesh_pending > 0:
+			bb += "[%s]%d pending[/color]  " % [C_BLUE, mesh_pending]
+		if mesh_failed > 0:
+			bb += "[%s]%d FAILED[/color]  " % [C_RED, mesh_failed]
+		# Meshes — Electron side
+		var e_mesh_busy: int = e_mesh_dl + e_mesh_q + e_sculpt_q
+		if e_mesh_busy > 0 or e_mesh_done > 0 or e_mesh_fail > 0:
+			bb += "[%s]DL:[/color] " % C_WHITE
+			if e_mesh_dl > 0:
+				bb += "[%s]%d active[/color] " % [C_YELLOW, e_mesh_dl]
+			if e_mesh_q > 0:
+				bb += "[%s]%d queued[/color] " % [C_YELLOW, e_mesh_q]
+			if e_sculpt_q > 0:
+				bb += "[%s]%d sculpt[/color] " % [C_YELLOW, e_sculpt_q]
+			bb += "[%s]%d sent[/color] " % [C_GREEN, e_mesh_done]
+			if e_mesh_fail > 0:
+				bb += "[%s]%d fail[/color] " % [C_RED, e_mesh_fail]
+		bb += " |  "
+		# Deferred + MsgQ
+		if e_deferred > 0:
+			bb += "[%s]Def:[/color] [%s]%d[/color]  " % [C_WHITE, C_BLUE, e_deferred]
+		if msg_q > 0:
+			bb += "[%s]MsgQ:[/color] [%s]%d[/color]" % [C_WHITE, C_YELLOW, msg_q]
+		_stats_label.text = bb
+
+	# Console log (plain text, once per second)
 	var tex_fail_str := ("  %d FAILED" % tex_failed) if tex_failed > 0 else ""
 	var mesh_fail_str := ("  %d FAILED" % mesh_failed) if mesh_failed > 0 else ""
-
-	# Update on-screen label (compact)
-	if _stats_bar.visible:
-		_stats_label.text = "FPS: %.0f  |  Obj: %d  Av: %d  Lights: %d/%d  |  VRAM: %.0fMB  |  Tex: %d done  %d decoding  %d placeholder%s  |  Mesh: %d done  %d decoding  %d pending%s  |  MsgQ: %d" % [
-			fps, obj_count, avatar_count, lights_active, lights_total,
-			(tex_mem + buf_mem) / 1048576.0,
-			tex_cached, tex_loading, tex_waiting, tex_fail_str,
-			mesh_cached, mesh_loading, mesh_pending, mesh_fail_str,
-			msg_q]
-
-	# Console log (detailed, once per second)
-	print("[Stats] FPS: %.0f | Obj: %d Av: %d Lights: %d/%d Mat: %d | VRAM: tex=%.1fMB buf=%.1fMB | Tex: %d cached %d decoding %d placeholder%s | Mesh: %d cached %d decoding %d pending%s | MsgQ: %d" % [
+	var e_tex_fail_str := ("  %d FAIL" % e_tex_fail) if e_tex_fail > 0 else ""
+	var e_mesh_fail_str := ("  %d FAIL" % e_mesh_fail) if e_mesh_fail > 0 else ""
+	print("[Stats] FPS: %.0f | Obj: %d Av: %d Lights: %d/%d Mat: %d | VRAM: tex=%.1fMB buf=%.1fMB | Tex: %d cached %d decoding %d placeholder%s [eDL:%d q:%d dec:%d gpu:%d done:%d%s] | Mesh: %d cached %d decoding %d pending%s [eDL:%d q:%d sculpt:%d done:%d%s] | Def: %d MsgQ: %d" % [
 		fps, obj_count, avatar_count, lights_active, lights_total, mat_count,
 		tex_mem / 1048576.0, buf_mem / 1048576.0,
 		tex_cached, tex_loading, tex_waiting, tex_fail_str,
+		e_tex_dl, e_tex_q, e_tex_dec, e_tex_gpu, e_tex_done, e_tex_fail_str,
 		mesh_cached, mesh_loading, mesh_pending, mesh_fail_str,
-		msg_q])
+		e_mesh_dl, e_mesh_q, e_sculpt_q, e_mesh_done, e_mesh_fail_str,
+		e_deferred, msg_q])
 
 
 func _is_high_priority(text: String) -> bool:
 	var prefix := text.left(40)
-	return '"avatar_' in prefix or '"self_id"' in prefix or '"object_update_p' in prefix or '"sitting_state"' in prefix
+	return '"avatar_' in prefix or '"self_id"' in prefix or '"object_update_p' in prefix or '"sitting_state"' in prefix or '"electron_stats"' in prefix
 
 
 func _handle_message(text: String) -> void:
@@ -395,6 +474,8 @@ func _handle_message(text: String) -> void:
 			scene_manager.handle_avatar_shape(msg)
 		"settings":
 			scene_manager.handle_settings(msg)
+		"electron_stats":
+			_electron_stats = msg
 		_:
 			push_warning("[Main] Unknown message type: %s" % msg_type)
 

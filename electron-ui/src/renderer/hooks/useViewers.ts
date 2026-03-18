@@ -61,12 +61,11 @@ export function useViewers() {
   const launchViewer = async (
     accountId: string,
     password?: string,
-    options?: { launchViewer?: boolean; startLocation?: string }
+    options?: { startLocation?: string }
   ): Promise<ViewerInstance> => {
     const instance = await ipcRenderer.invoke(IPC_CHANNELS.LAUNCH_VIEWER, {
       accountId,
       password,
-      launchViewer: options?.launchViewer,
       startLocation: options?.startLocation,
     });
     // Only add if not already added via status-update event
@@ -87,8 +86,8 @@ export function useViewers() {
     await ipcRenderer.invoke(IPC_CHANNELS.STOP_VIEWER, instanceId);
   };
 
-  const launchViewerForInstance = async (instanceId: string): Promise<void> => {
-    await ipcRenderer.invoke(IPC_CHANNELS.LAUNCH_VIEWER_FOR_INSTANCE, instanceId);
+  const launchFirestormForInstance = async (instanceId: string): Promise<void> => {
+    await ipcRenderer.invoke(IPC_CHANNELS.LAUNCH_FIRESTORM_FOR_INSTANCE, instanceId);
   };
 
   const launchGodotViewerForInstance = async (instanceId: string, vrMode = false): Promise<void> => {
@@ -101,7 +100,7 @@ export function useViewers() {
   return {
     instances,
     launchViewer,
-    launchViewerForInstance,
+    launchFirestormForInstance,
     launchGodotViewerForInstance,
     stopViewer,
     getInstanceForAccount,

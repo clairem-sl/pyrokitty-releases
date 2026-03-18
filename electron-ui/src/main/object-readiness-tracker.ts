@@ -117,24 +117,19 @@ export class ObjectReadinessTracker {
     this.meshToObjects.clear();
   }
 
-  /** Send object_complete for objects that have been pending too long (mesh never arrived). */
+  /** Log objects that have been pending a long time (mesh not yet arrived). */
   sweepTimeouts(maxAgeMs: number = 30000): void {
     const now = Date.now();
-    const timedOut: number[] = [];
+    let staleCount = 0;
 
-    for (const [localId, entry] of this.pending) {
-      if (now - entry.createdAt > maxAgeMs) {
-        timedOut.push(localId);
+    for (const [, entry] of this.pending) {
+      if (now - entry.createdAt > maxAgeMs && !entry.meshReady) {
+        staleCount++;
       }
     }
 
-    for (const localId of timedOut) {
-      const entry = this.pending.get(localId);
-      if (!entry) continue;
-      const meshStatus = entry.needsMesh ? (entry.meshReady ? 'ready' : 'MISSING') : 'n/a';
-      const ageS = ((now - entry.createdAt) / 1000).toFixed(1);
-      console.warn(`[ReadinessTracker] Timeout for localId=${localId} (mesh=${meshStatus} id=${entry.needsMesh?.slice(0, 8) || '-'} age=${ageS}s)`);
-      this.emit(localId);
+    if (staleCount > 0) {
+      console.log(`[ReadinessTracker] ${staleCount} objects still waiting for mesh (>${(maxAgeMs / 1000).toFixed(0)}s)`);
     }
   }
 

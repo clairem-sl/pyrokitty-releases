@@ -14,5 +14,6 @@ export interface IObjectStore
     getObjectByLocalID: (ID: number) => GameObject;
     getNumberOfObjects: () => number;
     getAllObjects: (options: GetObjectsOptions) => GameObject[];
+    forEachObject: (fn: (obj: GameObject, localId: number) => void) => void;
     setPersist: (persist: boolean) => void;
 }

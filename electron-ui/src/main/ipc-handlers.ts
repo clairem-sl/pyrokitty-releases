@@ -92,7 +92,6 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle(IPC_CHANNELS.LAUNCH_VIEWER, async (_, request: LaunchViewerRequest) => {
     return viewerManager.launchViewer(request.accountId, request.password, {
       startLocation: request.startLocation,
-      launchViewer: request.launchViewer,
     });
   });
 
@@ -100,8 +99,8 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     return viewerManager.stopViewer(instanceId);
   });
 
-  ipcMain.handle(IPC_CHANNELS.LAUNCH_VIEWER_FOR_INSTANCE, async (_, instanceId: string) => {
-    return viewerManager.launchViewerForInstance(instanceId);
+  ipcMain.handle(IPC_CHANNELS.LAUNCH_FIRESTORM_FOR_INSTANCE, async (_, instanceId: string) => {
+    return viewerManager.launchFirestormForInstance(instanceId);
   });
 
   ipcMain.handle(IPC_CHANNELS.LAUNCH_GODOT_VIEWER_FOR_INSTANCE, async (_, instanceId: string, vrMode = false) => {
@@ -109,8 +108,8 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
   });
 
   // MFA handlers
-  ipcMain.handle(IPC_CHANNELS.MFA_SUBMIT, async (_, instanceId: string, token: string) => {
-    return viewerManager.submitMfaToken(instanceId, token);
+  ipcMain.handle(IPC_CHANNELS.MFA_SUBMIT, async (_, instanceId: string, token: string, remember: boolean) => {
+    return viewerManager.submitMfaToken(instanceId, token, remember);
   });
 
   ipcMain.handle(IPC_CHANNELS.GET_INSTANCES, async () => {

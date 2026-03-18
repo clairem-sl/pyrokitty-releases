@@ -164,7 +164,7 @@ export const IPC_CHANNELS = {
 
   // Viewer operations
   LAUNCH_VIEWER: 'viewer:launch',
-  LAUNCH_VIEWER_FOR_INSTANCE: 'viewer:launch-for-instance',
+  LAUNCH_FIRESTORM_FOR_INSTANCE: 'viewer:launch-firestorm-for-instance',
   LAUNCH_GODOT_VIEWER_FOR_INSTANCE: 'viewer:launch-godot-for-instance',
   STOP_VIEWER: 'viewer:stop',
   GET_INSTANCES: 'viewer:instances',
@@ -257,7 +257,6 @@ export interface LaunchViewerRequest {
   accountId: string;
   password?: string; // Required if account doesn't have saved password
   startLocation?: string; // 'home', 'last', or 'uri:RegionName&x&y&z'
-  launchViewer?: boolean; // Default true - set to false to stay in metaverse-only mode
 }
 
 export interface AddAccountRequest {

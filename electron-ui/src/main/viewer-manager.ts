@@ -58,7 +58,7 @@ export class ViewerManager extends EventEmitter {
   /**
    * Launch a session - logs in via node-metaverse first, then optionally hands off to viewer
    */
-  async launchViewer(accountId: string, password?: string, options?: { startLocation?: string; launchViewer?: boolean }): Promise<ViewerInstance> {
+  async launchViewer(accountId: string, password?: string, options?: { startLocation?: string }): Promise<ViewerInstance> {
     // Check if already running
     const existing = this.getInstanceForAccount(accountId);
     if (existing) {
@@ -85,7 +85,6 @@ export class ViewerManager extends EventEmitter {
 
     const wsPort = this.getNextWsPort();
     const instanceId = `viewer_${Date.now()}`;
-    const shouldLaunchViewer = options?.launchViewer !== false;
 
     // Create instance record
     const instance: ViewerInstance = {
@@ -148,22 +147,6 @@ export class ViewerManager extends EventEmitter {
         console.warn(`[ViewerManager] Voice connect failed (non-fatal):`, err);
       }
 
-      // Step 2: If viewer launch is requested, launch with CLI login
-      // (Firestorm logging in will auto-disconnect node-metaverse)
-      if (shouldLaunchViewer) {
-        // Store whether viewer launch was requested so submitMfaToken can continue
-        (instance as any)._pendingViewerLaunch = true;
-        await this.launchViewerWithLogin(
-          instanceId,
-          instance,
-          account.firstName,
-          account.lastName,
-          loginPassword,
-          grid.nick,
-          wsPort
-        );
-      }
-
       return instance;
 
     } catch (error) {
@@ -171,7 +154,6 @@ export class ViewerManager extends EventEmitter {
       const mc = metaverseConnectionManager.get(instanceId);
       if (mc?.connectionState === 'mfa_pending') {
         console.log(`[ViewerManager] MFA required for ${account.firstName} ${account.lastName}`);
-        (instance as any)._pendingViewerLaunch = shouldLaunchViewer;
         return instance;
       }
       console.error(`[ViewerManager] Launch failed:`, error);
@@ -185,7 +167,7 @@ export class ViewerManager extends EventEmitter {
    * Firestorm will log in with CLI params, which automatically disconnects node-metaverse.
    * When viewer exits, we re-login to node-metaverse.
    */
-  async launchViewerForInstance(instanceId: string): Promise<void> {
+  async launchFirestormForInstance(instanceId: string): Promise<void> {
     const instance = this.instances.get(instanceId);
     if (!instance) {
       throw new Error('Instance not found');
@@ -229,7 +211,7 @@ export class ViewerManager extends EventEmitter {
     console.log(`[ViewerManager] Launching viewer for ${account.firstName} ${account.lastName}`);
 
     // Launch viewer with standard CLI login - this will auto-disconnect node-metaverse
-    await this.launchViewerWithLogin(
+    await this.launchFirestormWithLogin(
       instanceId,
       instance,
       account.firstName,
@@ -313,7 +295,7 @@ export class ViewerManager extends EventEmitter {
    * Firestorm logs in normally, which auto-disconnects node-metaverse.
    * WebSocket is used only for chat relay.
    */
-  private async launchViewerWithLogin(
+  private async launchFirestormWithLogin(
     instanceId: string,
     instance: ViewerInstance,
     firstName: string,
@@ -676,9 +658,9 @@ export class ViewerManager extends EventEmitter {
   }
 
   /**
-   * Submit an MFA token for a pending instance. Completes login and optionally launches viewer.
+   * Submit an MFA token for a pending instance. Completes login.
    */
-  async submitMfaToken(instanceId: string, token: string): Promise<void> {
+  async submitMfaToken(instanceId: string, token: string, remember: boolean = false): Promise<void> {
     const instance = this.instances.get(instanceId);
     if (!instance) {
       throw new Error('Instance not found');
@@ -694,11 +676,13 @@ export class ViewerManager extends EventEmitter {
     console.log(`[ViewerManager] MFA login successful`);
     this.updateStatus(instanceId, 'running');
 
-    // Save mfaHash for future logins
-    const account = accountManager.getAccount(instance.accountId);
-    const mfaHash = metaverse.getLastMfaHash();
-    if (account && mfaHash) {
-      accountManager.updateAccount(account.id, { mfaHash });
+    // Save mfaHash for future logins (only if user opted in)
+    if (remember) {
+      const account = accountManager.getAccount(instance.accountId);
+      const mfaHash = metaverse.getLastMfaHash();
+      if (account && mfaHash) {
+        accountManager.updateAccount(account.id, { mfaHash });
+      }
     }
 
     // Set region name
@@ -707,25 +691,6 @@ export class ViewerManager extends EventEmitter {
       this.updateRegionName(instanceId, regionName);
     }
 
-    // If viewer launch was pending before MFA, continue with it
-    const pendingViewerLaunch = (instance as any)._pendingViewerLaunch;
-    delete (instance as any)._pendingViewerLaunch;
-
-    if (pendingViewerLaunch && account) {
-      const grid = gridManager.getGrid(instance.gridId);
-      const password = this.sessionPasswords.get(instanceId) || account.password;
-      if (grid && password) {
-        await this.launchViewerWithLogin(
-          instanceId,
-          instance,
-          account.firstName,
-          account.lastName,
-          password,
-          grid.nick,
-          instance.wsPort
-        );
-      }
-    }
   }
 
   private updateStatus(instanceId: string, status: ViewerStatus): void {

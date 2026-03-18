@@ -16,7 +16,7 @@ type View = 'account' | 'add-account';
 export const App: React.FC = () => {
   const { grids } = useGrids();
   const { accounts, addAccount, updateAccount, removeAccount, getAccount } = useAccounts();
-  const { instances, launchViewer, launchViewerForInstance, launchGodotViewerForInstance, stopViewer, getInstanceForAccount, isRunning } = useViewers();
+  const { instances, launchViewer, launchFirestormForInstance, launchGodotViewerForInstance, stopViewer, getInstanceForAccount, isRunning } = useViewers();
 
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<View>('account');
@@ -36,9 +36,9 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  const handleMfaSubmit = async (token: string) => {
+  const handleMfaSubmit = async (token: string, remember: boolean) => {
     if (!mfaState) return;
-    await ipcRenderer.invoke(IPC_CHANNELS.MFA_SUBMIT, mfaState.instanceId, token);
+    await ipcRenderer.invoke(IPC_CHANNELS.MFA_SUBMIT, mfaState.instanceId, token, remember);
     setMfaState(null);
   };
 
@@ -100,8 +100,7 @@ export const App: React.FC = () => {
       if (startLocationType) updates.startLocationType = startLocationType;
       if (Object.keys(updates).length > 0) await updateAccount(selectedAccountId, updates);
 
-      // Pass launchViewer: false to only login to metaverse
-      await launchViewer(selectedAccountId, password, { launchViewer: false, startLocation });
+      await launchViewer(selectedAccountId, password, { startLocation });
       setError(null);
     } catch (err: any) {
       setError(err.message || 'Failed to login');
@@ -153,8 +152,8 @@ export const App: React.FC = () => {
                 onSelectAccount={handleSelectAccount}
                 onAddAccount={handleAddAccount}
                 onStopInstance={handleStopViewer}
-                onLoginAccount={(accountId) => launchViewer(accountId, undefined, { launchViewer: false })}
-                onLaunchViewer={launchViewerForInstance}
+                onLoginAccount={(accountId) => launchViewer(accountId)}
+                onLaunchFirestorm={launchFirestormForInstance}
                 onLaunchGodotViewer={launchGodotViewerForInstance}
               />
             </div>

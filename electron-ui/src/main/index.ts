@@ -220,7 +220,7 @@ async function createWindow(): Promise<void> {
             return;
           }
           // Look for existing saved account
-          let account = accountManager.getAllAccounts().find(
+          const account = accountManager.getAllAccounts().find(
             a => a.firstName.toLowerCase() === cliLogin.firstName.toLowerCase()
               && a.lastName.toLowerCase() === cliLogin.lastName.toLowerCase()
               && a.gridId === grid.id
@@ -255,7 +255,7 @@ async function createWindow(): Promise<void> {
           console.log(`[AutoLogin] Launching ${account.firstName} ${account.lastName}...`);
         }
 
-        await viewerManager.launchViewer(accountId, password, { launchViewer: false });
+        await viewerManager.launchViewer(accountId, password);
         console.log('[AutoLogin] Login complete');
         // Auto-launch Godot viewer after a brief delay
         const instances = viewerManager.getInstances();
