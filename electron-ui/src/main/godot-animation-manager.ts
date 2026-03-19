@@ -2,6 +2,8 @@
  * Manages animation batching for avatars and animesh objects.
  * Deduplicates animation sets, waits for all fetches to complete,
  * then sends a single batch to Godot.
+ *
+ * All tracking is keyed by object/avatar UUID strings (not numeric localIds).
  */
 
 import type { Bot } from '../../node-metaverse/dist/lib';
@@ -12,10 +14,10 @@ import type { AnimationFetchQueue } from './animation-fetch-queue';
 import type { SendFn } from './godot-bridge-types';
 
 export class GodotAnimationManager {
-  private animRootPending = new Map<number, Set<string>>(); // localId → set of anim UUIDs needed
-  private animRootLastSet = new Map<number, string>(); // localId → sorted anim ID string (for dedup)
+  private animRootPending = new Map<string, Set<string>>(); // UUID → set of anim UUIDs needed
+  private animRootLastSet = new Map<string, string>(); // UUID → sorted anim ID string (for dedup)
   private animeshAnimState = new Map<string, { animId: string; sequenceId: number }[]>(); // UUID → latest animation list
-  private animeshObjects = new Map<string, number>(); // UUID → localId for animesh objects
+  private animeshObjects = new Set<string>(); // UUIDs of known animesh objects
   private avatarAnimState = new Map<string, { animId: string; sequenceId: number }[]>(); // avatar UUID → latest animation list
   private animationFetchQueue: AnimationFetchQueue | null = null;
   private connected = false;
@@ -23,7 +25,7 @@ export class GodotAnimationManager {
   constructor(
     private bot: Bot,
     private send: SendFn,
-    private avatarLocalIds: Map<string, number>,
+    private trackedAvatars: Set<string>,
   ) {}
 
   /** Seed from MetaverseConnection's early ObjectAnimation buffer */
@@ -42,14 +44,14 @@ export class GodotAnimationManager {
     this.animationFetchQueue = queue;
   }
 
-  /** Register an animesh object UUID → localId mapping */
-  registerAnimeshObject(uuid: string, localId: number): void {
-    this.animeshObjects.set(uuid, localId);
+  /** Register a UUID as an animesh object */
+  registerAnimeshObject(uuid: string): void {
+    this.animeshObjects.add(uuid);
   }
 
-  /** Get localId for an animesh object by UUID */
-  getAnimeshLocalId(uuid: string): number | undefined {
-    return this.animeshObjects.get(uuid);
+  /** Check if a UUID is a known animesh object */
+  isAnimeshObject(uuid: string): boolean {
+    return this.animeshObjects.has(uuid);
   }
 
   /** Get buffered object animation state */
@@ -79,12 +81,12 @@ export class GodotAnimationManager {
 
         this.animeshAnimState.set(senderUuid, animations);
 
-        const localId = this.animeshObjects.get(senderUuid);
-        if (localId !== undefined && this.connected) {
-          console.log(`[Animesh] ObjectAnimation for localId=${localId} uuid=${senderUuid.slice(0, 8)}: ${animations.length} anims`);
-          this.updateAnimSet(localId, animations.map(a => a.animId));
+        const isKnown = this.animeshObjects.has(senderUuid);
+        if (isKnown && this.connected) {
+          console.log(`[Animesh] ObjectAnimation for uuid=${senderUuid.slice(0, 8)}: ${animations.length} anims`);
+          this.updateAnimSet(senderUuid, animations.map(a => a.animId));
         } else {
-          console.log(`[Animesh] Buffering ObjectAnimation for ${senderUuid.slice(0, 8)} (known=${localId !== undefined}, connected=${this.connected})`);
+          console.log(`[Animesh] Buffering ObjectAnimation for ${senderUuid.slice(0, 8)} (known=${isKnown}, connected=${this.connected})`);
         }
       } catch (err) {
         console.error(`[Animesh] ObjectAnimation handler error:`, (err as Error).message);
@@ -107,11 +109,11 @@ export class GodotAnimationManager {
 
         this.avatarAnimState.set(avatarId, animations);
 
-        const localId = this.avatarLocalIds.get(avatarId);
-        if (localId !== undefined && this.connected) {
-          this.updateAnimSet(localId, animations.map(a => a.animId));
+        const isTracked = this.trackedAvatars.has(avatarId);
+        if (isTracked && this.connected) {
+          this.updateAnimSet(avatarId, animations.map(a => a.animId));
         } else {
-          console.log(`[AnimDebug] AvatarAnimation for ${avatarId.slice(0, 8)}: localId=${localId} connected=${this.connected} (buffered only)`);
+          console.log(`[AnimDebug] AvatarAnimation for ${avatarId.slice(0, 8)}: tracked=${isTracked} connected=${this.connected} (buffered only)`);
         }
       } catch (err) {
         console.error(`[AnimDebug] AvatarAnimation handler error:`, (err as Error).message);
@@ -120,65 +122,52 @@ export class GodotAnimationManager {
   }
 
   /**
-   * Update the animation set for a root (avatar or animesh object).
+   * Update the animation set for a root (avatar or animesh object) identified by UUID.
    * Dedup: skip if identical to previous set.
    * Batch: request all fetches, then only notify Godot when ALL are cached.
    */
-  updateAnimSet(localId: number, animIds: string[]): void {
+  updateAnimSet(uuid: string, animIds: string[]): void {
     const sorted = [...animIds].sort();
     const key = sorted.join(',');
-    if (this.animRootLastSet.get(localId) === key) return;
-    this.animRootLastSet.set(localId, key);
-    console.log(`[AnimDebug] updateAnimSet localId=${localId}: ${animIds.length} anims [${animIds.map(id => id.slice(0,8)).join(', ')}]`);
+    if (this.animRootLastSet.get(uuid) === key) return;
+    this.animRootLastSet.set(uuid, key);
+    console.log(`[AnimDebug] updateAnimSet uuid=${uuid.slice(0, 8)}: ${animIds.length} anims [${animIds.map(id => id.slice(0,8)).join(', ')}]`);
 
     const needed = new Set(sorted.filter(id => id.length > 0));
-    this.animRootPending.set(localId, needed);
+    this.animRootPending.set(uuid, needed);
 
     if (this.animationFetchQueue) {
       for (const animId of needed) {
-        this.animationFetchQueue.request(animId, localId);
+        this.animationFetchQueue.request(animId, 0);
       }
     }
 
-    this.checkAnimBatchReadyForRoot(localId);
+    this.checkAnimBatchReadyForRoot(uuid);
   }
 
   /** Called when a single animation finishes fetching — check all roots that need it */
   checkAnimBatchReady(animUuid: string): void {
-    for (const [localId, needed] of this.animRootPending) {
+    for (const [uuid, needed] of this.animRootPending) {
       if (needed.has(animUuid)) {
-        this.checkAnimBatchReadyForRoot(localId);
+        this.checkAnimBatchReadyForRoot(uuid);
       }
     }
   }
 
-  /** Reverse-lookup UUID for a localId (checks animesh objects and avatar maps) */
-  private getUuidForLocalId(localId: number): string {
-    for (const [uuid, lid] of this.animeshObjects) {
-      if (lid === localId) return uuid;
-    }
-    for (const [uuid, lid] of this.avatarLocalIds) {
-      if (lid === localId) return uuid;
-    }
-    return '';
-  }
-
   /** Check if all animations for a specific root are cached. If so, send batch to Godot. */
-  private checkAnimBatchReadyForRoot(localId: number): void {
-    const needed = this.animRootPending.get(localId);
+  private checkAnimBatchReadyForRoot(uuid: string): void {
+    const needed = this.animRootPending.get(uuid);
     if (!needed || !this.connected) {
-      console.log(`[AnimDebug] checkBatchReady localId=${localId}: skip (needed=${needed?.size ?? 'null'} connected=${this.connected})`);
+      console.log(`[AnimDebug] checkBatchReady uuid=${uuid.slice(0, 8)}: skip (needed=${needed?.size ?? 'null'} connected=${this.connected})`);
       return;
     }
 
     // Empty animation set — send empty batch so Godot clears the old animations
     if (needed.size === 0 || !this.animationFetchQueue) {
-      this.animRootPending.delete(localId);
-      const uuid = this.getUuidForLocalId(localId);
-      console.log(`[Animesh] Sending empty batch for localId=${localId} uuid=${uuid.slice(0, 8)} (animations cleared)`);
+      this.animRootPending.delete(uuid);
+      console.log(`[Animesh] Sending empty batch for uuid=${uuid.slice(0, 8)} (animations cleared)`);
       this.send({
         type: 'animations_batch',
-        localId,
         uuid,
         animations: {},
       });
@@ -204,14 +193,13 @@ export class GodotAnimationManager {
       return; // Nothing cached yet at all — wait for at least one
     }
     if (!stillFetching) {
-      this.animRootPending.delete(localId);
+      this.animRootPending.delete(uuid);
     }
 
-    const uuid = this.getUuidForLocalId(localId);
     // Check if this is the self avatar
     let isSelf = false;
     try { isSelf = (uuid === this.bot.agent?.agentID?.toString()); } catch { /* empty */ }
-    console.log(`[Animesh] Batch ready for localId=${localId} uuid=${uuid.slice(0, 8)}: ${Object.keys(allData).map(id => id.slice(0, 8)).join(', ')}`);
+    console.log(`[Animesh] Batch ready for uuid=${uuid.slice(0, 8)}: ${Object.keys(allData).map(id => id.slice(0, 8)).join(', ')}`);
     if (isSelf) {
       const animSummary = Object.entries(allData).map(([id, d]: [string, any]) =>
         `${id.slice(0, 8)}(${d.joints?.length ?? 0}j,${Number(d.duration).toFixed(1)}s,pri=${d.priority ?? '?'})`
@@ -220,29 +208,23 @@ export class GodotAnimationManager {
     }
     this.send({
       type: 'animations_batch',
-      localId,
       uuid,
       animations: allData,
     });
   }
 
-  /** Clean up state for a deleted object localId */
-  cleanupLocalId(localId: number): void {
-    this.animRootPending.delete(localId);
-    this.animRootLastSet.delete(localId);
-    for (const [uuid, lid] of this.animeshObjects) {
-      if (lid === localId) { this.animeshObjects.delete(uuid); break; }
-    }
+  /** Clean up state for a deleted object by UUID */
+  cleanupUuid(uuid: string): void {
+    this.animRootPending.delete(uuid);
+    this.animRootLastSet.delete(uuid);
+    this.animeshObjects.delete(uuid);
   }
 
   /** Clean up state for a departed avatar */
   cleanupAvatar(id: string): void {
     this.avatarAnimState.delete(id);
-    const avLocalId = this.avatarLocalIds.get(id);
-    if (avLocalId !== undefined) {
-      this.animRootPending.delete(avLocalId);
-      this.animRootLastSet.delete(avLocalId);
-    }
+    this.animRootPending.delete(id);
+    this.animRootLastSet.delete(id);
   }
 
   /** Light reset for region change — clear state but keep queues alive */

@@ -18,8 +18,9 @@ import { app } from 'electron';
 import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import type { Bot } from '../../node-metaverse/dist/lib';
+import type { Region } from '../../node-metaverse/dist/lib/classes/Region';
 import { Message } from '../../node-metaverse/dist/lib/enums/Message';
-import { TeleportEventType } from '../../node-metaverse/dist/lib/enums/TeleportEventType';
+import type { SceneManager, ViewerAdapter } from './scene-manager';
 import { MeshFetchQueue } from './mesh-fetch-queue';
 import { TextureFetchQueue } from './texture-fetch-queue';
 import { SculptFetchQueue } from './sculpt-fetch-queue';
@@ -95,10 +96,9 @@ export class GodotBridge extends EventEmitter {
   private connected = false;
   private vrMode: boolean;
 
-  // Shared state (passed to sub-modules)
-  private trackedObjects = new Set<number>();
+  // Shared state (passed to sub-modules) — keyed by UUID for multi-region safety
+  private trackedObjects = new Set<string>();
   private trackedAvatars = new Set<string>();
-  private avatarLocalIds = new Map<string, number>();
 
   // Sub-modules
   private inputHandler: GodotInputHandler;
@@ -108,6 +108,7 @@ export class GodotBridge extends EventEmitter {
   private avatarManager: GodotAvatarManager;
 
   // Managers (already extracted)
+  private sceneManager: SceneManager;
   private environmentMgr: GodotEnvironmentManager | null = null;
   private updateCoalescer: GodotUpdateCoalescer | null = null;
 
@@ -128,9 +129,10 @@ export class GodotBridge extends EventEmitter {
   private killSweepTimer: ReturnType<typeof setInterval> | null = null;
   private electronStatsCounter = 0;
 
-  constructor(bot: Bot, options: { vrMode?: boolean; objectAnimationBuffer?: Map<string, { animId: string; sequenceId: number }[]>; avatarAppearanceBuffer?: Map<string, string[]>; visualParamBuffer?: Map<string, number[]> } = {}) {
+  constructor(bot: Bot, sceneManager: SceneManager, options: { vrMode?: boolean; objectAnimationBuffer?: Map<string, { animId: string; sequenceId: number }[]>; avatarAppearanceBuffer?: Map<string, string[]>; visualParamBuffer?: Map<string, number[]> } = {}) {
     super();
     this.bot = bot;
+    this.sceneManager = sceneManager;
     this.port = 0;
     this.vrMode = options.vrMode ?? false;
 
@@ -138,15 +140,15 @@ export class GodotBridge extends EventEmitter {
 
     // Initialize sub-modules
     this.inputHandler = new GodotInputHandler(bot, send);
-    this.animationManager = new GodotAnimationManager(bot, send, this.avatarLocalIds);
+    this.animationManager = new GodotAnimationManager(bot, send, this.trackedAvatars);
     this.materialPipeline = new GodotMaterialPipeline(bot, send, this.trackedObjects);
     this.objectSender = new GodotObjectSender(
-      bot, send, this.trackedObjects, this.avatarLocalIds,
+      bot, send, this.trackedObjects, this.trackedAvatars,
       this.materialPipeline, this.animationManager,
     );
     this.avatarManager = new GodotAvatarManager(
       bot, send, this.trackedObjects, this.trackedAvatars,
-      this.avatarLocalIds, this.animationManager,
+      this.animationManager,
     );
     this.avatarManager.setObjectSender(this.objectSender);
     this.objectSender.setAvatarManager(this.avatarManager);
@@ -391,9 +393,16 @@ export class GodotBridge extends EventEmitter {
 
     this.objectSender.initQueues(this.meshFetchQueue, this.sculptFetchQueue, this.textureFetchQueue, this.updateCoalescer);
 
-    // Send initial snapshot and subscribe to events
-    this.objectSender.sendInitialSnapshot((avatar, id) => this.avatarManager.sendAvatarCreate(avatar, id));
+    // Subscribe to events + register with SceneManager
     this.subscribeToEvents();
+
+    // Send initial state from all regions (terrain, objects, avatars)
+    this.sceneManager.sendInitialState(this.viewerAdapter);
+
+    // Main region environment (polled on timer, not event-driven)
+    this.environmentMgr.sendTerrain().catch(err => {
+      console.error('[GodotBridge] Error sending terrain:', err);
+    });
 
     // Replay sitting state if we were seated before Godot restarted
     const sitState = this.inputHandler.getSitState();
@@ -411,11 +420,6 @@ export class GodotBridge extends EventEmitter {
       }
       console.log(`[GodotBridge] Replayed sitting state on reconnect: seatLocalId=${sitState.seatLocalId}`);
     }
-
-    // Send terrain + environment async
-    this.environmentMgr.sendTerrain().catch(err => {
-      console.error('[GodotBridge] Error sending terrain:', err);
-    });
   }
 
   private handleGodotMessage(msg: any): void {
@@ -429,13 +433,13 @@ export class GodotBridge extends EventEmitter {
         this.lastGodotStats = msg;
         break;
       case 'request_object_properties':
-        this.inputHandler.handleRequestObjectProperties(msg.localId);
+        this.inputHandler.handleRequestObjectProperties(msg.uuid);
         break;
       case 'set_object_name':
-        this.inputHandler.handleSetObjectName(msg.localId, msg.name);
+        this.inputHandler.handleSetObjectName(msg.uuid, msg.name);
         break;
       case 'set_object_description':
-        this.inputHandler.handleSetObjectDescription(msg.localId, msg.description);
+        this.inputHandler.handleSetObjectDescription(msg.uuid, msg.description);
         break;
       case 'object_touch':
         this.inputHandler.handleObjectTouch(msg);
@@ -501,38 +505,116 @@ export class GodotBridge extends EventEmitter {
     }
   }
 
-  private subscribeToEvents(): void {
-    const events = this.bot.clientEvents;
+  /** ViewerAdapter implementation — called by SceneManager for all regions. */
+  private viewerAdapter: ViewerAdapter = {
+    onWorldOrigin: (originX: number, originY: number) => {
+      this.send({ type: 'world_origin', originX, originY });
+    },
 
-    // New objects
-    const newObjSub = events.onNewObjectEvent.subscribe((event) => {
+    onTerrain: (region: Region) => {
+      const offset = this.sceneManager.getRegionOffset(region);
+      this.environmentMgr?.sendRegionTerrain(region, offset.x, offset.y);
+    },
+
+    onNewObject: (event) => {
       const obj = event.object;
       if (obj.PCode === 47) return;
       if (isHudAttachment(obj)) return;
 
-      const parentId = obj.ParentID || 0;
-      this.objectSender.sendObject(obj, parentId);
-
-      if (parentId === 0) {
+      const parentLocalId = obj.ParentID || 0;
+      let parentUuid = '';
+      if (parentLocalId > 0) {
         try {
-          const children = this.bot.currentRegion.objects.getObjectsByParent(obj.ID);
-          for (const child of children) {
-            if (child.PCode === 47) continue;
-            if (isHudAttachment(child)) continue;
-            if (!this.trackedObjects.has(child.ID)) {
-              this.objectSender.sendObject(child, obj.ID);
+          const parentObj = obj.region?.objects?.getObjectByLocalID(parentLocalId);
+          parentUuid = parentObj?.FullID?.toString() || '';
+        } catch { /* parent may not be in store */ }
+      }
+      this.objectSender.sendObject(obj, parentUuid);
+
+      if (parentLocalId === 0) {
+        try {
+          const region = obj.region;
+          if (region) {
+            const objUuid = obj.FullID?.toString() || '';
+            const children = region.objects.getObjectsByParent(obj.ID);
+            for (const child of children) {
+              if (child.PCode === 47) continue;
+              if (isHudAttachment(child)) continue;
+              const childUuid = child.FullID?.toString() || '';
+              if (childUuid && !this.trackedObjects.has(childUuid)) {
+                this.objectSender.sendObject(child, objUuid);
+              }
             }
           }
         } catch { /* ignore */ }
       }
-    });
-    this.subscriptions.push(newObjSub);
+    },
 
-    // Terse + full updates
+    onObjectUpdated: () => {
+      // Handled by updateCoalescer (Godot-specific batching)
+    },
+
+    onObjectUpdatedTerse: () => {
+      // Handled by updateCoalescer (Godot-specific batching)
+    },
+
+    onObjectResolved: () => {
+      // Already handled via ClientEvents subscription in ObjectStoreLite
+    },
+
+    onObjectSelected: () => {
+      // Not currently used by Godot
+    },
+
+    onAvatarEntered: (avatar) => {
+      try {
+        const id = avatar.getKey().toString();
+        if (!id || this.trackedAvatars.has(id)) return;
+        this.avatarManager.sendAvatarCreate(avatar, id);
+      } catch { /* avatar may not be fully initialized yet */ }
+    },
+
+    onEnvironment: () => {
+      // Environment is polled on a timer, not event-driven for Godot
+    },
+
+    onParcelOverlay: () => {
+      // Not currently visualized in Godot
+    },
+
+    onRegionChange: () => {
+      console.log(`[GodotBridge] Cross-region teleport detected, clearing scene`);
+      this.handleRegionChange();
+    },
+
+    onInitialState: (allRegions: Region[]) => {
+      // Send terrain for all regions that have it
+      for (const region of allRegions) {
+        if (region.terrainComplete) {
+          const offset = this.sceneManager.getRegionOffset(region);
+          this.environmentMgr?.sendRegionTerrain(region, offset.x, offset.y);
+        }
+      }
+
+      // Send objects + avatars from all regions
+      this.objectSender.sendInitialSnapshot(
+        (avatar, id) => this.avatarManager.sendAvatarCreate(avatar, id),
+        allRegions,
+      );
+    },
+  };
+
+  private subscribeToEvents(): void {
+    const events = this.bot.clientEvents;
+
+    // Register with SceneManager for multi-region events
+    this.sceneManager.addAdapter(this.viewerAdapter);
+
+    // Godot-specific: update coalescer (16ms batching for terse/full updates)
     const updateSubs = this.updateCoalescer!.subscribe(events);
     this.subscriptions.push(...updateSubs);
 
-    // Standing detection: onObjectUpdatedEvent DOES fire for the avatar when ParentID → 0.
+    // Godot-specific: standing detection
     // (Sit detection is handled by AvatarSitResponse in subscribeToCircuit())
     const selfStandSub = events.onObjectUpdatedEvent.subscribe((event: any) => {
       const obj = event.object;
@@ -548,26 +630,6 @@ export class GodotBridge extends EventEmitter {
       console.log('[GodotBridge] Self avatar stood up (ParentID → 0)');
     });
     this.subscriptions.push(selfStandSub);
-
-    // Avatar enter
-    const avatarEnterSub = events.onAvatarEnteredRegion.subscribe((avatar) => {
-      try {
-        const id = avatar.getKey().toString();
-        if (!id || this.trackedAvatars.has(id)) return;
-        this.avatarManager.sendAvatarCreate(avatar, id);
-      } catch { /* avatar may not be fully initialized yet */ }
-    });
-    this.subscriptions.push(avatarEnterSub);
-
-    // Cross-region teleport: clear old scene and re-sync
-    const teleportSub = events.onTeleportEvent.subscribe((e) => {
-      console.log(`[GodotBridge] TeleportEvent: type=${e.eventType} simIP=${e.simIP} message=${e.message}`);
-      if (e.eventType === TeleportEventType.TeleportCompleted && e.simIP !== 'local') {
-        console.log(`[GodotBridge] Cross-region teleport detected, clearing scene`);
-        this.handleRegionChange();
-      }
-    });
-    this.subscriptions.push(teleportSub);
 
     // Kill sweep + deferred promotion: every 2s
     let memLogCounter = 0;
@@ -730,7 +792,6 @@ export class GodotBridge extends EventEmitter {
     // Reset bridge-side tracking
     this.trackedObjects.clear();
     this.trackedAvatars.clear();
-    this.avatarLocalIds.clear();
 
     // Reset sub-module state (without destroying fetch queues — they're reused)
     this.objectSender.clearForRegionChange();
@@ -754,16 +815,14 @@ export class GodotBridge extends EventEmitter {
 
       if (!this.connected) return;
 
-      // Re-send terrain + water + environment immediately
+      // Re-send terrain + environment + objects from all regions
       this.environmentMgr?.sendTerrain().catch(err => {
         console.error('[GodotBridge] Error sending terrain after region change:', err);
       });
 
-      // Send initial snapshot — objects arriving via onNewObjectEvent are handled
-      // live (no hold). The snapshot catches anything already in the store.
       try {
         console.log('[GodotBridge] New region ready, sending initial snapshot');
-        this.objectSender.sendInitialSnapshot((avatar, id) => this.avatarManager.sendAvatarCreate(avatar, id));
+        this.sceneManager.sendInitialState(this.viewerAdapter);
       } catch (e) {
         console.error('[GodotBridge] Failed to send snapshot after region change:', e);
       }
@@ -781,6 +840,8 @@ export class GodotBridge extends EventEmitter {
   }
 
   private cleanup(): void {
+    this.sceneManager.removeAdapter(this.viewerAdapter);
+
     for (const sub of this.subscriptions) {
       sub.unsubscribe();
     }

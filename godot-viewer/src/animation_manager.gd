@@ -19,7 +19,7 @@ var _cv_default_scales: Dictionary = {}  # cvName -> Vector3 (SL space)
 # When the winning animation for a joint changes, we slerp from the old
 # rotation to the new one to avoid visual snapping (mimics Firestorm's
 # ease-in/ease-out crossfade).
-var _prev_sl_local_rot: Dictionary = {}  # root_id -> { joint_name -> Quaternion }
+var _prev_sl_local_rot: Dictionary = {}  # root_uuid -> { joint_name -> Quaternion }
 const _ANIM_BLEND_SPEED: float = 10.0  # ~0.2s to 95% convergence
 
 # Skeleton evaluation runs at 30 Hz — the visual difference vs 72 Hz is
@@ -38,23 +38,20 @@ func _init(scene_manager) -> void:
 ## Contains the full set of animations with their parsed keyframe data.
 ## Replaces the old object_animation + avatar_animation + animation_ready flow.
 func handle_animations_batch(msg: Dictionary) -> void:
-	var local_id: int = int(msg.get("localId", 0))
-	var msg_uuid: String = str(msg.get("uuid", ""))
-	if not msg_uuid.is_empty() and local_id > 0:
-		sm.object_uuid[local_id] = msg_uuid
+	var obj_uuid: String = str(msg.get("uuid", ""))
 	var animations: Dictionary = msg.get("animations", {})
-	if sm.object_mgr._is_self_avatar(local_id):
-		print("[SelfAvatar] animations_batch: localId=%d uuid=%s, %d animations, is_animesh_root=%s, has_shared_skel=%s" % [
-			local_id, sm.object_mgr._uuid_short(local_id), animations.size(),
-			str(sm.animesh_roots.has(local_id)),
-			str(sm.animesh_shared_skeleton.has(local_id))])
-	if local_id == 0:
+	if sm.object_mgr._is_self_avatar(obj_uuid):
+		print("[SelfAvatar] animations_batch: uuid=%s, %d animations, is_animesh_root=%s, has_shared_skel=%s" % [
+			obj_uuid.substr(0, 8), animations.size(),
+			str(sm.animesh_roots.has(obj_uuid)),
+			str(sm.animesh_shared_skeleton.has(obj_uuid))])
+	if obj_uuid.is_empty():
 		return
 
 	# TAG 100
 	# Empty batch = all animations stopped — clear eval state so old animation stops
 	if animations.is_empty():
-		var anim_root: int = sm.animesh_root_for.get(local_id, local_id)
+		var anim_root: String = sm.animesh_root_for.get(obj_uuid, obj_uuid)
 		sm.animesh_pending_anims.erase(anim_root)
 		sm.animesh_eval.erase(anim_root)
 		_prev_sl_local_rot.erase(anim_root)
@@ -64,8 +61,8 @@ func handle_animations_batch(msg: Dictionary) -> void:
 			for bi in range(shared_skel.get_bone_count()):
 				shared_skel.set_bone_pose_rotation(bi, Quaternion.IDENTITY)
 				shared_skel.set_bone_pose_position(bi, Vector3.ZERO)
-		if sm.object_mgr._is_self_avatar(local_id):
-			print("[SelfAvatar] Animations cleared for localId=%d" % local_id)
+		if sm.object_mgr._is_self_avatar(obj_uuid):
+			print("[SelfAvatar] Animations cleared for uuid=%s" % obj_uuid.substr(0, 8))
 		return
 
 	# Cache all animation data and build pending anim list
@@ -79,33 +76,33 @@ func handle_animations_batch(msg: Dictionary) -> void:
 		anim_ids.append(anim_id)
 
 	# Route animations to the correct root (worn animesh → avatar root)
-	var anim_root: int = sm.animesh_root_for.get(local_id, local_id)
-	if anim_root != local_id:
+	var anim_root: String = sm.animesh_root_for.get(obj_uuid, obj_uuid)
+	if anim_root != obj_uuid:
 		# Worn animesh: store separately so avatar batch updates don't overwrite
 		sm.animesh_worn_anims[anim_root] = sm.animesh_worn_anims.get(anim_root, []) as Array
 		for aid: String in anim_ids:
 			if not (sm.animesh_worn_anims[anim_root] as Array).has(aid):
 				(sm.animesh_worn_anims[anim_root] as Array).append(aid)
 	else:
-		sm.animesh_pending_anims[local_id] = anim_ids
+		sm.animesh_pending_anims[obj_uuid] = anim_ids
 
-	if sm.object_mgr._is_self_avatar(local_id) or sm.object_mgr._is_self_avatar(anim_root):
-		print("[SelfAvatar] Animations batch received: localId=%d root=%d, %d animations [%s]" % [local_id, anim_root, anim_ids.size(), ", ".join(anim_ids.map(func(a: String) -> String: return a.substr(0, 8)))])
+	if sm.object_mgr._is_self_avatar(obj_uuid) or sm.object_mgr._is_self_avatar(anim_root):
+		print("[SelfAvatar] Animations batch received: uuid=%s root=%s, %d animations [%s]" % [obj_uuid.substr(0, 8), anim_root.substr(0, 8), anim_ids.size(), ", ".join(anim_ids.map(func(a: String) -> String: return a.substr(0, 8)))])
 
 	# Trigger rebuild if shared skeleton exists for the root
 	if sm.animesh_shared_skeleton.has(anim_root):
 		_apply_pending_animations(anim_root)
 	elif sm.object_mgr._is_self_avatar(anim_root):
-		print("[SelfAvatar] Batch for root=%d: %d anims cached, but NO shared skeleton yet" % [anim_root, anim_ids.size()])
+		print("[SelfAvatar] Batch for root=%s: %d anims cached, but NO shared skeleton yet" % [anim_root.substr(0, 8), anim_ids.size()])
 
 
 ## Apply any pending animations to a specific animesh root.
 ## Merges all pending animations by per-joint priority and stores merged keyframe data
 ## for manual per-frame evaluation (required because SL composes bone rotations as
 ## world = local * parent, while Godot uses world = parent * local).
-func _apply_pending_animations(obj_id: int) -> void:
-	var root_id: int = sm.animesh_root_for.get(obj_id, obj_id)
-	if root_id == 0:
+func _apply_pending_animations(obj_uuid: String) -> void:
+	var root_id: String = sm.animesh_root_for.get(obj_uuid, obj_uuid)
+	if root_id.is_empty():
 		return
 	# Combine root's own animations with worn animesh animations
 	var pending_anims: Array = sm.animesh_pending_anims.get(root_id, []).duplicate()
@@ -131,10 +128,10 @@ func _apply_pending_animations(obj_id: int) -> void:
 
 	if available.is_empty():
 		if sm.object_mgr._is_self_avatar(root_id):
-			print("[SelfAvatar] _apply_pending root=%d uuid=%s: %d pending, 0 available, %d missing" % [root_id, sm.object_mgr._uuid_short(root_id), pending_anims.size(), missing])
+			print("[SelfAvatar] _apply_pending root=%s: %d pending, 0 available, %d missing" % [root_id.substr(0, 8), pending_anims.size(), missing])
 		return
 	if sm.object_mgr._is_self_avatar(root_id):
-		print("[SelfAvatar] _apply_pending root=%d uuid=%s: %d available, %d missing, %d total joints" % [root_id, sm.object_mgr._uuid_short(root_id), available.size(), missing, available.reduce(func(acc: int, d: Dictionary): return acc + (d.get("joints", []) as Array).size(), 0)])
+		print("[SelfAvatar] _apply_pending root=%s: %d available, %d missing, %d total joints" % [root_id.substr(0, 8), available.size(), missing, available.reduce(func(acc: int, d: Dictionary): return acc + (d.get("joints", []) as Array).size(), 0)])
 
 	# Build per-joint per-CHANNEL priority maps.
 	# SL claims rotation and position independently: an animation with position
@@ -262,7 +259,7 @@ func _apply_pending_animations(obj_id: int) -> void:
 ## SL's operator*(a,b) = Hamilton(b*a), so this is Hamilton(parent * local).
 ## Godot uses standard Hamilton, so we write: world = parent * local.
 func process_animesh(delta: float) -> void:
-	for root_id: int in sm.animesh_eval:
+	for root_id: String in sm.animesh_eval:
 		var eval: Dictionary = sm.animesh_eval[root_id]
 
 		# Advance wall-clock elapsed time every frame so animation timing
@@ -366,7 +363,7 @@ func process_animesh(delta: float) -> void:
 					finger_in_rot += 1
 			if finger_in_joints > 0:
 				var missing_str: String = "" if finger_missing.is_empty() else " MISSING=%s" % ",".join(finger_missing.slice(0, 5))
-				print("[FingerDbg] root=%d fingers_in_merged=%d fingers_with_rot=%d elapsed=%.1f %s%s%s" % [root_id, finger_in_joints, finger_in_rot, elapsed, sample, sample_rot, missing_str])
+				print("[FingerDbg] root=%s fingers_in_merged=%d fingers_with_rot=%d elapsed=%.1f %s%s%s" % [root_id.substr(0, 8), finger_in_joints, finger_in_rot, elapsed, sample, sample_rot, missing_str])
 			# TEMP DEBUG: log ankle/foot/toe joint state
 			var foot_joints: Array = []
 			for jname2 in joints:
@@ -379,7 +376,7 @@ func process_animesh(delta: float) -> void:
 					var anim_id: String = str(jd2.get("anim_uuid", "?")).substr(0, 8)
 					foot_joints.append("%s(rk=%d,pk=%d,%s,anim=%s,dur=%.1f)" % [jname2, rkeys, pkeys, has_r, anim_id, float(jd2.get("duration", 0.0))])
 			if foot_joints.size() > 0:
-				print("[FootDbg] root=%d %s" % [root_id, ", ".join(foot_joints)])
+				print("[FootDbg] root=%s %s" % [root_id.substr(0, 8), ", ".join(foot_joints)])
 
 		# Per-animation ease-in blending (matches SL viewer's motion controller).
 		# Each animation has an easeInTime during which its contribution ramps
@@ -434,7 +431,7 @@ func process_animesh(delta: float) -> void:
 ##    worldMatrix.initAll(mScale, mWorldRotation, mWorldPosition)
 ##    Scale is included in the world matrix upper 3x3 for vertex deformation
 ##    but does NOT cascade to children's scale (SL: worldScale = localScale).
-func _apply_global_pose_overrides(skeleton: Skeleton3D, root_id: int) -> void:
+func _apply_global_pose_overrides(skeleton: Skeleton3D, root_id: String) -> void:
 	var shape_scales: Dictionary = sm.bone_shape_scales.get(root_id, {})
 	var bone_count: int = skeleton.get_bone_count()
 
@@ -601,13 +598,13 @@ func _evaluate_skeleton_animation(skeleton: Skeleton3D, sl_local_rot: Dictionary
 ## Uses the shared skeleton (which has joint position overrides from mesh IBMs applied).
 ## Since all meshes bind to the shared skeleton, bone transforms are read directly
 ## from it — no per-mesh skeleton search needed.
-func _update_bone_attachments(root_id: int, shared_skel: Skeleton3D) -> void:
+func _update_bone_attachments(root_id: String, shared_skel: Skeleton3D) -> void:
 	if not sm.object_children.has(root_id):
 		return
 	var root_node: Node3D = sm.animesh_roots.get(root_id)
 	if root_node == null or not is_instance_valid(root_node):
 		return
-	for child_id: int in sm.object_children[root_id]:
+	for child_id: String in sm.object_children[root_id]:
 		if not sm.attach_bone.has(child_id):
 			continue
 		# Skip rigged mesh attachments — they follow the skeleton via skinning
@@ -644,7 +641,7 @@ func _update_bone_attachments(root_id: int, shared_skel: Skeleton3D) -> void:
 		# Debug: log once per child
 		if not sm._attach_bone_logged.has(child_id):
 			sm._attach_bone_logged[child_id] = true
-			print("[AttachBone] child=%d bone=%s ap=%d root=%d" % [child_id, bone_name, sm.attach_point_id.get(child_id, 0), root_id])
+			print("[AttachBone] child=%s bone=%s ap=%d root=%s" % [child_id.substr(0, 8), bone_name, sm.attach_point_id.get(child_id, 0), root_id.substr(0, 8)])
 
 		# Include skeleton's local offset (hover height) when computing world position
 		var skel_offset: Vector3 = shared_skel.position
@@ -763,10 +760,10 @@ func _get_bone_global_rest_xf(skel: Skeleton3D, bi: int) -> Transform3D:
 ## consistent with GLB IBMs (both without parent scale), preventing skinning mismatch.
 func _apply_joint_overrides(glb_skel: Skeleton3D, shared_skel: Skeleton3D, override_joints: Array, mesh_id: String) -> void:
 	# Find the avatar root for priority tracking
-	var avatar_root_id: int = -1
-	for av_lid: int in sm.animesh_shared_skeleton:
-		if sm.animesh_shared_skeleton[av_lid] == shared_skel:
-			avatar_root_id = av_lid
+	var avatar_root_id: String = ""
+	for av_uuid: String in sm.animesh_shared_skeleton:
+		if sm.animesh_shared_skeleton[av_uuid] == shared_skel:
+			avatar_root_id = av_uuid
 			break
 
 	var xml_bones: Array = sm.skeleton_builder.get_bone_data()
@@ -825,9 +822,9 @@ func _apply_joint_overrides(glb_skel: Skeleton3D, shared_skel: Skeleton3D, overr
 	# Recompute body size offset — mesh body overrides change hip/knee/ankle/head
 	# rest positions which feed into the pelvisToFoot and bodyHeight formulas.
 	# Only for avatars (not animesh objects which don't use body offset).
-	if override_count > 0 and avatar_root_id > 0:
-		var _avatar_uuid: String = str(sm.object_uuid.get(avatar_root_id, ""))
-		if sm.avatar_local_ids.has(_avatar_uuid):
+	if override_count > 0 and not avatar_root_id.is_empty():
+		# Only recompute for avatars (not animesh objects)
+		if sm.avatars.has(avatar_root_id):
 			sm.avatar_mgr._recompute_body_offset(avatar_root_id, shared_skel)
 
 ## Convert a Basis to its rotation quaternion safely.
@@ -1122,8 +1119,8 @@ func _update_debug_bone_markers(skel: Skeleton3D) -> void:
 		# Compute bone global transform (rest * pose + dynamic parent scale)
 		var chain: Array[int] = _bone_chain_to_root(skel, bi)
 		# Find root_id for shape scale lookup
-		var dbg_root_id: int = 0
-		for rid: int in sm.animesh_shared_skeleton:
+		var dbg_root_id: String = ""
+		for rid: String in sm.animesh_shared_skeleton:
 			if sm.animesh_shared_skeleton[rid] == skel:
 				dbg_root_id = rid
 				break

@@ -422,12 +422,14 @@ func _handle_message(text: String) -> void:
 
 	# Crash breadcrumb — write before processing so we know what killed us
 	_msg_count += 1
-	var local_id_str: String = str(msg.get("localId", msg.get("id", "")))
+	var uuid_str: String = str(msg.get("uuid", msg.get("id", ""))).left(8)
 	var mesh_id_str: String = str(msg.get("meshId", "")).left(8)
-	write_breadcrumb("msg#%d type=%s localId=%s meshId=%s queued=%d" % [
-		_msg_count, msg_type, local_id_str, mesh_id_str, _low_priority_queue.size()])
+	write_breadcrumb("msg#%d type=%s uuid=%s meshId=%s queued=%d" % [
+		_msg_count, msg_type, uuid_str, mesh_id_str, _low_priority_queue.size()])
 
 	match msg_type:
+		"world_origin":
+			scene_manager.set_world_origin(msg.get("originX", 0.0), msg.get("originY", 0.0))
 		"region_change":
 			scene_manager.handle_region_change()
 		"self_id":

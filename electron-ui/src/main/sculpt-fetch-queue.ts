@@ -17,7 +17,7 @@ export class SculptFetchQueue {
   private bot: Bot;
   private onReady: SculptReadyCallback;
   private decodePool: DecodePool;
-  private pending = new Map<string, Set<number>>(); // dedupKey → localIds waiting
+  private pending = new Map<string, Set<number | string>>(); // dedupKey → object ids waiting
   private active = 0;
   private queue: { textureUuid: string; sculptType: number; dedupKey: string }[] = [];
   private failed = new Set<string>();
@@ -40,7 +40,7 @@ export class SculptFetchQueue {
   get failedCount(): number { return this.failed.size; }
   get notifiedCount(): number { return this.notified.size; }
 
-  request(textureUuid: string, sculptType: number, localId: number): void {
+  request(textureUuid: string, sculptType: number, localId: number | string): void {
     if (this.destroyed) return;
 
     const dedupKey = sculptMeshId(textureUuid, sculptType);

@@ -122,22 +122,24 @@ export class GodotInputHandler {
     agent.sendAgentUpdate();
   }
 
-  async handleRequestObjectProperties(localId: number): Promise<void> {
+  async handleRequestObjectProperties(uuid: string): Promise<void> {
     try {
       const region = this.bot.currentRegion;
       if (!region) return;
-      const obj = region.objects?.getObjectByLocalID(localId);
+      const { UUID } = await import('../../node-metaverse/dist/lib/classes/UUID');
+      const obj = region.objects?.getObjectByUUID(new UUID(uuid));
       if (!obj) {
-        this.send({ type: 'object_properties', localId, name: '', description: '' });
+        this.send({ type: 'object_properties', uuid, name: '', description: '' });
         return;
       }
 
       if (obj.resolvedAt) {
-        this.send({ type: 'object_properties', localId, name: obj.name || '', description: obj.description || '' });
+        this.send({ type: 'object_properties', uuid, name: obj.name || '', description: obj.description || '' });
         return;
       }
 
-      // Send ObjectSelect to request properties from server
+      // Send ObjectSelect to request properties from server (uses localId for sim protocol)
+      const localId = obj.ID;
       const selectMsg = new ObjectSelectMessage();
       selectMsg.AgentData = {
         AgentID: region.agent.agentID,
@@ -161,38 +163,40 @@ export class GodotInputHandler {
       deselectMsg.ObjectData = [{ ObjectLocalID: localId }];
       region.circuit.sendMessage(deselectMsg, PacketFlags.Reliable);
 
-      this.send({ type: 'object_properties', localId, name: obj.name || '', description: obj.description || '' });
+      this.send({ type: 'object_properties', uuid, name: obj.name || '', description: obj.description || '' });
     } catch (e) {
-      console.error(`[GodotBridge] request_object_properties failed for ${localId}:`, e);
-      this.send({ type: 'object_properties', localId, name: '', description: '' });
+      console.error(`[GodotBridge] request_object_properties failed for ${uuid}:`, e);
+      this.send({ type: 'object_properties', uuid, name: '', description: '' });
     }
   }
 
-  async handleSetObjectName(localId: number, name: string): Promise<void> {
+  async handleSetObjectName(uuid: string, name: string): Promise<void> {
     try {
-      const obj = this.bot.currentRegion?.objects?.getObjectByLocalID(localId);
+      const { UUID } = await import('../../node-metaverse/dist/lib/classes/UUID');
+      const obj = this.bot.currentRegion?.objects?.getObjectByUUID(new UUID(uuid));
       if (!obj) {
-        console.warn(`[GodotBridge] set_object_name: object ${localId} not found`);
+        console.warn(`[GodotBridge] set_object_name: object ${uuid} not found`);
         return;
       }
       await obj.setName(name);
-      console.log(`[GodotBridge] Renamed object ${localId} to "${name}"`);
+      console.log(`[GodotBridge] Renamed object ${uuid.slice(0, 8)} to "${name}"`);
     } catch (e) {
-      console.error(`[GodotBridge] set_object_name failed for ${localId}:`, e);
+      console.error(`[GodotBridge] set_object_name failed for ${uuid}:`, e);
     }
   }
 
-  async handleSetObjectDescription(localId: number, description: string): Promise<void> {
+  async handleSetObjectDescription(uuid: string, description: string): Promise<void> {
     try {
-      const obj = this.bot.currentRegion?.objects?.getObjectByLocalID(localId);
+      const { UUID } = await import('../../node-metaverse/dist/lib/classes/UUID');
+      const obj = this.bot.currentRegion?.objects?.getObjectByUUID(new UUID(uuid));
       if (!obj) {
-        console.warn(`[GodotBridge] set_object_description: object ${localId} not found`);
+        console.warn(`[GodotBridge] set_object_description: object ${uuid} not found`);
         return;
       }
       await obj.setDescription(description);
-      console.log(`[GodotBridge] Set description on object ${localId}`);
+      console.log(`[GodotBridge] Set description on object ${uuid.slice(0, 8)}`);
     } catch (e) {
-      console.error(`[GodotBridge] set_object_description failed for ${localId}:`, e);
+      console.error(`[GodotBridge] set_object_description failed for ${uuid}:`, e);
     }
   }
 
@@ -245,21 +249,23 @@ export class GodotInputHandler {
     try {
       const region = this.bot.currentRegion;
       if (!region) return;
-      const localId: number = msg.localId;
-      const obj = region.objects?.getObjectByLocalID(localId);
+      const objectUuid: string = msg.uuid;
+      const { UUID } = await import('../../node-metaverse/dist/lib/classes/UUID');
+      const obj = region.objects?.getObjectByUUID(new UUID(objectUuid));
       if (!obj) {
-        console.warn(`[GodotBridge] object_touch: object ${localId} not found`);
+        console.warn(`[GodotBridge] object_touch: object ${objectUuid} not found`);
         return;
       }
 
+      const localId = obj.ID; // sim protocol still uses localId
+
       // If the object's default action is SIT and we're not already sitting on it, sit.
       if (obj.ClickAction === CLICK_ACTION_SIT && this._sittingOnLocalId !== localId) {
-        const { UUID } = await import('../../node-metaverse/dist/lib/classes/UUID');
         const { Vector3 } = await import('../../node-metaverse/dist/lib/classes/Vector3');
         const targetUuid = new UUID(obj.FullID.toString());
         await this.bot.clientCommands.movement.sitOnObject(targetUuid, Vector3.getZero());
         this._sittingOnLocalId = localId;
-        console.log(`[GodotBridge] Sat on object ${localId} (ClickAction=Sit)`);
+        console.log(`[GodotBridge] Sat on object ${objectUuid.slice(0, 8)} (ClickAction=Sit)`);
         return;
       }
 
@@ -277,9 +283,9 @@ export class GodotInputHandler {
       await this.bot.clientCommands.region.touchObject(
         localId, grabOffset, uvCoord, stCoord, faceIndex, position, normal, binormal
       );
-      console.log(`[GodotBridge] Touched object ${localId} face=${faceIndex} st=(${st.x?.toFixed(2)},${st.y?.toFixed(2)})`);
+      console.log(`[GodotBridge] Touched object ${objectUuid.slice(0, 8)} face=${faceIndex} st=(${st.x?.toFixed(2)},${st.y?.toFixed(2)})`);
     } catch (e) {
-      console.error(`[GodotBridge] object_touch failed for ${msg.localId}:`, e);
+      console.error(`[GodotBridge] object_touch failed for ${msg.uuid}:`, e);
     }
   }
 }

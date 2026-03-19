@@ -1,15 +1,16 @@
 /**
  * GodotUpdateCoalescer — Coalesces terse and full object/avatar updates into
  * batched messages, separating physics (velocity) from static updates.
- * Extracted from GodotBridge.
+ *
+ * Objects are keyed by UUID (not localId) for multi-region safety.
  */
 
 import type { Subscription } from 'rxjs';
 import { slPos, slQuat, slScale, slVec3 } from './godot-bridge-types';
 
 export interface UpdateCoalescerDeps {
-  /** Check if an object localId is being tracked */
-  isTracked(localId: number): boolean;
+  /** Check if an object UUID is being tracked */
+  isTracked(uuid: string): boolean;
   /** Check if an avatar UUID is being tracked */
   isAvatarTracked(id: string): boolean;
   /** Get light info for an object, or null */
@@ -22,14 +23,14 @@ export interface UpdateCoalescerDeps {
 
 export class GodotUpdateCoalescer {
   private deps: UpdateCoalescerDeps;
-  private updateBuffer: Map<number, any> = new Map();
-  private updateSeq: Map<number, number> = new Map();
-  private recentTerse = new Set<number>();
+  private updateBuffer: Map<string, any> = new Map();       // object UUID → pending update
+  private updateSeq: Map<string, number> = new Map();       // object UUID → last sequence number
+  private recentTerse = new Set<string>();                   // object UUIDs with recent terse updates
   private updateTimer: ReturnType<typeof setTimeout> | null = null;
   private avatarUpdateBuffer: Map<string, any> = new Map();
   private avatarUpdateTimer: ReturnType<typeof setTimeout> | null = null;
-  private objectsWithLights = new Set<number>();
-  private objectAnimeshState = new Map<number, boolean>();
+  private objectsWithLights = new Set<string>();             // object UUIDs that have lights
+  private objectAnimeshState = new Map<string, boolean>();   // object UUID → animesh flag
   private _debugFlushSeq = 0;
 
   constructor(deps: UpdateCoalescerDeps) {
@@ -37,26 +38,26 @@ export class GodotUpdateCoalescer {
   }
 
   /** Track an object's animesh state (called from sendObject) */
-  trackAnimesh(localId: number, isAnimesh: boolean): void {
-    this.objectAnimeshState.set(localId, isAnimesh);
+  trackAnimesh(uuid: string, isAnimesh: boolean): void {
+    this.objectAnimeshState.set(uuid, isAnimesh);
   }
 
   /** Track that an object has a light (called from sendObject) */
-  trackLight(localId: number): void {
-    this.objectsWithLights.add(localId);
+  trackLight(uuid: string): void {
+    this.objectsWithLights.add(uuid);
   }
 
   /** Check if an object has a tracked light */
-  hasLight(localId: number): boolean {
-    return this.objectsWithLights.has(localId);
+  hasLight(uuid: string): boolean {
+    return this.objectsWithLights.has(uuid);
   }
 
   /** Get or set sequence number for stale-update detection */
-  getSeq(localId: number): number {
-    return this.updateSeq.get(localId) ?? -1;
+  getSeq(uuid: string): number {
+    return this.updateSeq.get(uuid) ?? -1;
   }
-  setSeq(localId: number, seq: number): void {
-    this.updateSeq.set(localId, seq);
+  setSeq(uuid: string, seq: number): void {
+    this.updateSeq.set(uuid, seq);
   }
 
   /** Subscribe to terse and full object update events. Returns subscriptions to track. */
@@ -92,21 +93,21 @@ export class GodotUpdateCoalescer {
       }
 
       // Object terse updates
-      if (!this.deps.isTracked(obj.ID)) return;
+      const uid = obj.FullID?.toString() ?? '';
+      if (!uid || !this.deps.isTracked(uid)) return;
 
       const seq = event.sequenceNumber;
-      const prevSeq = this.updateSeq.get(obj.ID) ?? -1;
-      const uid = obj.FullID?.toString() ?? '';
+      const prevSeq = this.updateSeq.get(uid) ?? -1;
       const pos = obj.Position;
 
       // Log ALL updates for debug target
       if (uid === 'bbafd512-4ab8-9878-0e68-eba086760821') {
-        console.log(`[ObjUpdate] TERSE localId=${obj.ID} seq=${seq} prevSeq=${prevSeq} pos=[${pos?.x.toFixed(2)},${pos?.y.toFixed(2)},${pos?.z.toFixed(2)}] vel=[${obj.Velocity?.x.toFixed(2)},${obj.Velocity?.y.toFixed(2)},${obj.Velocity?.z.toFixed(2)}]`);
+        console.log(`[ObjUpdate] TERSE uuid=${uid.slice(0, 8)} seq=${seq} prevSeq=${prevSeq} pos=[${pos?.x.toFixed(2)},${pos?.y.toFixed(2)},${pos?.z.toFixed(2)}] vel=[${obj.Velocity?.x.toFixed(2)},${obj.Velocity?.y.toFixed(2)},${obj.Velocity?.z.toFixed(2)}]`);
       }
 
       // Drop stale updates — only accept newer sequence numbers
       if (seq < prevSeq) return;
-      this.updateSeq.set(obj.ID, seq);
+      this.updateSeq.set(uid, seq);
 
       const rot = obj.Rotation;
       const scl = obj.Scale;
@@ -114,8 +115,8 @@ export class GodotUpdateCoalescer {
       const accel = obj.Acceleration;
       const angVel = obj.AngularVelocity;
 
-      this.updateBuffer.set(obj.ID, {
-        localId: obj.ID,
+      this.updateBuffer.set(uid, {
+        uuid: uid,
         ...(pos ? { position: slPos(pos) } : {}),
         ...(rot ? { rotation: slQuat(rot) } : {}),
         ...(scl ? { scale: slScale(scl) } : {}),
@@ -123,7 +124,7 @@ export class GodotUpdateCoalescer {
         ...(accel ? { acceleration: slPos(accel) } : {}),
         ...(angVel ? { angularVelocity: slPos(angVel) } : {}),
       });
-      this.recentTerse.add(obj.ID);
+      this.recentTerse.add(uid);
 
       // Flush every 16ms (~1 frame) for responsive corrections
       if (!this.updateTimer) {
@@ -138,30 +139,30 @@ export class GodotUpdateCoalescer {
     // Full object updates (may include scale/light changes)
     const fullUpdateSub = events.onObjectUpdatedEvent.subscribe((event: any) => {
       const obj = event.object;
-      if (!this.deps.isTracked(obj.ID)) return;
+      const uid = obj.FullID?.toString() ?? '';
+      if (!uid || !this.deps.isTracked(uid)) return;
 
       const seq = event.sequenceNumber;
-      const prevSeq = this.updateSeq.get(obj.ID) ?? -1;
-      const uid = obj.FullID?.toString() ?? '';
+      const prevSeq = this.updateSeq.get(uid) ?? -1;
       const pos = obj.Position;
 
       // Log ALL updates for debug target
       if (uid === 'bbafd512-4ab8-9878-0e68-eba086760821') {
-        const terseGuard = this.updateBuffer.get(obj.ID)?.velocity || this.recentTerse.has(obj.ID);
-        console.log(`[ObjUpdate] FULL localId=${obj.ID} seq=${seq} prevSeq=${prevSeq} pos=[${pos?.x.toFixed(2)},${pos?.y.toFixed(2)},${pos?.z.toFixed(2)}] vel=[${obj.Velocity?.x.toFixed(2)},${obj.Velocity?.y.toFixed(2)},${obj.Velocity?.z.toFixed(2)}] terseGuard=${terseGuard}`);
+        const terseGuard = this.updateBuffer.get(uid)?.velocity || this.recentTerse.has(uid);
+        console.log(`[ObjUpdate] FULL uuid=${uid.slice(0, 8)} seq=${seq} prevSeq=${prevSeq} pos=[${pos?.x.toFixed(2)},${pos?.y.toFixed(2)},${pos?.z.toFixed(2)}] vel=[${obj.Velocity?.x.toFixed(2)},${obj.Velocity?.y.toFixed(2)},${obj.Velocity?.z.toFixed(2)}] terseGuard=${terseGuard}`);
       }
 
       // Drop stale updates — only accept newer sequence numbers
       if (seq < prevSeq) return;
-      this.updateSeq.set(obj.ID, seq);
+      this.updateSeq.set(uid, seq);
 
       // Detect animesh state change — re-create the object if it changed
       const isAnimesh = !!(obj.extraParams?.extendedMeshData?.flags & 0x1);
-      const wasAnimesh = this.objectAnimeshState.get(obj.ID) ?? false;
+      const wasAnimesh = this.objectAnimeshState.get(uid) ?? false;
       if (isAnimesh !== wasAnimesh) {
-        console.log(`[Animesh] State changed for localId=${obj.ID} uuid=${uid}: ${wasAnimesh} → ${isAnimesh}`);
-        this.objectAnimeshState.set(obj.ID, isAnimesh);
-        this.updateBuffer.delete(obj.ID);
+        console.log(`[Animesh] State changed for uuid=${uid}: ${wasAnimesh} → ${isAnimesh}`);
+        this.objectAnimeshState.set(uid, isAnimesh);
+        this.updateBuffer.delete(uid);
         this.deps.resendObject(obj);
         return;
       }
@@ -177,32 +178,23 @@ export class GodotUpdateCoalescer {
       let lightField: Record<string, any> = {};
       if (lightInfo) {
         lightField = { light: lightInfo };
-        this.objectsWithLights.add(obj.ID);
-      } else if (this.objectsWithLights.has(obj.ID)) {
+        this.objectsWithLights.add(uid);
+      } else if (this.objectsWithLights.has(uid)) {
         // Light was removed — send null so Godot destroys it
         lightField = { light: null };
-        this.objectsWithLights.delete(obj.ID);
+        this.objectsWithLights.delete(uid);
       }
 
       // If a terse update recently set motion data, don't overwrite position/velocity —
       // full/compressed updates can carry staler position than the latest terse update.
-      const existing = this.updateBuffer.get(obj.ID);
-      const terseHasMotion = existing?.velocity || this.recentTerse.has(obj.ID);
+      const existing = this.updateBuffer.get(uid);
+      const terseHasMotion = existing?.velocity || this.recentTerse.has(uid);
       if (terseHasMotion && pos) {
-        console.log(`[ObjUpdate] FULL SKIP POS localId=${obj.ID} uuid=${obj.FullID} seq=${seq} (terse guard)`);
-      } else if (pos) {
-        const ex = existing?.position;
-        if (ex) {
-          const dx = pos.x - ex[0], dy = pos.y - ex[1], dz = pos.z - ex[2];
-          const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-          if (dist > 0.5) {
-            console.log(`[ObjUpdate] FULL JUMP localId=${obj.ID} uuid=${obj.FullID} seq=${seq} dist=${dist.toFixed(2)}`);
-          }
-        }
+        console.log(`[ObjUpdate] FULL SKIP POS uuid=${uid.slice(0, 8)} seq=${seq} (terse guard)`);
       }
-      this.updateBuffer.set(obj.ID, {
+      this.updateBuffer.set(uid, {
         ...(existing || {}),
-        localId: obj.ID,
+        uuid: uid,
         ...(!terseHasMotion && pos ? { position: slPos(pos) } : {}),
         ...(!terseHasMotion && rot ? { rotation: slQuat(rot) } : {}),
         ...(scl ? { scale: slScale(scl) } : {}),
@@ -233,25 +225,11 @@ export class GodotUpdateCoalescer {
     for (const obj of this.updateBuffer.values()) {
       const hasMotion =
         obj.velocity || obj.acceleration || obj.angularVelocity;
-      // Tag each entry with a monotonic flush sequence for bridge↔Godot correlation
       obj._fseq = ++this._debugFlushSeq;
       (hasMotion ? physics : statics).push(obj);
     }
     this.updateBuffer.clear();
     this.recentTerse.clear();
-
-    // Log what we're actually flushing for the debug object
-    const debugLocalId = 642829107;
-    for (const obj of physics) {
-      if (obj.localId === debugLocalId) {
-        console.log(`[ObjFlush] PHYSICS fseq=${obj._fseq} pos=[${obj.position?.[0]?.toFixed(2)},${obj.position?.[1]?.toFixed(2)},${obj.position?.[2]?.toFixed(2)}] vel=[${obj.velocity?.[0]?.toFixed(2)},${obj.velocity?.[1]?.toFixed(2)},${obj.velocity?.[2]?.toFixed(2)}]`);
-      }
-    }
-    for (const obj of statics) {
-      if (obj.localId === debugLocalId) {
-        console.log(`[ObjFlush] STATIC fseq=${obj._fseq} pos=[${obj.position?.[0]?.toFixed(2)},${obj.position?.[1]?.toFixed(2)},${obj.position?.[2]?.toFixed(2)}]`);
-      }
-    }
 
     if (physics.length > 0) {
       this.deps.send({ type: 'object_update_physics', objects: physics });

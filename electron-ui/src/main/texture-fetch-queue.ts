@@ -64,7 +64,7 @@ function resolvedCachePath(textureUuid: string): string {
 export class TextureFetchQueue {
   private bot: Bot;
   private onReady: TextureReadyCallback;
-  private pending = new Map<string, Set<number>>(); // textureUuid → localIds waiting
+  private pending = new Map<string, Set<string>>(); // textureUuid → objectUuids waiting
   private active = 0;
   private queue: string[] = [];
   private failed = new Set<string>();
@@ -98,7 +98,7 @@ export class TextureFetchQueue {
   get gpuQueueDepth(): number { return this.gpuQueue.queueDepth; }
   get gpuQueueActive(): number { return this.gpuQueue.activeCount; }
 
-  request(textureUuid: string, localId: number): void {
+  request(textureUuid: string, objectUuid: string): void {
     if (this.destroyed || this.failed.has(textureUuid)) return;
     if (!textureUuid || textureUuid === ZERO_UUID) return;
 
@@ -113,19 +113,19 @@ export class TextureFetchQueue {
       return;
     }
 
-    // Already queued or in-flight — just track the localId
+    // Already queued or in-flight — just track the objectUuid
     if (this.pending.has(textureUuid)) {
-      this.pending.get(textureUuid)!.add(localId);
+      this.pending.get(textureUuid)!.add(objectUuid);
       return;
     }
 
-    this.pending.set(textureUuid, new Set([localId]));
+    this.pending.set(textureUuid, new Set([objectUuid]));
     this.queue.push(textureUuid);
     this.drain();
   }
 
   /** Request a baked texture — uses appearance service URL instead of ViewerAsset */
-  requestBake(textureUuid: string, localId: number, avatarUuid: string, channel: number): void {
+  requestBake(textureUuid: string, objectUuid: string, avatarUuid: string, channel: number): void {
     if (this.destroyed || this.failed.has(textureUuid)) return;
     if (!textureUuid || textureUuid === ZERO_UUID) return;
     if (this.notified.has(textureUuid)) return;
@@ -143,11 +143,11 @@ export class TextureFetchQueue {
     }
 
     if (this.pending.has(textureUuid)) {
-      this.pending.get(textureUuid)!.add(localId);
+      this.pending.get(textureUuid)!.add(objectUuid);
       return;
     }
 
-    this.pending.set(textureUuid, new Set([localId]));
+    this.pending.set(textureUuid, new Set([objectUuid]));
     this.queue.push(textureUuid);
     this.drain();
   }
@@ -280,7 +280,7 @@ export class TextureFetchQueue {
     // Remove from notified so request() will re-send
     this.notified.delete(textureUuid);
     this.failed.delete(textureUuid);
-    this.request(textureUuid, 0);
+    this.request(textureUuid, '');
   }
 
   clearPending(): void {

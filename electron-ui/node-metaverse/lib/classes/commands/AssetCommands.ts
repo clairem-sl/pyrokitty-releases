@@ -458,7 +458,7 @@ export class AssetCommands extends CommandsBase
         }
         else
         {
-            throw new Error('Material data not found');
+            console.log(`RenderMaterials returned empty for ${uuidArray.length} material(s)`);
         }
     }
 }

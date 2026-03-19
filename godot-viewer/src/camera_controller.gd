@@ -83,7 +83,7 @@ var _name_edit: LineEdit
 var _desc_edit: LineEdit
 var _faces_label: RichTextLabel
 var _tooltip_visible: bool = false
-var _inspected_local_id: int = -1
+var _inspected_uuid: String = ""
 var _dragging_panel: bool = false
 var _drag_offset: Vector2 = Vector2.ZERO
 var _highlight_material: StandardMaterial3D
@@ -658,19 +658,19 @@ func _handle_debug_pick(screen_pos: Vector2) -> void:
 	if hit.is_empty():
 		_hide_debug_tooltip()
 		return
-	var local_id: int = hit["localId"]
+	var obj_uuid: String = hit["uuid"]
 	var dist: float = hit["distance"]
 	# Highlight the picked object
 	_clear_highlight()
-	var rid: RID = scene_manager.get_object_rid(local_id)
+	var rid: RID = scene_manager.get_object_rid(obj_uuid)
 	if rid.is_valid():
 		RenderingServer.instance_geometry_set_material_overlay(rid, _highlight_material.get_rid())
 		_highlighted_rid = rid
-	var info: Dictionary = scene_manager.get_object_debug_info(local_id)
-	var faces: Array = scene_manager.get_object_face_info(local_id)
+	var info: Dictionary = scene_manager.get_object_debug_info(obj_uuid)
+	var faces: Array = scene_manager.get_object_face_info(obj_uuid)
 	_show_debug_tooltip(screen_pos, dist, info, faces)
 	# Request name/description from server (arrives async via object_properties_received)
-	main_node.send_message({ "type": "request_object_properties", "localId": local_id })
+	main_node.send_message({ "type": "request_object_properties", "uuid": obj_uuid })
 
 
 func _handle_touch_pick(screen_pos: Vector2) -> void:
@@ -688,7 +688,7 @@ func _handle_touch_pick(screen_pos: Vector2) -> void:
 	var st: Vector2 = hit["st"]
 	main_node.send_message({
 		"type": "object_touch",
-		"localId": hit["localId"],
+		"uuid": hit["uuid"],
 		"faceIndex": hit["faceIndex"],
 		"st": { "x": st.x, "y": st.y },
 		"position": { "x": pos_local.x, "y": pos_local.z, "z": -pos_local.y },
@@ -700,7 +700,7 @@ const _MAPPING_NAMES: Dictionary = { 0: "default", 2: "planar", 4: "spherical", 
 const _ALPHA_NAMES: Dictionary = { -1: "auto", 0: "none", 1: "blend", 2: "mask", 3: "emissive" }
 
 func _show_debug_tooltip(screen_pos: Vector2, dist: float, info: Dictionary, faces: Array) -> void:
-	_inspected_local_id = info["localId"]
+	_inspected_uuid = str(info.get("uuid", ""))
 
 	# ── General tab — editable fields (populated async via object_properties_received) ──
 	var cached_name: String = info.get("name", "")
@@ -715,11 +715,11 @@ func _show_debug_tooltip(screen_pos: Vector2, dist: float, info: Dictionary, fac
 	var uuid: String = info.get("uuid", "")
 	if not uuid.is_empty():
 		gb += "uuid: [color=#aaaaff]%s[/color]\n" % uuid
-	gb += "localId: %d  (%.1fm away)\n" % [info["localId"], dist]
+	gb += "(%.1fm away)\n" % dist
 
-	var parent_id: int = info["parentId"]
-	if parent_id > 0:
-		gb += "parent: %d\n" % parent_id
+	var parent_uuid: String = str(info.get("parentUuid", ""))
+	if not parent_uuid.is_empty():
+		gb += "parent: [color=#aaaaff]%s[/color]\n" % parent_uuid.substr(0, 8)
 
 	var p: Vector3 = info["pos"]
 	var r: Quaternion = info.get("rot", Quaternion.IDENTITY)
@@ -816,28 +816,27 @@ func _show_debug_tooltip(screen_pos: Vector2, dist: float, info: Dictionary, fac
 	_tooltip_panel.position = pos
 
 
-func _on_object_properties_received(local_id: int, obj_name: String, obj_desc: String) -> void:
-	if local_id == _inspected_local_id and _tooltip_visible:
+func _on_object_properties_received(uuid: String, obj_name: String, obj_desc: String) -> void:
+	if uuid == _inspected_uuid and _tooltip_visible:
 		_name_edit.text = obj_name
 		_desc_edit.text = obj_desc
 
 
 func _on_name_submitted(new_name: String) -> void:
-	if _inspected_local_id < 0:
+	if _inspected_uuid.is_empty():
 		return
-	main_node.send_message({ "type": "set_object_name", "localId": _inspected_local_id, "name": new_name })
-	# Update local cache
-	if scene_manager and scene_manager.object_meta.has(_inspected_local_id):
-		scene_manager.object_meta[_inspected_local_id]["name"] = new_name
+	main_node.send_message({ "type": "set_object_name", "uuid": _inspected_uuid, "name": new_name })
+	if scene_manager and scene_manager.object_meta.has(_inspected_uuid):
+		scene_manager.object_meta[_inspected_uuid]["name"] = new_name
 	_name_edit.release_focus()
 
 
 func _on_desc_submitted(new_desc: String) -> void:
-	if _inspected_local_id < 0:
+	if _inspected_uuid.is_empty():
 		return
-	main_node.send_message({ "type": "set_object_description", "localId": _inspected_local_id, "description": new_desc })
-	if scene_manager and scene_manager.object_meta.has(_inspected_local_id):
-		scene_manager.object_meta[_inspected_local_id]["description"] = new_desc
+	main_node.send_message({ "type": "set_object_description", "uuid": _inspected_uuid, "description": new_desc })
+	if scene_manager and scene_manager.object_meta.has(_inspected_uuid):
+		scene_manager.object_meta[_inspected_uuid]["description"] = new_desc
 	_desc_edit.release_focus()
 
 
@@ -866,7 +865,7 @@ func _hide_debug_tooltip() -> void:
 	_clear_highlight()
 	_tooltip_panel.visible = false
 	_tooltip_visible = false
-	_inspected_local_id = -1
+	_inspected_uuid = ""
 	_dragging_panel = false
 
 

@@ -6,12 +6,14 @@
  *
  * Textures are NOT gated here — Godot applies placeholder materials for uncached
  * textures and progressively refines via _tex_waiting when they arrive.
+ *
+ * Objects are keyed by UUID (not localId) for multi-region safety.
  */
 
 import type { SendFn } from './godot-bridge-types';
 
 interface PendingObject {
-  localId: number;
+  uuid: string;
   needsMesh: string | null;       // meshId or sculptMeshId, null for procedural prims
   meshReady: boolean;
   completeMsg: any;               // the full object_complete message payload
@@ -19,8 +21,8 @@ interface PendingObject {
 }
 
 export class ObjectReadinessTracker {
-  private pending = new Map<number, PendingObject>();        // localId → state
-  private meshToObjects = new Map<string, Set<number>>();    // meshId → localIds waiting
+  private pending = new Map<string, PendingObject>();        // object UUID → state
+  private meshToObjects = new Map<string, Set<string>>();    // meshId → object UUIDs waiting
   private send: SendFn;
 
   constructor(send: SendFn) {
@@ -28,18 +30,18 @@ export class ObjectReadinessTracker {
   }
 
   /** Register an object for readiness tracking. */
-  track(localId: number, meshId: string | null, textureIds: Set<string>, completeMsg: any): void {
+  track(uuid: string, meshId: string | null, textureIds: Set<string>, completeMsg: any): void {
     // Remove any prior entry (object re-creation)
-    this.remove(localId);
+    this.remove(uuid);
 
     const entry: PendingObject = {
-      localId,
+      uuid,
       needsMesh: meshId,
       meshReady: meshId === null, // no mesh needed → already ready
       completeMsg,
       createdAt: Date.now(),
     };
-    this.pending.set(localId, entry);
+    this.pending.set(uuid, entry);
 
     // Reverse index: mesh → objects
     if (meshId) {
@@ -48,22 +50,22 @@ export class ObjectReadinessTracker {
         set = new Set();
         this.meshToObjects.set(meshId, set);
       }
-      set.add(localId);
+      set.add(uuid);
     }
 
     // Check if already complete (procedural prim with no mesh needed)
-    this.checkAndEmit(localId);
+    this.checkAndEmit(uuid);
   }
 
   /** Mark mesh as resolved for all waiting objects. */
   onMeshReady(meshUuid: string): void {
-    const localIds = this.meshToObjects.get(meshUuid);
-    if (!localIds) return;
-    for (const lid of localIds) {
-      const entry = this.pending.get(lid);
+    const objectUuids = this.meshToObjects.get(meshUuid);
+    if (!objectUuids) return;
+    for (const uuid of objectUuids) {
+      const entry = this.pending.get(uuid);
       if (entry) {
         entry.meshReady = true;
-        this.checkAndEmit(lid);
+        this.checkAndEmit(uuid);
       }
     }
     this.meshToObjects.delete(meshUuid);
@@ -71,15 +73,15 @@ export class ObjectReadinessTracker {
 
   /** Mark mesh as failed — send object_complete with placeholder. */
   onMeshFailed(meshUuid: string): void {
-    const localIds = this.meshToObjects.get(meshUuid);
-    if (!localIds) return;
-    for (const lid of localIds) {
-      const entry = this.pending.get(lid);
+    const objectUuids = this.meshToObjects.get(meshUuid);
+    if (!objectUuids) return;
+    for (const uuid of objectUuids) {
+      const entry = this.pending.get(uuid);
       if (entry) {
         entry.meshReady = true;
         // Clear the meshId so Godot uses shape or placeholder
         entry.completeMsg.meshId = undefined;
-        this.checkAndEmit(lid);
+        this.checkAndEmit(uuid);
       }
     }
     this.meshToObjects.delete(meshUuid);
@@ -92,23 +94,23 @@ export class ObjectReadinessTracker {
   onTextureFailed(_textureUuid: string): void {}
 
   /** No-op — textures no longer gate object completion. Kept for API compat. */
-  addTextures(_localId: number, _textureIds: Set<string>): void {}
+  addTextures(_uuid: string, _textureIds: Set<string>): void {}
 
   /** Remove object from tracking (killed before completion). */
-  remove(localId: number): void {
-    const entry = this.pending.get(localId);
+  remove(uuid: string): void {
+    const entry = this.pending.get(uuid);
     if (!entry) return;
 
     // Clean up reverse index
     if (entry.needsMesh) {
       const set = this.meshToObjects.get(entry.needsMesh);
       if (set) {
-        set.delete(localId);
+        set.delete(uuid);
         if (set.size === 0) this.meshToObjects.delete(entry.needsMesh);
       }
     }
 
-    this.pending.delete(localId);
+    this.pending.delete(uuid);
   }
 
   /** Clear all pending state (region change). */
@@ -138,19 +140,19 @@ export class ObjectReadinessTracker {
   }
 
   /** Emit as soon as mesh is ready (or no mesh needed). */
-  private checkAndEmit(localId: number): void {
-    const entry = this.pending.get(localId);
+  private checkAndEmit(uuid: string): void {
+    const entry = this.pending.get(uuid);
     if (!entry) return;
     if (!entry.meshReady) return;
-    this.emit(localId);
+    this.emit(uuid);
   }
 
   /** Send the object_complete message and clean up. */
-  private emit(localId: number): void {
-    const entry = this.pending.get(localId);
+  private emit(uuid: string): void {
+    const entry = this.pending.get(uuid);
     if (!entry) return;
 
     this.send(entry.completeMsg);
-    this.remove(localId);
+    this.remove(uuid);
   }
 }

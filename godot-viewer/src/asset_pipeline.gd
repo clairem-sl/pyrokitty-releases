@@ -70,7 +70,7 @@ var _double_sided_shader_cache: Dictionary = {}  # Shader -> Shader (cull_back -
 
 # Two-phase object creation: retry queues for async asset loading races
 var _pending_complete_by_mesh: Dictionary = {}  # meshId (String) -> Array[Dictionary] (object_complete msgs)
-var _tex_waiting: Dictionary = {}               # textureId (String) -> Array[int] (localIds needing re-apply)
+var _tex_waiting: Dictionary = {}               # textureId (String) -> Array[String] (object uuids needing re-apply)
 
 # Re-request dedup: avoids sending duplicate texture_request/mesh_request to TS
 var _tex_requested: Dictionary = {}   # textureId -> true, cleared when texture_ready arrives
@@ -113,7 +113,7 @@ func handle_mesh_ready(msg: Dictionary) -> void:
 		if _pending_complete_by_mesh.has(mesh_id):
 			waiting = _pending_complete_by_mesh[mesh_id].size()
 			for m: Dictionary in _pending_complete_by_mesh[mesh_id]:
-				if sm.object_mgr._is_self_avatar(int(m.get("localId", 0))):
+				if sm.object_mgr._is_self_avatar(str(m.get("uuid", ""))):
 					self_waiting = true
 					break
 		if self_waiting:
@@ -317,16 +317,16 @@ func _apply_texture_to_waiting(texture_id: String) -> void:
 	if not _tex_waiting.has(texture_id):
 		return
 
-	var local_ids: Array = _tex_waiting[texture_id]
+	var obj_uuids: Array = _tex_waiting[texture_id]
 	_tex_waiting.erase(texture_id)
 
-	for local_id: int in local_ids:
-		var rsi = sm.objects.get(local_id)
+	for obj_uuid: String in obj_uuids:
+		var rsi = sm.objects.get(obj_uuid)
 		if rsi == null:
 			continue
-		if not sm.object_faces.has(local_id):
+		if not sm.object_faces.has(obj_uuid):
 			continue
-		apply_face_materials(rsi, local_id, sm.object_faces[local_id])
+		apply_face_materials(rsi, obj_uuid, sm.object_faces[obj_uuid])
 
 
 # ─── Finalization (_process budget) ──────────────────
@@ -469,12 +469,12 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 
 ## Apply per-face materials to an RSInstance.
 ## Faces with cached textures get real materials; uncached ones get placeholders and register in _tex_waiting.
-func apply_face_materials(rsi, local_id: int, faces: Array) -> void:
+func apply_face_materials(rsi, obj_uuid: String, faces: Array) -> void:
 	rsi.set_material_override(null)
 	var surface_count: int = rsi.mesh.get_surface_count() if rsi.mesh else 0
 	# For animesh objects, the real mesh is on the MeshInstance3D, not the RSI (which has a placeholder box).
 	# Use the animesh mesh's surface count so we don't skip faces beyond the placeholder's 1 surface.
-	var ami: MeshInstance3D = sm.animesh_mesh_instances.get(local_id)
+	var ami: MeshInstance3D = sm.animesh_mesh_instances.get(obj_uuid)
 	if ami and ami.mesh:
 		surface_count = maxi(surface_count, ami.mesh.get_surface_count())
 
@@ -554,8 +554,8 @@ func apply_face_materials(rsi, local_id: int, faces: Array) -> void:
 				if not _tex_waiting.has(tid):
 					_tex_waiting[tid] = []
 				# Avoid duplicate entries
-				if local_id not in _tex_waiting[tid]:
-					_tex_waiting[tid].append(local_id)
+				if obj_uuid not in _tex_waiting[tid]:
+					_tex_waiting[tid].append(obj_uuid)
 				# Re-request if not already in-flight (may have been evicted)
 				if not _texture_in_flight.has(tid):
 					_request_texture(tid)

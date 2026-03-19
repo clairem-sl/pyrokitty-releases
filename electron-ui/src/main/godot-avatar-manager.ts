@@ -1,6 +1,8 @@
 /**
  * Manages avatar lifecycle — creation, attachment routing, departure sweeps,
  * and Bakes on Mesh (BoM) texture substitution.
+ *
+ * All avatar and object identity uses UUID strings (not numeric localIds).
  */
 
 import type { Bot } from '../../node-metaverse/dist/lib';
@@ -23,8 +25,8 @@ export class GodotAvatarManager {
 
   // BoM state: avatarUuid → array of 11 baked texture UUIDs (index = channel)
   private avatarBakedTextures = new Map<string, string[]>();
-  // avatarUuid → set of attachment localIds that have magic bake UUIDs
-  private avatarBakeObjects = new Map<string, Set<number>>();
+  // avatarUuid → set of attachment UUIDs that have magic bake UUIDs
+  private avatarBakeObjects = new Map<string, Set<string>>();
   // Avatar shape: avatarUuid → pre-computed bone deltas (buffered until connected)
   private avatarShapes = new Map<string, Record<string, { scale: [number, number, number]; offset: [number, number, number] }>>();
   private avatarVolumeMorphs = new Map<string, Record<string, { scale: [number, number, number]; offset: [number, number, number] }>>();
@@ -36,9 +38,8 @@ export class GodotAvatarManager {
   constructor(
     private bot: Bot,
     private send: SendFn,
-    private trackedObjects: Set<number>,
+    private trackedObjects: Set<string>,
     private trackedAvatars: Set<string>,
-    private avatarLocalIds: Map<string, number>,
     private animationManager: GodotAnimationManager,
   ) {}
 
@@ -184,35 +185,41 @@ export class GodotAvatarManager {
   }
 
   /**
-   * Find which avatar UUID owns an object, by walking up the parent chain.
+   * Find which avatar UUID owns an object, by walking up the parent chain using UUIDs.
    * Returns undefined if the object is not an avatar attachment.
    */
-  findOwnerAvatar(parentLocalId: number, depth = 0): string | undefined {
-    if (depth > 4 || parentLocalId === 0) return undefined;
-    for (const [avId, avLid] of this.avatarLocalIds) {
-      if (avLid === parentLocalId) return avId;
-    }
+  findOwnerAvatar(parentUuid: string, depth = 0): string | undefined {
+    if (depth > 4 || !parentUuid || parentUuid === ZERO_UUID) return undefined;
+    // Check if the parent itself is a tracked avatar
+    if (this.trackedAvatars.has(parentUuid)) return parentUuid;
     try {
-      const parent = this.bot.currentRegion.objects.getObjectByLocalID(parentLocalId);
-      if (parent?.ParentID) return this.findOwnerAvatar(parent.ParentID, depth + 1);
+      const parent = this.bot.currentRegion.objects.getObjectByUUID(parentUuid as any);
+      if (parent?.ParentID) {
+        // Walk up: get the parent's parent object by localId, then recurse with its UUID
+        const grandparent = this.bot.currentRegion.objects.getObjectByLocalID(parent.ParentID);
+        if (grandparent) {
+          const grandparentUuid = grandparent.FullID?.toString();
+          if (grandparentUuid) return this.findOwnerAvatar(grandparentUuid, depth + 1);
+        }
+      }
     } catch { /* empty */ }
     return undefined;
   }
 
-  /** Track an object localId as having bake UUIDs for a given avatar */
-  trackBakeObject(avatarId: string, localId: number): void {
+  /** Track an object UUID as having bake UUIDs for a given avatar */
+  trackBakeObject(avatarId: string, objectUuid: string): void {
     let set = this.avatarBakeObjects.get(avatarId);
     if (!set) {
       set = new Set();
       this.avatarBakeObjects.set(avatarId, set);
     }
-    set.add(localId);
+    set.add(objectUuid);
   }
 
-  /** Remove a localId from bake tracking (called on object kill) */
-  removeBakeObject(localId: number): void {
+  /** Remove an object UUID from bake tracking (called on object kill) */
+  removeBakeObject(objectUuid: string): void {
     for (const set of this.avatarBakeObjects.values()) {
-      set.delete(localId);
+      set.delete(objectUuid);
     }
   }
 
@@ -229,10 +236,10 @@ export class GodotAvatarManager {
     }
 
     let reemitted = 0;
-    for (const localId of objectSet) {
-      if (!this.trackedObjects.has(localId)) continue;
+    for (const objectUuid of objectSet) {
+      if (!this.trackedObjects.has(objectUuid)) continue;
       try {
-        const obj = this.bot.currentRegion.objects.getObjectByLocalID(localId);
+        const obj = this.bot.currentRegion.objects.getObjectByUUID(objectUuid as any);
         if (!obj || obj.deleted) continue;
 
         const texInfo = this.materialPipeline?.getTextureInfo(obj);
@@ -255,16 +262,17 @@ export class GodotAvatarManager {
         }
 
         if (hadSub) {
+          const objUuid = obj.FullID?.toString() || '';
           // Queue face update for batched delivery to Godot
-          this.materialPipeline!.queueFaceUpdate(localId, texInfo.faces);
+          this.materialPipeline!.queueFaceUpdate(objUuid, texInfo.faces);
 
           // Fetch the new baked texture assets via appearance service
           for (const face of texInfo.faces) {
             if (face.textureId && !BAKE_MAGIC_UUIDS.has(face.textureId) && this.textureFetchQueue) {
               if (face._bakeChannel != null) {
-                this.textureFetchQueue.requestBake(face.textureId, localId, avatarId, face._bakeChannel);
+                this.textureFetchQueue.requestBake(face.textureId, objUuid, avatarId, face._bakeChannel);
               } else {
-                this.textureFetchQueue.request(face.textureId, localId);
+                this.textureFetchQueue.request(face.textureId, objUuid);
               }
             }
           }
@@ -280,7 +288,7 @@ export class GodotAvatarManager {
 
   // ─── Avatar Lifecycle ─────────────────────────────────────────
 
-  /** Send avatar_create with localId for attachment routing + skeleton creation */
+  /** Send avatar_create with UUID for attachment routing + skeleton creation */
   sendAvatarCreate(avatar: any, id: string): void {
     const pos = avatar.position;
     const rot = avatar.getRotation();
@@ -290,7 +298,17 @@ export class GodotAvatarManager {
       if (gameObj) localId = gameObj.ID;
     } catch { /* gameObject may not be set yet */ }
 
-    const parentId = (avatar as any)._gameObject?.ParentID || 0;
+    // Resolve parent UUID for seated avatars
+    const parentLocalId = (avatar as any)._gameObject?.ParentID || 0;
+    let parentUuid = '';
+    if (parentLocalId > 0) {
+      try {
+        const parentObj = this.bot.currentRegion.objects.getObjectByLocalID(parentLocalId);
+        if (parentObj) {
+          parentUuid = parentObj.FullID?.toString() || '';
+        }
+      } catch { /* parent may not be in store */ }
+    }
 
     const isSelf = id === this.bot.agent?.agentID?.toString();
     if (isSelf) {
@@ -300,23 +318,21 @@ export class GodotAvatarManager {
     this.send({
       type: 'avatar_create',
       id,
-      localId,
       name: avatar.getName(),
       position: slPos(pos),
       rotation: slQuat(rot),
-      parentId,
+      parentUuid,
     });
     if (localId > 0) {
       this.trackedAvatars.add(id);
-      this.avatarLocalIds.set(id, localId);
     } else {
       // Don't mark as tracked — onAvatarEnteredRegion will re-create with real localId
       console.log(`[Avatar] ${id.slice(0, 8)} has localId=0, deferring tracking until ObjectUpdate arrives`);
     }
 
-    // Track self-avatar localId for attachment tagging
-    if (isSelf && localId > 0) {
-      this.objectSender.selfAvatarLocalId = localId;
+    // Track self-avatar UUID for attachment tagging
+    if (isSelf) {
+      this.objectSender.selfAvatarUuid = id;
     }
 
     // Send existing attachments
@@ -338,8 +354,9 @@ export class GodotAvatarManager {
       let skippedTracked = 0;
       for (const [, obj] of attachments) {
         if (isHudAttachment(obj)) { skippedHud++; continue; }
-        if (!this.trackedObjects.has(obj.ID)) {
-          this.objectSender.sendObject(obj, avLocalId);
+        const objUuid = obj.FullID?.toString() || '';
+        if (!objUuid || !this.trackedObjects.has(objUuid)) {
+          this.objectSender.sendObject(obj, id);
           this.objectSender.sendChildren(obj);
           sentCount++;
         } else {
@@ -359,10 +376,11 @@ export class GodotAvatarManager {
       this.avatarAttachSubs.get(id)?.unsubscribe();
       const attachSub = avatar.onAttachmentAdded.subscribe((obj: any) => {
         if (!this.connected) return;
-        console.log(`[AvatarDebug] onAttachmentAdded: avatar=${id.slice(0,8)} obj=${obj.ID} IsAttachment=${obj.IsAttachment} attachPt=${obj.attachmentPoint} PCode=${obj.PCode} isHud=${isHudAttachment(obj)}`);
+        const objUuid = obj.FullID?.toString() || '';
+        console.log(`[AvatarDebug] onAttachmentAdded: avatar=${id.slice(0,8)} obj=${obj.ID} uuid=${objUuid.slice(0,8)} IsAttachment=${obj.IsAttachment} attachPt=${obj.attachmentPoint} PCode=${obj.PCode} isHud=${isHudAttachment(obj)}`);
         if (isHudAttachment(obj)) return;
-        if (this.trackedObjects.has(obj.ID)) return;
-        this.objectSender.sendObject(obj, avLocalId);
+        if (objUuid && this.trackedObjects.has(objUuid)) return;
+        this.objectSender.sendObject(obj, id);
         this.objectSender.sendChildren(obj);
       });
       this.avatarAttachSubs.set(id, attachSub);
@@ -385,7 +403,7 @@ export class GodotAvatarManager {
     // Replay buffered avatar animations
     const buffered = this.animationManager.getBufferedAvatarAnims(id);
     if (buffered && buffered.length > 0 && localId > 0) {
-      this.animationManager.updateAnimSet(localId, buffered.map(a => a.animId));
+      this.animationManager.updateAnimSet(id, buffered.map(a => a.animId));
     }
   }
 
@@ -398,7 +416,6 @@ export class GodotAvatarManager {
           this.send({ type: 'avatar_kill', id });
           this.trackedAvatars.delete(id);
           this.animationManager.cleanupAvatar(id);
-          this.avatarLocalIds.delete(id);
           this.avatarAttachSubs.get(id)?.unsubscribe();
           this.avatarAttachSubs.delete(id);
           // Clean up BoM + shape state

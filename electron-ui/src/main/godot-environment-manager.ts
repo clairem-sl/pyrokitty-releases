@@ -1,7 +1,9 @@
 /**
  * GodotEnvironmentManager — Terrain heights, parcel environment, day cycle,
- * and sun/ambient color computation. Subscribes to ClientEvents for terrain,
- * environment, and parcel overlay from all regions (main + children).
+ * and sun/ambient color computation. Formatting + sending only — does NOT
+ * subscribe to node-metaverse events. The caller (GodotBridge or any viewer
+ * bridge) is responsible for subscribing to ClientEvents and calling into
+ * these methods.
  */
 
 import * as fs from 'fs';
@@ -10,9 +12,8 @@ import { app } from 'electron';
 import type { Bot } from '../../node-metaverse/dist/lib';
 import { RegionEnvironment } from '../../node-metaverse/dist/lib/classes/public/RegionEnvironment';
 import { LLSD } from '../../node-metaverse/dist/lib/classes/llsd/LLSD';
+import type { Region } from '../../node-metaverse/dist/lib/classes/Region';
 import type { TerrainCompleteEvent } from '../../node-metaverse/dist/lib/events/TerrainCompleteEvent';
-import type { RegionEnvironmentEvent } from '../../node-metaverse/dist/lib/events/RegionEnvironmentEvent';
-import type { Subscription } from 'rxjs';
 
 function getCacheDirBase(): string {
   return path.join(app.getPath('userData'), 'asset-cache');
@@ -26,56 +27,59 @@ export class GodotEnvironmentManager {
   private _parcelEnvFetching = false;
   private static readonly PARCEL_ENV_TTL_MS = 30_000;
 
-  /** Per-region environment data, keyed by cacheID string */
-  private regionEnvironments = new Map<string, RegionEnvironmentEvent>();
-
-  private terrainSub: Subscription | null = null;
-  private envSub: Subscription | null = null;
-
   constructor(bot: Bot, send: (msg: object) => void) {
     this.bot = bot;
     this.send = send;
-
-    // Subscribe to terrain from all regions
-    this.terrainSub = bot.clientEvents.onTerrainComplete.subscribe((evt: TerrainCompleteEvent) => {
-      this.handleTerrainComplete(evt);
-    });
-
-    // Subscribe to environment from all regions
-    this.envSub = bot.clientEvents.onRegionEnvironment.subscribe((evt: RegionEnvironmentEvent) => {
-      this.regionEnvironments.set(evt.cacheID.toString(), evt);
-    });
   }
 
-  private handleTerrainComplete(evt: TerrainCompleteEvent): void {
+  /** Write terrain from a TerrainCompleteEvent and send terrain_ready to Godot. */
+  sendTerrainEvent(evt: TerrainCompleteEvent): void {
+    this.writeTerrain(evt.cacheID.toString(), evt.gridX, evt.gridY, evt.waterHeight, evt.terrain);
+  }
+
+  /** Write terrain from a Region and send terrain_ready to Godot. */
+  sendRegionTerrain(region: Region, offsetX = 0, offsetY = 0): void {
+    this.writeTerrain(
+      region.cacheID?.toString() ?? 'unknown',
+      region.xCoordinate,
+      region.yCoordinate,
+      region.waterHeight,
+      region.terrain,
+      offsetX,
+      offsetY,
+    );
+  }
+
+  private writeTerrain(cacheId: string, gridX: number, gridY: number, waterHeight: number, terrain: number[][], offsetX = 0, offsetY = 0): void {
     // Write terrain as raw Float32 binary to cache file (256KB)
     const buf = Buffer.alloc(256 * 256 * 4);
     for (let y = 0; y < 256; y++) {
       for (let x = 0; x < 256; x++) {
-        const h = evt.terrain[y]?.[x] ?? 0;
+        const h = terrain[y]?.[x] ?? 0;
         buf.writeFloatLE(h < 0 ? 0 : h, (y * 256 + x) * 4);
       }
     }
 
-    const cacheId = evt.cacheID.toString();
     const safeName = cacheId.replace(/[^a-zA-Z0-9_-]/g, '_');
     const cachePath = path.join(getCacheDirBase(), 'terrain', `${safeName}.bin`);
     fs.writeFileSync(cachePath, buf);
     const fwdPath = cachePath.replace(/\\/g, '/');
 
-    console.log(`[GodotBridge] Terrain cached for region ${evt.gridX},${evt.gridY} (waterHeight=${evt.waterHeight})`);
+    console.log(`[GodotBridge] Terrain cached for region ${gridX},${gridY} (waterHeight=${waterHeight})`);
     this.send({
       type: 'terrain_ready',
       path: fwdPath,
-      waterHeight: evt.waterHeight ?? 20,
+      waterHeight: waterHeight ?? 20,
       cacheID: cacheId,
-      gridX: evt.gridX,
-      gridY: evt.gridY,
+      gridX,
+      gridY,
+      offsetX,
+      offsetY,
     });
   }
 
-  /** Send terrain for the current main region (legacy call for initial load / region change).
-   *  Waits for terrain to arrive then the subscription handles the rest. */
+  /** Send terrain for the current main region (initial load / region change).
+   *  Waits for terrain to arrive, then sends directly. */
   async sendTerrain(): Promise<void> {
     const region = this.bot.currentRegion;
 
@@ -85,17 +89,7 @@ export class GodotEnvironmentManager {
       console.warn('[GodotBridge] Terrain wait timed out, sending what we have');
     }
 
-    // If the subscription already handled it (terrainComplete fired), great.
-    // If it timed out, emit manually for what we have.
-    if (!region.terrainComplete) {
-      const evt = new (await import('../../node-metaverse/dist/lib/events/TerrainCompleteEvent')).TerrainCompleteEvent();
-      evt.cacheID = region.cacheID;
-      evt.gridX = region.xCoordinate;
-      evt.gridY = region.yCoordinate;
-      evt.waterHeight = region.waterHeight;
-      evt.terrain = region.terrain;
-      this.handleTerrainComplete(evt);
-    }
+    this.sendRegionTerrain(region);
 
     // Clear parcel env cache on region change (parcel IDs are per-region)
     this._parcelEnvCache = null;
@@ -389,16 +383,7 @@ export class GodotEnvironmentManager {
       clearInterval(this.envTimer);
       this.envTimer = null;
     }
-    if (this.terrainSub) {
-      this.terrainSub.unsubscribe();
-      this.terrainSub = null;
-    }
-    if (this.envSub) {
-      this.envSub.unsubscribe();
-      this.envSub = null;
-    }
     this._parcelEnvCache = null;
     this._parcelEnvFetching = false;
-    this.regionEnvironments.clear();
   }
 }

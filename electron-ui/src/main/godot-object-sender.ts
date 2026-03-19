@@ -19,10 +19,10 @@ import { isHudAttachment, BAKE_MAGIC_UUIDS, ZERO_UUID, slPos, slQuat, slScale } 
 import type { ObjectReadinessTracker } from './object-readiness-tracker';
 
 export class GodotObjectSender {
-  private deferredTextures = new Map<number, any>();
+  private deferredTextures = new Map<string, any>();
   /** Children waiting for their parent to be tracked before sending */
-  private pendingChildren = new Map<number, { obj: any; parentLocalId: number }[]>();
-  private textureUpdateSubs = new Map<number, Subscription>();
+  private pendingChildren = new Map<string, { obj: any; parentUuid: string }[]>();
+  private textureUpdateSubs = new Map<string, Subscription>();
   private get TEXTURE_FETCH_RANGE(): number { return this.bot.agent?.cameraFar ?? 128; }
 
   private meshFetchQueue: MeshFetchQueue | null = null;
@@ -33,16 +33,16 @@ export class GodotObjectSender {
   private readinessTracker: ObjectReadinessTracker | null = null;
 
   // Self-avatar tracking for [SelfAvatar] logging
-  selfAvatarLocalId: number = 0;
-  readonly selfAttachmentIds = new Set<number>();
+  selfAvatarUuid: string = '';
+  readonly selfAttachmentIds = new Set<string>();
   readonly selfMeshIds = new Set<string>();
   readonly selfTextureIds = new Set<string>();
 
   constructor(
     private bot: Bot,
     private send: SendFn,
-    private trackedObjects: Set<number>,
-    private avatarLocalIds: Map<string, number>,
+    private trackedObjects: Set<string>,
+    private trackedAvatars: Set<string>,
     private materialPipeline: GodotMaterialPipeline,
     private animationManager: GodotAnimationManager,
   ) { }
@@ -94,7 +94,7 @@ export class GodotObjectSender {
     } : undefined;
     return {
       type: 'object_complete',
-      localId: obj.ID,
+      uuid: obj.FullID?.toString() || '',
       ...(effectiveMeshId ? { meshId: effectiveMeshId } : {}),
       ...(shapeParams ? { shape: shapeParams } : {}),
       ...(texInfo ? { faces: texInfo.faces } : {}),
@@ -157,32 +157,39 @@ export class GodotObjectSender {
     return me?.position ?? null;
   }
 
-  /** Get global position for a root prim (ParentID === 0). Returns null for children. */
-  getGlobalPosition(obj: any): { x: number; y: number; z: number; distance(other: any): number } | null {
+  /** Get world position for a root prim, accounting for region offset. Returns null for children. */
+  getWorldPosition(obj: any): { x: number; y: number; z: number } | null {
     const pos = obj.Position;
     if (!pos) return null;
     if (obj.ParentID && obj.ParentID !== 0) return null;
+    // Add region offset relative to main region
+    const objRegion = obj.region;
+    const mainRegion = this.bot.currentRegion;
+    if (objRegion && mainRegion) {
+      const dx = ((objRegion.xCoordinate ?? 0) - (mainRegion.xCoordinate ?? 0)) * 256;
+      const dy = ((objRegion.yCoordinate ?? 0) - (mainRegion.yCoordinate ?? 0)) * 256;
+      return { x: pos.x + dx, y: pos.y + dy, z: pos.z };
+    }
     return pos;
   }
 
-  /** Send a single object to Godot with optional parentId */
-  sendObject(obj: any, parentLocalId: number): void {
-    if (this.trackedObjects.has(obj.ID)) return;
+  /** Send a single object to Godot with optional parentUuid */
+  sendObject(obj: any, parentUuid: string): void {
+    const objUuid = obj.FullID?.toString() || '';
+    if (this.trackedObjects.has(objUuid)) return;
     const pos = obj.Position;
     if (!pos) return;
 
     // Buffer children whose parent hasn't been sent yet
-    if (parentLocalId > 0 && !this.trackedObjects.has(parentLocalId)) {
-      // Avatar localIds are always valid parents (tracked separately)
-      let isAvatarParent = false;
-      for (const [, lid] of this.avatarLocalIds) { if (lid === parentLocalId) { isAvatarParent = true; break; } }
-      if (!isAvatarParent) {
-        let buf = this.pendingChildren.get(parentLocalId);
+    if (parentUuid !== '' && !this.trackedObjects.has(parentUuid)) {
+      // Avatar UUIDs are always valid parents (tracked separately)
+      if (!this.trackedAvatars.has(parentUuid)) {
+        let buf = this.pendingChildren.get(parentUuid);
         if (!buf) {
           buf = [];
-          this.pendingChildren.set(parentLocalId, buf);
+          this.pendingChildren.set(parentUuid, buf);
         }
-        buf.push({ obj, parentLocalId });
+        buf.push({ obj, parentUuid });
         return;
       }
     }
@@ -192,10 +199,14 @@ export class GodotObjectSender {
     const meshId = this.getMeshId(obj);
     const sculptInfo = this.getSculptInfo(obj);
     const texInfo = this.materialPipeline.getTextureInfo(obj);
+    if (!texInfo) {
+      const te = obj.TextureEntry;
+      console.warn(`[ObjectSender] No texInfo for ${objUuid.slice(0, 8)}: TextureEntry=${te ? 'present' : 'null'}, defaultTexture=${te?.defaultTexture ? 'present' : 'null'}`);
+    }
 
     // BoM: substitute magic bake UUIDs with actual baked textures for avatar attachments
-    if (texInfo && parentLocalId > 0 && this.avatarManager) {
-      const avatarId = this.avatarManager.findOwnerAvatar(parentLocalId);
+    if (texInfo && parentUuid !== '' && this.avatarManager) {
+      const avatarId = this.avatarManager.findOwnerAvatar(parentUuid);
       if (avatarId) {
         let hasBakeUuids = false;
         for (const face of texInfo.faces) {
@@ -206,7 +217,7 @@ export class GodotObjectSender {
         }
         if (hasBakeUuids) {
           // Track this object for re-emit when bakes arrive/change
-          this.avatarManager.trackBakeObject(avatarId, obj.ID);
+          this.avatarManager.trackBakeObject(avatarId, objUuid);
 
           const bakes = this.avatarManager.getBakedTextures(avatarId);
           if (bakes) {
@@ -239,26 +250,22 @@ export class GodotObjectSender {
     const lightInfo = this.getLightInfo(obj);
 
     const isAnimesh = !!(obj.extraParams?.extendedMeshData?.flags & 0x1);
-    const objUuid = obj.FullID?.toString() || '';
 
     // Log avatar attachments
-    const isSelfAttach = parentLocalId > 0 && parentLocalId === this.selfAvatarLocalId;
-    if (parentLocalId > 0) {
-      let isAvatarAttach = isSelfAttach;
-      if (!isAvatarAttach) {
-        for (const [, lid] of this.avatarLocalIds) { if (lid === parentLocalId) { isAvatarAttach = true; break; } }
-      }
+    const isSelfAttach = parentUuid !== '' && parentUuid === this.selfAvatarUuid;
+    if (parentUuid !== '') {
+      let isAvatarAttach = isSelfAttach || this.trackedAvatars.has(parentUuid);
       if (isAvatarAttach) {
-        console.log(`[AvatarDebug] Sending attachment: localId=${obj.ID} meshId=${meshId?.slice(0, 8) || 'none'} parentId=${parentLocalId} isAnimesh=${isAnimesh} uuid=${objUuid.slice(0, 8)}`);
+        console.log(`[AvatarDebug] Sending attachment: uuid=${objUuid.slice(0, 8)} meshId=${meshId?.slice(0, 8) || 'none'} parentUuid=${parentUuid.slice(0, 8)} isAnimesh=${isAnimesh}`);
       }
     }
 
     // Track self-avatar attachments for [SelfAvatar] logging
     if (isSelfAttach) {
-      this.selfAttachmentIds.add(obj.ID);
+      this.selfAttachmentIds.add(objUuid);
       const faceCount = texInfo?.faces?.length ?? 0;
       const texCount = texInfo?.textureIds?.length ?? 0;
-      console.log(`[SelfAvatar] Attachment: localId=${obj.ID} uuid=${objUuid.slice(0, 8)} meshId=${meshId?.slice(0, 8) || 'none'} isAnimesh=${isAnimesh} faces=${faceCount} textures=${texCount}`);
+      console.log(`[SelfAvatar] Attachment: uuid=${objUuid.slice(0, 8)} meshId=${meshId?.slice(0, 8) || 'none'} isAnimesh=${isAnimesh} faces=${faceCount} textures=${texCount}`);
       if (meshId) this.selfMeshIds.add(meshId);
       if (texInfo) {
         for (const tid of texInfo.textureIds) this.selfTextureIds.add(tid);
@@ -266,23 +273,23 @@ export class GodotObjectSender {
     }
 
     if (isAnimesh) {
-      console.log(`[Animesh] Detected animesh object localId=${obj.ID} uuid=${objUuid} meshId=${meshId || 'none'} parentId=${parentLocalId}`);
+      console.log(`[Animesh] Detected animesh object uuid=${objUuid} meshId=${meshId || 'none'} parentUuid=${parentUuid.slice(0, 8)}`);
     }
 
-    // Distance gate: defer asset fetching for far root prims.
-    // Only roots are gated — child positions are relative and rotation-dependent,
-    // so their true world distance can't be computed without full transform math.
-    let skipAssets = false;
-    if (parentLocalId === 0) {
+    // Distance gate: skip entirely for far root prims (no placeholder, no assets).
+    // They stay in deferredTextures and get created when the bot moves closer.
+    if (parentUuid === '') {
       try {
         const botPos = this.getBotPosition();
         if (botPos) {
-          const globalPos = this.getGlobalPosition(obj);
-          if (globalPos) {
-            const dist = globalPos.distance(botPos);
+          const worldPos = this.getWorldPosition(obj);
+          if (worldPos) {
+            const dx = worldPos.x - botPos.x, dy = worldPos.y - botPos.y, dz = worldPos.z - botPos.z;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
             if (dist > this.TEXTURE_FETCH_RANGE) {
-              skipAssets = true;
-              this.deferredTextures.set(obj.ID, obj);
+              this.deferredTextures.set(objUuid, obj);
+              this.trackedObjects.add(objUuid);
+              return;
             }
           }
         }
@@ -290,11 +297,12 @@ export class GodotObjectSender {
     }
 
     // Phase 1: lightweight object_create with spatial info only
+    const regionCacheID = obj.region?.cacheID?.toString() ?? '';
     this.send({
       type: 'object_create',
-      localId: obj.ID,
       uuid: objUuid,
-      parentId: parentLocalId,
+      parentUuid: parentUuid,
+      cacheID: regionCacheID,
       position: slPos(pos),
       rotation: rot ? slQuat(rot) : [0, 0, 0, 1],
       scale: scl ? slScale(scl) : [0.5, 0.5, 0.5],
@@ -304,37 +312,35 @@ export class GodotObjectSender {
       ...(obj.attachmentPoint > 0 ? { attachmentPoint: obj.attachmentPoint } : {}),
     });
 
-    // Phase 2: build and track object_complete (skip deferred — tracked on promotion)
-    if (!skipAssets) {
-      const completeMsg = this.buildCompleteMsg(obj, meshId, sculptInfo, texInfo);
-      const effectiveMeshId = completeMsg.meshId || undefined;
-      if (this.readinessTracker) {
-        this.readinessTracker.track(obj.ID, effectiveMeshId || null, new Set(), completeMsg);
-      } else {
-        this.send(completeMsg);
-      }
+    // Phase 2: build and track object_complete
+    const completeMsg = this.buildCompleteMsg(obj, meshId, sculptInfo, texInfo);
+    const effectiveMeshId = completeMsg.meshId || undefined;
+    if (this.readinessTracker) {
+      this.readinessTracker.track(objUuid, effectiveMeshId || null, new Set(), completeMsg);
+    } else {
+      this.send(completeMsg);
     }
     if (lightInfo) {
-      this.updateCoalescer?.trackLight(obj.ID);
+      this.updateCoalescer?.trackLight(objUuid);
     }
-    this.updateCoalescer?.trackAnimesh(obj.ID, isAnimesh);
+    this.updateCoalescer?.trackAnimesh(objUuid, isAnimesh);
     if (isAnimesh && objUuid) {
-      this.animationManager.registerAnimeshObject(objUuid, obj.ID);
+      this.animationManager.registerAnimeshObject(objUuid);
       const buffered = this.animationManager.getBufferedObjectAnims(objUuid);
       if (buffered && buffered.length > 0) {
-        console.log(`[Animesh] Replaying ${buffered.length} buffered animations for ${objUuid.slice(0, 8)} localId=${obj.ID}: ${buffered.map(a => a.animId.slice(0, 8)).join(', ')}`);
-        this.animationManager.updateAnimSet(obj.ID, buffered.map(a => a.animId));
+        console.log(`[Animesh] Replaying ${buffered.length} buffered animations for ${objUuid.slice(0, 8)}: ${buffered.map(a => a.animId.slice(0, 8)).join(', ')}`);
+        this.animationManager.updateAnimSet(objUuid, buffered.map(a => a.animId));
       } else {
-        console.log(`[Animesh] No buffered animations for ${objUuid.slice(0, 8)} localId=${obj.ID} (ObjectAnimation not yet received)`);
+        console.log(`[Animesh] No buffered animations for ${objUuid.slice(0, 8)} (ObjectAnimation not yet received)`);
       }
     }
-    this.trackedObjects.add(obj.ID);
+    this.trackedObjects.add(objUuid);
 
     // Flush any children that were waiting for this parent
-    const waiting = this.pendingChildren.get(obj.ID);
+    const waiting = this.pendingChildren.get(objUuid);
     if (waiting) {
-      this.pendingChildren.delete(obj.ID);
-      for (const { obj: childObj, parentLocalId: childParent } of waiting) {
+      this.pendingChildren.delete(objUuid);
+      for (const { obj: childObj, parentUuid: childParent } of waiting) {
         this.sendObject(childObj, childParent);
       }
     }
@@ -342,72 +348,86 @@ export class GodotObjectSender {
     // Subscribe to live texture changes
     if (obj.onTextureUpdate) {
       const texSub = obj.onTextureUpdate.subscribe(() => this.materialPipeline.handleObjectTextureUpdate(obj));
-      this.textureUpdateSubs.set(obj.ID, texSub);
+      this.textureUpdateSubs.set(objUuid, texSub);
     }
 
-    if (!skipAssets) {
-      if (meshId && this.meshFetchQueue) {
-        this.meshFetchQueue.request(meshId, obj.ID);
-      }
-      if (sculptInfo && this.sculptFetchQueue) {
-        this.sculptFetchQueue.request(sculptInfo.textureUuid, sculptInfo.sculptType, obj.ID);
-      }
-      if (lightInfo?.isSpot && lightInfo.projTexture && this.textureFetchQueue) {
-        console.log(`[GodotBridge] Requesting proj texture ${lightInfo.projTexture} for localId=${obj.ID}`);
-        this.textureFetchQueue.request(lightInfo.projTexture, obj.ID);
-      }
-      this.materialPipeline.fetchTexturesForObject(obj, texInfo);
+    if (meshId && this.meshFetchQueue) {
+      this.meshFetchQueue.request(meshId, objUuid);
     }
+    if (sculptInfo && this.sculptFetchQueue) {
+      this.sculptFetchQueue.request(sculptInfo.textureUuid, sculptInfo.sculptType, objUuid);
+    }
+    if (lightInfo?.isSpot && lightInfo.projTexture && this.textureFetchQueue) {
+      console.log(`[GodotBridge] Requesting proj texture ${lightInfo.projTexture} for uuid=${objUuid.slice(0, 8)}`);
+      this.textureFetchQueue.request(lightInfo.projTexture, objUuid);
+    }
+    this.materialPipeline.fetchTexturesForObject(obj, texInfo);
   }
 
   /** Recursively send children of a root/parent object */
   sendChildren(obj: any): void {
     try {
       const children = this.bot.currentRegion.objects.getObjectsByParent(obj.ID);
+      const parentUuid = obj.FullID?.toString() || '';
       for (const child of children) {
         if (child.PCode === 47) continue;
         if (isHudAttachment(child)) continue;
-        this.sendObject(child, obj.ID);
+        this.sendObject(child, parentUuid);
         this.sendChildren(child);
       }
     } catch { /* */ }
   }
 
   /** Send initial snapshot of all objects and avatars */
-  sendInitialSnapshot(sendAvatarCreate: (avatar: any, id: string) => void): void {
+  sendInitialSnapshot(sendAvatarCreate: (avatar: any, id: string) => void, allRegions?: any[]): void {
     try {
-      const region = this.bot.currentRegion;
+      const regions = allRegions ?? [this.bot.currentRegion];
 
-      // Send initial avatars
-      const agents = region.agents;
-      for (const [id, avatar] of agents) {
-        sendAvatarCreate(avatar, id);
+      // Send initial avatars from all regions
+      let totalAvatars = 0;
+      for (const region of regions) {
+        const agents = region.agents;
+        for (const [id, avatar] of agents) {
+          sendAvatarCreate(avatar, id);
+        }
+        totalAvatars += agents.size;
       }
-      console.log(`[GodotBridge] Sent ${agents.size} initial avatars`);
+      console.log(`[GodotBridge] Sent ${totalAvatars} initial avatars from ${regions.length} region(s)`);
 
-      const objectStore = region.objects;
-      const queue: { obj: any; parentId: number }[] = [];
-      const collected = new Set<number>();
-      const collect = (obj: any, parentId: number) => {
-        if (obj.PCode === 47) return;
-        if (isHudAttachment(obj)) return;
-        if (this.trackedObjects.has(obj.ID)) return;
-        if (collected.has(obj.ID)) return;
-        collected.add(obj.ID);
-        queue.push({ obj, parentId });
-        // Collect children from object store (obj.children may not be populated)
-        try {
-          const children = objectStore.getObjectsByParent(obj.ID);
-          for (const child of children) {
-            collect(child, obj.ID);
+      const queue: { obj: any; parentUuid: string }[] = [];
+      const collected = new Set<string>();
+
+      for (const region of regions) {
+        const objectStore = region.objects;
+        const collect = (obj: any, parentUuid: string) => {
+          if (obj.PCode === 47) return;
+          if (isHudAttachment(obj)) return;
+          const objUuid = obj.FullID?.toString() || '';
+          if (this.trackedObjects.has(objUuid)) return;
+          if (collected.has(objUuid)) return;
+          collected.add(objUuid);
+          queue.push({ obj, parentUuid });
+          // Collect children from object store (obj.children may not be populated)
+          try {
+            const children = objectStore.getObjectsByParent(obj.ID);
+            for (const child of children) {
+              collect(child, objUuid);
+            }
+          } catch { /* */ }
+        };
+
+        // Iterate ALL objects in the store
+        objectStore.forEachObject((obj: any) => {
+          let parentUuid = '';
+          if (obj.ParentID && obj.ParentID !== 0) {
+            try {
+              const parent = objectStore.getObjectByLocalID(obj.ParentID);
+              parentUuid = parent?.FullID?.toString() || '';
+            } catch { /* */ }
           }
-        } catch { /* */ }
-      };
-
-      // Iterate ALL objects in the store — getAllObjects filters too aggressively
-      objectStore.forEachObject((obj: any) => {
-        collect(obj, obj.ParentID || 0);
-      });
+          collect(obj, parentUuid);
+        });
+      }
 
       // Throttled batching: 50 objects every 100ms to avoid overwhelming Godot
       // during cold start (Vulkan resource creation, skeleton setup, etc.)
@@ -419,7 +439,7 @@ export class GodotObjectSender {
       const sendNextBatch = () => {
         const end = Math.min(offset + BATCH_SIZE, queue.length);
         for (let i = offset; i < end; i++) {
-          this.sendObject(queue[i].obj, queue[i].parentId);
+          this.sendObject(queue[i].obj, queue[i].parentUuid);
         }
         offset = end;
         if (offset < queue.length) {
@@ -434,30 +454,34 @@ export class GodotObjectSender {
     }
   }
 
+  /** Find an object by UUID across all regions (main + children). */
+  private findObjectByUUID(uuid: string): any {
+    try {
+      const obj = this.bot.currentRegion?.objects?.getObjectByUUID(uuid as any);
+      if (obj) return obj;
+    } catch { /* */ }
+    for (const childRegion of this.bot.childAgentManager?.getChildRegions() ?? []) {
+      try {
+        const obj = childRegion.objects?.getObjectByUUID(uuid as any);
+        if (obj) return obj;
+      } catch { /* */ }
+    }
+    return null;
+  }
+
   /** Sweep for deleted objects */
   sweepDeletedObjects(): void {
     try {
-      const objectStore = this.bot.currentRegion.objects;
-      for (const localId of this.trackedObjects) {
-        try {
-          const obj = objectStore.getObjectByLocalID(localId);
-          if (!obj || obj.deleted) {
-            this.send({ type: 'object_kill', localId });
-            this.trackedObjects.delete(localId);
-            this.textureUpdateSubs.get(localId)?.unsubscribe();
-            this.textureUpdateSubs.delete(localId);
-            this.animationManager.cleanupLocalId(localId);
-            this.avatarManager?.removeBakeObject(localId);
-            this.readinessTracker?.remove(localId);
-          }
-        } catch {
-          this.send({ type: 'object_kill', localId });
-          this.trackedObjects.delete(localId);
-          this.textureUpdateSubs.get(localId)?.unsubscribe();
-          this.textureUpdateSubs.delete(localId);
-          this.animationManager.cleanupLocalId(localId);
-          this.avatarManager?.removeBakeObject(localId);
-          this.readinessTracker?.remove(localId);
+      for (const uuid of this.trackedObjects) {
+        const obj = this.findObjectByUUID(uuid);
+        if (!obj || obj.deleted) {
+          this.send({ type: 'object_kill', uuid });
+          this.trackedObjects.delete(uuid);
+          this.textureUpdateSubs.get(uuid)?.unsubscribe();
+          this.textureUpdateSubs.delete(uuid);
+          this.animationManager.cleanupUuid(uuid);
+          this.avatarManager?.removeBakeObject(uuid);
+          this.readinessTracker?.remove(uuid);
         }
       }
     } catch { /* bot may be disconnected */ }
@@ -470,51 +494,27 @@ export class GodotObjectSender {
       const botPos = this.getBotPosition();
       if (!botPos) return;
 
-      const objectStore = this.bot.currentRegion.objects;
       let promoted = 0;
 
-      for (const [localId, _obj] of this.deferredTextures) {
-        let live: any;
-        try {
-          live = objectStore.getObjectByLocalID(localId);
-          if (!live || live.deleted) {
-            this.deferredTextures.delete(localId);
-            continue;
-          }
-        } catch {
-          this.deferredTextures.delete(localId);
+      for (const [uuid, _obj] of this.deferredTextures) {
+        const live = this.findObjectByUUID(uuid);
+        if (!live || live.deleted) {
+          this.deferredTextures.delete(uuid);
           continue;
         }
 
-        const globalPos = this.getGlobalPosition(live);
-        if (!globalPos) {
+        const worldPos = this.getWorldPosition(live);
+        if (!worldPos) {
           continue;
         }
-        const dist = globalPos.distance(botPos);
+        const dx = worldPos.x - botPos.x, dy = worldPos.y - botPos.y, dz = worldPos.z - botPos.z;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (dist <= this.TEXTURE_FETCH_RANGE) {
-          this.deferredTextures.delete(localId);
-          const texInfo = this.materialPipeline.getTextureInfo(live);
-
-          // Request mesh and sculpt (deferred at sendObject time)
-          const liveMeshId = this.getMeshId(live);
-          const liveSculptInfo = this.getSculptInfo(live);
-          if (liveMeshId && this.meshFetchQueue) {
-            this.meshFetchQueue.request(liveMeshId, localId);
-          }
-          if (liveSculptInfo && this.sculptFetchQueue) {
-            this.sculptFetchQueue.request(liveSculptInfo.textureUuid, liveSculptInfo.sculptType, localId);
-          }
-          this.materialPipeline.fetchTexturesForObject(live, texInfo);
-
-          // Build object_complete and register with readiness tracker (was skipped at sendObject time)
-          const completeMsg = this.buildCompleteMsg(live, liveMeshId, liveSculptInfo, texInfo);
-          const effectiveMeshId = completeMsg.meshId || undefined;
-          if (this.readinessTracker) {
-            this.readinessTracker.track(localId, effectiveMeshId || null, new Set(), completeMsg);
-          } else {
-            this.send(completeMsg);
-          }
-
+          this.deferredTextures.delete(uuid);
+          // Remove from tracked so sendObject doesn't skip it as duplicate
+          this.trackedObjects.delete(uuid);
+          // Full send — deferred objects are always roots (parentUuid = '')
+          this.sendObject(live, '');
           promoted++;
         }
       }

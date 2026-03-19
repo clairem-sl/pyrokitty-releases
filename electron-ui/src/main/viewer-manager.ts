@@ -264,9 +264,14 @@ export class ViewerManager extends EventEmitter {
       throw new Error('Bot not available');
     }
 
+    const sceneManager = metaverse.getSceneManager();
+    if (!sceneManager) {
+      throw new Error('SceneManager not available');
+    }
+
     console.log(`[ViewerManager] Launching Godot viewer for ${instanceId}`);
 
-    const bridge = new GodotBridge(bot, {
+    const bridge = new GodotBridge(bot, sceneManager, {
       vrMode,
       objectAnimationBuffer: metaverse.getObjectAnimationBuffer(),
       avatarAppearanceBuffer: metaverse.getAvatarAppearanceBuffer(),

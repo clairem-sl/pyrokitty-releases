@@ -86,22 +86,20 @@ func handle_avatar_create(msg: Dictionary) -> void:
 	var avatar_id: String = msg.get("id", "")
 	if avatar_id.is_empty():
 		return
-	var local_id: int = int(msg.get("localId", 0))
-	_crumb("avatar_create id=%s lid=%d step=start" % [avatar_id.substr(0, 8), local_id])
+	_crumb("avatar_create id=%s step=start" % avatar_id.substr(0, 8))
 
 	# Remove existing if duplicate
 	if sm.avatars.has(avatar_id):
 		sm.avatars[avatar_id].destroy()
 		sm.avatar_targets.erase(avatar_id)
 		# Clean up old skeleton root if present
-		var old_lid: int = sm.avatar_local_ids.get(avatar_id, 0)
-		if old_lid > 0 and sm.animesh_roots.has(old_lid):
-			var old_node: Node3D = sm.animesh_roots[old_lid]
+		if sm.animesh_roots.has(avatar_id):
+			var old_node: Node3D = sm.animesh_roots[avatar_id]
 			if old_node and is_instance_valid(old_node):
 				old_node.queue_free()
-			sm.erase_animesh_state(old_lid)
+			sm.erase_animesh_state(avatar_id)
 
-	_crumb("avatar_create id=%s lid=%d step=RSInstance" % [avatar_id.substr(0, 8), local_id])
+	_crumb("avatar_create id=%s step=RSInstance" % avatar_id.substr(0, 8))
 	var _vfar: float = sm.FrameBudget.VR_CAMERA_FAR if sm._vr_mode else sm._vis_far
 	var _vfade: float = sm.FrameBudget.VR_VISIBILITY_FADE_MARGIN if sm._vr_mode else sm._vis_fade
 	var rsi = sm.RSInstance.new(sm._scenario, _vfar, _vfade)
@@ -117,22 +115,22 @@ func handle_avatar_create(msg: Dictionary) -> void:
 		godot_rot = Quaternion(r[0], r[1], r[2], r[3])
 
 	# If avatar is sitting, transform local offset into world space
-	var seat_id: int = int(msg.get("parentId", 0))
-	var seat_rsi = sm.objects.get(seat_id) if seat_id > 0 else null
-	if seat_id > 0:
+	var seat_uuid: String = str(msg.get("parentUuid", ""))
+	var seat_rsi = sm.objects.get(seat_uuid) if not seat_uuid.is_empty() else null
+	if not seat_uuid.is_empty():
 		if seat_rsi != null:
 			godot_pos = seat_rsi.pos + seat_rsi.rot * godot_pos
 			godot_rot = seat_rsi.rot * godot_rot
 		else:
 			# Seat object hasn't arrived yet — queue for deferred resolution
-			if not sm.pending_seated_avatars.has(seat_id):
-				sm.pending_seated_avatars[seat_id] = []
-			sm.pending_seated_avatars[seat_id].append({
+			if not sm.pending_seated_avatars.has(seat_uuid):
+				sm.pending_seated_avatars[seat_uuid] = []
+			sm.pending_seated_avatars[seat_uuid].append({
 				"id": avatar_id, "pos": godot_pos, "rot": godot_rot
 			})
-			print("[AvatarSit] Deferred: avatar=%s waiting for seat localId=%d" % [avatar_id.substr(0, 8), seat_id])
+			print("[AvatarSit] Deferred: avatar=%s waiting for seat uuid=%s" % [avatar_id.substr(0, 8), seat_uuid.substr(0, 8)])
 
-	print("[AvatarHeight] raw_sl_pos=%s godot_pos=%s seat=%d" % [pos, godot_pos, seat_id])
+	print("[AvatarHeight] raw_sl_pos=%s godot_pos=%s seat=%s" % [pos, godot_pos, seat_uuid.substr(0, 8)])
 	rsi.pos = godot_pos
 	rsi.rot = godot_rot
 
@@ -143,59 +141,56 @@ func handle_avatar_create(msg: Dictionary) -> void:
 	sm.avatar_targets[avatar_id] = { "pos": godot_pos, "rot": godot_rot, "vel": Vector3.ZERO }
 
 	# Create skeleton root for this avatar (same as animesh root).
-	# Avatar attachments arrive as objects with parentId = this localId.
-	if local_id > 0:
-		sm.avatar_local_ids[avatar_id] = local_id
-		sm.object_uuid[local_id] = avatar_id
-		var avatar_node := Node3D.new()
-		avatar_node.name = "avatar_%d" % local_id
-		sm.add_child(avatar_node)
-		avatar_node.position = godot_pos
-		avatar_node.quaternion = godot_rot
-		avatar_node.scale = Vector3.ONE
-		sm.animesh_roots[local_id] = avatar_node
-		_crumb("avatar_create id=%s lid=%d step=create_skeleton" % [avatar_id.substr(0, 8), local_id])
-		# Create shared skeleton from avatar_skeleton.xml (ONE per avatar)
-		var shared_skel: Skeleton3D = sm.skeleton_builder.create_shared_skeleton()
-		avatar_node.add_child(shared_skel)
-		sm.animesh_shared_skeleton[local_id] = shared_skel
-		_crumb("avatar_create id=%s lid=%d step=apply_shape" % [avatar_id.substr(0, 8), local_id])
-		# Apply pending shape if AvatarAppearance arrived before avatar_create
-		if _avatar_shapes.has(avatar_id):
-			print("[AvatarShape] Applying pending shape for %s at avatar_create" % avatar_id.substr(0, 8))
-			_apply_shape_to_skeleton(shared_skel, _avatar_shapes[avatar_id], avatar_id)
-			_log_bone_rests(shared_skel, avatar_id, "after_shape")
-			# Body size offset + hover (hover from VisualParam 11001, byte 252)
-			# TODO: Firestorm skips hover when sitting (isSitting || sit_ground_constrained).
-			# We need proper sit state tracking before gating this.
-			var body_offset: float = _compute_body_z_offset(shared_skel, _avatar_shapes[avatar_id])
-			var hover: float = _avatar_hover_heights.get(avatar_id, 0.0)
-			shared_skel.position.y = -body_offset + hover
-			print("[AvatarShape] Pending body_offset=%.4f hover=%.4f for %s" % [body_offset, hover, avatar_id.substr(0, 8)])
-		# Apply pending volume morphs
-		if _avatar_volume_morphs.has(avatar_id):
-			sm.cv_volume_morphs[local_id] = _avatar_volume_morphs[avatar_id]
-		if avatar_id == sm.self_avatar_id:
-			print("[SelfAvatar] === Skeleton root created: localId=%d bones=%d ===" % [local_id, shared_skel.get_bone_count()])
+	# Avatar attachments arrive as objects with parentUuid = this avatar's UUID.
+	var avatar_node := Node3D.new()
+	avatar_node.name = "avatar_%s" % avatar_id.substr(0, 8)
+	sm.add_child(avatar_node)
+	avatar_node.position = godot_pos
+	avatar_node.quaternion = godot_rot
+	avatar_node.scale = Vector3.ONE
+	sm.animesh_roots[avatar_id] = avatar_node
+	_crumb("avatar_create id=%s step=create_skeleton" % avatar_id.substr(0, 8))
+	# Create shared skeleton from avatar_skeleton.xml (ONE per avatar)
+	var shared_skel: Skeleton3D = sm.skeleton_builder.create_shared_skeleton()
+	avatar_node.add_child(shared_skel)
+	sm.animesh_shared_skeleton[avatar_id] = shared_skel
+	_crumb("avatar_create id=%s step=apply_shape" % avatar_id.substr(0, 8))
+	# Apply pending shape if AvatarAppearance arrived before avatar_create
+	if _avatar_shapes.has(avatar_id):
+		print("[AvatarShape] Applying pending shape for %s at avatar_create" % avatar_id.substr(0, 8))
+		_apply_shape_to_skeleton(shared_skel, _avatar_shapes[avatar_id], avatar_id)
+		_log_bone_rests(shared_skel, avatar_id, "after_shape")
+		# Body size offset + hover (hover from VisualParam 11001, byte 252)
+		# TODO: Firestorm skips hover when sitting (isSitting || sit_ground_constrained).
+		# We need proper sit state tracking before gating this.
+		var body_offset: float = _compute_body_z_offset(shared_skel, _avatar_shapes[avatar_id])
+		var hover: float = _avatar_hover_heights.get(avatar_id, 0.0)
+		shared_skel.position.y = -body_offset + hover
+		print("[AvatarShape] Pending body_offset=%.4f hover=%.4f for %s" % [body_offset, hover, avatar_id.substr(0, 8)])
+	# Apply pending volume morphs
+	if _avatar_volume_morphs.has(avatar_id):
+		sm.cv_volume_morphs[avatar_id] = _avatar_volume_morphs[avatar_id]
+	if avatar_id == sm.self_avatar_id:
+		print("[SelfAvatar] === Skeleton root created: uuid=%s bones=%d ===" % [avatar_id.substr(0, 8), shared_skel.get_bone_count()])
 
-		_crumb("avatar_create id=%s lid=%d step=pending_children" % [avatar_id.substr(0, 8), local_id])
-		# Resolve pending children that arrived before this avatar —
-		# fix their world positions
-		if sm.pending_children.has(local_id):
-			for child_id: int in sm.pending_children[local_id]:
-				if sm.objects.has(child_id) and sm.child_offset_pos.has(child_id):
-					var child_rsi = sm.objects[child_id]
-					child_rsi.pos = avatar_node.position + avatar_node.quaternion * sm.child_offset_pos[child_id]
-					child_rsi.rot = avatar_node.quaternion * sm.child_offset_rot[child_id]
-					child_rsi.push_transform()
-			sm.pending_children.erase(local_id)
+	_crumb("avatar_create id=%s step=pending_children" % avatar_id.substr(0, 8))
+	# Resolve pending children that arrived before this avatar —
+	# fix their world positions
+	if sm.pending_children.has(avatar_id):
+		for child_uuid: String in sm.pending_children[avatar_id]:
+			if sm.objects.has(child_uuid) and sm.child_offset_pos.has(child_uuid):
+				var child_rsi = sm.objects[child_uuid]
+				child_rsi.pos = avatar_node.position + avatar_node.quaternion * sm.child_offset_pos[child_uuid]
+				child_rsi.rot = avatar_node.quaternion * sm.child_offset_rot[child_uuid]
+				child_rsi.push_transform()
+		sm.pending_children.erase(avatar_id)
 
-		_crumb("avatar_create id=%s lid=%d step=register_descendants" % [avatar_id.substr(0, 8), local_id])
-		# Register ALL descendants (children, grandchildren, etc.) as animesh children.
-		# Handles attachment linksets where child prims also need skeleton rigging.
-		sm.object_mgr._register_animesh_descendants(local_id, local_id)
+	_crumb("avatar_create id=%s step=register_descendants" % avatar_id.substr(0, 8))
+	# Register ALL descendants (children, grandchildren, etc.) as animesh children.
+	# Handles attachment linksets where child prims also need skeleton rigging.
+	sm.object_mgr._register_animesh_descendants(avatar_id, avatar_id)
 
-	_crumb("avatar_create id=%s lid=%d step=DONE" % [avatar_id.substr(0, 8), local_id])
+	_crumb("avatar_create id=%s step=DONE" % avatar_id.substr(0, 8))
 	if avatar_id == sm.self_avatar_id:
 		sm.self_avatar_moved.emit(rsi.pos)
 		_apply_self_avatar_visibility()
@@ -224,8 +219,8 @@ func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
 	if data.has("position"):
 		var rp: Array = data["position"]
 		var raw_pos := Vector3(rp[0], rp[1], rp[2])
-		var seat_id: int = int(data.get("parentId", 0))
-		var seat_rsi = sm.objects.get(seat_id) if seat_id > 0 else null
+		var seat_uuid: String = str(data.get("parentUuid", ""))
+		var seat_rsi = sm.objects.get(seat_uuid) if not seat_uuid.is_empty() else null
 
 		var godot_pos: Vector3
 		var godot_rot: Quaternion
@@ -286,22 +281,20 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 		sm.avatars.erase(avatar_id)
 		sm.avatar_targets.erase(avatar_id)
 		# Clean up skeleton root
-		var av_lid: int = sm.avatar_local_ids.get(avatar_id, 0)
-		if av_lid > 0 and sm.animesh_roots.has(av_lid):
+		if sm.animesh_roots.has(avatar_id):
 			# Clean up mesh instance references (nodes freed when avatar_node is queue_freed)
 			var to_erase: Array = []
-			for mesh_lid: int in sm.animesh_mesh_instances:
-				if sm.animesh_root_for.get(mesh_lid, 0) == av_lid:
-					to_erase.append(mesh_lid)
-			for mesh_lid: int in to_erase:
-				sm.animesh_mesh_instances.erase(mesh_lid)
-			var node_ref = sm.animesh_roots[av_lid]
+			for mesh_uuid: String in sm.animesh_mesh_instances:
+				if sm.animesh_root_for.get(mesh_uuid, "") == avatar_id:
+					to_erase.append(mesh_uuid)
+			for mesh_uuid: String in to_erase:
+				sm.animesh_mesh_instances.erase(mesh_uuid)
+			var node_ref = sm.animesh_roots[avatar_id]
 			if node_ref is Node3D and is_instance_valid(node_ref):
 				node_ref.queue_free()  # Also frees shared skeleton + per-mesh skeletons + meshes
-			sm.erase_animesh_state(av_lid)
-		sm.bone_shape_scales.erase(av_lid)
-		sm.cv_volume_morphs.erase(av_lid)
-		sm.avatar_local_ids.erase(avatar_id)
+			sm.erase_animesh_state(avatar_id)
+		sm.bone_shape_scales.erase(avatar_id)
+		sm.cv_volume_morphs.erase(avatar_id)
 		_avatar_shapes.erase(avatar_id)
 		_avatar_volume_morphs.erase(avatar_id)
 		_avatar_hover_heights.erase(avatar_id)
@@ -323,20 +316,17 @@ func handle_avatar_shape(msg: Dictionary) -> void:
 	var hover_height: float = float(msg.get("hoverHeight", 0.0))
 	_avatar_hover_heights[avatar_id] = hover_height
 
-	var av_lid: int = sm.avatar_local_ids.get(avatar_id, 0)
-	# Store volume morphs by av_lid when available (for _apply_global_pose_overrides)
-	if av_lid > 0 and _avatar_volume_morphs.has(avatar_id):
-		sm.cv_volume_morphs[av_lid] = _avatar_volume_morphs[avatar_id]
+	# Store volume morphs by avatar_id (for _apply_global_pose_overrides)
+	if _avatar_volume_morphs.has(avatar_id):
+		sm.cv_volume_morphs[avatar_id] = _avatar_volume_morphs[avatar_id]
 
-	if av_lid <= 0:
-		return
-	var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(av_lid)
+	var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(avatar_id)
 	if shared_skel == null:
 		return
 
 	_apply_shape_to_skeleton(shared_skel, bones, avatar_id)
 	_log_bone_rests(shared_skel, avatar_id, "after_shape")
-	_reapply_joint_overrides(av_lid, shared_skel, avatar_id)
+	_reapply_joint_overrides(avatar_id, shared_skel, avatar_id)
 	_log_bone_rests(shared_skel, avatar_id, "after_reapply_overrides")
 
 	# Body size offset (Firestorm: root_pos.Z -= 0.5*bodyH - pelvisToFoot) + hover
@@ -350,14 +340,13 @@ func handle_avatar_shape(msg: Dictionary) -> void:
 ## Recompute body size offset after joint overrides change bone rest positions.
 ## Called from animation_manager._apply_joint_overrides when mesh body/head
 ## overrides modify hip/knee/ankle/foot positions.
-func _recompute_body_offset(root_local_id: int, shared_skel: Skeleton3D) -> void:
-	var avatar_id: String = str(sm.object_uuid.get(root_local_id, ""))
-	var bones: Dictionary = _avatar_shapes.get(avatar_id, {})
+func _recompute_body_offset(root_uuid: String, shared_skel: Skeleton3D) -> void:
+	var bones: Dictionary = _avatar_shapes.get(root_uuid, {})
 	var body_offset: float = _compute_body_z_offset(shared_skel, bones)
 	# Preserve hover height if we have it (from AvatarAppearance message)
-	var hover_height: float = _avatar_hover_heights.get(avatar_id, 0.0)
+	var hover_height: float = _avatar_hover_heights.get(root_uuid, 0.0)
 	shared_skel.position.y = -body_offset + hover_height
-	print("[AvatarShape] Recomputed body_offset=%.4f (hover=%.4f) for %s after joint overrides" % [body_offset, hover_height, avatar_id.substr(0, 8)])
+	print("[AvatarShape] Recomputed body_offset=%.4f (hover=%.4f) for %s after joint overrides" % [body_offset, hover_height, root_uuid.substr(0, 8)])
 
 
 ## Compute the vertical offset from bounding box center to pelvis.
@@ -414,9 +403,7 @@ func _apply_shape_to_skeleton(skeleton: Skeleton3D, bones: Dictionary, avatar_id
 		shape_scales[bname] = Vector3(s[0], s[1], s[2])
 
 	# Store shape scales for dynamic parent-scale application in _apply_global_pose_overrides
-	var av_lid: int = sm.avatar_local_ids.get(avatar_id, 0)
-	if av_lid > 0:
-		sm.bone_shape_scales[av_lid] = shape_scales
+	sm.bone_shape_scales[avatar_id] = shape_scales
 
 	for bi in range(skeleton.get_bone_count()):
 		var bname: String = skeleton.get_bone_name(bi)
@@ -442,13 +429,13 @@ func _apply_shape_to_skeleton(skeleton: Skeleton3D, bones: Dictionary, avatar_id
 
 ## Re-apply joint overrides from all rigged meshes on an avatar after shape change.
 ## Override priority: lowest mesh UUID wins (matches SL's std::map<LLUUID> ordering).
-func _reapply_joint_overrides(root_local_id: int, shared_skel: Skeleton3D, avatar_id: String) -> void:
+func _reapply_joint_overrides(root_uuid: String, shared_skel: Skeleton3D, avatar_id: String) -> void:
 	# Clear override ownership — shape just reset all bones, start fresh
-	sm.bone_override_owner.erase(root_local_id)
-	for mesh_lid: int in sm.animesh_mesh_instances:
-		if sm.animesh_root_for.get(mesh_lid, 0) != root_local_id:
+	sm.bone_override_owner.erase(root_uuid)
+	for mesh_uuid: String in sm.animesh_mesh_instances:
+		if sm.animesh_root_for.get(mesh_uuid, "") != root_uuid:
 			continue
-		var mesh_id: String = sm.object_mesh_id.get(mesh_lid, "")
+		var mesh_id: String = sm.object_mesh_id.get(mesh_uuid, "")
 		if mesh_id.is_empty():
 			continue
 		var override_joints: Array = sm.mesh_joint_overrides.get(mesh_id, [])
@@ -457,7 +444,7 @@ func _reapply_joint_overrides(root_local_id: int, shared_skel: Skeleton3D, avata
 		# Need the GLB skeleton to get the override rest transforms.
 		# The override rest was already copied to shared_skel during initial setup,
 		# and shape just reset all rests to XML baseline. Re-apply from the GLB.
-		print("[ReapplyOverrides] %s mesh_lid=%d mesh_id=%s overrides=%s" % [avatar_id.substr(0, 8), mesh_lid, mesh_id.substr(0, 16), str(override_joints)])
+		print("[ReapplyOverrides] %s mesh_uuid=%s mesh_id=%s overrides=%s" % [avatar_id.substr(0, 8), mesh_uuid.substr(0, 8), mesh_id.substr(0, 16), str(override_joints)])
 		var glb_path: String = sm.rigged_mesh_paths.get(mesh_id, "")
 		if glb_path.is_empty():
 			continue

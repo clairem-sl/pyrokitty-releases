@@ -7,6 +7,7 @@
 
 import { EventEmitter } from 'events';
 import { Bot, BotOptionFlags, LoginParameters, UUID } from '../../node-metaverse/dist/lib';
+import { SceneManager } from './scene-manager';
 import { LoginError } from '../../node-metaverse/dist/lib/classes/LoginError';
 import { ChatType } from '../../node-metaverse/dist/lib/enums/ChatType';
 import { ChatSourceType } from '../../node-metaverse/dist/lib/enums/ChatSourceType';
@@ -100,6 +101,7 @@ export interface MetaverseConnectionEvents {
 
 export class MetaverseConnection extends EventEmitter {
   private bot: Bot | null = null;
+  private _sceneManager: SceneManager | null = null;
   private state: ConnectionState = 'disconnected';
   private friends: Map<string, Friend> = new Map();
   private groups: Map<string, Group> = new Map();
@@ -222,6 +224,9 @@ export class MetaverseConnection extends EventEmitter {
       this.setState('metaverse_connected');
       this.emit('login-progress', `Connected to ${this.bot!.currentRegion?.regionName || 'region'}`);
 
+      // Create SceneManager — subscribes to ClientEvents for all regions
+      this._sceneManager = new SceneManager(this.bot!);
+
       // Subscribe to world sound messages (circuit is available after connectToSim)
       this.setupSoundSubscriptions();
 
@@ -243,6 +248,7 @@ export class MetaverseConnection extends EventEmitter {
         return;
       }
       this.setState('disconnected');
+      if (this._sceneManager) { this._sceneManager.shutdown(); this._sceneManager = null; }
       this.bot = null;
       throw error;
     }
@@ -279,6 +285,7 @@ export class MetaverseConnection extends EventEmitter {
       } catch {
         // Ignore close errors
       }
+      if (this._sceneManager) { this._sceneManager.shutdown(); this._sceneManager = null; }
       this.bot = null;
     }
     this.friends.clear();
@@ -557,6 +564,7 @@ export class MetaverseConnection extends EventEmitter {
       }
       this.avatarLeftSubscriptions.clear();
       this.nearbyAvatars.clear();
+      if (this._sceneManager) { this._sceneManager.shutdown(); this._sceneManager = null; }
       this.bot = null;
       this.setState('disconnected');
     });
@@ -1319,6 +1327,10 @@ export class MetaverseConnection extends EventEmitter {
    */
   getBot(): Bot | null {
     return this.bot;
+  }
+
+  getSceneManager(): SceneManager | null {
+    return this._sceneManager;
   }
 
   /**

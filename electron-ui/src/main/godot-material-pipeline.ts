@@ -12,7 +12,7 @@ import type { SendFn } from './godot-bridge-types';
 import { WATER_EXCLUSION_TEXTURES, ZERO_UUID, BAKE_MAGIC_UUIDS, TRANSPARENT_TEXTURES, SOLID_COLOR_TEXTURES } from './godot-bridge-types';
 
 export class GodotMaterialPipeline {
-  private materialToFaces = new Map<string, { localId: number; faceIndex: number; face: any; inlineOverride: any }[]>();
+  private materialToFaces = new Map<string, { objectUuid: string; faceIndex: number; face: any; inlineOverride: any }[]>();
   private legacyMaterialCache = new Map<string, {
     alphaMode: number; alphaCutoff: number;
     normMap?: string; normRepeatX?: number; normRepeatY?: number;
@@ -21,7 +21,7 @@ export class GodotMaterialPipeline {
   }>();
   private legacyMaterialPending = new Set<string>();
   private legacyMaterialFetching = false;
-  private legacyMaterialToFaces = new Map<string, { localId: number; faceIndex: number }[]>();
+  private legacyMaterialToFaces = new Map<string, { objectUuid: string; faceIndex: number }[]>();
   private pbrFaceCount = 0;
 
   private materialFetchQueue: MaterialFetchQueue | null = null;
@@ -29,14 +29,14 @@ export class GodotMaterialPipeline {
   private avatarManager: GodotAvatarManager | null = null;
 
   // Face update batching — coalesces per-object face updates into a single message per flush
-  private faceUpdateBuffer = new Map<number, any[]>(); // localId → faces (latest per face index wins)
+  private faceUpdateBuffer = new Map<string, any[]>(); // objectUuid → faces (latest per face index wins)
   private faceUpdateTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly FACE_UPDATE_FLUSH_MS = 50;
 
   constructor(
     private bot: Bot,
     private send: SendFn,
-    private trackedObjects: Set<number>,
+    private trackedObjects: Set<string>,
   ) {}
 
   initQueues(materialFetchQueue: MaterialFetchQueue, textureFetchQueue: TextureFetchQueue): void {
@@ -222,13 +222,16 @@ export class GodotMaterialPipeline {
 
       if (faces.length === 0) return undefined;
       return { faces, textureIds: Array.from(textureIdSet) };
-    } catch {
+    } catch (err) {
+      const objUuid = obj.FullID?.toString() || 'unknown';
+      console.error(`[MaterialPipeline] getTextureInfo failed for ${objUuid.slice(0, 8)}:`, err);
       return undefined;
     }
   }
 
   /** Fetch legacy + PBR textures and material assets for an object */
   fetchTexturesForObject(obj: any, texInfo?: ReturnType<typeof this.getTextureInfo>): void {
+    const objectUuid = obj.FullID?.toString() || '';
     // Collect face indices covered by renderMaterialData
     const rmd = obj.extraParams?.renderMaterialData;
     const materialFaceIndices = new Set<number>();
@@ -248,14 +251,14 @@ export class GodotMaterialPipeline {
         if (materialFaceIndices.has(face.index) && !face._isBake) continue;
         if (face.textureId && !WATER_EXCLUSION_TEXTURES.has(face.textureId) && !BAKE_MAGIC_UUIDS.has(face.textureId) && !TRANSPARENT_TEXTURES.has(face.textureId) && !SOLID_COLOR_TEXTURES.has(face.textureId)) {
           if (face._isBake && face._bakeAvatarUuid != null && face._bakeChannel != null) {
-            this.textureFetchQueue.requestBake(face.textureId, obj.ID, face._bakeAvatarUuid, face._bakeChannel);
+            this.textureFetchQueue.requestBake(face.textureId, objectUuid, face._bakeAvatarUuid, face._bakeChannel);
           } else {
-            this.textureFetchQueue.request(face.textureId, obj.ID);
+            this.textureFetchQueue.request(face.textureId, objectUuid);
           }
         }
-        if (face.normalTextureId) this.textureFetchQueue.request(face.normalTextureId, obj.ID);
-        if (face.ormTextureId) this.textureFetchQueue.request(face.ormTextureId, obj.ID);
-        if (face.emissiveTextureId) this.textureFetchQueue.request(face.emissiveTextureId, obj.ID);
+        if (face.normalTextureId) this.textureFetchQueue.request(face.normalTextureId, objectUuid);
+        if (face.ormTextureId) this.textureFetchQueue.request(face.ormTextureId, objectUuid);
+        if (face.emissiveTextureId) this.textureFetchQueue.request(face.emissiveTextureId, objectUuid);
       }
     }
 
@@ -275,7 +278,7 @@ export class GodotMaterialPipeline {
           list = [];
           this.materialToFaces.set(matUuid, list);
         }
-        list.push({ localId: obj.ID, faceIndex, face, inlineOverride });
+        list.push({ objectUuid, faceIndex, face, inlineOverride });
         this.materialFetchQueue.request(matUuid);
       }
     }
@@ -294,7 +297,7 @@ export class GodotMaterialPipeline {
           list = [];
           this.legacyMaterialToFaces.set(matId, list);
         }
-        list.push({ localId: obj.ID, faceIndex: i });
+        list.push({ objectUuid, faceIndex: i });
         this.legacyMaterialPending.add(matId);
       }
       if (this.legacyMaterialPending.size > 0 && !this.legacyMaterialFetching) {
@@ -344,30 +347,33 @@ export class GodotMaterialPipeline {
           }
           this.legacyMaterialCache.set(uuid, entry);
           if (entry.normMap && this.textureFetchQueue) {
-            this.textureFetchQueue.request(entry.normMap, 0);
+            this.textureFetchQueue.request(entry.normMap, '');
           }
         }
         // Re-emit face data for affected objects
         const entries = this.legacyMaterialToFaces.get(uuid);
         if (entries) {
           this.legacyMaterialToFaces.delete(uuid);
-          const byObject = new Map<number, number[]>();
-          for (const { localId, faceIndex } of entries) {
-            if (!this.trackedObjects.has(localId)) continue;
-            let list = byObject.get(localId);
-            if (!list) { list = []; byObject.set(localId, list); }
+          const byObject = new Map<string, number[]>();
+          for (const { objectUuid, faceIndex } of entries) {
+            if (!this.trackedObjects.has(objectUuid)) continue;
+            let list = byObject.get(objectUuid);
+            if (!list) { list = []; byObject.set(objectUuid, list); }
             list.push(faceIndex);
           }
-          for (const [localId, faceIndices] of byObject) {
-            const obj = this.bot.currentRegion?.objects?.getObjectByLocalID(localId);
+          for (const [objectUuid, faceIndices] of byObject) {
+            let obj: any;
+            try {
+              obj = this.bot.currentRegion?.objects?.getObjectByUUID(objectUuid as any);
+            } catch { continue; } // object killed before material arrived
             if (!obj) continue;
             const texInfo = this.getTextureInfo(obj);
             if (texInfo) {
               const updatedFaces = texInfo.faces.filter(f => faceIndices.includes(f.index));
               if (updatedFaces.length > 0) {
                 // Re-apply BoM substitution since getTextureInfo reads original magic UUIDs
-                this.substituteBakeUuids(updatedFaces, localId);
-                this.queueFaceUpdate(localId, updatedFaces);
+                this.substituteBakeUuids(updatedFaces, objectUuid);
+                this.queueFaceUpdate(objectUuid, updatedFaces);
               }
             }
           }
@@ -388,10 +394,10 @@ export class GodotMaterialPipeline {
     const entries = this.materialToFaces.get(materialUuid);
     if (!entries || entries.length === 0) return;
 
-    const byObject = new Map<number, any[]>();
+    const byObject = new Map<string, any[]>();
 
-    for (const { localId, faceIndex, face, inlineOverride } of entries) {
-      if (!this.trackedObjects.has(localId)) continue;
+    for (const { objectUuid, faceIndex, face, inlineOverride } of entries) {
+      if (!this.trackedObjects.has(objectUuid)) continue;
 
       let baseColorTextureId = data.baseColorTextureId;
       let normalTextureId = data.normalTextureId;
@@ -455,9 +461,11 @@ export class GodotMaterialPipeline {
       let bakeChannel: number | undefined;
       if (BAKE_MAGIC_UUIDS.has(resolvedTextureId) && this.avatarManager) {
         try {
-          const obj = this.bot.currentRegion?.objects?.getObjectByLocalID(localId);
+          const obj = this.bot.currentRegion?.objects?.getObjectByUUID(objectUuid as any);
           if (obj?.ParentID) {
-            const avatarId = this.avatarManager.findOwnerAvatar(obj.ParentID);
+            const parentObj = this.bot.currentRegion?.objects?.getObjectByLocalID(obj.ParentID);
+            const parentUuid = parentObj?.FullID?.toString() || '';
+            const avatarId = parentUuid ? this.avatarManager.findOwnerAvatar(parentUuid) : undefined;
             if (avatarId) {
               const bakes = this.avatarManager.getBakedTextures(avatarId);
               const channel = BAKE_MAGIC_UUIDS.get(resolvedTextureId);
@@ -506,25 +514,25 @@ export class GodotMaterialPipeline {
       // Fetch the resolved texture (may be substituted bake UUID)
       if (resolvedTextureId && !BAKE_MAGIC_UUIDS.has(resolvedTextureId) && !TRANSPARENT_TEXTURES.has(resolvedTextureId) && !SOLID_COLOR_TEXTURES.has(resolvedTextureId) && this.textureFetchQueue) {
         if (isBake && faceData._bakeAvatarUuid && faceData._bakeChannel != null) {
-          this.textureFetchQueue.requestBake(resolvedTextureId, localId, faceData._bakeAvatarUuid, faceData._bakeChannel);
+          this.textureFetchQueue.requestBake(resolvedTextureId, objectUuid, faceData._bakeAvatarUuid, faceData._bakeChannel);
         } else {
-          this.textureFetchQueue.request(resolvedTextureId, localId);
+          this.textureFetchQueue.request(resolvedTextureId, objectUuid);
         }
       }
       if (normalTextureId && this.textureFetchQueue) {
-        this.textureFetchQueue.request(normalTextureId, localId);
+        this.textureFetchQueue.request(normalTextureId, objectUuid);
       }
 
-      let faces = byObject.get(localId);
+      let faces = byObject.get(objectUuid);
       if (!faces) {
         faces = [];
-        byObject.set(localId, faces);
+        byObject.set(objectUuid, faces);
       }
       faces.push(faceData);
     }
 
-    for (const [localId, faces] of byObject) {
-      this.queueFaceUpdate(localId, faces);
+    for (const [objectUuid, faces] of byObject) {
+      this.queueFaceUpdate(objectUuid, faces);
     }
 
     this.materialToFaces.delete(materialUuid);
@@ -532,12 +540,13 @@ export class GodotMaterialPipeline {
 
   /** Handle live texture/UV change on a tracked object */
   handleObjectTextureUpdate(obj: any): void {
-    if (!this.trackedObjects.has(obj.ID)) return;
+    const objectUuid = obj.FullID?.toString() || '';
+    if (!this.trackedObjects.has(objectUuid)) return;
     const texInfo = this.getTextureInfo(obj);
     if (!texInfo) return;
     // Re-apply BoM substitution since getTextureInfo reads original magic UUIDs
-    this.substituteBakeUuids(texInfo.faces, obj.ID);
-    this.queueFaceUpdate(obj.ID, texInfo.faces);
+    this.substituteBakeUuids(texInfo.faces, objectUuid);
+    this.queueFaceUpdate(objectUuid, texInfo.faces);
     this.fetchTexturesForObject(obj, texInfo);
   }
 
@@ -545,12 +554,15 @@ export class GodotMaterialPipeline {
    * Substitute magic bake UUIDs in face data with actual baked texture UUIDs.
    * Must be called on any face data re-read from live objects before sending to Godot.
    */
-  private substituteBakeUuids(faces: any[], localId: number): void {
+  private substituteBakeUuids(faces: any[], objectUuid: string): void {
     if (!this.avatarManager) return;
     try {
-      const obj = this.bot.currentRegion?.objects?.getObjectByLocalID(localId);
+      const obj = this.bot.currentRegion?.objects?.getObjectByUUID(objectUuid as any);
       if (!obj?.ParentID) return;
-      const avatarId = this.avatarManager.findOwnerAvatar(obj.ParentID);
+      const parentObj = this.bot.currentRegion?.objects?.getObjectByLocalID(obj.ParentID);
+      const parentUuid = parentObj?.FullID?.toString() || '';
+      if (!parentUuid) return;
+      const avatarId = this.avatarManager.findOwnerAvatar(parentUuid);
       if (!avatarId) return;
       const bakes = this.avatarManager.getBakedTextures(avatarId);
       if (!bakes) return;
@@ -572,8 +584,8 @@ export class GodotMaterialPipeline {
 
   /** Queue a face update for batched delivery to Godot. Multiple updates for the same
    *  object within the flush window are coalesced (latest per face index wins). */
-  queueFaceUpdate(localId: number, faces: any[]): void {
-    const existing = this.faceUpdateBuffer.get(localId);
+  queueFaceUpdate(objectUuid: string, faces: any[]): void {
+    const existing = this.faceUpdateBuffer.get(objectUuid);
     if (existing) {
       // Merge: latest face data wins per face index
       for (const face of faces) {
@@ -585,7 +597,7 @@ export class GodotMaterialPipeline {
         }
       }
     } else {
-      this.faceUpdateBuffer.set(localId, [...faces]);
+      this.faceUpdateBuffer.set(objectUuid, [...faces]);
     }
     if (!this.faceUpdateTimer) {
       this.faceUpdateTimer = setTimeout(() => this.flushFaceUpdates(), GodotMaterialPipeline.FACE_UPDATE_FLUSH_MS);
@@ -597,8 +609,8 @@ export class GodotMaterialPipeline {
     if (this.faceUpdateBuffer.size === 0) return;
 
     const objects: any[] = [];
-    for (const [localId, faces] of this.faceUpdateBuffer) {
-      objects.push({ localId, faces });
+    for (const [uuid, faces] of this.faceUpdateBuffer) {
+      objects.push({ uuid, faces });
     }
     this.faceUpdateBuffer.clear();
 

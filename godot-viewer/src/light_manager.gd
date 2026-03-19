@@ -46,9 +46,9 @@ class RSLight extends RefCounted:
 			RenderingServer.free_rid(light_rid)
 
 
-var object_lights: Dictionary = {}           # localId -> RSLight
-var _object_light_data: Dictionary = {}      # localId -> light dict (for re-creation after cull)
-var _pending_proj_textures: Dictionary = {}  # textureId -> Array[localId]
+var object_lights: Dictionary = {}           # obj_uuid (String) -> RSLight
+var _object_light_data: Dictionary = {}      # obj_uuid (String) -> light dict (for re-creation after cull)
+var _pending_proj_textures: Dictionary = {}  # textureId -> Array[obj_uuid (String)]
 var _projector_textures: Dictionary = {}    # textureId -> padded ImageTexture (square inscribed in circle)
 var _light_count: int = 0
 var _light_cull_timer: float = 0.0
@@ -103,9 +103,9 @@ func _get_projector_texture(texture_id: String) -> ImageTexture:
 
 
 ## Create or update a RenderingServer light for an object
-func create_or_update_light(local_id: int, light_data: Dictionary, rsi) -> void:
+func create_or_update_light(obj_uuid: String, light_data: Dictionary, rsi) -> void:
 	# Cache light data for distance cull re-creation
-	_object_light_data[local_id] = light_data
+	_object_light_data[obj_uuid] = light_data
 
 	# Distance check: skip if prim beyond cull distance from camera
 	var cam: Camera3D = sm.get_viewport().get_camera_3d()
@@ -117,12 +117,12 @@ func create_or_update_light(local_id: int, light_data: Dictionary, rsi) -> void:
 	var is_spot: bool = light_data.get("isSpot", false)
 
 	# If light exists and type changed (spot<->omni), destroy and recreate
-	if object_lights.has(local_id):
-		var existing: RSLight = object_lights[local_id]
+	if object_lights.has(obj_uuid):
+		var existing: RSLight = object_lights[obj_uuid]
 		if existing.is_spot != is_spot:
-			destroy_light(local_id)
+			destroy_light(obj_uuid)
 		else:
-			_apply_light_params(local_id, existing, light_data, rsi)
+			_apply_light_params(obj_uuid, existing, light_data, rsi)
 			return
 
 	# Light count cap: skip if at max and this is a new light
@@ -131,13 +131,13 @@ func create_or_update_light(local_id: int, light_data: Dictionary, rsi) -> void:
 
 	# Create new light
 	var rsl := RSLight.new(sm, sm._scenario, is_spot)
-	object_lights[local_id] = rsl
+	object_lights[obj_uuid] = rsl
 	_light_count += 1
-	_apply_light_params(local_id, rsl, light_data, rsi)
+	_apply_light_params(obj_uuid, rsl, light_data, rsi)
 
 
 ## Apply parameters to an existing RSLight from light data dict
-func _apply_light_params(local_id: int, rsl: RSLight, light_data: Dictionary, rsi) -> void:
+func _apply_light_params(obj_uuid: String, rsl: RSLight, light_data: Dictionary, rsi) -> void:
 	var color: Array = light_data.get("color", [1.0, 1.0, 1.0])
 	var intensity: float = float(light_data.get("intensity", 1.0))
 	var radius: float = float(light_data.get("radius", 10.0))
@@ -178,8 +178,8 @@ func _apply_light_params(local_id: int, rsl: RSLight, light_data: Dictionary, rs
 			else:
 				if not _pending_proj_textures.has(proj_tex_id):
 					_pending_proj_textures[proj_tex_id] = []
-				if local_id not in _pending_proj_textures[proj_tex_id]:
-					_pending_proj_textures[proj_tex_id].append(local_id)
+				if obj_uuid not in _pending_proj_textures[proj_tex_id]:
+					_pending_proj_textures[proj_tex_id].append(obj_uuid)
 		else:
 			# Non-projector spot — set shadow params for when the cull
 			# sweep enables shadow_enabled on this light.
@@ -211,31 +211,31 @@ func _apply_light_params(local_id: int, rsl: RSLight, light_data: Dictionary, rs
 		RS.instance_set_transform(rsl.instance_rid, Transform3D(Basis(rsi.rot), rsi.pos))
 
 
-## Destroy a light for a given localId
-func destroy_light(local_id: int) -> void:
-	if not object_lights.has(local_id):
+## Destroy a light for a given object uuid
+func destroy_light(obj_uuid: String) -> void:
+	if not object_lights.has(obj_uuid):
 		return
-	var rsl: RSLight = object_lights[local_id]
-	var rsi = sm.objects.get(local_id)
+	var rsl: RSLight = object_lights[obj_uuid]
+	var rsi = sm.objects.get(obj_uuid)
 	var dist_info := ""
 	if rsi:
 		var cam: Camera3D = sm.get_viewport().get_camera_3d()
 		if cam:
 			dist_info = " dist=%.1f" % rsi.pos.distance_to(cam.global_position)
-	print("[Light] DESTROY localId=%d spot=%s proj=%s%s" % [local_id, str(rsl.is_spot), rsl.proj_texture_id, dist_info])
+	print("[Light] DESTROY uuid=%s spot=%s proj=%s%s" % [obj_uuid.substr(0, 8), str(rsl.is_spot), rsl.proj_texture_id, dist_info])
 	# Remove from pending proj textures
 	if not rsl.proj_texture_id.is_empty() and _pending_proj_textures.has(rsl.proj_texture_id):
-		_pending_proj_textures[rsl.proj_texture_id].erase(local_id)
+		_pending_proj_textures[rsl.proj_texture_id].erase(obj_uuid)
 		if _pending_proj_textures[rsl.proj_texture_id].size() == 0:
 			_pending_proj_textures.erase(rsl.proj_texture_id)
 	rsl.destroy()
-	object_lights.erase(local_id)
+	object_lights.erase(obj_uuid)
 	_light_count -= 1
 
 
 ## Update a light's transform to match its RSInstance position/rotation
-func update_light_transform(local_id: int, rsi) -> void:
-	var rsl: RSLight = object_lights.get(local_id)
+func update_light_transform(obj_uuid: String, rsi) -> void:
+	var rsl: RSLight = object_lights.get(obj_uuid)
 	if rsl == null:
 		return
 	var basis: Basis = Basis(rsi.rot)
@@ -252,12 +252,12 @@ func update_light_transform(local_id: int, rsi) -> void:
 func apply_pending_proj_texture(texture_id: String) -> void:
 	if not _pending_proj_textures.has(texture_id):
 		return
-	var waiting_ids: Array = _pending_proj_textures[texture_id]
+	var waiting_uuids: Array = _pending_proj_textures[texture_id]
 	_pending_proj_textures.erase(texture_id)
-	for lid: int in waiting_ids:
-		var rsl: RSLight = object_lights.get(lid)
+	for obj_uuid: String in waiting_uuids:
+		var rsl: RSLight = object_lights.get(obj_uuid)
 		if rsl != null and rsl.is_spot and rsl.node:
-			print("[Light] Applying proj texture %s to localId=%d" % [texture_id, lid])
+			print("[Light] Applying proj texture %s to uuid=%s" % [texture_id, obj_uuid.substr(0, 8)])
 			rsl.node.light_projector = _get_projector_texture(texture_id)
 
 
@@ -269,61 +269,61 @@ func sweep_light_culling() -> void:
 	var cam_pos: Vector3 = cam.global_position
 
 	# Destroy lights beyond cull distance
-	var to_remove: Array[int] = []
-	for local_id: int in object_lights:
-		var rsi = sm.objects.get(local_id)
+	var to_remove: Array[String] = []
+	for obj_uuid: String in object_lights:
+		var rsi = sm.objects.get(obj_uuid)
 		if rsi == null:
-			to_remove.append(local_id)
+			to_remove.append(obj_uuid)
 			continue
 		if rsi.pos.distance_to(cam_pos) > LIGHT_CULL_DISTANCE:
-			to_remove.append(local_id)
-	for local_id: int in to_remove:
-		destroy_light(local_id)
+			to_remove.append(obj_uuid)
+	for obj_uuid: String in to_remove:
+		destroy_light(obj_uuid)
 
 	# Create lights for prims now within range (if under cap), nearest first
-	var candidates: Array = []  # [[dist, local_id], ...]
-	for local_id: int in _object_light_data:
-		if object_lights.has(local_id):
+	var candidates: Array = []  # [[dist, obj_uuid], ...]
+	for obj_uuid: String in _object_light_data:
+		if object_lights.has(obj_uuid):
 			continue
-		var rsi = sm.objects.get(local_id)
+		var rsi = sm.objects.get(obj_uuid)
 		if rsi == null:
 			continue
 		var dist: float = rsi.pos.distance_to(cam_pos)
 		if dist <= LIGHT_CULL_DISTANCE:
-			candidates.append([dist, local_id])
+			candidates.append([dist, obj_uuid])
 	candidates.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
 	for c: Array in candidates:
 		if _light_count >= MAX_ACTIVE_LIGHTS:
 			break
-		var local_id: int = int(c[1])
-		var rsi = sm.objects.get(local_id)
+		var obj_uuid: String = str(c[1])
+		var rsi = sm.objects.get(obj_uuid)
 		if rsi == null:
 			continue
-		var light_data: Dictionary = _object_light_data[local_id]
+		var light_data: Dictionary = _object_light_data[obj_uuid]
 		var is_spot: bool = light_data.get("isSpot", false)
 		var rsl := RSLight.new(sm, sm._scenario, is_spot)
-		object_lights[local_id] = rsl
+		object_lights[obj_uuid] = rsl
 		_light_count += 1
-		_apply_light_params(local_id, rsl, light_data, rsi)
+		_apply_light_params(obj_uuid, rsl, light_data, rsi)
 
 	# -- Shadow ranking --
 	# Projectors always keep shadows (required for the texture to render).
 	# The shadow budget applies to all other lights (omni + non-projector
 	# spots) — enable shadows on the closest MAX_SHADOW_LIGHTS, disable rest.
-	var shadow_candidates: Array = []  # [[dist, local_id], ...]
-	for local_id: int in object_lights:
-		var rsl: RSLight = object_lights[local_id]
+	var shadow_candidates: Array = []  # [[dist, obj_uuid], ...]
+	for obj_uuid: String in object_lights:
+		var rsl: RSLight = object_lights[obj_uuid]
 		if rsl.has_projector:
 			continue  # projectors keep shadows unconditionally
-		var rsi = sm.objects.get(local_id)
+		var rsi = sm.objects.get(obj_uuid)
 		if rsi == null:
 			continue
-		shadow_candidates.append([rsi.pos.distance_to(cam_pos), local_id])
+		shadow_candidates.append([rsi.pos.distance_to(cam_pos), obj_uuid])
 	shadow_candidates.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
 
 	var shadow_budget: int = FrameBudget.MAX_SHADOW_LIGHTS
 	for i: int in shadow_candidates.size():
-		var lid: int = int(shadow_candidates[i][1])
+		var lid: String = str(shadow_candidates[i][1])
 		var rsl: RSLight = object_lights[lid]
 		var want_shadow: bool = i < shadow_budget
 		if want_shadow != rsl.has_shadow:

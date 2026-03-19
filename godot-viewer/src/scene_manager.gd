@@ -18,7 +18,7 @@ const ObjectPickerScript = preload("res://src/object_picker.gd")
 const SkeletonBuilderScript = preload("res://src/skeleton_builder.gd")
 
 signal self_avatar_moved(pos: Vector3)
-signal object_properties_received(local_id: int, name: String, description: String)
+signal object_properties_received(uuid: String, name: String, description: String)
 
 ## Lightweight RefCounted wrapper around a RenderingServer instance RID.
 ## Replaces MeshInstance3D nodes to eliminate scene tree overhead.
@@ -67,22 +67,32 @@ class RSInstance extends RefCounted:
 # ─── Shared State ────────────────────────────────────
 # All tracking dictionaries live here. Sub-managers access via their `sm` reference.
 
-var objects: Dictionary = {}   # localId (int) -> RSInstance
+var objects: Dictionary = {}   # uuid (String) -> RSInstance
 var avatars: Dictionary = {}   # avatarId (String) -> RSInstance
 var self_avatar_id: String = ""
 
+# World origin — set at login, updated on teleport. All positions relative to this.
+var world_origin_x: float = 0.0
+var world_origin_y: float = 0.0
+
+# Per-region offsets from world origin, keyed by cacheID
+var region_offsets: Dictionary = {}   # cacheID (String) -> Vector2(offsetX, offsetY)
+
+# Per-object region offset (stored at creation, reused on updates)
+var object_region_offset: Dictionary = {}   # uuid (String) -> Vector3(offsetX, 0, offsetY)
+
 # Interpolation targets
 var avatar_targets: Dictionary = {}   # avatarId -> { pos, rot, vel, age }
-var object_targets: Dictionary = {}   # localId -> { pos, rot, vel, accel, angVel, age, blend_offset, blend_time }
-var avatar_local_ids: Dictionary = {} # avatarId (String) -> localId (int) for skeleton root routing
+var object_targets: Dictionary = {}   # uuid (String) -> { pos, rot, vel, accel, angVel, age, blend_offset, blend_time }
+# avatar_local_ids removed — animesh_roots/animesh_shared_skeleton now keyed by avatar UUID directly
 
 # Linkset tracking (flat hierarchy — no Godot node parenting to avoid scale inheritance)
-var pending_children: Dictionary = {}   # parentLocalId -> Array[childLocalId]
-var object_parent: Dictionary = {}      # childLocalId -> parentLocalId
-var object_children: Dictionary = {}    # parentLocalId -> Array[childLocalId]
-var child_offset_pos: Dictionary = {}   # childLocalId -> Vector3
-var child_offset_rot: Dictionary = {}   # childLocalId -> Quaternion
-var pending_seated_avatars: Dictionary = {}  # seatLocalId -> Array[{id, pos, rot}]
+var pending_children: Dictionary = {}   # parent uuid (String) -> Array[child uuid (String)]
+var object_parent: Dictionary = {}      # child uuid (String) -> parent uuid (String)
+var object_children: Dictionary = {}    # parent uuid (String) -> Array[child uuid (String)]
+var child_offset_pos: Dictionary = {}   # uuid (String) -> Vector3
+var child_offset_rot: Dictionary = {}   # uuid (String) -> Quaternion
+var pending_seated_avatars: Dictionary = {}  # seat uuid (String) -> Array[{id, pos, rot}]
 
 # Shared mesh resources
 var object_mesh: BoxMesh
@@ -97,40 +107,39 @@ var mesh_load_failed: Dictionary = {}  # meshId (String) -> bool
 # Texture pipeline
 var texture_cache: Dictionary = {}        # textureId (String) -> ImageTexture
 var material_cache: Dictionary = {}       # "uuid_colorhex_fb_ds_uv" (String) -> StandardMaterial3D
-var object_meta: Dictionary = {}          # localId (int) -> { uuid, name, description }
-var object_faces: Dictionary = {}         # localId (int) -> Array[face_info dicts]
+var object_meta: Dictionary = {}          # uuid (String) -> { name, description }
+var object_faces: Dictionary = {}         # uuid (String) -> Array[face_info dicts]
 var texture_load_failed: Dictionary = {}  # textureId (String) -> bool
 
 # Animesh (rigged mesh with skeleton animation)
-var animesh_roots: Dictionary = {}         # root localId (int) -> Node3D (scene tree parent)
-var animesh_shared_skeleton: Dictionary = {} # root localId (int) -> Skeleton3D (ONE per avatar, from XML)
+var animesh_roots: Dictionary = {}         # root uuid (String) -> Node3D (scene tree parent)
+var animesh_shared_skeleton: Dictionary = {} # root uuid (String) -> Skeleton3D (ONE per avatar, from XML)
 # animesh_mesh_skeletons removed — all meshes now bind to the shared skeleton
-var animesh_root_for: Dictionary = {}      # localId (int) -> root localId (maps object to its animesh root)
+var animesh_root_for: Dictionary = {}      # uuid (String) -> root uuid (String) (maps object to its animesh root)
 var rigged_mesh_paths: Dictionary = {}     # meshId (String) -> GLB path (for generate_scene)
 var mesh_joint_overrides: Dictionary = {} # meshId (String) -> Array[String] (joints with custom positions)
-var bone_override_owner: Dictionary = {}  # root localId (int) -> Dictionary { boneName -> meshId } (lowest UUID wins)
-var bone_shape_scales: Dictionary = {}   # root localId (int) -> Dictionary { boneName -> Vector3 (SL space scale) }
-var cv_volume_morphs: Dictionary = {}    # root localId (int) -> Dictionary { cvName -> { scale: Vec3, offset: Vec3 } }
+var bone_override_owner: Dictionary = {}  # root uuid (String) -> Dictionary { boneName -> meshId } (lowest UUID wins)
+var bone_shape_scales: Dictionary = {}   # root uuid (String) -> Dictionary { boneName -> Vector3 (SL space scale) }
+var cv_volume_morphs: Dictionary = {}    # root uuid (String) -> Dictionary { cvName -> { scale: Vec3, offset: Vec3 } }
 var animesh_anim_data: Dictionary = {}    # animId (String) -> raw Dictionary (with per-joint priorities)
-var animesh_pending_anims: Dictionary = {} # root localId (int) -> Array[animId String] (pending animation IDs)
-var animesh_worn_anims: Dictionary = {}   # root localId (int) -> Array[animId String] (from worn animesh attachments)
-var animesh_mesh_instances: Dictionary = {} # localId (int) -> MeshInstance3D (for texture application)
+var animesh_pending_anims: Dictionary = {} # root uuid (String) -> Array[animId String] (pending animation IDs)
+var animesh_worn_anims: Dictionary = {}   # root uuid (String) -> Array[animId String] (from worn animesh attachments)
+var animesh_mesh_instances: Dictionary = {} # uuid (String) -> MeshInstance3D (for texture application)
 
 # Attachment point bone tracking — non-rigged attachments follow their bone each frame
-var attach_bone: Dictionary = {}            # localId (int) -> bone name (String) for objects attached to avatar bones
-var attach_point_id: Dictionary = {}        # localId (int) -> attachmentPointId (int)
-var bone_global_overrides: Dictionary = {}  # root localId (int) -> {bone_name -> Vector3} (global rest positions from meshes)
-var _attach_bone_logged: Dictionary = {}    # localId (int) -> true (debug: one-time log flag)
+var attach_bone: Dictionary = {}            # uuid (String) -> bone name (String) for objects attached to avatar bones
+var attach_point_id: Dictionary = {}        # uuid (String) -> attachmentPointId (int)
+var bone_global_overrides: Dictionary = {}  # root uuid (String) -> {bone_name -> Vector3} (global rest positions from meshes)
+var _attach_bone_logged: Dictionary = {}    # uuid (String) -> true (debug: one-time log flag)
 
 # Skeleton builder — parses avatar_skeleton.xml once, creates shared skeletons
 var skeleton_builder: RefCounted
 
 # Manual animation evaluation (replaces AnimationPlayer for correct SL→Godot rotation order)
 # SL: world = local * parent.  Godot: world = parent * local.  Must conjugate per bone.
-var animesh_eval: Dictionary = {}          # root localId -> {time, duration, loop, joints: {name -> {rot_keys, pos_keys}}}
+var animesh_eval: Dictionary = {}          # root uuid (String) -> {time, duration, loop, joints: {name -> {rot_keys, pos_keys}}}
 var animesh_eval_active: bool = false      # true when any animesh has active animation data
-var object_mesh_id: Dictionary = {}        # localId (int) -> meshId (String) — persists after mesh loads
-var object_uuid: Dictionary = {}           # localId (int) -> UUID (String) — for log correlation
+var object_mesh_id: Dictionary = {}        # uuid (String) -> meshId (String) — persists after mesh loads
 
 # Prim geometry generator
 var prim_generator: RefCounted
@@ -163,17 +172,17 @@ var terrain_env: RefCounted        # TerrainEnvironment
 var object_picker: RefCounted      # ObjectPicker
 
 
-## Erase all animesh-related dictionary entries for a given root localId.
+## Erase all animesh-related dictionary entries for a given root uuid.
 ## Call after queue_free()ing the root node.
-func erase_animesh_state(root_lid: int) -> void:
-	animesh_roots.erase(root_lid)
-	animesh_shared_skeleton.erase(root_lid)
-	animesh_eval.erase(root_lid)
-	animesh_pending_anims.erase(root_lid)
-	animesh_worn_anims.erase(root_lid)
-	bone_global_overrides.erase(root_lid)
-	bone_shape_scales.erase(root_lid)
-	cv_volume_morphs.erase(root_lid)
+func erase_animesh_state(root_uuid: String) -> void:
+	animesh_roots.erase(root_uuid)
+	animesh_shared_skeleton.erase(root_uuid)
+	animesh_eval.erase(root_uuid)
+	animesh_pending_anims.erase(root_uuid)
+	animesh_worn_anims.erase(root_uuid)
+	bone_global_overrides.erase(root_uuid)
+	bone_shape_scales.erase(root_uuid)
+	cv_volume_morphs.erase(root_uuid)
 	if animesh_eval.is_empty():
 		animesh_eval_active = false
 
@@ -283,8 +292,8 @@ func handle_region_change() -> void:
 	print("[SceneManager] Region change — clearing all objects, avatars, and lights")
 
 	# Destroy all object RSInstances
-	for local_id: int in objects:
-		objects[local_id].destroy()
+	for uuid: String in objects:
+		objects[uuid].destroy()
 	objects.clear()
 
 	# Destroy all avatar RSInstances
@@ -293,16 +302,16 @@ func handle_region_change() -> void:
 	avatars.clear()
 
 	# Destroy all lights
-	for local_id: int in light_mgr.object_lights:
-		light_mgr.object_lights[local_id].destroy()
+	for uuid: String in light_mgr.object_lights:
+		light_mgr.object_lights[uuid].destroy()
 	light_mgr.object_lights.clear()
 	light_mgr._object_light_data.clear()
 	light_mgr._pending_proj_textures.clear()
 	light_mgr._light_count = 0
 
 	# Destroy all animesh scene tree nodes (skeletons + mesh instances)
-	for local_id: int in animesh_roots:
-		var node: Node3D = animesh_roots[local_id]
+	for uuid: String in animesh_roots:
+		var node: Node3D = animesh_roots[uuid]
 		if node and is_instance_valid(node):
 			node.queue_free()
 	animesh_roots.clear()
@@ -319,7 +328,6 @@ func handle_region_change() -> void:
 
 	# Clear all tracking dictionaries
 	avatar_targets.clear()
-	avatar_local_ids.clear()
 	object_targets.clear()
 	pending_children.clear()
 	object_parent.clear()
@@ -329,8 +337,9 @@ func handle_region_change() -> void:
 	pending_seated_avatars.clear()
 	object_faces.clear()
 	object_meta.clear()
-	object_uuid.clear()
 	object_mesh_id.clear()
+	object_region_offset.clear()
+	region_offsets.clear()
 	attach_bone.clear()
 	attach_point_id.clear()
 	_attach_bone_logged.clear()
@@ -388,6 +397,20 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 	avatar_mgr.handle_avatar_kill(msg)
 
 # Self avatar
+func set_world_origin(origin_x: float, origin_y: float) -> void:
+	world_origin_x = origin_x
+	world_origin_y = origin_y
+	region_offsets.clear()
+	print("[SceneManager] World origin set to (%.0f, %.0f)" % [origin_x, origin_y])
+
+## Store region offset from a terrain_ready or region_info message.
+func register_region_offset(cache_id: String, offset_x: float, offset_y: float) -> void:
+	region_offsets[cache_id] = Vector2(offset_x, offset_y)
+
+## Get the scene-space offset for a region. Returns Vector2.ZERO for the main region.
+func get_region_offset(cache_id: String) -> Vector2:
+	return region_offsets.get(cache_id, Vector2.ZERO)
+
 func set_self_avatar_id(id: String) -> void:
 	avatar_mgr.set_self_avatar_id(id)
 
@@ -430,6 +453,12 @@ func handle_texture_ready(msg: Dictionary) -> void:
 
 # Terrain / Environment
 func handle_terrain_ready(msg: Dictionary) -> void:
+	# Register region offset from the terrain message
+	var cache_id: String = str(msg.get("cacheID", ""))
+	var offset_x: float = float(msg.get("offsetX", 0.0))
+	var offset_y: float = float(msg.get("offsetY", 0.0))
+	if not cache_id.is_empty():
+		register_region_offset(cache_id, offset_x, offset_y)
 	terrain_env.handle_terrain_ready(msg)
 
 func handle_environment_data(msg: Dictionary) -> void:
@@ -442,14 +471,14 @@ func pick_object(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
 func pick_object_detailed(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
 	return object_picker.pick_object_detailed(ray_origin, ray_dir)
 
-func get_object_rid(local_id: int) -> RID:
-	return object_picker.get_object_rid(local_id)
+func get_object_rid(uuid: String) -> RID:
+	return object_picker.get_object_rid(uuid)
 
-func get_object_face_info(local_id: int) -> Array:
-	return object_picker.get_object_face_info(local_id)
+func get_object_face_info(uuid: String) -> Array:
+	return object_picker.get_object_face_info(uuid)
 
-func get_object_debug_info(local_id: int) -> Dictionary:
-	return object_picker.get_object_debug_info(local_id)
+func get_object_debug_info(uuid: String) -> Dictionary:
+	return object_picker.get_object_debug_info(uuid)
 
 func set_planar_debug_mode(mode: int) -> void:
 	object_picker.set_planar_debug_mode(mode)

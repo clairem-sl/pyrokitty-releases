@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { app, shell } from 'electron';
+import { watch as chokidarWatch, type FSWatcher as ChokidarWatcher } from 'chokidar';
 import { Bot, AssetType, FolderType, InventoryType, LLLindenText } from '../../node-metaverse/dist/lib';
 import { InventoryFolder } from '../../node-metaverse/dist/lib/classes/InventoryFolder';
 import { InventoryItem } from '../../node-metaverse/dist/lib/classes/InventoryItem';
@@ -85,7 +86,7 @@ export class InventorySyncManager {
   private manifest: Manifest;
   private progress: SyncStatus = { phase: 'idle', current: 0, total: 0, uploadCost: -1 };
   private onProgress?: (progress: SyncStatus) => void;
-  private watcher: fs.FSWatcher | null = null;
+  private watcher: ChokidarWatcher | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private syncing = false;
   private pendingWatch = false;
@@ -132,14 +133,13 @@ export class InventorySyncManager {
     }
 
     try {
-      this.watcher = fs.watch(this.localDir, { recursive: true }, (_eventType, filename) => {
-        if (!filename) return;
-        // Ignore manifest file
-        if (filename === MANIFEST_FILE || filename.endsWith(path.sep + MANIFEST_FILE)) return;
-        // Ignore non-syncable files
-        const ext = path.extname(filename).toLowerCase();
+      this.watcher = chokidarWatch(this.localDir, {
+        ignoreInitial: true,
+        ignored: (filePath: string) => path.basename(filePath) === MANIFEST_FILE,
+      });
+      this.watcher.on('all', (_event, filePath) => {
+        const ext = path.extname(filePath).toLowerCase();
         if (!['.png', '.txt', '.lsl'].includes(ext)) return;
-
         this.scheduleSync();
       });
       console.log(`[InventorySync] Watching ${this.localDir} for changes`);
@@ -151,7 +151,7 @@ export class InventorySyncManager {
   /** Stop watching the local sync folder */
   stopWatching(): void {
     if (this.watcher) {
-      this.watcher.close();
+      this.watcher.close().catch(() => {});
       this.watcher = null;
       console.log('[InventorySync] Stopped watching for changes');
     }

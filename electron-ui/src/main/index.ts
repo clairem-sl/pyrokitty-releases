@@ -353,7 +353,10 @@ async function createWindow(): Promise<void> {
   }
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  console.log(`[PyroKitty] v${app.getVersion()} (${app.isPackaged ? 'packaged' : 'dev'})`);
+  createWindow();
+});
 
 app.on('before-quit', (event) => {
   isQuitting = true;

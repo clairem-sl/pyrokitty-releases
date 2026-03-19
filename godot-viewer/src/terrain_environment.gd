@@ -7,7 +7,9 @@ const QuadTree3DScript = preload("res://addons/tessarakkt.oceanfft/components/Qu
 
 var sm  # scene_manager reference
 
-var terrain_node: MeshInstance3D
+var terrain_nodes: Dictionary = {}    # cacheID (String) -> MeshInstance3D
+var terrain_heights: Dictionary = {}  # cacheID (String) -> PackedFloat32Array (256x256)
+var terrain_grid: Dictionary = {}     # "gridX,gridY" -> cacheID — for neighbor lookups
 var water_node: MeshInstance3D  # flat fallback (only if OceanFFT unavailable)
 var _ocean = null  # Ocean3D
 var _ocean_quad_tree = null  # QuadTree3D
@@ -54,9 +56,12 @@ func process(_delta: float) -> void:
 
 ## Remove terrain and water meshes for region change
 func clear() -> void:
-	if terrain_node:
-		terrain_node.queue_free()
-		terrain_node = null
+	for node: MeshInstance3D in terrain_nodes.values():
+		if is_instance_valid(node):
+			node.queue_free()
+	terrain_nodes.clear()
+	terrain_heights.clear()
+	terrain_grid.clear()
 	if water_node:
 		water_node.queue_free()
 		water_node = null
@@ -89,19 +94,33 @@ func handle_terrain_ready(msg: Dictionary) -> void:
 		heights[i] = f.get_float()
 	f.close()
 
-	# Build and add terrain mesh
-	var mesh := _build_terrain_mesh(heights)
-	if terrain_node:
-		terrain_node.queue_free()
-	terrain_node = MeshInstance3D.new()
-	terrain_node.mesh = mesh
+	var cache_id: String = str(msg.get("cacheID", ""))
+	var grid_x: int = int(msg.get("gridX", 0))
+	var grid_y: int = int(msg.get("gridY", 0))
+	var offset_x: float = float(msg.get("offsetX", 0.0))
+	var offset_y: float = float(msg.get("offsetY", 0.0))
 
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.36, 0.50, 0.25)  # Green-brown ground
-	mat.roughness = 0.9
-	terrain_node.material_override = mat
+	# Store heights and grid mapping for neighbor stitching
+	terrain_heights[cache_id] = heights
+	var grid_key := "%d,%d" % [grid_x, grid_y]
+	terrain_grid[grid_key] = cache_id
 
-	sm.add_child(terrain_node)
+	# Build this tile (with neighbor edge data if available)
+	_build_terrain_tile(cache_id, grid_x, grid_y, offset_x, offset_y)
+
+	# Rebuild the tile to the west (it needs our x=0 column as its east edge)
+	var west_key := "%d,%d" % [grid_x - 1, grid_y]
+	if terrain_grid.has(west_key):
+		var west_id: String = terrain_grid[west_key]
+		_build_terrain_tile(west_id, grid_x - 1, grid_y, offset_x - 256.0, offset_y)
+
+	# Rebuild the tile to the south (it needs our y=0 row as its north edge)
+	var south_key := "%d,%d" % [grid_x, grid_y - 1]
+	if terrain_grid.has(south_key):
+		var south_id: String = terrain_grid[south_key]
+		_build_terrain_tile(south_id, grid_x, grid_y - 1, offset_x, offset_y - 256.0)
+
+	print("[Terrain] Tile loaded: cacheID=%s grid=(%d,%d) offset=(%.0f, %.0f)" % [cache_id.substr(0, 8), grid_x, grid_y, offset_x, offset_y])
 
 	# Build water plane
 	var water_height: float = float(msg.get("waterHeight", 20.0))
@@ -109,49 +128,117 @@ func handle_terrain_ready(msg: Dictionary) -> void:
 	_build_water_plane(water_height)
 
 
-func _build_terrain_mesh(heights: PackedFloat32Array) -> ArrayMesh:
+## Build (or rebuild) a single terrain tile with stitched neighbor edges.
+func _build_terrain_tile(cache_id: String, grid_x: int, grid_y: int, offset_x: float, offset_y: float) -> void:
+	var heights: PackedFloat32Array = terrain_heights.get(cache_id, PackedFloat32Array())
+	if heights.size() < 65536:
+		return
+
+	# East neighbor: their x=0 column is our x=256 edge
+	var east_edge := PackedFloat32Array()
+	var east_key := "%d,%d" % [grid_x + 1, grid_y]
+	if terrain_grid.has(east_key):
+		var east_h: PackedFloat32Array = terrain_heights.get(terrain_grid[east_key], PackedFloat32Array())
+		if east_h.size() >= 65536:
+			east_edge.resize(256)
+			for y in range(256):
+				east_edge[y] = east_h[y * 256 + 0]  # x=0 column of east neighbor
+
+	# North neighbor: their y=0 row is our y=256 edge
+	var north_edge := PackedFloat32Array()
+	var north_key := "%d,%d" % [grid_x, grid_y + 1]
+	if terrain_grid.has(north_key):
+		var north_h: PackedFloat32Array = terrain_heights.get(terrain_grid[north_key], PackedFloat32Array())
+		if north_h.size() >= 65536:
+			north_edge.resize(256)
+			for x in range(256):
+				north_edge[x] = north_h[0 * 256 + x]  # y=0 row of north neighbor
+
+	# Corner (256, 256) — northeast neighbor's (0, 0)
+	var corner_h: float = 0.0
+	var ne_key := "%d,%d" % [grid_x + 1, grid_y + 1]
+	if terrain_grid.has(ne_key):
+		var ne_h: PackedFloat32Array = terrain_heights.get(terrain_grid[ne_key], PackedFloat32Array())
+		if ne_h.size() >= 65536:
+			corner_h = ne_h[0]
+
+	var mesh := _build_terrain_mesh(heights, east_edge, north_edge, corner_h)
+
+	# Remove existing tile
+	if terrain_nodes.has(cache_id):
+		var old_node: MeshInstance3D = terrain_nodes[cache_id]
+		if is_instance_valid(old_node):
+			old_node.queue_free()
+
+	var tile := MeshInstance3D.new()
+	tile.mesh = mesh
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.36, 0.50, 0.25)
+	mat.roughness = 0.9
+	tile.material_override = mat
+	tile.position = Vector3(offset_x, 0.0, -offset_y)
+
+	sm.add_child(tile)
+	terrain_nodes[cache_id] = tile
+
+
+func _build_terrain_mesh(heights: PackedFloat32Array, east_edge: PackedFloat32Array, north_edge: PackedFloat32Array, corner_h: float) -> ArrayMesh:
+	# 257x257 vertices (256 quads per axis = 256m). Heights array is 256x256.
+	# East edge (x=256) and north edge (y=256) come from neighboring regions.
+	# If no neighbor data, those arrays are empty and we repeat the last row/column.
+	const W := 257
+	var has_east := east_edge.size() >= 256
+	var has_north := north_edge.size() >= 256
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var indices := PackedInt32Array()
 
-	verts.resize(256 * 256)
-	normals.resize(256 * 256)
+	verts.resize(W * W)
+	normals.resize(W * W)
 
-	# Place vertices: Godot coords = (x, height, -y) matching SL->Godot convention
-	for y in range(256):
-		for x in range(256):
-			var idx := y * 256 + x
-			var h: float = heights[idx]
-			verts[idx] = Vector3(float(x), h, -float(y))
+	# Place vertices: Godot coords = (x, height, -y)
+	for y in range(W):
+		for x in range(W):
+			var h: float
+			if x < 256 and y < 256:
+				h = heights[y * 256 + x]
+			elif x == 256 and y < 256:
+				h = east_edge[y] if has_east else heights[y * 256 + 255]
+			elif y == 256 and x < 256:
+				h = north_edge[x] if has_north else heights[255 * 256 + x]
+			else:
+				# Corner (256, 256) — use neighbor data or repeat
+				if has_east and has_north:
+					h = corner_h
+				elif has_east:
+					h = east_edge[255]
+				elif has_north:
+					h = north_edge[255]
+				else:
+					h = heights[255 * 256 + 255]
+			verts[y * W + x] = Vector3(float(x), h, -float(y))
 
-	# Compute normals from height differences
-	for y in range(256):
-		for x in range(256):
-			var idx := y * 256 + x
-			# Sample adjacent heights (clamp at edges)
-			var hL: float = heights[y * 256 + maxi(x - 1, 0)]
-			var hR: float = heights[y * 256 + mini(x + 1, 255)]
-			var hD: float = heights[mini(y + 1, 255) * 256 + x]
-			var hU: float = heights[maxi(y - 1, 0) * 256 + x]
-			# Normal from cross product of tangent vectors
-			# dX tangent: (2, hR-hL, 0), dY tangent: (0, hU-hD, -2) [note -y in Godot]
-			var n := Vector3(hL - hR, 2.0, hD - hU).normalized()
-			normals[idx] = n
+	# Compute normals from height differences (sample from vertex positions)
+	for y in range(W):
+		for x in range(W):
+			var hL: float = verts[y * W + maxi(x - 1, 0)].y
+			var hR: float = verts[y * W + mini(x + 1, W - 1)].y
+			var hD: float = verts[mini(y + 1, W - 1) * W + x].y
+			var hU: float = verts[maxi(y - 1, 0) * W + x].y
+			normals[y * W + x] = Vector3(hL - hR, 2.0, hD - hU).normalized()
 
-	# Build triangle indices: 255x255 cells, 2 triangles each
-	indices.resize(255 * 255 * 6)
+	# Build triangle indices: 256x256 cells, 2 triangles each
+	indices.resize(256 * 256 * 6)
 	var ii := 0
-	for y in range(255):
-		for x in range(255):
-			var tl := y * 256 + x
+	for y in range(256):
+		for x in range(256):
+			var tl := y * W + x
 			var tr := tl + 1
-			var bl := (y + 1) * 256 + x
+			var bl := (y + 1) * W + x
 			var br := bl + 1
-			# Triangle 1: tl, bl, tr
 			indices[ii] = tl; ii += 1
 			indices[ii] = bl; ii += 1
 			indices[ii] = tr; ii += 1
-			# Triangle 2: tr, bl, br
 			indices[ii] = tr; ii += 1
 			indices[ii] = bl; ii += 1
 			indices[ii] = br; ii += 1

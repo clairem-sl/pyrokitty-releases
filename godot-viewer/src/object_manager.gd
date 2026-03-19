@@ -94,26 +94,22 @@ func _init(scene_manager) -> void:
 	sm = scene_manager
 
 
-## Short UUID for log messages (first 8 chars, or "?" if not found)
-func _uuid_short(local_id: int) -> String:
-	var uuid: String = sm.object_uuid.get(local_id, "")
-	if uuid.is_empty():
+## Short UUID for log messages (first 8 chars, or "?" if empty)
+func _uuid_short(obj_uuid: String) -> String:
+	if obj_uuid.is_empty():
 		return "?"
-	return uuid.substr(0, 8)
+	return obj_uuid.substr(0, 8)
 
 
-## Check if a localId belongs to the self avatar (is the avatar root or an attachment of it)
-func _is_self_avatar(local_id: int) -> bool:
-	if sm.self_avatar_id.is_empty():
+## Check if an object uuid belongs to the self avatar (is the avatar root or an attachment of it)
+func _is_self_avatar(obj_uuid: String) -> bool:
+	if sm.self_avatar_id.is_empty() or obj_uuid.is_empty():
 		return false
-	var self_lid: int = sm.avatar_local_ids.get(sm.self_avatar_id, 0)
-	if self_lid == 0:
-		return false
-	if local_id == self_lid:
+	if obj_uuid == sm.self_avatar_id:
 		return true
 	# Check if this object's animesh root is the self avatar
-	var root_id: int = sm.animesh_root_for.get(local_id, 0)
-	return root_id == self_lid
+	var root_id: String = sm.animesh_root_for.get(obj_uuid, "")
+	return root_id == sm.self_avatar_id
 
 
 # ─── Object Handlers ──────────────────────────────────
@@ -121,23 +117,18 @@ func _is_self_avatar(local_id: int) -> bool:
 # All position/rotation/scale arrays arrive pre-converted to Godot space.
 
 func handle_object_create(msg: Dictionary) -> void:
-	var local_id: int = int(msg.get("localId", 0))
-	if local_id == 0:
+	var obj_uuid: String = str(msg.get("uuid", ""))
+	if obj_uuid.is_empty():
 		return
 
-	var parent_id: int = int(msg.get("parentId", 0))
+	var parent_uuid: String = str(msg.get("parentUuid", ""))
 
 	# Remove existing if duplicate
-	if sm.objects.has(local_id):
-		_cleanup_object(local_id)
+	if sm.objects.has(obj_uuid):
+		_cleanup_object(obj_uuid)
 
-	# Store UUID for log correlation
-	var obj_uuid: String = str(msg.get("uuid", ""))
-	if not obj_uuid.is_empty():
-		sm.object_uuid[local_id] = obj_uuid
-
-	# Store object metadata (uuid; name/description arrive later via object_properties)
-	sm.object_meta[local_id] = {
+	# Store object metadata (name/description arrive later via object_properties)
+	sm.object_meta[obj_uuid] = {
 		"uuid": obj_uuid,
 		"name": "",
 		"description": "",
@@ -165,40 +156,40 @@ func handle_object_create(msg: Dictionary) -> void:
 
 	rsi.scl = godot_scale  # SL prims have independent scale — no compensation
 
-	if parent_id > 0:
+	if not parent_uuid.is_empty():
 		# Child prim — store relative offset for linkset movement
-		sm.object_parent[local_id] = parent_id
-		sm.child_offset_pos[local_id] = godot_pos
-		sm.child_offset_rot[local_id] = godot_rot
+		sm.object_parent[obj_uuid] = parent_uuid
+		sm.child_offset_pos[obj_uuid] = godot_pos
+		sm.child_offset_rot[obj_uuid] = godot_rot
 		var _dbg_ap: int = msg.get("attachmentPoint", 0)
 		if _dbg_ap > 0:
-			print("[AttachDebug] localId=%d attachPt=%d offset_pos=%s offset_rot=%s" % [local_id, _dbg_ap, godot_pos, godot_rot])
+			print("[AttachDebug] uuid=%s attachPt=%d offset_pos=%s offset_rot=%s" % [_uuid_short(obj_uuid), _dbg_ap, godot_pos, godot_rot])
 
-		if not sm.object_children.has(parent_id):
-			sm.object_children[parent_id] = []
-		sm.object_children[parent_id].append(local_id)
+		if not sm.object_children.has(parent_uuid):
+			sm.object_children[parent_uuid] = []
+		sm.object_children[parent_uuid].append(obj_uuid)
 
-		if sm.objects.has(parent_id):
+		if sm.objects.has(parent_uuid):
 			# Parent exists — compute world position from parent + offset
-			var parent_rsi = sm.objects[parent_id]
+			var parent_rsi = sm.objects[parent_uuid]
 			rsi.pos = parent_rsi.pos + parent_rsi.rot * godot_pos
 			rsi.rot = parent_rsi.rot * godot_rot
-		elif sm.animesh_roots.has(parent_id):
+		elif sm.animesh_roots.has(parent_uuid):
 			# Parent is an avatar or animesh root — use scene tree node transform
-			var root_node: Node3D = sm.animesh_roots[parent_id]
+			var root_node: Node3D = sm.animesh_roots[parent_uuid]
 			# If this attachment has a bone, use bone position for initial placement.
 			# Shared skeleton has joint position overrides from mesh IBMs applied.
 			var _ap: int = msg.get("attachmentPoint", 0)
 			var _bn: String = ATTACH_POINT_BONES.get(_ap, "") if _ap > 0 else ""
-			if not _bn.is_empty() and sm.animesh_shared_skeleton.has(parent_id):
-				var _ss: Skeleton3D = sm.animesh_shared_skeleton[parent_id]
+			if not _bn.is_empty() and sm.animesh_shared_skeleton.has(parent_uuid):
+				var _ss: Skeleton3D = sm.animesh_shared_skeleton[parent_uuid]
 				var _bi: int = _ss.find_bone(_bn)
 				if _bi >= 0:
 					var _bpos: Vector3 = sm.animation_mgr._get_bone_global_rest_pos(_ss, _bi)
 					var _bp: Vector3 = root_node.position + root_node.quaternion * _bpos
 					var _bg: Transform3D = _ss.get_bone_global_rest(_bi)
 					var _br: Quaternion = root_node.quaternion * _bg.basis.orthonormalized().get_rotation_quaternion()
-					var _bone_scale: Vector3 = sm.bone_shape_scales.get(parent_id, {}).get(_bn, Vector3.ONE)
+					var _bone_scale: Vector3 = sm.bone_shape_scales.get(parent_uuid, {}).get(_bn, Vector3.ONE)
 					var _ap_xf: Array = sm.animation_mgr._get_ap_world_transform(_ap, _bp, _br, _bone_scale)
 					rsi.pos = _ap_xf[0] + _ap_xf[2] * godot_pos
 					rsi.rot = _ap_xf[2] * godot_rot
@@ -212,120 +203,124 @@ func handle_object_create(msg: Dictionary) -> void:
 			# Parent hasn't arrived — use offset as-is (will be corrected when parent arrives)
 			rsi.pos = godot_pos
 			rsi.rot = godot_rot
-			if not sm.pending_children.has(parent_id):
-				sm.pending_children[parent_id] = []
-			sm.pending_children[parent_id].append(local_id)
+			if not sm.pending_children.has(parent_uuid):
+				sm.pending_children[parent_uuid] = []
+			sm.pending_children[parent_uuid].append(obj_uuid)
 	else:
-		# Root prim — position is world absolute
-		rsi.pos = godot_pos
+		# Root prim — position is region-local, apply region offset for world position
+		var cache_id: String = str(msg.get("cacheID", ""))
+		var region_offset: Vector2 = sm.get_region_offset(cache_id)
+		# SL→Godot coordinate conversion: SL X→Godot X, SL Y(north)→Godot -Z
+		var offset_3d := Vector3(region_offset.x, 0.0, -region_offset.y)
+		sm.object_region_offset[obj_uuid] = offset_3d
+		rsi.pos = godot_pos + offset_3d
 		rsi.rot = godot_rot
 
 	rsi.push_transform()
-	sm.objects[local_id] = rsi
+	sm.objects[obj_uuid] = rsi
 
 	# Track attachment point bone for non-rigged attachments that follow skeleton bones.
 	# Only store if the bone actually exists in the shared skeleton (mRoot doesn't — it's
 	# not a real skeleton bone, just the avatar root. Those fall through to normal positioning).
 	var attach_point: int = msg.get("attachmentPoint", 0)
-	if attach_point > 0 and parent_id > 0 and sm.animesh_roots.has(parent_id):
+	if attach_point > 0 and not parent_uuid.is_empty() and sm.animesh_roots.has(parent_uuid):
 		var bone_name: String = ATTACH_POINT_BONES.get(attach_point, "")
-		if not bone_name.is_empty() and sm.animesh_shared_skeleton.has(parent_id):
-			var _ss: Skeleton3D = sm.animesh_shared_skeleton[parent_id]
+		if not bone_name.is_empty() and sm.animesh_shared_skeleton.has(parent_uuid):
+			var _ss: Skeleton3D = sm.animesh_shared_skeleton[parent_uuid]
 			var _bi: int = _ss.find_bone(bone_name)
 			if _bi >= 0:
-				sm.attach_bone[local_id] = bone_name
-				sm.attach_point_id[local_id] = attach_point
-				print("[AttachBone] localId=%d uuid=%s → bone=%s (attachPt=%d) parent=%d" % [local_id, _uuid_short(local_id), bone_name, attach_point, parent_id])
+				sm.attach_bone[obj_uuid] = bone_name
+				sm.attach_point_id[obj_uuid] = attach_point
+				print("[AttachBone] uuid=%s → bone=%s (attachPt=%d) parent=%s" % [_uuid_short(obj_uuid), bone_name, attach_point, _uuid_short(parent_uuid)])
 			else:
-				print("[AttachBone] localId=%d bone=%s NOT FOUND in skeleton (attachPt=%d)" % [local_id, bone_name, attach_point])
+				print("[AttachBone] uuid=%s bone=%s NOT FOUND in skeleton (attachPt=%d)" % [_uuid_short(obj_uuid), bone_name, attach_point])
 		elif bone_name.is_empty():
-			print("[AttachBone] localId=%d unknown attachmentPoint=%d" % [local_id, attach_point])
-	elif attach_point > 0 and parent_id > 0:
-		print("[AttachBone] localId=%d attachPt=%d but parent %d not in animesh_roots" % [local_id, attach_point, parent_id])
+			print("[AttachBone] uuid=%s unknown attachmentPoint=%d" % [_uuid_short(obj_uuid), attach_point])
+	elif attach_point > 0 and not parent_uuid.is_empty():
+		print("[AttachBone] uuid=%s attachPt=%d but parent %s not in animesh_roots" % [_uuid_short(obj_uuid), attach_point, _uuid_short(parent_uuid)])
 
 	# Animesh root detection — create a Node3D in the scene tree for skeleton parenting.
 	# Worn animesh (child of avatar) uses the AVATAR's skeleton and root, matching SL behavior
 	# where the ControlAvatar for a worn animesh shares the avatar's skeleton.
 	if msg.get("animesh", false):
-		if parent_id > 0 and sm.animesh_roots.has(parent_id):
+		if not parent_uuid.is_empty() and sm.animesh_roots.has(parent_uuid):
 			# Worn animesh attachment — gets its OWN skeleton, parented under the avatar's
 			# root node so it follows the avatar's transform. Its child prims' joint
 			# overrides must NOT affect the avatar's skeleton (they define a separate
 			# rigged mesh, e.g. animated tail/wings on a dog avatar).
-			var avatar_node: Node3D = sm.animesh_roots[parent_id]
+			var avatar_node: Node3D = sm.animesh_roots[parent_uuid]
 			var animesh_node := Node3D.new()
-			animesh_node.name = "worn_animesh_%d" % local_id
+			animesh_node.name = "worn_animesh_%s" % _uuid_short(obj_uuid)
 			avatar_node.add_child(animesh_node)
 			animesh_node.position = Vector3.ZERO
 			animesh_node.quaternion = Quaternion.IDENTITY
 			animesh_node.scale = Vector3.ONE
-			sm.animesh_roots[local_id] = animesh_node
-			sm.animesh_root_for[local_id] = local_id
-			if not sm.animesh_shared_skeleton.has(local_id):
+			sm.animesh_roots[obj_uuid] = animesh_node
+			sm.animesh_root_for[obj_uuid] = obj_uuid
+			if not sm.animesh_shared_skeleton.has(obj_uuid):
 				var shared_skel: Skeleton3D = sm.skeleton_builder.create_shared_skeleton()
 				animesh_node.add_child(shared_skel)
-				sm.animesh_shared_skeleton[local_id] = shared_skel
-			_register_animesh_descendants(local_id, local_id)
-			print("[Animesh] Worn animesh %d uuid=%s → own skeleton under avatar root %d" % [local_id, _uuid_short(local_id), parent_id])
+				sm.animesh_shared_skeleton[obj_uuid] = shared_skel
+			_register_animesh_descendants(obj_uuid, obj_uuid)
+			print("[Animesh] Worn animesh %s → own skeleton under avatar root %s" % [_uuid_short(obj_uuid), _uuid_short(parent_uuid)])
 		else:
 			# Standalone animesh object (rezzed on ground) — own root + skeleton
 			var animesh_node := Node3D.new()
-			animesh_node.name = "animesh_%d" % local_id
+			animesh_node.name = "animesh_%s" % _uuid_short(obj_uuid)
 			sm.add_child(animesh_node)
 			animesh_node.position = rsi.pos
 			animesh_node.quaternion = rsi.rot
 			# SL ControlAvatar uses mScaleConstraintFixup (default 1.0) — prim scale does NOT
 			# affect the rendered animesh character size. The skeleton is at natural bind-pose size.
 			animesh_node.scale = Vector3.ONE
-			sm.animesh_roots[local_id] = animesh_node
-			sm.animesh_root_for[local_id] = local_id
+			sm.animesh_roots[obj_uuid] = animesh_node
+			sm.animesh_root_for[obj_uuid] = obj_uuid
 			# Create shared skeleton — ALL meshes bind to this one skeleton (no per-mesh skeletons).
 			# Added to scene tree as parent of MeshInstance3D nodes (Godot's expected pattern).
-			if not sm.animesh_shared_skeleton.has(local_id):
+			if not sm.animesh_shared_skeleton.has(obj_uuid):
 				var shared_skel: Skeleton3D = sm.skeleton_builder.create_shared_skeleton()
 				animesh_node.add_child(shared_skel)
-				sm.animesh_shared_skeleton[local_id] = shared_skel
-			if _is_self_avatar(local_id):
-				print("[SelfAvatar] Animesh root object %d uuid=%s created" % [local_id, _uuid_short(local_id)])
+				sm.animesh_shared_skeleton[obj_uuid] = shared_skel
+			if _is_self_avatar(obj_uuid):
+				print("[SelfAvatar] Animesh root object %s created" % [_uuid_short(obj_uuid)])
 			# Retroactively register existing children + grandchildren (attachment linksets)
-			_register_animesh_descendants(local_id, local_id)
+			_register_animesh_descendants(obj_uuid, obj_uuid)
 
 	# Track children of animesh roots (direct children AND grandchildren of linksets).
 	# Skip if this object already has a root assigned (e.g. worn animesh that just
 	# created its own root above — don't let child tracking overwrite it).
-	if parent_id > 0 and not sm.animesh_root_for.has(local_id):
-		if sm.animesh_roots.has(parent_id):
-			sm.animesh_root_for[local_id] = parent_id
-		elif sm.animesh_root_for.has(parent_id):
+	if not parent_uuid.is_empty() and not sm.animesh_root_for.has(obj_uuid):
+		if sm.animesh_roots.has(parent_uuid):
+			sm.animesh_root_for[obj_uuid] = parent_uuid
+		elif sm.animesh_root_for.has(parent_uuid):
 			# Grandchild — inherit the same animesh root (attachment linkset child)
-			sm.animesh_root_for[local_id] = sm.animesh_root_for[parent_id]
+			sm.animesh_root_for[obj_uuid] = sm.animesh_root_for[parent_uuid]
 		else:
 			# Only log for self-avatar attachments — regular linkset children are expected noise
-			var self_lid: int = sm.avatar_local_ids.get(sm.self_avatar_id, 0)
-			if self_lid > 0 and parent_id == self_lid:
-				print("[SelfAvatar] WARNING: obj %d uuid=%s has parentId=%d (self avatar) but NOT an animesh root (animesh_roots has %d entries)" % [local_id, _uuid_short(local_id), parent_id, sm.animesh_roots.size()])
+			if not sm.self_avatar_id.is_empty() and parent_uuid == sm.self_avatar_id:
+				print("[SelfAvatar] WARNING: obj %s has parentUuid=%s (self avatar) but NOT an animesh root (animesh_roots has %d entries)" % [_uuid_short(obj_uuid), _uuid_short(parent_uuid), sm.animesh_roots.size()])
 
 	# [SelfAvatar] log when an attachment is registered for the self avatar
-	if _is_self_avatar(local_id):
-		print("[SelfAvatar] Attachment created: localId=%d uuid=%s parentId=%d" % [local_id, _uuid_short(local_id), parent_id])
+	if _is_self_avatar(obj_uuid):
+		print("[SelfAvatar] Attachment created: uuid=%s parentUuid=%s" % [_uuid_short(obj_uuid), _uuid_short(parent_uuid)])
 
 	# Create light if this object is a light source
 	if msg.has("light") and msg["light"] is Dictionary:
-		sm.light_mgr.create_or_update_light(local_id, msg["light"], rsi)
+		sm.light_mgr.create_or_update_light(obj_uuid, msg["light"], rsi)
 
 	# If this is a root and we have pending children, fix their world positions
-	if parent_id == 0 and sm.pending_children.has(local_id):
-		for child_id: int in sm.pending_children[local_id]:
-			if sm.objects.has(child_id) and sm.child_offset_pos.has(child_id):
-				var child_rsi = sm.objects[child_id]
-				child_rsi.pos = rsi.pos + rsi.rot * sm.child_offset_pos[child_id]
-				child_rsi.rot = rsi.rot * sm.child_offset_rot[child_id]
+	if parent_uuid.is_empty() and sm.pending_children.has(obj_uuid):
+		for child_uuid: String in sm.pending_children[obj_uuid]:
+			if sm.objects.has(child_uuid) and sm.child_offset_pos.has(child_uuid):
+				var child_rsi = sm.objects[child_uuid]
+				child_rsi.pos = rsi.pos + rsi.rot * sm.child_offset_pos[child_uuid]
+				child_rsi.rot = rsi.rot * sm.child_offset_rot[child_uuid]
 				child_rsi.push_transform()
-		sm.pending_children.erase(local_id)
+		sm.pending_children.erase(obj_uuid)
 
 	# Resolve any seated avatars waiting for this object as their seat
-	if sm.pending_seated_avatars.has(local_id):
-		for entry: Dictionary in sm.pending_seated_avatars[local_id]:
+	if sm.pending_seated_avatars.has(obj_uuid):
+		for entry: Dictionary in sm.pending_seated_avatars[obj_uuid]:
 			var av_id: String = entry["id"]
 			if sm.avatars.has(av_id):
 				var world_pos: Vector3 = rsi.pos + rsi.rot * entry["pos"]
@@ -335,23 +330,22 @@ func handle_object_create(msg: Dictionary) -> void:
 				sm.avatars[av_id].push_transform()
 				sm.avatar_targets[av_id] = { "pos": world_pos, "rot": world_rot, "vel": Vector3.ZERO }
 				# Update skeleton root node too
-				var av_lid: int = sm.avatar_local_ids.get(av_id, 0)
-				if av_lid > 0 and sm.animesh_roots.has(av_lid):
-					var av_node: Node3D = sm.animesh_roots[av_lid]
+				if sm.animesh_roots.has(av_id):
+					var av_node: Node3D = sm.animesh_roots[av_id]
 					av_node.position = world_pos
 					av_node.quaternion = world_rot
-				print("[AvatarSit] Resolved: avatar=%s seat=%d pos=%s" % [av_id.substr(0, 8), local_id, world_pos])
-		sm.pending_seated_avatars.erase(local_id)
+				print("[AvatarSit] Resolved: avatar=%s seat=%s pos=%s" % [av_id.substr(0, 8), _uuid_short(obj_uuid), world_pos])
+		sm.pending_seated_avatars.erase(obj_uuid)
 
 
 func handle_object_update_batch(msg: Dictionary) -> void:
 	var obj_list: Array = msg.get("objects", [])
 	for obj: Dictionary in obj_list:
-		var local_id: int = int(obj.get("localId", 0))
-		if local_id == 0:
+		var obj_uuid: String = str(obj.get("uuid", ""))
+		if obj_uuid.is_empty():
 			continue
 
-		var rsi = sm.objects.get(local_id)
+		var rsi = sm.objects.get(obj_uuid)
 		if rsi == null:
 			continue
 
@@ -376,29 +370,30 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 			if ang_vel.length_squared() > 0.0001:
 				has_motion = true
 
-		if sm.object_parent.has(local_id):
+		if sm.object_parent.has(obj_uuid):
 			# Child prim — update offsets, parent interpolation handles world pos
 			if obj.has("position"):
 				var cp: Array = obj["position"]
-				sm.child_offset_pos[local_id] = Vector3(cp[0], cp[1], cp[2])
+				sm.child_offset_pos[obj_uuid] = Vector3(cp[0], cp[1], cp[2])
 			if obj.has("rotation"):
 				var cr: Array = obj["rotation"]
-				sm.child_offset_rot[local_id] = Quaternion(cr[0], cr[1], cr[2], cr[3])
+				sm.child_offset_rot[obj_uuid] = Quaternion(cr[0], cr[1], cr[2], cr[3])
 			if obj.has("scale"):
 				var cs: Array = obj["scale"]
 				rsi.scl = Vector3(cs[0], cs[1], cs[2])
 			# Recompute world transform from parent
-			var parent_rsi = sm.objects.get(sm.object_parent[local_id])
-			if parent_rsi and sm.child_offset_pos.has(local_id):
-				rsi.pos = parent_rsi.pos + parent_rsi.rot * sm.child_offset_pos[local_id]
-				rsi.rot = parent_rsi.rot * sm.child_offset_rot.get(local_id, Quaternion.IDENTITY)
+			var parent_rsi = sm.objects.get(sm.object_parent[obj_uuid])
+			if parent_rsi and sm.child_offset_pos.has(obj_uuid):
+				rsi.pos = parent_rsi.pos + parent_rsi.rot * sm.child_offset_pos[obj_uuid]
+				rsi.rot = parent_rsi.rot * sm.child_offset_rot.get(obj_uuid, Quaternion.IDENTITY)
 			rsi.push_transform()
 		elif has_motion:
 			# Root prim with motion — blend from current visual pos toward server pos
+			var r_offset: Vector3 = sm.object_region_offset.get(obj_uuid, Vector3.ZERO)
 			var server_pos: Vector3 = rsi.pos
 			if obj.has("position"):
 				var sp: Array = obj["position"]
-				server_pos = Vector3(sp[0], sp[1], sp[2])
+				server_pos = Vector3(sp[0], sp[1], sp[2]) + r_offset
 			var server_rot: Quaternion = rsi.rot
 			if obj.has("rotation"):
 				var sr: Array = obj["rotation"]
@@ -418,7 +413,7 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 			target["age"] = 0.0
 			target["blend_offset"] = blend_offset
 			target["blend_time"] = 0.0
-			sm.object_targets[local_id] = target
+			sm.object_targets[obj_uuid] = target
 			# Scale always snaps
 			if obj.has("scale"):
 				var ms: Array = obj["scale"]
@@ -429,16 +424,17 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 			# BUT if the object is currently being interpolated (physics updates
 			# arrived more recently via high-priority), this batch message is stale
 			# from the low-priority queue. Skip position/rotation to avoid snapping backward.
-			if sm.object_targets.has(local_id):
+			if sm.object_targets.has(obj_uuid):
 				# Only allow scale changes from stale batch updates
 				if obj.has("scale"):
 					var ss: Array = obj["scale"]
 					rsi.scl = Vector3(ss[0], ss[1], ss[2])
 					rsi.push_transform()
 			else:
+				var r_off: Vector3 = sm.object_region_offset.get(obj_uuid, Vector3.ZERO)
 				if obj.has("position"):
 					var np: Array = obj["position"]
-					rsi.pos = Vector3(np[0], np[1], np[2])
+					rsi.pos = Vector3(np[0], np[1], np[2]) + r_off
 				if obj.has("rotation"):
 					var nr: Array = obj["rotation"]
 					rsi.rot = Quaternion(nr[0], nr[1], nr[2], nr[3])
@@ -448,47 +444,47 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 				rsi.push_transform()
 
 			# Propagate root movement to all children
-			if sm.object_children.has(local_id):
-				_update_children_transforms(local_id)
+			if sm.object_children.has(obj_uuid):
+				_update_children_transforms(obj_uuid)
 
 		# Sync animesh root Node3D transform with RSInstance
-		_sync_animesh_transform(local_id, rsi)
+		_sync_animesh_transform(obj_uuid, rsi)
 
 		# Update light (may be added, changed, or removed)
 		if obj.has("light"):
 			if obj["light"] is Dictionary:
-				sm.light_mgr.create_or_update_light(local_id, obj["light"], rsi)
+				sm.light_mgr.create_or_update_light(obj_uuid, obj["light"], rsi)
 			else:
 				# light: null means light was removed
-				sm.light_mgr.destroy_light(local_id)
-				sm.light_mgr._object_light_data.erase(local_id)
-		elif sm.light_mgr.object_lights.has(local_id):
+				sm.light_mgr.destroy_light(obj_uuid)
+				sm.light_mgr._object_light_data.erase(obj_uuid)
+		elif sm.light_mgr.object_lights.has(obj_uuid):
 			# Transform changed — update light position
-			sm.light_mgr.update_light_transform(local_id, rsi)
+			sm.light_mgr.update_light_transform(obj_uuid, rsi)
 
 
 ## Recompute world positions of all children from parent's current transform
-func _update_children_transforms(parent_id: int) -> void:
-	var parent_rsi = sm.objects.get(parent_id)
+func _update_children_transforms(parent_uuid: String) -> void:
+	var parent_rsi = sm.objects.get(parent_uuid)
 	if parent_rsi == null:
 		return
-	for child_id: int in sm.object_children[parent_id]:
-		if sm.objects.has(child_id) and sm.child_offset_pos.has(child_id):
-			var child_rsi = sm.objects[child_id]
-			child_rsi.pos = parent_rsi.pos + parent_rsi.rot * sm.child_offset_pos[child_id]
-			child_rsi.rot = parent_rsi.rot * sm.child_offset_rot[child_id]
+	for child_uuid: String in sm.object_children[parent_uuid]:
+		if sm.objects.has(child_uuid) and sm.child_offset_pos.has(child_uuid):
+			var child_rsi = sm.objects[child_uuid]
+			child_rsi.pos = parent_rsi.pos + parent_rsi.rot * sm.child_offset_pos[child_uuid]
+			child_rsi.rot = parent_rsi.rot * sm.child_offset_rot[child_uuid]
 			child_rsi.push_transform()
 			# Sync animesh root Node3D for child animesh objects
-			_sync_animesh_transform(child_id, child_rsi)
+			_sync_animesh_transform(child_uuid, child_rsi)
 			# Move child's light with it
-			if sm.light_mgr.object_lights.has(child_id):
-				sm.light_mgr.update_light_transform(child_id, child_rsi)
+			if sm.light_mgr.object_lights.has(child_uuid):
+				sm.light_mgr.update_light_transform(child_uuid, child_rsi)
 
 
 ## Sync animesh root Node3D transform with its RSInstance (call after any RSInstance transform change)
-func _sync_animesh_transform(local_id: int, rsi) -> void:
-	if sm.animesh_roots.has(local_id):
-		var node: Node3D = sm.animesh_roots[local_id]
+func _sync_animesh_transform(obj_uuid: String, rsi) -> void:
+	if sm.animesh_roots.has(obj_uuid):
+		var node: Node3D = sm.animesh_roots[obj_uuid]
 		if node and is_instance_valid(node):
 			node.position = rsi.pos
 			node.quaternion = rsi.rot
@@ -500,40 +496,40 @@ func _sync_animesh_transform(local_id: int, rsi) -> void:
 ## Recursively register all descendants of a parent as animesh children.
 ## Handles attachment linksets: root prim is direct child of avatar, child prims
 ## are grandchildren but still rig to the same avatar skeleton.
-func _register_animesh_descendants(parent_id: int, root_id: int) -> void:
-	if not sm.object_children.has(parent_id):
+func _register_animesh_descendants(parent_uuid: String, root_uuid: String) -> void:
+	if not sm.object_children.has(parent_uuid):
 		return
-	for child_id: int in sm.object_children[parent_id]:
-		if not sm.animesh_root_for.has(child_id):
-			sm.animesh_root_for[child_id] = root_id
-			var child_mid: String = sm.object_mesh_id.get(child_id, "")
+	for child_uuid: String in sm.object_children[parent_uuid]:
+		if not sm.animesh_root_for.has(child_uuid):
+			sm.animesh_root_for[child_uuid] = root_uuid
+			var child_mid: String = sm.object_mesh_id.get(child_uuid, "")
 			if not child_mid.is_empty() and sm.mesh_cache.has(child_mid) and sm.rigged_mesh_paths.has(child_mid):
-				_instantiate_animesh_mesh(child_id, child_mid, root_id)
-				if sm.object_faces.has(child_id) and sm.objects.has(child_id):
-					sm.asset_pipeline.apply_face_materials(sm.objects[child_id], child_id, sm.object_faces[child_id])
+				_instantiate_animesh_mesh(child_uuid, child_mid, root_uuid)
+				if sm.object_faces.has(child_uuid) and sm.objects.has(child_uuid):
+					sm.asset_pipeline.apply_face_materials(sm.objects[child_uuid], child_uuid, sm.object_faces[child_uuid])
 		# Recurse into grandchildren
-		_register_animesh_descendants(child_id, root_id)
+		_register_animesh_descendants(child_uuid, root_uuid)
 
 
 ## Instantiate a rigged mesh under the shared skeleton for this animesh root.
 ## Extracts MeshInstance3D from the GLB, applies joint position overrides from the
 ## GLB skeleton to the shared skeleton, and binds the mesh to the shared skeleton.
 ## The GLB's per-mesh Skeleton3D is discarded — only the shared skeleton is used.
-func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: int) -> void:
+func _instantiate_animesh_mesh(obj_uuid: String, mesh_id: String, animesh_root_uuid: String) -> void:
 	# Guard against double instantiation (can be called from cache hit + retry)
-	if sm.animesh_mesh_instances.has(local_id):
+	if sm.animesh_mesh_instances.has(obj_uuid):
 		return
 	var glb_path: String = sm.rigged_mesh_paths.get(mesh_id, "")
 	if glb_path.is_empty():
-		push_warning("[Animesh] No GLB path for rigged mesh %s (obj %d uuid=%s)" % [mesh_id, local_id, _uuid_short(local_id)])
+		push_warning("[Animesh] No GLB path for rigged mesh %s (obj %s)" % [mesh_id, _uuid_short(obj_uuid)])
 		return
-	var root_node: Node3D = sm.animesh_roots.get(animesh_root_id)
+	var root_node: Node3D = sm.animesh_roots.get(animesh_root_uuid)
 	if root_node == null:
-		push_warning("[Animesh] No root node for animesh root %d uuid=%s (obj %d uuid=%s)" % [animesh_root_id, _uuid_short(animesh_root_id), local_id, _uuid_short(local_id)])
+		push_warning("[Animesh] No root node for animesh root %s (obj %s)" % [_uuid_short(animesh_root_uuid), _uuid_short(obj_uuid)])
 		return
-	var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(animesh_root_id)
+	var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(animesh_root_uuid)
 	if shared_skel == null:
-		push_warning("[Animesh] No shared skeleton for animesh root %d (obj %d uuid=%s)" % [animesh_root_id, local_id, _uuid_short(local_id)])
+		push_warning("[Animesh] No shared skeleton for animesh root %s (obj %s)" % [_uuid_short(animesh_root_uuid), _uuid_short(obj_uuid)])
 		return
 
 	# Parse GLB and generate full scene tree (includes Skeleton3D + MeshInstance3D)
@@ -541,18 +537,18 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	var state := GLTFState.new()
 	var err := doc.append_from_file(glb_path, state)
 	if err != OK:
-		push_warning("[Animesh] Failed to parse GLB %s: %s (obj %d uuid=%s)" % [glb_path, error_string(err), local_id, _uuid_short(local_id)])
+		push_warning("[Animesh] Failed to parse GLB %s: %s (obj %s)" % [glb_path, error_string(err), _uuid_short(obj_uuid)])
 		return
 	var scene: Node = doc.generate_scene(state)
 	if scene == null:
-		push_warning("[Animesh] generate_scene returned null for %s (obj %d uuid=%s)" % [glb_path, local_id, _uuid_short(local_id)])
+		push_warning("[Animesh] generate_scene returned null for %s (obj %s)" % [glb_path, _uuid_short(obj_uuid)])
 		return
 
 	# Find Skeleton3D and MeshInstance3D in the generated scene tree
 	var glb_skeleton: Skeleton3D = _find_node_of_type(scene, "Skeleton3D")
 	var mesh_instance: MeshInstance3D = _find_node_of_type(scene, "MeshInstance3D")
 	if glb_skeleton == null or mesh_instance == null:
-		push_warning("[Animesh] No Skeleton3D/MeshInstance3D in GLB for object %d uuid=%s" % [local_id, _uuid_short(local_id)])
+		push_warning("[Animesh] No Skeleton3D/MeshInstance3D in GLB for object %s" % [_uuid_short(obj_uuid)])
 		scene.queue_free()
 		return
 
@@ -560,8 +556,7 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	# Override list comes from mesh_ready message, stored on scene_manager.
 	var override_joints: Array = sm.mesh_joint_overrides.get(mesh_id, [])
 	if override_joints.size() > 0:
-		var av_uuid: String = sm.object_uuid.get(animesh_root_id, "?")
-		print("[JointOverride] Applying %d overrides for mesh %s (avatar root=%d uuid=%s)" % [override_joints.size(), mesh_id.substr(0, 16), animesh_root_id, av_uuid.substr(0, 8)])
+		print("[JointOverride] Applying %d overrides for mesh %s (avatar root=%s)" % [override_joints.size(), mesh_id.substr(0, 16), _uuid_short(animesh_root_uuid)])
 		sm.animation_mgr._apply_joint_overrides(glb_skeleton, shared_skel, override_joints, mesh_id)
 
 	# Duplicate skin and remap bone indices to shared skeleton order.
@@ -608,33 +603,31 @@ func _instantiate_animesh_mesh(local_id: int, mesh_id: String, animesh_root_id: 
 	mesh_instance.skeleton = mesh_instance.get_path_to(shared_skel)
 
 	# Store reference
-	sm.animesh_mesh_instances[local_id] = mesh_instance
+	sm.animesh_mesh_instances[obj_uuid] = mesh_instance
 
 	# Double-sided shadow casting reduces shadow acne near deformed joints
 	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_DOUBLE_SIDED
 
 	# Hide the RSInstance placeholder (keep it for metadata/transform tracking)
-	var rsi = sm.objects.get(local_id)
+	var rsi = sm.objects.get(obj_uuid)
 	if rsi != null:
 		RenderingServer.instance_set_visible(rsi.rid, false)
 		RenderingServer.instance_geometry_set_cast_shadows_setting(
 			rsi.rid, RenderingServer.SHADOW_CASTING_SETTING_OFF)
 
 	# Hide the avatar placeholder (blue box) once first rigged mesh appears
-	for av_id: String in sm.avatar_local_ids:
-		if sm.avatar_local_ids[av_id] == animesh_root_id and sm.avatars.has(av_id):
-			var av_rsi = sm.avatars[av_id]
-			RenderingServer.instance_set_visible(av_rsi.rid, false)
-			RenderingServer.instance_geometry_set_cast_shadows_setting(
-				av_rsi.rid, RenderingServer.SHADOW_CASTING_SETTING_OFF)
-			break
+	if sm.avatars.has(animesh_root_uuid):
+		var av_rsi = sm.avatars[animesh_root_uuid]
+		RenderingServer.instance_set_visible(av_rsi.rid, false)
+		RenderingServer.instance_geometry_set_cast_shadows_setting(
+			av_rsi.rid, RenderingServer.SHADOW_CASTING_SETTING_OFF)
 
 	# If we already have pending animations for this root, apply them
-	if sm.animesh_roots.has(animesh_root_id):
-		sm.animation_mgr._apply_pending_animations(local_id)
+	if sm.animesh_roots.has(animesh_root_uuid):
+		sm.animation_mgr._apply_pending_animations(obj_uuid)
 
-	if _is_self_avatar(local_id):
-		print("[SelfAvatar] Rigged mesh instantiated: localId=%d meshId=%s shared_bones=%d" % [local_id, mesh_id.substr(0, 8), shared_skel.get_bone_count()])
+	if _is_self_avatar(obj_uuid):
+		print("[SelfAvatar] Rigged mesh instantiated: uuid=%s meshId=%s shared_bones=%d" % [_uuid_short(obj_uuid), mesh_id.substr(0, 8), shared_skel.get_bone_count()])
 
 	# Debug: visualize skeleton once per root (check for existing markers)
 	if sm.animation_mgr._debug_skeleton_visible:
@@ -666,8 +659,8 @@ func _find_node_of_type(node: Node, type_name: String) -> Node:
 ## Handle object_complete — applies mesh, shape, and face materials to an existing placeholder.
 ## Sent by the readiness tracker once all assets (mesh + textures) are cached on disk.
 func handle_object_complete(msg: Dictionary) -> void:
-	var local_id: int = int(msg.get("localId", 0))
-	var rsi = sm.objects.get(local_id)
+	var obj_uuid: String = str(msg.get("uuid", ""))
+	var rsi = sm.objects.get(obj_uuid)
 	if rsi == null:
 		return  # killed before completion
 
@@ -679,12 +672,12 @@ func handle_object_complete(msg: Dictionary) -> void:
 	if not mesh_id.is_empty():
 		if sm.mesh_cache.has(mesh_id):
 			var is_rigged: bool = sm.rigged_mesh_paths.has(mesh_id)
-			var will_be_animesh: bool = sm.animesh_root_for.has(local_id)
+			var will_be_animesh: bool = sm.animesh_root_for.has(obj_uuid)
 
-			if is_rigged and will_be_animesh and not sm.animesh_roots.has(local_id):
+			if is_rigged and will_be_animesh and not sm.animesh_roots.has(obj_uuid):
 				# Animesh child with rigged mesh: use placeholder — real mesh goes on Skeleton3D
 				pass  # keep existing placeholder mesh
-			elif is_rigged and not sm.animesh_roots.has(local_id) and not will_be_animesh:
+			elif is_rigged and not sm.animesh_roots.has(obj_uuid) and not will_be_animesh:
 				# Non-animesh rigged: use cached mesh with AABB correction
 				var cached_mesh: Mesh = sm.mesh_cache[mesh_id]
 				rsi.set_mesh(cached_mesh)
@@ -696,13 +689,13 @@ func handle_object_complete(msg: Dictionary) -> void:
 			else:
 				rsi.set_mesh(sm.mesh_cache[mesh_id])
 
-			sm.object_mesh_id[local_id] = mesh_id
+			sm.object_mesh_id[obj_uuid] = mesh_id
 
 			# Animesh rigged mesh instantiation
-			if sm.animesh_root_for.has(local_id) and sm.rigged_mesh_paths.has(mesh_id):
-				var ar_id: int = sm.animesh_root_for[local_id]
-				if not sm.animesh_mesh_instances.has(local_id):
-					_instantiate_animesh_mesh(local_id, mesh_id, ar_id)
+			if sm.animesh_root_for.has(obj_uuid) and sm.rigged_mesh_paths.has(mesh_id):
+				var ar_uuid: String = sm.animesh_root_for[obj_uuid]
+				if not sm.animesh_mesh_instances.has(obj_uuid):
+					_instantiate_animesh_mesh(obj_uuid, mesh_id, ar_uuid)
 		else:
 			# mesh_ready hasn't been processed yet — retry when mesh loads
 			if not sm.asset_pipeline._pending_complete_by_mesh.has(mesh_id):
@@ -716,16 +709,16 @@ func handle_object_complete(msg: Dictionary) -> void:
 
 	# Apply face materials (textures should be cached)
 	if faces.size() > 0:
-		sm.object_faces[local_id] = faces
-		sm.asset_pipeline.apply_face_materials(rsi, local_id, faces)
+		sm.object_faces[obj_uuid] = faces
+		sm.asset_pipeline.apply_face_materials(rsi, obj_uuid, faces)
 
 
 # ─── Face/Material Updates ───────────────────────────
 
 ## Handle face updates from material asset fetch (PBR materials resolved after initial object_create)
 func handle_update_faces(msg: Dictionary) -> void:
-	var local_id: int = int(msg.get("localId", 0))
-	var rsi = sm.objects.get(local_id)
+	var obj_uuid: String = str(msg.get("uuid", ""))
+	var rsi = sm.objects.get(obj_uuid)
 	if rsi == null or rsi.mesh == null:
 		return
 	var faces: Array = msg.get("faces", [])
@@ -733,11 +726,11 @@ func handle_update_faces(msg: Dictionary) -> void:
 		return
 
 	# Merge into existing face data so apply_face_materials picks up PBR updates
-	if not sm.object_faces.has(local_id):
-		sm.object_faces[local_id] = faces
+	if not sm.object_faces.has(obj_uuid):
+		sm.object_faces[obj_uuid] = faces
 	else:
 		# Update/add faces by index
-		var existing: Array = sm.object_faces[local_id]
+		var existing: Array = sm.object_faces[obj_uuid]
 		for new_face: Dictionary in faces:
 			var idx: int = int(new_face.get("index", -1))
 			var found := false
@@ -748,7 +741,7 @@ func handle_update_faces(msg: Dictionary) -> void:
 					break
 			if not found:
 				existing.append(new_face)
-	sm.asset_pipeline.apply_face_materials(rsi, local_id, sm.object_faces[local_id])
+	sm.asset_pipeline.apply_face_materials(rsi, obj_uuid, sm.object_faces[obj_uuid])
 
 
 ## Handle batched face updates (multiple objects in one message)
@@ -761,67 +754,70 @@ func handle_update_faces_batch(msg: Dictionary) -> void:
 # ─── Object Cleanup ──────────────────────────────────
 
 func handle_object_kill(msg: Dictionary) -> void:
-	var local_id: int = int(msg.get("localId", 0))
-	_cleanup_object(local_id)
+	var obj_uuid: String = str(msg.get("uuid", ""))
+	_cleanup_object(obj_uuid)
 
 
 ## Clean up an object and all its children from all tracking dictionaries
-func _cleanup_object(local_id: int) -> void:
+func _cleanup_object(obj_uuid: String) -> void:
+	if obj_uuid.is_empty():
+		return
+
 	# Recursively clean up children first
-	if sm.object_children.has(local_id):
-		for child_id: int in sm.object_children[local_id].duplicate():
-			_cleanup_object(child_id)
-		sm.object_children.erase(local_id)
+	if sm.object_children.has(obj_uuid):
+		for child_uuid: String in sm.object_children[obj_uuid].duplicate():
+			_cleanup_object(child_uuid)
+		sm.object_children.erase(obj_uuid)
 
 	# Remove from parent's children list
-	if sm.object_parent.has(local_id):
-		var pid: int = sm.object_parent[local_id]
+	if sm.object_parent.has(obj_uuid):
+		var pid: String = sm.object_parent[obj_uuid]
 		if sm.object_children.has(pid):
-			sm.object_children[pid].erase(local_id)
-		sm.object_parent.erase(local_id)
+			sm.object_children[pid].erase(obj_uuid)
+		sm.object_parent.erase(obj_uuid)
 
 	# Free the RenderingServer instance
-	if sm.objects.has(local_id):
-		sm.objects[local_id].destroy()
-		sm.objects.erase(local_id)
+	if sm.objects.has(obj_uuid):
+		sm.objects[obj_uuid].destroy()
+		sm.objects.erase(obj_uuid)
 
 	# Destroy associated light
-	sm.light_mgr.destroy_light(local_id)
-	sm.light_mgr._object_light_data.erase(local_id)
-	sm.object_targets.erase(local_id)
+	sm.light_mgr.destroy_light(obj_uuid)
+	sm.light_mgr._object_light_data.erase(obj_uuid)
+	sm.object_targets.erase(obj_uuid)
 
 	# Clean up animesh mesh instance (child of shared skeleton, freed individually)
-	if sm.animesh_mesh_instances.has(local_id):
-		var ami_ref = sm.animesh_mesh_instances[local_id]
+	if sm.animesh_mesh_instances.has(obj_uuid):
+		var ami_ref = sm.animesh_mesh_instances[obj_uuid]
 		if ami_ref is MeshInstance3D and is_instance_valid(ami_ref):
 			ami_ref.queue_free()
-		sm.animesh_mesh_instances.erase(local_id)
-	sm.object_mesh_id.erase(local_id)
-	sm.attach_bone.erase(local_id)
-	sm.animesh_root_for.erase(local_id)
-	if sm.animesh_roots.has(local_id):
-		var animesh_ref = sm.animesh_roots[local_id]
+		sm.animesh_mesh_instances.erase(obj_uuid)
+	sm.object_mesh_id.erase(obj_uuid)
+	sm.attach_bone.erase(obj_uuid)
+	sm.animesh_root_for.erase(obj_uuid)
+	if sm.animesh_roots.has(obj_uuid):
+		var animesh_ref = sm.animesh_roots[obj_uuid]
 		if animesh_ref is Node3D and is_instance_valid(animesh_ref):
 			animesh_ref.queue_free()
-		sm.erase_animesh_state(local_id)
+		sm.erase_animesh_state(obj_uuid)
 
 	# Clean up asset pipeline retry queues
-	var mid: String = sm.object_mesh_id.get(local_id, "")
+	var mid: String = sm.object_mesh_id.get(obj_uuid, "")
 	if not mid.is_empty() and sm.asset_pipeline._pending_complete_by_mesh.has(mid):
 		var msgs: Array = sm.asset_pipeline._pending_complete_by_mesh[mid]
-		msgs = msgs.filter(func(m: Dictionary) -> bool: return int(m.get("localId", 0)) != local_id)
+		msgs = msgs.filter(func(m: Dictionary) -> bool: return str(m.get("uuid", "")) != obj_uuid)
 		if msgs.size() == 0:
 			sm.asset_pipeline._pending_complete_by_mesh.erase(mid)
 		else:
 			sm.asset_pipeline._pending_complete_by_mesh[mid] = msgs
 	# Remove from texture waiting lists
 	for tid: String in sm.asset_pipeline._tex_waiting.keys():
-		sm.asset_pipeline._tex_waiting[tid].erase(local_id)
+		sm.asset_pipeline._tex_waiting[tid].erase(obj_uuid)
 		if sm.asset_pipeline._tex_waiting[tid].size() == 0:
 			sm.asset_pipeline._tex_waiting.erase(tid)
-	sm.object_faces.erase(local_id)
-	sm.object_meta.erase(local_id)
-	sm.object_uuid.erase(local_id)
-	sm.child_offset_pos.erase(local_id)
-	sm.child_offset_rot.erase(local_id)
-	sm.pending_children.erase(local_id)
+	sm.object_faces.erase(obj_uuid)
+	sm.object_meta.erase(obj_uuid)
+	sm.child_offset_pos.erase(obj_uuid)
+	sm.child_offset_rot.erase(obj_uuid)
+	sm.object_region_offset.erase(obj_uuid)
+	sm.pending_children.erase(obj_uuid)

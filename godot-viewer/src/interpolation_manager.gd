@@ -62,20 +62,19 @@ func interpolate_avatars(delta: float) -> void:
 		rsi.push_transform()
 
 		# Sync avatar skeleton root Node3D with RSInstance position
-		var av_lid: int = sm.avatar_local_ids.get(avatar_id, 0)
-		if av_lid > 0 and sm.animesh_roots.has(av_lid):
-			var node: Node3D = sm.animesh_roots[av_lid]
+		if sm.animesh_roots.has(avatar_id):
+			var node: Node3D = sm.animesh_roots[avatar_id]
 			if node and is_instance_valid(node):
 				node.position = rsi.pos
 				node.quaternion = rsi.rot
 			# Update ALL attachment child RSInstance positions so they follow the avatar.
 			# Rigged MeshInstance3Ds follow via scene tree, but their hidden RSIs and
 			# any non-rigged attachments need explicit repositioning.
-			_update_children_world_pos(av_lid, rsi.pos, rsi.rot)
+			_update_children_world_pos(avatar_id, rsi.pos, rsi.rot)
 			# Bone-tracked attachments need skeleton-relative positioning every frame,
 			# even before animations load (rest pose has bone positions from XML).
-			if sm.animesh_shared_skeleton.has(av_lid):
-				sm.animation_mgr._update_bone_attachments(av_lid, sm.animesh_shared_skeleton[av_lid])
+			if sm.animesh_shared_skeleton.has(avatar_id):
+				sm.animation_mgr._update_bone_attachments(avatar_id, sm.animesh_shared_skeleton[avatar_id])
 
 		# Emit camera follow signal for self avatar
 		if avatar_id == sm.self_avatar_id:
@@ -90,14 +89,14 @@ func interpolate_avatars(delta: float) -> void:
 func interpolate_objects(delta: float) -> void:
 	# Firestorm-style: each frame, advance position by vel*dt + 0.5*accel*dt^2
 	# Server updates reset pos/vel/accel. Server omits updates when object follows predicted path.
-	var to_remove: Array[int] = []
-	for local_id: int in sm.object_targets:
-		var rsi = sm.objects.get(local_id)
+	var to_remove: Array[String] = []
+	for obj_uuid: String in sm.object_targets:
+		var rsi = sm.objects.get(obj_uuid)
 		if rsi == null:
-			to_remove.append(local_id)
+			to_remove.append(obj_uuid)
 			continue
 
-		var target: Dictionary = sm.object_targets[local_id]
+		var target: Dictionary = sm.object_targets[obj_uuid]
 		var vel: Vector3 = target.get("vel", Vector3.ZERO)
 		var accel: Vector3 = target.get("accel", Vector3.ZERO)
 		var ang_vel: Vector3 = target.get("angVel", Vector3.ZERO)
@@ -114,7 +113,7 @@ func interpolate_objects(delta: float) -> void:
 		# Stop entirely after max time (but only if blend is also done)
 		if age > INTERP_MAX_TIME:
 			if blend_frac >= 1.0:
-				to_remove.append(local_id)
+				to_remove.append(obj_uuid)
 				continue
 
 		# Phase out motion if no server update for a while
@@ -145,26 +144,26 @@ func interpolate_objects(delta: float) -> void:
 		rsi.push_transform()
 
 		# Propagate to linkset children + lights
-		if sm.object_children.has(local_id):
-			sm.object_mgr._update_children_transforms(local_id)
-		if sm.light_mgr.object_lights.has(local_id):
-			sm.light_mgr.update_light_transform(local_id, rsi)
-		sm.object_mgr._sync_animesh_transform(local_id, rsi)
+		if sm.object_children.has(obj_uuid):
+			sm.object_mgr._update_children_transforms(obj_uuid)
+		if sm.light_mgr.object_lights.has(obj_uuid):
+			sm.light_mgr.update_light_transform(obj_uuid, rsi)
+		sm.object_mgr._sync_animesh_transform(obj_uuid, rsi)
 
-	for local_id: int in to_remove:
-		sm.object_targets.erase(local_id)
+	for obj_uuid: String in to_remove:
+		sm.object_targets.erase(obj_uuid)
 
 
 # ─── Child Repositioning ─────────────────────────────
 
 ## Recursively reposition all children of a parent to follow it.
 ## Used for avatar attachments and their sub-linksets.
-func _update_children_world_pos(parent_id: int, parent_pos: Vector3, parent_rot: Quaternion) -> void:
-	if not sm.object_children.has(parent_id):
+func _update_children_world_pos(parent_uuid: String, parent_pos: Vector3, parent_rot: Quaternion) -> void:
+	if not sm.object_children.has(parent_uuid):
 		return
-	for child_id: int in sm.object_children[parent_id]:
+	for child_id: String in sm.object_children[parent_uuid]:
 		# Skip bone-tracked attachments — _update_bone_attachments handles them each frame
-		if sm.attach_bone.has(child_id) and sm.animesh_roots.has(parent_id):
+		if sm.attach_bone.has(child_id) and sm.animesh_roots.has(parent_uuid):
 			continue
 		var child_rsi = sm.objects.get(child_id)
 		if child_rsi == null or not sm.child_offset_pos.has(child_id):

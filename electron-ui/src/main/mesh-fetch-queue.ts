@@ -14,7 +14,7 @@ export type MeshReadyCallback = (meshUuid: string, cachePath: string, isRigged?:
 export class MeshFetchQueue {
   private bot: Bot;
   private onReady: MeshReadyCallback;
-  private pending = new Map<string, Set<number>>(); // meshUuid → localIds waiting
+  private pending = new Map<string, Set<number | string>>(); // meshUuid → object ids waiting
   private active = 0;
   private queue: string[] = [];
   private failed = new Set<string>();
@@ -36,7 +36,7 @@ export class MeshFetchQueue {
   get failedCount(): number { return this.failed.size; }
   get notifiedCount(): number { return this.notified.size; }
 
-  request(meshUuid: string, localId: number): void {
+  request(meshUuid: string, localId: number | string): void {
     if (this.destroyed) return;
 
     // Already failed — notify readiness tracker so it doesn't timeout

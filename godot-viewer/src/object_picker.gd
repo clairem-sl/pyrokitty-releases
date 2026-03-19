@@ -14,9 +14,9 @@ func _init(scene_manager) -> void:
 func pick_object(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
 	# Broad phase: AABB test (skip objects far from camera)
 	var max_pick_dist := 200.0
-	var candidates: Array = []  # Array of { id, xform, inv, local_from, local_dir }
-	for id: int in sm.objects:
-		var rsi = sm.objects[id]
+	var candidates: Array = []  # Array of { uuid, xform, inv, local_from, local_dir }
+	for obj_uuid: String in sm.objects:
+		var rsi = sm.objects[obj_uuid]
 		if rsi.mesh == null:
 			continue
 		if ray_origin.distance_to(rsi.pos) > max_pick_dist:
@@ -26,22 +26,22 @@ func pick_object(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
 		var local_from := inv * ray_origin
 		var local_dir := (inv.basis * ray_dir).normalized()
 		if rsi.mesh.get_aabb().intersects_ray(local_from, local_dir) != null:
-			candidates.append({ "id": id, "mesh": rsi.mesh, "xform": xform, "local_from": local_from, "local_dir": local_dir })
+			candidates.append({ "uuid": obj_uuid, "mesh": rsi.mesh, "xform": xform, "local_from": local_from, "local_dir": local_dir })
 
 	if candidates.size() == 0:
 		return {}
 
 	# Narrow phase: per-triangle intersection on AABB candidates
-	var best_id: int = -1
+	var best_uuid: String = ""
 	var best_dist: float = INF
 	for c: Dictionary in candidates:
 		var dist := _ray_mesh_intersect(c["mesh"], c["local_from"], c["local_dir"], c["xform"])
 		if dist >= 0.0 and dist < best_dist:
 			best_dist = dist
-			best_id = c["id"]
+			best_uuid = c["uuid"]
 
 	# Fallback: if triangle test missed all (degenerate mesh), use nearest AABB hit
-	if best_id < 0:
+	if best_uuid.is_empty():
 		for c: Dictionary in candidates:
 			var hit = (c["mesh"] as Mesh).get_aabb().intersects_ray(c["local_from"], c["local_dir"])
 			if hit != null:
@@ -49,11 +49,11 @@ func pick_object(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
 				var dist: float = ray_origin.distance_to(world_hit)
 				if dist < best_dist:
 					best_dist = dist
-					best_id = c["id"]
+					best_uuid = c["uuid"]
 
-	if best_id < 0:
+	if best_uuid.is_empty():
 		return {}
-	return { "localId": best_id, "distance": best_dist }
+	return { "uuid": best_uuid, "distance": best_dist }
 
 
 ## Test ray against mesh triangles. Returns world-space distance or -1.0 on miss.
@@ -143,8 +143,8 @@ func _ray_tri_bary(origin: Vector3, dir: Vector3, v0: Vector3, v1: Vector3, v2: 
 func pick_object_detailed(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
 	var max_pick_dist := 200.0
 	var candidates: Array = []
-	for id: int in sm.objects:
-		var rsi = sm.objects[id]
+	for obj_uuid: String in sm.objects:
+		var rsi = sm.objects[obj_uuid]
 		if rsi.mesh == null:
 			continue
 		if ray_origin.distance_to(rsi.pos) > max_pick_dist:
@@ -154,7 +154,7 @@ func pick_object_detailed(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
 		var local_from := inv * ray_origin
 		var local_dir := (inv.basis * ray_dir).normalized()
 		if rsi.mesh.get_aabb().intersects_ray(local_from, local_dir) != null:
-			candidates.append({ "id": id, "mesh": rsi.mesh, "xform": xform, "inv": inv,
+			candidates.append({ "uuid": obj_uuid, "mesh": rsi.mesh, "xform": xform, "inv": inv,
 				"local_from": local_from, "local_dir": local_dir })
 
 	if candidates.size() == 0:
@@ -210,7 +210,7 @@ func pick_object_detailed(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
 						interp_normal = (normals[tri[0]] * bary_w + normals[tri[1]] * bary_u + normals[tri[2]] * bary_v).normalized()
 					var local_hit: Vector3 = local_from + local_dir * hit["t"]
 					best = {
-						"localId": c["id"],
+						"uuid": c["uuid"],
 						"distance": dist,
 						"faceIndex": si,
 						"st": interp_uv,
@@ -222,16 +222,16 @@ func pick_object_detailed(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
 
 
 ## Return the RenderingServer instance RID for an object (used for highlight overlay).
-func get_object_rid(local_id: int) -> RID:
-	var rsi = sm.objects.get(local_id)
+func get_object_rid(obj_uuid: String) -> RID:
+	var rsi = sm.objects.get(obj_uuid)
 	if rsi == null:
 		return RID()
 	return rsi.rid
 
 
 ## Return per-face info array for an object.
-func get_object_face_info(local_id: int) -> Array:
-	return sm.object_faces.get(local_id, [])
+func get_object_face_info(obj_uuid: String) -> Array:
+	return sm.object_faces.get(obj_uuid, [])
 
 
 ## Set planar shader debug mode on all cached planar materials.
@@ -249,33 +249,32 @@ func set_planar_debug_mode(mode: int) -> void:
 
 
 ## Return debug summary for an object.
-func get_object_debug_info(local_id: int) -> Dictionary:
-	var rsi = sm.objects.get(local_id)
+func get_object_debug_info(obj_uuid: String) -> Dictionary:
+	var rsi = sm.objects.get(obj_uuid)
 	if rsi == null:
 		return {}
 	var surface_count: int = rsi.mesh.get_surface_count() if rsi.mesh else 0
-	var meta: Dictionary = sm.object_meta.get(local_id, {})
+	var meta: Dictionary = sm.object_meta.get(obj_uuid, {})
 	return {
-		"localId": local_id,
-		"uuid": meta.get("uuid", ""),
+		"uuid": obj_uuid,
 		"name": meta.get("name", ""),
 		"description": meta.get("description", ""),
 		"pos": rsi.pos,
 		"rot": rsi.rot,
 		"scl": rsi.scl,
-		"meshId": sm.object_mesh_id.get(local_id, ""),
-		"parentId": sm.object_parent.get(local_id, 0),
+		"meshId": sm.object_mesh_id.get(obj_uuid, ""),
+		"parentUuid": sm.object_parent.get(obj_uuid, ""),
 		"surfaceCount": surface_count,
 	}
 
 
 func handle_object_properties(msg: Dictionary) -> void:
-	var local_id: int = int(msg.get("localId", 0))
-	if local_id == 0:
+	var obj_uuid: String = str(msg.get("uuid", ""))
+	if obj_uuid.is_empty():
 		return
 	var obj_name: String = str(msg.get("name", ""))
 	var obj_desc: String = str(msg.get("description", ""))
-	if sm.object_meta.has(local_id):
-		sm.object_meta[local_id]["name"] = obj_name
-		sm.object_meta[local_id]["description"] = obj_desc
-	sm.object_properties_received.emit(local_id, obj_name, obj_desc)
+	if sm.object_meta.has(obj_uuid):
+		sm.object_meta[obj_uuid]["name"] = obj_name
+		sm.object_meta[obj_uuid]["description"] = obj_desc
+	sm.object_properties_received.emit(obj_uuid, obj_name, obj_desc)
