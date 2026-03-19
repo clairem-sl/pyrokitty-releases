@@ -2,10 +2,12 @@ import type { RBush3D } from 'rbush-3d/dist';
 import type { UUID } from '../UUID';
 import type { GameObject } from '../public/GameObject';
 import type { GetObjectsOptions } from '../commands/RegionCommands';
+import type { Region } from '../Region';
 
 export interface IObjectStore
 {
     rtree?: RBush3D;
+    setRegion: (region: Region) => void;
     populateChildren: (obj: GameObject) => void;
     getObjectsByParent: (parentID: number) => GameObject[];
     shutdown: () => void;

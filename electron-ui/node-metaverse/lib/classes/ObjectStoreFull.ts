@@ -65,7 +65,7 @@ export class ObjectStoreFull extends ObjectStoreLite implements IObjectStore
             {
                 newObject = true;
                 obj = new GameObject();
-                obj.region = this.agent.currentRegion;
+                obj.region = this.ownerRegion!;
                 this.objects.set(localID, obj);
             }
             obj.deleted = false;
@@ -278,7 +278,7 @@ export class ObjectStoreFull extends ObjectStoreLite implements IObjectStore
             {
                 newObj = true;
                 o = new GameObject();
-                o.region = this.agent.currentRegion;
+                o.region = this.ownerRegion!;
                 this.objects.set(localID, o);
             }
             o.ID = localID;

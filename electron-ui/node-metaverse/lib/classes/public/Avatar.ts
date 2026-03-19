@@ -15,6 +15,8 @@ export class Avatar extends AvatarQueryResult
     public onAttachmentRemoved: Subject<GameObject> = new Subject<GameObject>();
     public onVisibleChanged: Subject<Avatar> = new Subject<Avatar>();
 
+    public cacheID: UUID;
+
     private rotation: Quaternion = Quaternion.getIdentity();
     private title = '';
 

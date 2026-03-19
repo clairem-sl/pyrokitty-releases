@@ -8,6 +8,7 @@ import type { ObjectUpdateCompressedMessage } from './messages/ObjectUpdateCompr
 import type { ImprovedTerseObjectUpdateMessage } from './messages/ImprovedTerseObjectUpdate';
 import { RequestMultipleObjectsMessage } from './messages/RequestMultipleObjects';
 import type { Agent } from './Agent';
+import type { Region } from './Region';
 import { UUID } from './UUID';
 import { Utils } from './Utils';
 import type { ClientEvents } from './ClientEvents';
@@ -57,6 +58,7 @@ export class ObjectStoreLite implements IObjectStore
     protected objectsByParent = new Map<number, number[]>();
     protected clientEvents: ClientEvents;
     protected options: BotOptionFlags;
+    protected ownerRegion: Region | null = null;
     protected fullStore = false;
     protected requestedObjects = new Set<number>();
     protected deadObjects: number[] = [];
@@ -96,6 +98,16 @@ export class ObjectStoreLite implements IObjectStore
     private selectedChecker?: NodeJS.Timeout;
     private readonly blacklist: Map<number, Date> = new Map<number, Date>();
     private readonly pendingResolves: Set<number> = new Set<number>();
+
+    public setRegion(region: Region): void
+    {
+        this.ownerRegion = region;
+    }
+
+    protected get regionCacheID(): UUID
+    {
+        return this.ownerRegion!.cacheID;
+    }
 
     public constructor(circuit: Circuit, agent: Agent, clientEvents: ClientEvents, options: BotOptionFlags)
     {
@@ -416,7 +428,7 @@ export class ObjectStoreLite implements IObjectStore
                 const parent = this.objects.get(obj.ParentID);
                 if (parent !== undefined && parent.PCode === PCode.Avatar)
                 {
-                    const agent = this.agent.currentRegion.agents.get(parent.FullID.toString());
+                    const agent = (this.ownerRegion!).agents.get(parent.FullID.toString());
                     if (agent !== undefined)
                     {
                         agent.removeAttachment(obj);
@@ -424,7 +436,7 @@ export class ObjectStoreLite implements IObjectStore
                 }
             }
 
-            const foundAgent = this.agent.currentRegion.agents.get(objectUUID.toString());
+            const foundAgent = (this.ownerRegion!).agents.get(objectUUID.toString());
             if (foundAgent !== undefined)
             {
                 foundAgent.isVisible = false;
@@ -788,6 +800,7 @@ export class ObjectStoreLite implements IObjectStore
         {
             const evt = new ObjectResolvedEvent();
             evt.object = o;
+            evt.cacheID = this.regionCacheID;
             this.clientEvents.onObjectResolvedEvent.next(evt);
         }
         if (o.Flags !== undefined)
@@ -797,6 +810,7 @@ export class ObjectStoreLite implements IObjectStore
             {
                 const evt = new SelectedObjectEvent();
                 evt.object = o;
+                evt.cacheID = this.regionCacheID;
                 this.clientEvents.onSelectedObjectEvent.next(evt);
             }
         }
@@ -931,7 +945,7 @@ export class ObjectStoreLite implements IObjectStore
             {
                 newObject = true;
                 const newObj = new GameObject();
-                newObj.region = this.agent.currentRegion;
+                newObj.region = this.ownerRegion!;
                 this.objects.set(localID, newObj);
             }
 
@@ -1038,7 +1052,7 @@ export class ObjectStoreLite implements IObjectStore
         {
             if (obj.PCode === PCode.Avatar)
             {
-                const agent = this.agent.currentRegion.agents.get(obj.FullID.toString());
+                const agent = (this.ownerRegion!).agents.get(obj.FullID.toString());
                 if (agent !== undefined)
                 {
                     agent.processObjectUpdate(obj);
@@ -1053,6 +1067,7 @@ export class ObjectStoreLite implements IObjectStore
             updObj.objectID = obj.FullID;
             updObj.object = obj;
             updObj.sequenceNumber = sequenceNumber;
+            updObj.cacheID = this.regionCacheID;
             this.clientEvents.onObjectUpdatedTerseEvent.next(updObj);
         }
     }
@@ -1064,11 +1079,12 @@ export class ObjectStoreLite implements IObjectStore
             const avatarID = obj.FullID.toString();
             if (newObject)
             {
-                const agent = this.agent.currentRegion.agents.get(avatarID);
+                const agent = (this.ownerRegion!).agents.get(avatarID);
                 if (agent === undefined)
                 {
                     const av = Avatar.fromGameObject(obj);
-                    this.agent.currentRegion.agents.set(avatarID, av);
+                    av.cacheID = this.regionCacheID;
+                    (this.ownerRegion!).agents.set(avatarID, av);
                     this.clientEvents.onAvatarEnteredRegion.next(av)
                 }
                 else
@@ -1078,7 +1094,7 @@ export class ObjectStoreLite implements IObjectStore
             }
             else
             {
-                const agent = this.agent.currentRegion.agents.get(avatarID);
+                const agent = (this.ownerRegion!).agents.get(avatarID);
                 if (agent !== undefined)
                 {
                     agent.processObjectUpdate(obj);
@@ -1093,7 +1109,7 @@ export class ObjectStoreLite implements IObjectStore
         const parentObj = this.objects.get(obj.ParentID ?? 0);
         if (newObject && obj.IsAttachment && obj.ParentID !== undefined && parentObj !== undefined && parentObj.PCode === PCode.Avatar)
         {
-            const avatar = this.agent.currentRegion.agents.get(parentObj.FullID.toString());
+            const avatar = (this.ownerRegion!).agents.get(parentObj.FullID.toString());
 
             let invItemID = UUID.zero();
             const attach = obj.NameValue.get('AttachItemID');
@@ -1102,7 +1118,7 @@ export class ObjectStoreLite implements IObjectStore
                 invItemID = new UUID(attach.value);
             }
 
-            this.agent.currentRegion.clientCommands.region.resolveObject(obj, {}).then(() =>
+            (this.ownerRegion!).clientCommands.region.resolveObject(obj, {}).then(() =>
             {
                 try
                 {
@@ -1133,6 +1149,7 @@ export class ObjectStoreLite implements IObjectStore
             newObj.localID = obj.ID;
             newObj.objectID = obj.FullID;
             newObj.object = obj;
+            newObj.cacheID = this.regionCacheID;
             // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
             newObj.createSelected = obj.Flags !== undefined && (obj.Flags & PrimFlags.CreateSelected) === PrimFlags.CreateSelected;
             obj.createdSelected = newObj.createSelected;
@@ -1150,6 +1167,7 @@ export class ObjectStoreLite implements IObjectStore
             updObj.objectID = obj.FullID;
             updObj.object = obj;
             updObj.sequenceNumber = sequenceNumber;
+            updObj.cacheID = this.regionCacheID;
             this.clientEvents.onObjectUpdatedEvent.next(updObj);
         }
         const pendingProp = this.pendingObjectProperties.get(obj.FullID.toString());
@@ -1199,7 +1217,7 @@ export class ObjectStoreLite implements IObjectStore
             if (!o)
             {
                 o = new GameObject();
-                o.region = this.agent.currentRegion;
+                o.region = this.ownerRegion!;
                 this.objects.set(localID, o);
             }
             o.deleted = false;

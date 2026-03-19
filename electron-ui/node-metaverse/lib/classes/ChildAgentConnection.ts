@@ -1,10 +1,9 @@
 /**
- * ChildAgentConnection - lightweight UDP circuit to a neighboring region.
+ * ChildAgentConnection - full Region connection to a neighboring region.
  *
- * Unlike the heavy Region class (which allocates terrain, object stores, Comms, etc.),
- * this only maintains a UDP circuit for receiving CoarseLocationUpdate messages
- * with avatar positions. No CompleteAgentMovement is sent — the sim treats us as
- * a child agent and sends only limited data.
+ * Creates a Region (with ObjectStore, terrain, parcels, Comms) for the
+ * neighboring sim. No CompleteAgentMovement is sent — the sim treats us as
+ * a child agent but sends terrain, objects, parcels, and coarse avatar data.
  *
  * Optionally, when EstablishAgentCommunication provides a seed capability URL,
  * this connection activates caps + event queue. The child's event queue can then
@@ -13,29 +12,28 @@
  * Protocol (from Firestorm llworld.cpp):
  *   1. Send UseCircuitCode (reusing main login's circuitCode)
  *   2. Wait for RegionHandshake → reply with RegionHandshakeReply
- *   3. Sim sends CoarseLocationUpdate every few seconds
+ *   3. Sim sends terrain, objects, parcels, CoarseLocationUpdate
  *   4. EstablishAgentCommunication → activate caps + event queue
  *   5. DisableSimulator tears down the connection
  */
 
-import { Circuit } from './Circuit';
-import { Caps } from './Caps';
-import { UUID } from './UUID';
-import { Vector3 } from './Vector3';
-import { Avatar } from './public/Avatar';
-import { AvatarQueryResult } from './public/AvatarQueryResult';
+import { Region } from './Region';
+import { ClientCommands } from './ClientCommands';
+import type { UUID } from './UUID';
+import type { Vector3 } from './Vector3';
+import type { Avatar } from './public/Avatar';
 import { UseCircuitCodeMessage } from './messages/UseCircuitCode';
 import { RegionHandshakeReplyMessage } from './messages/RegionHandshakeReply';
 import { StartPingCheckMessage } from './messages/StartPingCheck';
 import { PacketFlags } from '../enums/PacketFlags';
 import { RegionProtocolFlags } from '../enums/RegionProtocolFlags';
 import { Message } from '../enums/Message';
-import { Utils } from './Utils';
+import type { BotOptionFlags } from '../enums/BotOptionFlags';
 import type { ClientEvents } from './ClientEvents';
 import type { Agent } from './Agent';
+import type { Bot } from '../Bot';
 import type { Packet } from './Packet';
 import type { RegionHandshakeMessage } from './messages/RegionHandshake';
-import type { CoarseLocationUpdateMessage } from './messages/CoarseLocationUpdate';
 import type { CompletePingCheckMessage } from './messages/CompletePingCheck';
 import type { Subscription } from 'rxjs';
 import type Long from 'long';
@@ -47,31 +45,31 @@ export interface ChildAgentAvatar {
     position: Vector3;
 }
 
-export type NameResolver = (uuid: UUID) => Promise<AvatarQueryResult | AvatarQueryResult[]>;
-
 export class ChildAgentConnection {
     public regionName = '';
     public gridX = 0;
     public gridY = 0;
-    public agents = new Map<string, Avatar>();
     public ipAddress: string;
     public port: number;
+    public region: Region;
 
-    private circuit: Circuit;
-    private caps: Caps | null = null;
+    /** Proxy to the Region's agents map for backwards compatibility */
+    public get agents(): Map<string, Avatar> {
+        return this.region.agents;
+    }
+
     private readonly agentID: UUID;
     private readonly sessionID: UUID;
     private readonly circuitCode: number;
     private readonly regionHandle: Long;
-    private readonly nameResolver: NameResolver;
-    private readonly onAvatarUpdate: () => void;
-    private readonly clientEvents: ClientEvents;
     private readonly agent: Agent;
+    private readonly bot: Bot;
+    private clientCommands: ClientCommands | null = null;
 
     private pingTimer: NodeJS.Timeout | null = null;
     private pingNumber = 0;
     private lastPingResponse = 0;
-    private messageSubscription: Subscription | null = null;
+    private disableSimSubscription: Subscription | null = null;
     private connected = false;
     private shuttingDown = false;
 
@@ -83,10 +81,10 @@ export class ChildAgentConnection {
         sessionID: UUID;
         secureSessionID: UUID;
         circuitCode: number;
-        nameResolver: NameResolver;
-        onAvatarUpdate: () => void;
         clientEvents: ClientEvents;
         agent: Agent;
+        bot: Bot;
+        options: BotOptionFlags;
     }) {
         this.regionHandle = params.regionHandle;
         this.ipAddress = params.ipAddress;
@@ -94,44 +92,35 @@ export class ChildAgentConnection {
         this.agentID = params.agentID;
         this.sessionID = params.sessionID;
         this.circuitCode = params.circuitCode;
-        this.nameResolver = params.nameResolver;
-        this.onAvatarUpdate = params.onAvatarUpdate;
-        this.clientEvents = params.clientEvents;
         this.agent = params.agent;
+        this.bot = params.bot;
 
         // Derive grid coordinates from region handle
         // Long: high = regionX * 256, low = regionY * 256
         this.gridX = this.regionHandle.high / 256;
         this.gridY = this.regionHandle.low / 256;
 
-        // Create circuit
-        this.circuit = new Circuit();
-        this.circuit.ipAddress = params.ipAddress;
-        this.circuit.port = params.port;
-        this.circuit.circuitCode = params.circuitCode;
-        this.circuit.sessionID = params.sessionID;
-        this.circuit.secureSessionID = params.secureSessionID;
+        // Create a full Region (ObjectStore, terrain, parcels, Comms all included)
+        this.region = new Region(params.agent, params.clientEvents, params.options);
+        this.region.circuit.ipAddress = params.ipAddress;
+        this.region.circuit.port = params.port;
+        this.region.circuit.circuitCode = params.circuitCode;
+        this.region.circuit.sessionID = params.sessionID;
+        this.region.circuit.secureSessionID = params.secureSessionID;
     }
 
     async connect(): Promise<void> {
         if (this.shuttingDown) return;
 
-        this.circuit.init();
+        const circuit = this.region.circuit;
+        circuit.init();
 
-        // Subscribe to messages we care about
-        this.messageSubscription = this.circuit.subscribeToMessages([
-            Message.CoarseLocationUpdate,
+        // Subscribe to DisableSimulator
+        this.disableSimSubscription = circuit.subscribeToMessages([
             Message.DisableSimulator,
-        ], (packet: Packet) => {
-            switch (packet.message.id) {
-                case Message.CoarseLocationUpdate:
-                    this.handleCoarseLocationUpdate(packet.message as CoarseLocationUpdateMessage);
-                    break;
-                case Message.DisableSimulator:
-                    console.log(`[ChildAgent] DisableSimulator received for ${this.regionName || `${this.gridX},${this.gridY}`}`);
-                    this.shutdown();
-                    break;
-            }
+        ], (_packet: Packet) => {
+            console.log(`[ChildAgent] DisableSimulator received for ${this.regionName || `${this.gridX},${this.gridY}`}`);
+            this.shutdown();
         });
 
         // Send UseCircuitCode (NO CompleteAgentMovement — child agent only)
@@ -143,8 +132,8 @@ export class ChildAgentConnection {
         };
 
         try {
-            await this.circuit.waitForAck(
-                this.circuit.sendMessage(msg, PacketFlags.Reliable),
+            await circuit.waitForAck(
+                circuit.sendMessage(msg, PacketFlags.Reliable),
                 10000
             );
         } catch (e) {
@@ -158,7 +147,7 @@ export class ChildAgentConnection {
         // Wait for RegionHandshake
         let handshake: RegionHandshakeMessage;
         try {
-            handshake = await this.circuit.waitForMessage<RegionHandshakeMessage>(
+            handshake = await circuit.waitForMessage<RegionHandshakeMessage>(
                 Message.RegionHandshake, 10000
             );
         } catch (e) {
@@ -169,8 +158,13 @@ export class ChildAgentConnection {
 
         if (this.shuttingDown) return;
 
-        // Extract region name
-        this.regionName = Utils.BufferToStringSimple(handshake.RegionInfo.SimName);
+        // Fill in region info via the lightweight child handshake
+        this.region.handshakeChild(handshake, this.gridX, this.gridY, this.regionHandle);
+        this.regionName = this.region.regionName;
+
+        // Create ClientCommands so the Region's CoarseLocationUpdate handler can resolve names
+        this.clientCommands = new ClientCommands(this.region, this.agent, this.bot);
+        this.region.clientCommands = this.clientCommands;
 
         // Reply to handshake
         const reply = new RegionHandshakeReplyMessage();
@@ -181,7 +175,7 @@ export class ChildAgentConnection {
         reply.RegionInfo = {
             Flags: RegionProtocolFlags.SelfAppearanceSupport | RegionProtocolFlags.AgentAppearanceService,
         };
-        this.circuit.sendMessage(reply, PacketFlags.Reliable);
+        circuit.sendMessage(reply, PacketFlags.Reliable);
 
         this.connected = true;
         this.lastPingResponse = Date.now();
@@ -196,13 +190,10 @@ export class ChildAgentConnection {
     /**
      * Activate caps + event queue for this child agent.
      * Called when EstablishAgentCommunication provides the seed capability URL.
-     * The event queue uses the shared clientEvents, so EnableSimulator events
-     * from this child will cascade to create even more child connections.
      */
     activateCaps(seedCapability: string): void {
-        if (this.shuttingDown || this.caps) return;
-
-        this.caps = new Caps(this.agent, seedCapability, this.clientEvents);
+        if (this.shuttingDown) return;
+        this.region.activateCaps(seedCapability);
         console.log(`[ChildAgent] Caps activated for ${this.regionName} (${this.gridX},${this.gridY})`);
     }
 
@@ -216,18 +207,17 @@ export class ChildAgentConnection {
             this.pingTimer = null;
         }
 
-        if (this.messageSubscription) {
-            this.messageSubscription.unsubscribe();
-            this.messageSubscription = null;
+        if (this.disableSimSubscription) {
+            this.disableSimSubscription.unsubscribe();
+            this.disableSimSubscription = null;
         }
 
-        if (this.caps) {
-            this.caps.shutdown();
-            this.caps = null;
+        if (this.clientCommands) {
+            this.clientCommands.shutdown();
+            this.clientCommands = null;
         }
 
-        this.agents.clear();
-        this.circuit.shutdown();
+        this.region.shutdown();
 
         console.log(`[ChildAgent] Disconnected from ${this.regionName || `${this.gridX},${this.gridY}`}`);
     }
@@ -252,72 +242,15 @@ export class ChildAgentConnection {
             PingID: this.pingNumber,
             OldestUnacked: 0,
         };
-        this.circuit.sendMessage(ping, PacketFlags.Reliable);
+        this.region.circuit.sendMessage(ping, PacketFlags.Reliable);
 
         // Listen for pong (fire-and-forget, just update lastPingResponse)
-        this.circuit.waitForMessage<CompletePingCheckMessage>(
+        this.region.circuit.waitForMessage<CompletePingCheckMessage>(
             Message.CompletePingCheck, 10000
         ).then(() => {
             this.lastPingResponse = Date.now();
         }).catch(() => {
             // Timeout on individual ping is ok; the 60s overall timeout handles it
         });
-    }
-
-    private handleCoarseLocationUpdate(locations: CoarseLocationUpdateMessage): void {
-        const foundAgents: Record<string, Vector3> = {};
-
-        const resolvePromises: Promise<void>[] = [];
-
-        for (let i = 0; i < locations.AgentData.length; i++) {
-            const agentData = locations.AgentData[i];
-            const location = locations.Location[i];
-            if (!location) continue;
-
-            const agentId = agentData.AgentID.toString();
-            const newPosition = new Vector3([location.X, location.Y, location.Z * 4]);
-            foundAgents[agentId] = newPosition;
-
-            const existing = this.agents.get(agentId);
-            if (existing) {
-                existing.coarsePosition = newPosition;
-            } else {
-                // Need to resolve name — do it async but don't block the update
-                const uuid = agentData.AgentID;
-                resolvePromises.push(
-                    this.nameResolver(uuid).then((resolved) => {
-                        if (this.shuttingDown) return;
-                        if (Array.isArray(resolved)) resolved = resolved[0];
-                        const av = new Avatar(uuid, resolved.getFirstName(), resolved.getLastName());
-                        av.coarsePosition = newPosition;
-                        this.agents.set(agentId, av);
-                    }).catch(() => {
-                        // If name resolution fails, use Unknown Avatar
-                        if (this.shuttingDown) return;
-                        const av = new Avatar(uuid, 'Unknown', 'Avatar');
-                        av.coarsePosition = newPosition;
-                        this.agents.set(agentId, av);
-                    })
-                );
-            }
-        }
-
-        // Remove agents no longer present
-        for (const agentId of this.agents.keys()) {
-            if (foundAgents[agentId] === undefined) {
-                const agent = this.agents.get(agentId);
-                if (agent) agent.coarseLeftRegion();
-                this.agents.delete(agentId);
-            }
-        }
-
-        // Notify immediately for known agents, then again after name resolution
-        this.onAvatarUpdate();
-
-        if (resolvePromises.length > 0) {
-            Promise.all(resolvePromises).then(() => {
-                if (!this.shuttingDown) this.onAvatarUpdate();
-            }).catch(() => { /* ignore */ });
-        }
     }
 }

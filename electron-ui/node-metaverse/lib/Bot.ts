@@ -551,16 +551,17 @@ export class Bot {
             sessionID: circuit.sessionID,
             secureSessionID: circuit.secureSessionID,
             circuitCode: circuit.circuitCode,
-            nameResolver: (uuid) => this.clientCommands.grid.avatarKey2Name(uuid),
             clientEvents: this.clientEvents,
             agent: this.agent,
+            bot: this,
+            options: this.options,
         });
         this._childAgentManager.setMainRegion(circuit.ipAddress, circuit.port);
 
         this.enableSimSubscription = this.clientEvents.onEnableSimulator.subscribe(
             (evt: EnableSimulatorEvent) => {
                 this._childAgentManager?.enableSimulator(evt.regionHandle, evt.ipAddress, evt.port)
-                    .catch((e) => console.warn('[ChildAgent] enableSimulator error:', e));
+                    .catch((e: unknown) => { console.warn('[ChildAgent] enableSimulator error:', e); });
             }
         );
     }

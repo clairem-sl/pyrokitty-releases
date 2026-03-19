@@ -662,13 +662,13 @@ export function llMeshToGlb(mesh: LLMesh): Buffer | null {
       byteOffset += nrmBuf.length;
     }
 
-    // --- UVs: [u, -v] (Hippolyzer convention) ---
+    // --- UVs: [u, 1-v] — convert SL (V=0 bottom) to glTF/Godot (V=0 top) ---
     if (hasUVs) {
       const uvBuf = Buffer.alloc(vertCount * 8);
       for (let i = 0; i < vertCount; i++) {
         const uv = sub.texCoord0![i];
         uvBuf.writeFloatLE(uv.x, i * 8);
-        uvBuf.writeFloatLE(-uv.y, i * 8 + 4);
+        uvBuf.writeFloatLE(1.0 - uv.y, i * 8 + 4);
       }
       bufferViews.push({ buffer: 0, byteOffset, byteLength: uvBuf.length });
       accessors.push({ bufferView: bufferViews.length - 1, componentType: 5126, count: vertCount, type: 'VEC2' });

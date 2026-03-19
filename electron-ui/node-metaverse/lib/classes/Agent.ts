@@ -390,7 +390,11 @@ export class Agent {
             ControlFlags: flags,
             Flags: AgentFlags.None
         };
-        circuit.sendMessage(agentUpdate, 0 as PacketFlags);
+        try {
+            circuit.sendMessage(agentUpdate, 0 as PacketFlags);
+        } catch {
+            // Circuit closed between check and send — timer will be cleared by shutdown()
+        }
     }
 
     private onMessage(packet: Packet): void {

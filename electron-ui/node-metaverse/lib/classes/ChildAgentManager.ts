@@ -1,30 +1,34 @@
 /**
- * ChildAgentManager - manages lightweight child agent connections to neighboring regions.
+ * ChildAgentManager - manages child agent connections to neighboring regions.
  *
  * When the sim sends EnableSimulator events, this creates ChildAgentConnection instances
- * for each neighbor. Each child connection receives CoarseLocationUpdate messages with
- * avatar positions, expanding the bot's awareness from 1 region to up to 3x3 regions.
+ * for each neighbor. Each child connection creates a full Region with ObjectStore, terrain,
+ * parcels, and avatar tracking — expanding awareness from 1 region to up to 3x3 regions.
  */
 
 import { Subject, type Subscription } from 'rxjs';
-import { ChildAgentConnection, type NameResolver, type ChildAgentAvatar } from './ChildAgentConnection';
+import { ChildAgentConnection, type ChildAgentAvatar } from './ChildAgentConnection';
 import type { ClientEvents } from './ClientEvents';
 import type { Agent } from './Agent';
+import type { Bot } from '../Bot';
 import type { UUID } from './UUID';
+import type { Region } from './Region';
+import type { BotOptionFlags } from '../enums/BotOptionFlags';
 import type Long from 'long';
 
 export class ChildAgentManager {
     /** Fires when any child's avatar list changes */
     public onChildAvatarsUpdated: Subject<void> = new Subject<void>();
 
-    private children = new Map<string, ChildAgentConnection>();
+    private readonly children = new Map<string, ChildAgentConnection>();
     private readonly agentID: UUID;
     private readonly sessionID: UUID;
     private readonly secureSessionID: UUID;
     private readonly circuitCode: number;
-    private readonly nameResolver: NameResolver;
     private readonly clientEvents: ClientEvents;
     private readonly agent: Agent;
+    private readonly bot: Bot;
+    private readonly options: BotOptionFlags;
     private mainRegionKey = '';
     private isShutdown = false;
     private eacSubscription: Subscription | null = null;
@@ -34,17 +38,19 @@ export class ChildAgentManager {
         sessionID: UUID;
         secureSessionID: UUID;
         circuitCode: number;
-        nameResolver: NameResolver;
         clientEvents: ClientEvents;
         agent: Agent;
+        bot: Bot;
+        options: BotOptionFlags;
     }) {
         this.agentID = params.agentID;
         this.sessionID = params.sessionID;
         this.secureSessionID = params.secureSessionID;
         this.circuitCode = params.circuitCode;
-        this.nameResolver = params.nameResolver;
         this.clientEvents = params.clientEvents;
         this.agent = params.agent;
+        this.bot = params.bot;
+        this.options = params.options;
 
         // Subscribe to EstablishAgentCommunication to activate caps on child connections
         this.eacSubscription = this.clientEvents.onEstablishAgentCommunication.subscribe((evt) => {
@@ -81,14 +87,10 @@ export class ChildAgentManager {
             sessionID: this.sessionID,
             secureSessionID: this.secureSessionID,
             circuitCode: this.circuitCode,
-            nameResolver: this.nameResolver,
-            onAvatarUpdate: () => {
-                if (!this.isShutdown) {
-                    this.onChildAvatarsUpdated.next();
-                }
-            },
             clientEvents: this.clientEvents,
             agent: this.agent,
+            bot: this.bot,
+            options: this.options,
         });
 
         this.children.set(key, child);
@@ -102,18 +104,18 @@ export class ChildAgentManager {
     }
 
     /** Get all avatars across all child connections */
-    getAllChildAvatars(): Array<{
+    getAllChildAvatars(): {
         avatar: ChildAgentAvatar;
         regionName: string;
         gridX: number;
         gridY: number;
-    }> {
-        const result: Array<{
+    }[] {
+        const result: {
             avatar: ChildAgentAvatar;
             regionName: string;
             gridX: number;
             gridY: number;
-        }> = [];
+        }[] = [];
 
         for (const child of this.children.values()) {
             if (!child.isConnected()) continue;
@@ -135,6 +137,23 @@ export class ChildAgentManager {
         }
 
         return result;
+    }
+
+    /** Get the Region for a child connection by ip:port key */
+    getChildRegion(ipAddress: string, port: number): Region | null {
+        const child = this.children.get(`${ipAddress}:${port}`);
+        return child?.region ?? null;
+    }
+
+    /** Get all connected child Regions */
+    getChildRegions(): Region[] {
+        const regions: Region[] = [];
+        for (const child of this.children.values()) {
+            if (child.isConnected()) {
+                regions.push(child.region);
+            }
+        }
+        return regions;
     }
 
     /** Tear down all children (called on region change — new EnableSimulator events will come) */

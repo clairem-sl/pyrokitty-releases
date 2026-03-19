@@ -6,4 +6,5 @@ export class ObjectKilledEvent
     public objectID: UUID;
     public localID: number;
     public object: GameObject;
+    public cacheID: UUID;
 }

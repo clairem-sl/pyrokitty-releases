@@ -6,5 +6,6 @@ export class ObjectUpdatedEvent
     public objectID: UUID;
     public localID: number;
     public object: GameObject;
-    public sequenceNumber: number = 0;
+    public sequenceNumber = 0;
+    public cacheID: UUID;
 }

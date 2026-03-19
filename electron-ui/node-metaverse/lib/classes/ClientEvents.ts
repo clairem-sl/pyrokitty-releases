@@ -34,6 +34,9 @@ import type { BalanceUpdatedEvent } from '../events/BalanceUpdatedEvent';
 import type { AgentGroupDataUpdateEvent } from '../events/AgentGroupDataUpdateEvent';
 import type { EnableSimulatorEvent } from '../events/EnableSimulatorEvent';
 import type { EstablishAgentCommunicationEvent } from '../events/EstablishAgentCommunicationEvent';
+import type { TerrainCompleteEvent } from '../events/TerrainCompleteEvent';
+import type { ParcelOverlayCompleteEvent } from '../events/ParcelOverlayCompleteEvent';
+import type { RegionEnvironmentEvent } from '../events/RegionEnvironmentEvent';
 import { TimeoutError } from './TimeoutError';
 import { FilterResponse } from '../enums/FilterResponse';
 import type { UUID } from './UUID';
@@ -84,6 +87,9 @@ export class ClientEvents
     }>();
     public onEnableSimulator: Subject<EnableSimulatorEvent> = new Subject<EnableSimulatorEvent>();
     public onEstablishAgentCommunication: Subject<EstablishAgentCommunicationEvent> = new Subject<EstablishAgentCommunicationEvent>();
+    public onTerrainComplete: Subject<TerrainCompleteEvent> = new Subject<TerrainCompleteEvent>();
+    public onParcelOverlayComplete: Subject<ParcelOverlayCompleteEvent> = new Subject<ParcelOverlayCompleteEvent>();
+    public onRegionEnvironment: Subject<RegionEnvironmentEvent> = new Subject<RegionEnvironmentEvent>();
 
     public async waitForEvent<T>(subj: Subject<T>, messageFilter?: (message: T) => FilterResponse, timeout = 10000): Promise<T>
     {

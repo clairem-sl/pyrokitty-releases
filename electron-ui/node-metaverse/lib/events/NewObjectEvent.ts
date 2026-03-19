@@ -7,4 +7,5 @@ export class NewObjectEvent
     public localID: number;
     public object: GameObject;
     public createSelected: boolean;
+    public cacheID: UUID;
 }

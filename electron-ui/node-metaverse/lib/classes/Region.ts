@@ -52,6 +52,9 @@ import { EconomyDataRequestMessage } from './messages/EconomyDataRequest';
 import type { EconomyDataMessage } from './messages/EconomyData';
 import { RegionEnvironment } from './public/RegionEnvironment';
 import { LLSD } from './llsd/LLSD';
+import { TerrainCompleteEvent } from '../events/TerrainCompleteEvent';
+import { ParcelOverlayCompleteEvent } from '../events/ParcelOverlayCompleteEvent';
+import { RegionEnvironmentEvent } from '../events/RegionEnvironmentEvent';
 
 export class Region {
     public static CopyMatrix16: number[] = [];
@@ -195,6 +198,7 @@ export class Region {
         else {
             this.objects = new ObjectStoreFull(this.circuit, agent, clientEvents, options);
         }
+        this.objects.setRegion(this);
         this.comms = new Comms(this.circuit, agent, clientEvents);
 
         this.parcelPropertiesSubscription = this.clientEvents.onParcelPropertiesEvent.subscribe((parcelProperties: ParcelPropertiesEvent) => {
@@ -251,6 +255,7 @@ export class Region {
                                     resolved = resolved[0];
                                 }
                                 const ag = new Avatar(agentData.AgentID, resolved.getFirstName(), resolved.getLastName());
+                                ag.cacheID = this.cacheID;
                                 ag.coarsePosition = newPosition;
                                 this.agents.set(agentData.AgentID.toString(), ag);
                                 this.clientEvents.onAvatarEnteredRegion.next(ag);
@@ -467,6 +472,12 @@ export class Region {
                         if (!this.parcelOverlayComplete) {
                             this.parcelOverlayComplete = true;
                             this.parcelOverlayCompleteEvent.next();
+                            const pevt = new ParcelOverlayCompleteEvent();
+                            pevt.cacheID = this.cacheID;
+                            pevt.gridX = this.xCoordinate;
+                            pevt.gridY = this.yCoordinate;
+                            pevt.parcelOverlay = this.parcelOverlay;
+                            this.clientEvents.onParcelOverlayComplete.next(pevt);
                         }
 
                         this.parcelOverlayReceived = {};
@@ -593,6 +604,13 @@ export class Region {
                                                 if (this.tilesReceived === 65536) {
                                                     this.terrainComplete = true;
                                                     this.terrainCompleteEvent.next();
+                                                    const tevt = new TerrainCompleteEvent();
+                                                    tevt.cacheID = this.cacheID;
+                                                    tevt.gridX = this.xCoordinate;
+                                                    tevt.gridY = this.yCoordinate;
+                                                    tevt.waterHeight = this.waterHeight;
+                                                    tevt.terrain = this.terrain;
+                                                    this.clientEvents.onTerrainComplete.next(tevt);
                                                 }
                                             }
                                         }
@@ -970,6 +988,69 @@ export class Region {
         }
         this.seedCapabilityURL = seedURL;
         this.caps = new Caps(this.agent, seedURL, this.clientEvents);
+
+        // Fetch environment if not already loaded (e.g. child regions that
+        // didn't have caps during handshake)
+        if (!this.environment) {
+            this.caps.waitForSeedCapability().then(async () => {
+                try {
+                    const extResponse = await this.caps.capsGetString('ExtEnvironment');
+                    this.environment = new RegionEnvironment(LLSD.parseXML(extResponse));
+                    const eevt = new RegionEnvironmentEvent();
+                    eevt.cacheID = this.cacheID;
+                    eevt.gridX = this.xCoordinate;
+                    eevt.gridY = this.yCoordinate;
+                    eevt.environment = this.environment;
+                    this.clientEvents.onRegionEnvironment.next(eevt);
+                } catch (e: unknown) {
+                    Logger.Warn('Unable to get environment settings from child region');
+                }
+            }).catch(() => { /* ignore */ });
+        }
+    }
+
+    /**
+     * Lightweight handshake for child agent regions.
+     * Fills in basic region info from the handshake message without sending
+     * MapNameRequest or RequestRegionInfo (coords already known from regionHandle).
+     */
+    public handshakeChild(handshake: RegionHandshakeMessage, gridX: number, gridY: number, regionHandle: Long): void {
+        this.regionName = Utils.BufferToStringSimple(handshake.RegionInfo.SimName);
+        this.simAccess = handshake.RegionInfo.SimAccess;
+        this.regionFlags = handshake.RegionInfo.RegionFlags;
+        this.regionOwner = handshake.RegionInfo.SimOwner;
+        this.waterHeight = handshake.RegionInfo.WaterHeight;
+        this.billableFactor = handshake.RegionInfo.BillableFactor;
+        this.cacheID = handshake.RegionInfo.CacheID;
+        this.terrainBase0 = handshake.RegionInfo.TerrainBase0;
+        this.terrainBase1 = handshake.RegionInfo.TerrainBase1;
+        this.terrainBase2 = handshake.RegionInfo.TerrainBase2;
+        this.terrainBase3 = handshake.RegionInfo.TerrainBase3;
+        this.terrainDetail0 = handshake.RegionInfo.TerrainDetail0;
+        this.terrainDetail1 = handshake.RegionInfo.TerrainDetail1;
+        this.terrainDetail2 = handshake.RegionInfo.TerrainDetail2;
+        this.terrainDetail3 = handshake.RegionInfo.TerrainDetail3;
+        this.terrainStartHeight00 = handshake.RegionInfo.TerrainStartHeight00;
+        this.terrainStartHeight01 = handshake.RegionInfo.TerrainStartHeight01;
+        this.terrainStartHeight10 = handshake.RegionInfo.TerrainStartHeight10;
+        this.terrainStartHeight11 = handshake.RegionInfo.TerrainStartHeight11;
+        this.terrainHeightRange00 = handshake.RegionInfo.TerrainHeightRange00;
+        this.terrainHeightRange01 = handshake.RegionInfo.TerrainHeightRange01;
+        this.terrainHeightRange10 = handshake.RegionInfo.TerrainHeightRange10;
+        this.terrainHeightRange11 = handshake.RegionInfo.TerrainHeightRange11;
+        this.regionID = handshake.RegionInfo2.RegionID;
+        this.cpuClassID = handshake.RegionInfo3.CPUClassID;
+        this.cpuRatio = handshake.RegionInfo3.CPURatio;
+        this.coloName = Utils.BufferToStringSimple(handshake.RegionInfo3.ColoName);
+        this.productSKU = Utils.BufferToStringSimple(handshake.RegionInfo3.ProductSKU);
+        this.productName = Utils.BufferToStringSimple(handshake.RegionInfo3.ProductName);
+
+        this.xCoordinate = gridX;
+        this.yCoordinate = gridY;
+        this.regionHandle = regionHandle;
+
+        this.handshakeComplete = true;
+        this.handshakeCompleteEvent.next();
     }
 
     public async handshake(handshake: RegionHandshakeMessage): Promise<void> {
@@ -1061,6 +1142,12 @@ export class Region {
         try {
             const extResponse = await this.caps.capsGetString('ExtEnvironment');
             this.environment = new RegionEnvironment(LLSD.parseXML(extResponse));
+            const eevt = new RegionEnvironmentEvent();
+            eevt.cacheID = this.cacheID;
+            eevt.gridX = this.xCoordinate;
+            eevt.gridY = this.yCoordinate;
+            eevt.environment = this.environment;
+            this.clientEvents.onRegionEnvironment.next(eevt);
         }
         catch (e: unknown) {
             Logger.Error(e);
