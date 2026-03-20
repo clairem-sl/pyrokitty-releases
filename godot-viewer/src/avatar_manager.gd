@@ -50,18 +50,14 @@ func set_self_avatar_id(id: String) -> void:
 	_apply_self_avatar_visibility()
 
 
-## Set the self avatar's yaw directly (for instant A/D feedback)
+## Set the self avatar's target yaw. The visual rotation damps toward this
+## each frame in interpolate_avatars (matching Firestorm's smoothed body rotation).
 func set_self_avatar_yaw(godot_yaw: float) -> void:
 	if sm.self_avatar_id.is_empty():
 		return
-	var rsi = sm.avatars.get(sm.self_avatar_id)
-	if rsi == null:
-		return
-	# Godot yaw → visual rotation: add PI/2 to match the SL heading offset
-	# (godot-input-handler.ts adds PI/2 when converting yaw to SL BodyRotation,
-	# so sl_to_godot_quat on the server echo produces yaw + PI/2 around Y)
-	rsi.rot = Quaternion(Vector3.UP, godot_yaw + PI / 2.0)
-	rsi.push_transform()
+	# Store target rotation — interpolation_manager will slerp toward it.
+	# PI/2 offset matches the SL heading conversion in godot-input-handler.ts.
+	sm.self_avatar_target_rot = Quaternion(Vector3.UP, godot_yaw + PI / 2.0)
 
 
 ## Return click-detection data for the self avatar, or empty dict if unavailable
@@ -253,6 +249,9 @@ func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
 			if avatar_id != sm.self_avatar_id or seat_rsi != null:
 				rsi.rot = godot_rot
 
+		# Preserve old velocity when update doesn't include one (matching Firestorm —
+		# the object's velocity persists until explicitly changed by a new update).
+		var old_target: Dictionary = sm.avatar_targets.get(avatar_id, {})
 		var target: Dictionary = {}
 		target["pos"] = godot_pos
 		target["rot"] = godot_rot
@@ -260,7 +259,7 @@ func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
 			var sv: Array = data["velocity"]
 			target["vel"] = Vector3(sv[0], sv[1], sv[2])
 		else:
-			target["vel"] = Vector3.ZERO
+			target["vel"] = old_target.get("vel", Vector3.ZERO)
 		target["age"] = 0.0
 		sm.avatar_targets[avatar_id] = target
 	else:

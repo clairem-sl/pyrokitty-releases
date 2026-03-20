@@ -70,6 +70,7 @@ class RSInstance extends RefCounted:
 var objects: Dictionary = {}   # uuid (String) -> RSInstance
 var avatars: Dictionary = {}   # avatarId (String) -> RSInstance
 var self_avatar_id: String = ""
+var self_avatar_target_rot: Quaternion = Quaternion.IDENTITY  # target yaw, damped in interpolation
 
 # World origin — set at login, updated on teleport. All positions relative to this.
 var world_origin_x: float = 0.0

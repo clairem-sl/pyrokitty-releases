@@ -15,7 +15,7 @@ signal xr_pose_updated(avatar_pos: Vector3, avatar_yaw: float)
 @export var min_distance: float = 0.0
 @export var max_distance: float = 500.0
 @export var follow_smoothing: float = 8.0
-@export var turn_rate: float = 2.5        # Radians per second for A/D
+@export var turn_rate: float = 1.5708     # Radians per second for A/D (90 deg/s, matching Firestorm)
 @export var camera_return_speed: float = 4.0  # How fast camera springs back behind avatar
 
 var default_pitch: float = 0.4     # Default camera elevation angle

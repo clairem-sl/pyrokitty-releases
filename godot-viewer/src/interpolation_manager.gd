@@ -1,9 +1,8 @@
 extends RefCounted
 
-## Avatar and object interpolation — velocity extrapolation, blend offsets, and child repositioning.
-## Matches Firestorm: server velocity extrapolation + drawable-level exponential damping.
-## Self avatar rotation is client-authoritative (set_self_avatar_yaw); position uses
-## the same server-driven extrapolation as all other avatars/objects.
+## Avatar and object interpolation — velocity extrapolation + damping.
+## Avatars and objects: server velocity extrapolation + exponential damping.
+## Self avatar rotation is client-authoritative (set_self_avatar_yaw).
 
 var sm  # scene_manager reference
 
@@ -32,9 +31,7 @@ func _damping_lerp(delta: float) -> float:
 # ─── Avatar Interpolation ────────────────────────────
 
 ## Smoothly move all avatars toward their targets each frame.
-## Two-layer system matching Firestorm:
-##   Layer 1 — "object system": extrapolate target position from server velocity
-##   Layer 2 — "drawable damping": lerp rendered position toward target (0.06s time constant)
+## Server velocity extrapolation + exponential damping.
 ## Self avatar rotation is client-authoritative (set by set_self_avatar_yaw each frame).
 func interpolate_avatars(delta: float) -> void:
 	var lerp_amt := _damping_lerp(delta)
@@ -51,7 +48,7 @@ func interpolate_avatars(delta: float) -> void:
 		var age: float = target.get("age", 0.0) + delta
 		target["age"] = age
 
-		# Layer 1: extrapolate target position from server velocity
+		# Extrapolate target position from server velocity
 		if not vel.is_zero_approx() and age < INTERP_MAX_TIME:
 			var phase_out := 1.0
 			if age > INTERP_PHASE_OUT_TIME:
@@ -59,14 +56,16 @@ func interpolate_avatars(delta: float) -> void:
 			var pos_delta: Vector3 = vel * delta * phase_out
 			target["pos"] = target.get("pos", rsi.pos) + pos_delta
 
-		# Layer 2: damped rendering — lerp rendered pos toward extrapolated target
-		# (Firestorm's updateXform). No blend_offset needed — the damping IS the smoothing.
+		# Damped rendering
 		var target_pos: Vector3 = target.get("pos", rsi.pos)
 		rsi.pos = rsi.pos.lerp(target_pos, lerp_amt)
 
-		# Self avatar: rotation is set directly by set_self_avatar_yaw() each frame.
-		# Non-self avatars: damp toward server rotation.
-		if avatar_id != sm.self_avatar_id:
+		# Damp rotation toward target.
+		# Self avatar: target comes from set_self_avatar_yaw (client-authoritative).
+		# Non-self avatars: target comes from server rotation.
+		if avatar_id == sm.self_avatar_id:
+			rsi.rot = rsi.rot.slerp(sm.self_avatar_target_rot, lerp_amt)
+		else:
 			rsi.rot = rsi.rot.slerp(target_rot, lerp_amt)
 
 		rsi.push_transform()
