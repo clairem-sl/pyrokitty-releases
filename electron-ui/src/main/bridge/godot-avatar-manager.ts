@@ -5,18 +5,18 @@
  * All avatar and object identity uses UUID strings (not numeric localIds).
  */
 
-import type { Bot } from '../../node-metaverse/dist/lib';
-import { Message } from '../../node-metaverse/dist/lib/enums/Message';
-import { TextureEntry } from '../../node-metaverse/dist/lib/classes/TextureEntry';
-import type { AvatarAppearanceMessage } from '../../node-metaverse/dist/lib/classes/messages/AvatarAppearance';
+import type { Bot } from '../../../node-metaverse/dist/lib';
+import { Message } from '../../../node-metaverse/dist/lib/enums/Message';
+import { TextureEntry } from '../../../node-metaverse/dist/lib/classes/TextureEntry';
+import type { AvatarAppearanceMessage } from '../../../node-metaverse/dist/lib/classes/messages/AvatarAppearance';
 import type { Subscription } from 'rxjs';
 import type { GodotObjectSender } from './godot-object-sender';
 import type { GodotAnimationManager } from './godot-animation-manager';
 import type { GodotMaterialPipeline } from './godot-material-pipeline';
-import type { TextureFetchQueue } from './texture-fetch-queue';
+import type { TextureFetchQueue } from '../assets/texture-fetch-queue';
 import type { SendFn } from './godot-bridge-types';
 import { isHudAttachment, BAKE_MAGIC_UUIDS, BAKE_CHANNEL_NAMES, BAKE_CHANNEL_TO_TE_FACE, ZERO_UUID, slPos, slQuat } from './godot-bridge-types';
-import { computeShapeDeltas } from './avatar-shape';
+import { computeShapeDeltas } from '../avatar/avatar-shape';
 
 export class GodotAvatarManager {
   private avatarAttachSubs = new Map<string, Subscription>();

@@ -154,6 +154,8 @@ func handle_avatar_create(msg: Dictionary) -> void:
 	var shared_skel: Skeleton3D = sm.skeleton_builder.create_shared_skeleton()
 	avatar_node.add_child(shared_skel)
 	sm.animesh_shared_skeleton[avatar_id] = shared_skel
+	# Notify animation thread about new skeleton
+	sm.animation_mgr.push_avatar_created(avatar_id, shared_skel)
 	_crumb("avatar_create id=%s step=apply_shape" % avatar_id.substr(0, 8))
 	# Apply pending shape if AvatarAppearance arrived before avatar_create
 	if _avatar_shapes.has(avatar_id):
@@ -170,6 +172,9 @@ func handle_avatar_create(msg: Dictionary) -> void:
 	# Apply pending volume morphs
 	if _avatar_volume_morphs.has(avatar_id):
 		sm.cv_volume_morphs[avatar_id] = _avatar_volume_morphs[avatar_id]
+	# Notify animation thread about pending shape (rests + scales changed)
+	if _avatar_shapes.has(avatar_id):
+		sm.animation_mgr.push_shape_changed(avatar_id, shared_skel, sm.bone_shape_scales.get(avatar_id, {}), sm.cv_volume_morphs.get(avatar_id, {}))
 	if avatar_id == sm.self_avatar_id:
 		print("[SelfAvatar] === Skeleton root created: uuid=%s bones=%d ===" % [avatar_id.substr(0, 8), shared_skel.get_bone_count()])
 
@@ -239,15 +244,10 @@ func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
 			else:
 				godot_rot = rsi.rot if rsi else Quaternion.IDENTITY
 
-		# Snap when sitting (no blend) — sit position is server-authoritative.
-		var blend_offset := Vector3.ZERO
-		if seat_rsi == null and rsi:
-			blend_offset = rsi.pos - godot_pos
-			if blend_offset.length() > sm.interp_mgr.AVATAR_MAX_INTERP_DIST:
-				blend_offset = Vector3.ZERO
-
+		# Don't snap rsi.pos — the damping lerp in interpolation_manager
+		# will smoothly follow the new target position (matching Firestorm's
+		# updateXform damping layer).  Only update rotation directly.
 		if rsi:
-			rsi.pos = godot_pos
 			# Self avatar rotation is client-authoritative (set_self_avatar_yaw)
 			# unless sitting, where the server controls the sit pose.
 			if avatar_id != sm.self_avatar_id or seat_rsi != null:
@@ -256,8 +256,6 @@ func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
 		var target: Dictionary = {}
 		target["pos"] = godot_pos
 		target["rot"] = godot_rot
-		target["blend_offset"] = blend_offset
-		target["blend_time"] = 0.0
 		if data.has("velocity"):
 			var sv: Array = data["velocity"]
 			target["vel"] = Vector3(sv[0], sv[1], sv[2])
@@ -333,6 +331,9 @@ func handle_avatar_shape(msg: Dictionary) -> void:
 	# TODO: Firestorm skips hover when sitting (isSitting || sit_ground_constrained).
 	var body_offset: float = _compute_body_z_offset(shared_skel, bones)
 	shared_skel.position.y = -body_offset + hover_height
+
+	# Notify animation thread about shape change (new rest positions + scales)
+	sm.animation_mgr.push_shape_changed(avatar_id, shared_skel, sm.bone_shape_scales.get(avatar_id, {}), sm.cv_volume_morphs.get(avatar_id, {}))
 
 	print("[AvatarShape] Applied shape for avatar %s (%d bones, hover=%.4f, body_offset=%.4f)" % [avatar_id.substr(0, 8), bones.size(), hover_height, body_offset])
 

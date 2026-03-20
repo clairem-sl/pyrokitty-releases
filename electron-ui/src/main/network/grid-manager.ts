@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
-import { Grid } from '../shared/types';
+import { Grid } from '../../shared/types';
 
 function getGridsFilePath(): string {
   // In dev mode __dirname is dist/main/, grids.json is at electron-ui/data/

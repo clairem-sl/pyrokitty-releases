@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
-import { Account } from '../shared/types';
+import { Account } from '../../shared/types';
 
 function getAccountsFilePath(): string {
   return path.join(app.getPath('userData'), 'data', 'accounts.json');

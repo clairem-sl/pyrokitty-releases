@@ -2,13 +2,13 @@ import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { app } from 'electron';
 import { EventEmitter } from 'events';
-import { ViewerInstance, ViewerStatus, ConnectionState } from '../shared/types';
+import { ViewerInstance, ViewerStatus, ConnectionState } from '../../shared/types';
 import { accountManager } from './account-manager';
 import { gridManager } from './grid-manager';
 import { connectionManager, ViewerConnection } from './viewer-connection';
 import { metaverseConnectionManager, MetaverseConnection } from './metaverse-connection';
-import { voiceRegistry } from './voice-registry';
-import { GodotBridge } from './godot-bridge';
+import { voiceRegistry } from '../voice/voice-registry';
+import { GodotBridge } from '../bridge/godot-bridge';
 
 function getViewerPath(): string {
   if (app.isPackaged) {

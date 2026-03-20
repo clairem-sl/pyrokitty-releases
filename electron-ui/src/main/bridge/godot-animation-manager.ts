@@ -6,11 +6,11 @@
  * All tracking is keyed by object/avatar UUID strings (not numeric localIds).
  */
 
-import type { Bot } from '../../node-metaverse/dist/lib';
-import { Message } from '../../node-metaverse/dist/lib/enums/Message';
-import type { ObjectAnimationMessage } from '../../node-metaverse/dist/lib/classes/messages/ObjectAnimation';
-import type { AvatarAnimationMessage } from '../../node-metaverse/dist/lib/classes/messages/AvatarAnimation';
-import type { AnimationFetchQueue } from './animation-fetch-queue';
+import type { Bot } from '../../../node-metaverse/dist/lib';
+import { Message } from '../../../node-metaverse/dist/lib/enums/Message';
+import type { ObjectAnimationMessage } from '../../../node-metaverse/dist/lib/classes/messages/ObjectAnimation';
+import type { AvatarAnimationMessage } from '../../../node-metaverse/dist/lib/classes/messages/AvatarAnimation';
+import type { AnimationFetchQueue } from '../assets/animation-fetch-queue';
 import type { SendFn } from './godot-bridge-types';
 
 export class GodotAnimationManager {

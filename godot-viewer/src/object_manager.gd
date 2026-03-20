@@ -261,6 +261,7 @@ func handle_object_create(msg: Dictionary) -> void:
 				var shared_skel: Skeleton3D = sm.skeleton_builder.create_shared_skeleton()
 				animesh_node.add_child(shared_skel)
 				sm.animesh_shared_skeleton[obj_uuid] = shared_skel
+				sm.animation_mgr.push_avatar_created(obj_uuid, shared_skel)
 			_register_animesh_descendants(obj_uuid, obj_uuid)
 			print("[Animesh] Worn animesh %s → own skeleton under avatar root %s" % [_uuid_short(obj_uuid), _uuid_short(parent_uuid)])
 		else:
@@ -281,6 +282,7 @@ func handle_object_create(msg: Dictionary) -> void:
 				var shared_skel: Skeleton3D = sm.skeleton_builder.create_shared_skeleton()
 				animesh_node.add_child(shared_skel)
 				sm.animesh_shared_skeleton[obj_uuid] = shared_skel
+				sm.animation_mgr.push_avatar_created(obj_uuid, shared_skel)
 			if _is_self_avatar(obj_uuid):
 				print("[SelfAvatar] Animesh root object %s created" % [_uuid_short(obj_uuid)])
 			# Retroactively register existing children + grandchildren (attachment linksets)
@@ -399,11 +401,6 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 				var sr: Array = obj["rotation"]
 				server_rot = Quaternion(sr[0], sr[1], sr[2], sr[3])
 
-			# Blend offset = how far visual pos is from server pos
-			var blend_offset: Vector3 = rsi.pos - server_pos
-			if blend_offset.length() > sm.interp_mgr.BLEND_SNAP_DIST:
-				blend_offset = Vector3.ZERO  # too far, snap
-
 			var target: Dictionary = {}
 			target["pos"] = server_pos
 			target["rot"] = server_rot
@@ -411,8 +408,6 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 			target["accel"] = accel
 			target["angVel"] = ang_vel
 			target["age"] = 0.0
-			target["blend_offset"] = blend_offset
-			target["blend_time"] = 0.0
 			sm.object_targets[obj_uuid] = target
 			# Scale always snaps
 			if obj.has("scale"):
@@ -621,6 +616,9 @@ func _instantiate_animesh_mesh(obj_uuid: String, mesh_id: String, animesh_root_u
 		RenderingServer.instance_set_visible(av_rsi.rid, false)
 		RenderingServer.instance_geometry_set_cast_shadows_setting(
 			av_rsi.rid, RenderingServer.SHADOW_CASTING_SETTING_OFF)
+
+	# Update animation thread bone metadata (joint overrides + dynamic bones may have changed it)
+	sm.animation_mgr.push_joint_override_update(animesh_root_uuid, shared_skel)
 
 	# If we already have pending animations for this root, apply them
 	if sm.animesh_roots.has(animesh_root_uuid):

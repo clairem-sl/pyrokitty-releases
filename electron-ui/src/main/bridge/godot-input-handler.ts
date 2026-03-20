@@ -2,11 +2,11 @@
  * Handles input from Godot (movement, object interaction).
  */
 
-import type { Bot } from '../../node-metaverse/dist/lib';
-import { ControlFlags, PacketFlags } from '../../node-metaverse/dist/lib';
-import { ObjectSelectMessage } from '../../node-metaverse/dist/lib/classes/messages/ObjectSelect';
-import { ObjectDeselectMessage } from '../../node-metaverse/dist/lib/classes/messages/ObjectDeselect';
-import { SetAlwaysRunMessage } from '../../node-metaverse/dist/lib/classes/messages/SetAlwaysRun';
+import type { Bot } from '../../../node-metaverse/dist/lib';
+import { ControlFlags, PacketFlags } from '../../../node-metaverse/dist/lib';
+import { ObjectSelectMessage } from '../../../node-metaverse/dist/lib/classes/messages/ObjectSelect';
+import { ObjectDeselectMessage } from '../../../node-metaverse/dist/lib/classes/messages/ObjectDeselect';
+import { SetAlwaysRunMessage } from '../../../node-metaverse/dist/lib/classes/messages/SetAlwaysRun';
 import type { SendFn } from './godot-bridge-types';
 
 const CLICK_ACTION_SIT = 1;
@@ -126,7 +126,7 @@ export class GodotInputHandler {
     try {
       const region = this.bot.currentRegion;
       if (!region) return;
-      const { UUID } = await import('../../node-metaverse/dist/lib/classes/UUID');
+      const { UUID } = await import('../../../node-metaverse/dist/lib/classes/UUID');
       const obj = region.objects?.getObjectByUUID(new UUID(uuid));
       if (!obj) {
         this.send({ type: 'object_properties', uuid, name: '', description: '' });
@@ -172,7 +172,7 @@ export class GodotInputHandler {
 
   async handleSetObjectName(uuid: string, name: string): Promise<void> {
     try {
-      const { UUID } = await import('../../node-metaverse/dist/lib/classes/UUID');
+      const { UUID } = await import('../../../node-metaverse/dist/lib/classes/UUID');
       const obj = this.bot.currentRegion?.objects?.getObjectByUUID(new UUID(uuid));
       if (!obj) {
         console.warn(`[GodotBridge] set_object_name: object ${uuid} not found`);
@@ -187,7 +187,7 @@ export class GodotInputHandler {
 
   async handleSetObjectDescription(uuid: string, description: string): Promise<void> {
     try {
-      const { UUID } = await import('../../node-metaverse/dist/lib/classes/UUID');
+      const { UUID } = await import('../../../node-metaverse/dist/lib/classes/UUID');
       const obj = this.bot.currentRegion?.objects?.getObjectByUUID(new UUID(uuid));
       if (!obj) {
         console.warn(`[GodotBridge] set_object_description: object ${uuid} not found`);
@@ -250,7 +250,7 @@ export class GodotInputHandler {
       const region = this.bot.currentRegion;
       if (!region) return;
       const objectUuid: string = msg.uuid;
-      const { UUID } = await import('../../node-metaverse/dist/lib/classes/UUID');
+      const { UUID } = await import('../../../node-metaverse/dist/lib/classes/UUID');
       const obj = region.objects?.getObjectByUUID(new UUID(objectUuid));
       if (!obj) {
         console.warn(`[GodotBridge] object_touch: object ${objectUuid} not found`);
@@ -261,7 +261,7 @@ export class GodotInputHandler {
 
       // If the object's default action is SIT and we're not already sitting on it, sit.
       if (obj.ClickAction === CLICK_ACTION_SIT && this._sittingOnLocalId !== localId) {
-        const { Vector3 } = await import('../../node-metaverse/dist/lib/classes/Vector3');
+        const { Vector3 } = await import('../../../node-metaverse/dist/lib/classes/Vector3');
         const targetUuid = new UUID(obj.FullID.toString());
         await this.bot.clientCommands.movement.sitOnObject(targetUuid, Vector3.getZero());
         this._sittingOnLocalId = localId;
@@ -269,7 +269,7 @@ export class GodotInputHandler {
         return;
       }
 
-      const { Vector3 } = await import('../../node-metaverse/lib/classes/Vector3');
+      const { Vector3 } = await import('../../../node-metaverse/lib/classes/Vector3');
       const pos = msg.position || {};
       const norm = msg.normal || {};
       const st = msg.st || {};

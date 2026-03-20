@@ -6,7 +6,7 @@ import {
   BAKE_CHANNEL_NAMES,
   ZERO_UUID,
   WATER_EXCLUSION_TEXTURES,
-} from '../godot-bridge-types';
+} from '../bridge/godot-bridge-types';
 
 describe('isHudAttachment', () => {
   it('returns true for HUD attachment points 31-38', () => {

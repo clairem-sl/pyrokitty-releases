@@ -3,13 +3,13 @@
  * children, sweeps, and deferred texture promotion.
  */
 
-import type { Bot } from '../../node-metaverse/dist/lib';
-import { SculptType } from '../../node-metaverse/dist/lib';
+import type { Bot } from '../../../node-metaverse/dist/lib';
+import { SculptType } from '../../../node-metaverse/dist/lib';
 import type { Subscription } from 'rxjs';
-import { sculptMeshId } from './sculpt-converter';
-import type { MeshFetchQueue } from './mesh-fetch-queue';
-import type { TextureFetchQueue } from './texture-fetch-queue';
-import type { SculptFetchQueue } from './sculpt-fetch-queue';
+import { sculptMeshId } from '../assets/sculpt-converter';
+import type { MeshFetchQueue } from '../assets/mesh-fetch-queue';
+import type { TextureFetchQueue } from '../assets/texture-fetch-queue';
+import type { SculptFetchQueue } from '../assets/sculpt-fetch-queue';
 import type { GodotUpdateCoalescer } from './godot-update-coalescer';
 import type { GodotMaterialPipeline } from './godot-material-pipeline';
 import type { GodotAnimationManager } from './godot-animation-manager';

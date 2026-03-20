@@ -1,16 +1,16 @@
 import { ipcMain, BrowserWindow, Menu, shell } from 'electron';
 import { IPC_CHANNELS, AddAccountRequest, LaunchViewerRequest, ChatMessage, SyncStatus, VoiceState, MapMarker } from '../shared/types';
-import { gridManager } from './grid-manager';
-import { accountManager } from './account-manager';
-import { viewerManager } from './viewer-manager';
-import { connectionManager } from './viewer-connection';
-import { metaverseConnectionManager } from './metaverse-connection';
+import { gridManager } from './network/grid-manager';
+import { accountManager } from './network/account-manager';
+import { viewerManager } from './network/viewer-manager';
+import { connectionManager } from './network/viewer-connection';
+import { metaverseConnectionManager } from './network/metaverse-connection';
 import { Vector3 } from '../../node-metaverse/dist/lib';
-import { chatLogManager } from './chat-log-manager';
-import { InventorySyncManager } from './inventory-sync-manager';
-import { ViewerInventoryAdapter } from './viewer-inventory-adapter';
-import { voiceRegistry } from './voice-registry';
-import { getMapWindow } from './map-window';
+import { chatLogManager } from './ui/chat-log-manager';
+import { InventorySyncManager } from './ui/inventory-sync-manager';
+import { ViewerInventoryAdapter } from './ui/viewer-inventory-adapter';
+import { voiceRegistry } from './voice/voice-registry';
+import { getMapWindow } from './ui/map-window';
 
 // Track sync managers per instance
 const syncManagers = new Map<string, InventorySyncManager>();

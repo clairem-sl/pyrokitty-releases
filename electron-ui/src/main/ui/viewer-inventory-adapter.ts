@@ -1,4 +1,4 @@
-import { ViewerConnection } from './viewer-connection';
+import { ViewerConnection } from '../network/viewer-connection';
 
 /**
  * Adapter that wraps ViewerConnection.request() calls to provide an interface

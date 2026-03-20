@@ -2,16 +2,16 @@ import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { setupIpcHandlers } from './ipc-handlers';
-import { gridManager } from './grid-manager';
-import { accountManager } from './account-manager';
-import { viewerManager } from './viewer-manager';
-import { chatLogManager } from './chat-log-manager';
+import { gridManager } from './network/grid-manager';
+import { accountManager } from './network/account-manager';
+import { viewerManager } from './network/viewer-manager';
+import { chatLogManager } from './ui/chat-log-manager';
 import { IPC_CHANNELS } from '../shared/types';
-import { setMapWindow, getMapWindow } from './map-window';
-import { voiceRegistry } from './voice-registry';
+import { setMapWindow, getMapWindow } from './ui/map-window';
+import { voiceRegistry } from './voice/voice-registry';
 import { InventoryFolder } from '../../node-metaverse/dist/lib/classes/InventoryFolder';
-import { initGpuCompressWindow, destroyGpuCompressWindow } from './gpu-compress-window';
-import { getSavedBounds, trackWindow } from './window-state-manager';
+import { initGpuCompressWindow, destroyGpuCompressWindow } from './assets/gpu-compress-window';
+import { getSavedBounds, trackWindow } from './ui/window-state-manager';
 
 // Linux-specific Chromium tweaks (must run before app.whenReady())
 if (process.platform === 'linux') {

@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import { EventEmitter } from 'events';
-import { WSMessage, WSConnectedMessage, ViewerAPI } from '../shared/types';
+import { WSMessage, WSConnectedMessage, ViewerAPI } from '../../shared/types';
 
 export interface ViewerConnectionEvents {
   'connected': (apis: ViewerAPI[]) => void;

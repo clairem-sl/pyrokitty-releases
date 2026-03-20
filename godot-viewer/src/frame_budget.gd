@@ -68,3 +68,16 @@ const LIGHT_CULL_INTERVAL: float = 2.0
 ## Max spot lights that cast shadows (ranked by distance each cull pass).
 ## Omni lights never cast shadows (cubemap shadow maps are too expensive).
 const MAX_SHADOW_LIGHTS: int = 4
+
+# ---------------------------------------------------------------------------
+#  Animation LOD (consumer-driven pacing)
+# ---------------------------------------------------------------------------
+
+## Distance² thresholds for animation consumption tiers.
+const ANIM_LOD_NEAR_SQ: float = 225.0    # 15m squared
+const ANIM_LOD_MID_SQ: float = 1600.0    # 40m squared
+const ANIM_LOD_FAR_SQ: float = 6400.0    # 80m squared
+
+## Consumption intervals (frames to skip between consuming a slot).
+## NEAR=every frame, MID=every 2nd, FAR=every 4th, DISTANT=every 8th.
+const ANIM_LOD_CONSUME: Array = [1, 2, 4, 8]

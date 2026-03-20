@@ -3,11 +3,11 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { app, shell } from 'electron';
 import { watch as chokidarWatch, type FSWatcher as ChokidarWatcher } from 'chokidar';
-import { Bot, AssetType, FolderType, InventoryType, LLLindenText } from '../../node-metaverse/dist/lib';
-import { InventoryFolder } from '../../node-metaverse/dist/lib/classes/InventoryFolder';
-import { InventoryItem } from '../../node-metaverse/dist/lib/classes/InventoryItem';
-import { j2cToPng, pngToJ2c } from './j2k-converter';
-import { SyncStatus } from '../shared/types';
+import { Bot, AssetType, FolderType, InventoryType, LLLindenText } from '../../../node-metaverse/dist/lib';
+import { InventoryFolder } from '../../../node-metaverse/dist/lib/classes/InventoryFolder';
+import { InventoryItem } from '../../../node-metaverse/dist/lib/classes/InventoryItem';
+import { j2cToPng, pngToJ2c } from '../assets/j2k-converter';
+import { SyncStatus } from '../../shared/types';
 import { ViewerInventoryAdapter, ViewerInventoryFolder } from './viewer-inventory-adapter';
 
 const SYNC_FOLDER_NAME = '#Inventory Sync';

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeShapeDeltas, getVisualParams } from '../avatar-shape';
+import { computeShapeDeltas, getVisualParams } from '../avatar/avatar-shape';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 

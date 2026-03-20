@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decodeSculptMap, buildSculptMesh, sculptMeshToGlb } from '../sculpt-converter';
+import { decodeSculptMap, buildSculptMesh, sculptMeshToGlb } from '../assets/sculpt-converter';
 
 describe('decodeSculptMap', () => {
   it('decodes a 2x2 RGB pixel grid to normalized Vec3', () => {

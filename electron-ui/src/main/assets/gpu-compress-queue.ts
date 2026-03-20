@@ -10,7 +10,7 @@ import {
   BctexFormat,
   encodeBctex,
   type BctexHeader,
-} from '../gpu-compress/bctex-format';
+} from '../../gpu-compress/bctex-format';
 import { gpuCompressFull, gpuCompressionAvailable } from './gpu-compress-window';
 
 const MAX_CONCURRENT = 4; // max concurrent GPU dispatches

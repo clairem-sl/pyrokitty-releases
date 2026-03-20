@@ -83,7 +83,7 @@ var object_region_offset: Dictionary = {}   # uuid (String) -> Vector3(offsetX, 
 
 # Interpolation targets
 var avatar_targets: Dictionary = {}   # avatarId -> { pos, rot, vel, age }
-var object_targets: Dictionary = {}   # uuid (String) -> { pos, rot, vel, accel, angVel, age, blend_offset, blend_time }
+var object_targets: Dictionary = {}   # uuid (String) -> { pos, rot, vel, accel, angVel, age }
 # avatar_local_ids removed — animesh_roots/animesh_shared_skeleton now keyed by avatar UUID directly
 
 # Linkset tracking (flat hierarchy — no Godot node parenting to avoid scale inheritance)
@@ -185,9 +185,12 @@ func erase_animesh_state(root_uuid: String) -> void:
 	cv_volume_morphs.erase(root_uuid)
 	if animesh_eval.is_empty():
 		animesh_eval_active = false
+	# Notify animation thread to clean up state for this root
+	animation_mgr.push_avatar_killed(root_uuid)
 
 
 func _exit_tree() -> void:
+	animation_mgr.shutdown()
 	asset_pipeline.shutdown()
 	# Skip all cleanup — process is about to die anyway.
 	# RenderingServer RIDs, threads, and memory are freed by the OS on exit.
@@ -250,9 +253,8 @@ func _process(delta: float) -> void:
 	# Interpolate moving objects (physical objects with velocity)
 	interp_mgr.interpolate_objects(delta)
 
-	# Evaluate animesh animations (manual per-frame, not AnimationPlayer)
-	if animesh_eval_active:
-		animation_mgr.process_animesh(delta)
+	# Consume animation thread output slots and apply to Skeleton3D
+	animation_mgr.consume_anim_slots(delta)
 
 	# Periodic light distance culling sweep
 	light_mgr._light_cull_timer += delta
@@ -344,8 +346,8 @@ func handle_region_change() -> void:
 	attach_point_id.clear()
 	_attach_bone_logged.clear()
 
-	# Clear animesh crossfade blending state
-	animation_mgr._prev_sl_local_rot.clear()
+	# Notify animation thread to clear all state
+	animation_mgr.push_region_change()
 
 	# Clear asset pipeline retry queues
 	asset_pipeline._pending_complete_by_mesh.clear()

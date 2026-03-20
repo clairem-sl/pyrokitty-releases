@@ -16,9 +16,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
-import type { LLMesh } from '../../node-metaverse/dist/lib/classes/public/LLMesh';
-import type { LLSubMesh } from '../../node-metaverse/dist/lib/classes/public/interfaces/LLSubMesh';
-import type { LLSkin } from '../../node-metaverse/dist/lib/classes/public/interfaces/LLSkin';
+import type { LLMesh } from '../../../node-metaverse/dist/lib/classes/public/LLMesh';
+import type { LLSubMesh } from '../../../node-metaverse/dist/lib/classes/public/interfaces/LLSubMesh';
+import type { LLSkin } from '../../../node-metaverse/dist/lib/classes/public/interfaces/LLSkin';
 
 const LOD_PREFERENCE = ['high_lod', 'medium_lod', 'low_lod', 'lowest_lod'];
 

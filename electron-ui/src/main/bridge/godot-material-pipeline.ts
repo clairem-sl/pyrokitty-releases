@@ -3,10 +3,10 @@
  * Manages PBR material assets, legacy materials, and texture queue coordination.
  */
 
-import type { Bot } from '../../node-metaverse/dist/lib';
-import { Material } from '../../node-metaverse/dist/lib/classes/public/Material';
-import type { MaterialFetchQueue, MaterialOverrideData, TextureTransform } from './material-fetch-queue';
-import type { TextureFetchQueue } from './texture-fetch-queue';
+import type { Bot } from '../../../node-metaverse/dist/lib';
+import { Material } from '../../../node-metaverse/dist/lib/classes/public/Material';
+import type { MaterialFetchQueue, MaterialOverrideData, TextureTransform } from '../assets/material-fetch-queue';
+import type { TextureFetchQueue } from '../assets/texture-fetch-queue';
 import type { GodotAvatarManager } from './godot-avatar-manager';
 import type { SendFn } from './godot-bridge-types';
 import { WATER_EXCLUSION_TEXTURES, ZERO_UUID, BAKE_MAGIC_UUIDS, TRANSPARENT_TEXTURES, SOLID_COLOR_TEXTURES } from './godot-bridge-types';

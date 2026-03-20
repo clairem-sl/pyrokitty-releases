@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
-import { ChatMessage, ChatSession, SessionMeta } from '../shared/types';
+import { ChatMessage, ChatSession, SessionMeta } from '../../shared/types';
 
 const DEBOUNCE_MS = 1000;
 
