@@ -410,13 +410,20 @@ export class GodotBridge extends EventEmitter {
       this.send({ type: 'sitting_state', sitting: true });
       const selfId = this.bot.agent?.agentID?.toString();
       if (selfId) {
-        this.send({
-          type: 'avatar_update',
-          id: selfId,
-          position: sitState.position,
-          rotation: sitState.rotation,
-          parentId: sitState.seatLocalId,
-        });
+        let seatUuid = '';
+        try {
+          const seatObj = this.bot.currentRegion?.objects?.getObjectByLocalID(sitState.seatLocalId);
+          seatUuid = seatObj?.FullID?.toString() || '';
+        } catch { /* seat may not be in object store */ }
+        if (seatUuid) {
+          this.send({
+            type: 'avatar_update',
+            id: selfId,
+            position: sitState.position,
+            rotation: sitState.rotation,
+            parentUuid: seatUuid,
+          });
+        }
       }
       console.log(`[GodotBridge] Replayed sitting state on reconnect: seatLocalId=${sitState.seatLocalId}`);
     }
@@ -760,7 +767,7 @@ export class GodotBridge extends EventEmitter {
             id: selfId,
             position: slPos(sitPos),
             rotation: slQuat(sitRot),
-            parentId: seatLocalId,
+            parentUuid: seatUuid,
           });
         }
         console.log(`[GodotBridge] AvatarSitResponse: seated on ${seatUuid.slice(0, 8)} localId=${seatLocalId} offset=(${sitPos.x.toFixed(2)},${sitPos.y.toFixed(2)},${sitPos.z.toFixed(2)})`);

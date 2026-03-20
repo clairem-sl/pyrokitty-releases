@@ -75,12 +75,19 @@ export class GodotUpdateCoalescer {
           const pos = obj.Position;
           const rot = obj.Rotation;
           const vel = obj.Velocity;
+          // Resolve parent local ID to UUID (seat object when sitting)
+          const parentLocalId = obj.ParentID || 0;
+          let parentUuid = '';
+          if (parentLocalId > 0) {
+            const parentObj = obj.region?.objects?.getObjectByLocalID(parentLocalId);
+            parentUuid = parentObj?.FullID?.toString() || '';
+          }
           this.avatarUpdateBuffer.set(avatarId, {
             id: avatarId,
             ...(pos ? { position: slPos(pos) } : {}),
             ...(rot ? { rotation: slQuat(rot) } : {}),
             ...(vel ? { velocity: slPos(vel) } : {}),
-            parentId: obj.ParentID || 0,
+            ...(parentUuid ? { parentUuid } : {}),
           });
           if (!this.avatarUpdateTimer) {
             this.avatarUpdateTimer = setTimeout(() => {

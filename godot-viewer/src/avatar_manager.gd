@@ -240,27 +240,31 @@ func _apply_avatar_target(avatar_id: String, data: Dictionary) -> void:
 			else:
 				godot_rot = rsi.rot if rsi else Quaternion.IDENTITY
 
-		# Don't snap rsi.pos — the damping lerp in interpolation_manager
-		# will smoothly follow the new target position (matching Firestorm's
-		# updateXform damping layer).  Only update rotation directly.
+		# Snap position when sitting — the seat offset is server-authoritative
+		# and damping would cause the avatar to slowly crawl to the seat.
+		# Also snap rotation when seated or for non-self avatars.
 		if rsi:
-			# Self avatar rotation is client-authoritative (set_self_avatar_yaw)
-			# unless sitting, where the server controls the sit pose.
+			if seat_rsi != null:
+				rsi.pos = godot_pos
 			if avatar_id != sm.self_avatar_id or seat_rsi != null:
 				rsi.rot = godot_rot
 
 		# Preserve old velocity when update doesn't include one (matching Firestorm —
 		# the object's velocity persists until explicitly changed by a new update).
+		# Exception: when seated, velocity is always zero (no extrapolation).
 		var old_target: Dictionary = sm.avatar_targets.get(avatar_id, {})
 		var target: Dictionary = {}
 		target["pos"] = godot_pos
 		target["rot"] = godot_rot
-		if data.has("velocity"):
+		if seat_rsi != null:
+			target["vel"] = Vector3.ZERO
+		elif data.has("velocity"):
 			var sv: Array = data["velocity"]
 			target["vel"] = Vector3(sv[0], sv[1], sv[2])
 		else:
 			target["vel"] = old_target.get("vel", Vector3.ZERO)
 		target["age"] = 0.0
+		target["seated"] = seat_rsi != null
 		sm.avatar_targets[avatar_id] = target
 	else:
 		# Rotation-only update

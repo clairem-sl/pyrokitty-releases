@@ -16,6 +16,10 @@ const INTERP_MAX_TIME: float = 3.0        # Stop extrapolation entirely
 # velocity, then the "rendered" position lerps toward it each frame.  This low-pass
 # filter smooths out discrete server updates without predicting ahead.
 const DAMPING_TIME_CONSTANT: float = 0.06
+# Pelvis lag — Firestorm slerps the avatar root rotation with u = dt / lag_time.
+# Flying: 0.22s, Walking: 0.4s, Mouselook: 0.15s.  We use the walking value
+# since we don't have mouselook and can refine flying later.
+const PELVIS_LAG_TIME: float = 0.4
 
 
 func _init(scene_manager) -> void:
@@ -60,11 +64,13 @@ func interpolate_avatars(delta: float) -> void:
 		var target_pos: Vector3 = target.get("pos", rsi.pos)
 		rsi.pos = rsi.pos.lerp(target_pos, lerp_amt)
 
-		# Damp rotation toward target.
-		# Self avatar: target comes from set_self_avatar_yaw (client-authoritative).
-		# Non-self avatars: target comes from server rotation.
-		if avatar_id == sm.self_avatar_id:
-			rsi.rot = rsi.rot.slerp(sm.self_avatar_target_rot, lerp_amt)
+		# Self avatar: slerp toward client yaw (client-authoritative).
+		# When seated, use server rotation (sit pose).
+		# Non-self avatars: damp toward server rotation.
+		if avatar_id == sm.self_avatar_id and not target.get("seated", false):
+			# Pelvis lag: linear slerp matching Firestorm's updateCharacter
+			var u: float = clampf(delta / PELVIS_LAG_TIME, 0.0, 1.0)
+			rsi.rot = rsi.rot.slerp(sm.self_avatar_target_rot, u)
 		else:
 			rsi.rot = rsi.rot.slerp(target_rot, lerp_amt)
 

@@ -144,7 +144,7 @@ func set_vr_mode(enabled: bool) -> void:
 
 
 func _on_self_avatar_moved(pos: Vector3) -> void:
-	avatar_point = pos
+	avatar_point = pos + Vector3(0.0, 0.8, 0.0)  # focus on upper chest, not feet
 	if not has_target:
 		target_point = avatar_point
 		has_target = true
