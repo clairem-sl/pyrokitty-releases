@@ -3,7 +3,7 @@ import { ipcRenderer } from 'electron';
 import L from 'leaflet';
 import { MapContainer, useMap, useMapEvents } from 'react-leaflet';
 import { createLayerComponent } from '@react-leaflet/core';
-import { IPC_CHANNELS, MAP_COLORS, BOT_COLORS, MapMarker } from '../shared/types';
+import { IPC_CHANNELS, MAP_COLORS, BOT_COLORS, MapMarker, LandmarkInfo } from '../shared/types';
 
 // ── SL Tile Layer ──────────────────────────────────────────
 
@@ -209,11 +209,121 @@ function MapRefCapture({ mapRef }: { mapRef: React.MutableRefObject<L.Map | null
   return null;
 }
 
+// ── Landmark Pin Layer ───────────────────────────────────────
+
+function LandmarkPinLayer({ pin }: { pin: LandmarkInfo | null }) {
+  const map = useMap();
+  const markerRef = useRef<L.Marker | null>(null);
+
+  useEffect(() => {
+    if (!pin) return;
+
+    const mapX = pin.gridX + pin.localX / 256;
+    const mapY = pin.gridY + pin.localY / 256;
+
+    const icon = L.divIcon({
+      className: 'lm-pin-icon',
+      html: '<div class="lm-pin"></div>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    });
+
+    const marker = L.marker([mapY, mapX], { icon, interactive: false }).addTo(map);
+    markerRef.current = marker;
+
+    return () => {
+      marker.remove();
+      markerRef.current = null;
+    };
+  }, [pin, map]);
+
+  return null;
+}
+
+// ── Landmark Panel ───────────────────────────────────────────
+
+function LandmarkPanel({
+  landmarks, loading, mapRef, selectedInstanceId, onPinLandmark,
+}: {
+  landmarks: LandmarkInfo[];
+  loading: boolean;
+  mapRef: React.MutableRefObject<L.Map | null>;
+  selectedInstanceId: string | null;
+  onPinLandmark: (lm: LandmarkInfo | null) => void;
+}) {
+  const [filter, setFilter] = useState('');
+  const filtered = useMemo(() => {
+    if (!filter) return landmarks;
+    const lc = filter.toLowerCase();
+    return landmarks.filter(lm => lm.name.toLowerCase().includes(lc));
+  }, [landmarks, filter]);
+
+  const handleTeleport = useCallback((lm: LandmarkInfo) => {
+    if (!selectedInstanceId) return;
+    ipcRenderer.invoke(
+      IPC_CHANNELS.TELEPORT_REGION,
+      selectedInstanceId,
+      lm.gridX, lm.gridY,
+      lm.localX, lm.localY, lm.localZ,
+    );
+  }, [selectedInstanceId]);
+
+  const handleCenter = useCallback((lm: LandmarkInfo) => {
+    const mapX = lm.gridX + lm.localX / 256;
+    const mapY = lm.gridY + lm.localY / 256;
+    mapRef.current?.setView([mapY, mapX], 8);
+    onPinLandmark(lm);
+  }, [mapRef, onPinLandmark]);
+
+  if (loading) {
+    return (
+      <div className="lm-panel">
+        <div className="lm-panel-title">Landmarks</div>
+        <div className="lm-loading">Loading...</div>
+      </div>
+    );
+  }
+
+  if (landmarks.length === 0) return null;
+
+  return (
+    <div className="lm-panel">
+      <div className="lm-panel-title">Landmarks</div>
+      {landmarks.length > 5 && (
+        <input
+          className="lm-filter"
+          type="text"
+          placeholder="Filter..."
+          value={filter}
+          onChange={e => setFilter(e.target.value)}
+        />
+      )}
+      <div className="lm-list">
+        {filtered.map((lm, i) => (
+          <div
+            key={`${lm.name}-${i}`}
+            className="lm-item"
+            title={`${lm.name} (${lm.gridX}, ${lm.gridY}) [${Math.round(lm.localX)}, ${Math.round(lm.localY)}, ${Math.round(lm.localZ)}]\nClick: center map\nDouble-click: teleport`}
+            onClick={() => handleCenter(lm)}
+            onDoubleClick={() => handleTeleport(lm)}
+          >
+            <span className="lm-item-name">{lm.name}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── MapApp ─────────────────────────────────────────────────
 
 export const MapApp: React.FC = () => {
   const [markers, setMarkers] = useState<MapMarker[]>([]);
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
+  const [landmarks, setLandmarks] = useState<LandmarkInfo[]>([]);
+  const [landmarksLoading, setLandmarksLoading] = useState(false);
+  const [landmarkPin, setLandmarkPin] = useState<LandmarkInfo | null>(null);
+  const landmarkInstanceRef = useRef<string | null>(null);
 
   // Full marker refresh from 3s timer (nearby avatars, agent counts, etc.)
   useEffect(() => {
@@ -279,6 +389,37 @@ export const MapApp: React.FC = () => {
     }
   }, [selectedInstanceId, accountMarkers]);
 
+  // Fetch landmarks when selected account changes
+  useEffect(() => {
+    if (!selectedInstanceId) {
+      setLandmarks([]);
+      setLandmarkPin(null);
+      landmarkInstanceRef.current = null;
+      return;
+    }
+    if (landmarkInstanceRef.current === selectedInstanceId) return;
+    landmarkInstanceRef.current = selectedInstanceId;
+    setLandmarksLoading(true);
+    setLandmarks([]);
+    setLandmarkPin(null);
+    ipcRenderer.invoke(IPC_CHANNELS.GET_LANDMARKS, selectedInstanceId)
+      .then((data: LandmarkInfo[]) => {
+        if (landmarkInstanceRef.current === selectedInstanceId) {
+          setLandmarks(data || []);
+        }
+      })
+      .catch(() => {
+        if (landmarkInstanceRef.current === selectedInstanceId) {
+          setLandmarks([]);
+        }
+      })
+      .finally(() => {
+        if (landmarkInstanceRef.current === selectedInstanceId) {
+          setLandmarksLoading(false);
+        }
+      });
+  }, [selectedInstanceId]);
+
   const mapRef = useRef<L.Map | null>(null);
   const center = useMemo<L.LatLngExpression>(() => [1000, 1000], []);
 
@@ -302,6 +443,7 @@ export const MapApp: React.FC = () => {
         <AvatarMarkersLayer markers={markers} botColorMap={botColorMap} />
         <AutoCenter markers={markers} />
         <TeleportPopup markers={markers} selectedInstanceId={selectedInstanceId} />
+        <LandmarkPinLayer pin={landmarkPin} />
       </MapContainer>
       {accountMarkers.length > 0 && (
         <div className="bot-legend">
@@ -326,6 +468,13 @@ export const MapApp: React.FC = () => {
           ))}
         </div>
       )}
+      <LandmarkPanel
+        landmarks={landmarks}
+        loading={landmarksLoading}
+        mapRef={mapRef}
+        selectedInstanceId={selectedInstanceId}
+        onPinLandmark={setLandmarkPin}
+      />
     </>
   );
 };

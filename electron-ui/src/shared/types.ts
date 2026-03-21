@@ -250,6 +250,9 @@ export const IPC_CHANNELS = {
   MAP_POSITION_UPDATE: 'map:position-update',
   MAP_GET_POSITIONS: 'map:get-positions',
   MAP_SELECTED_ACCOUNT: 'map:selected-account',
+
+  // Landmarks
+  GET_LANDMARKS: 'landmarks:get',
 } as const;
 
 // IPC Request/Response types
@@ -316,6 +319,16 @@ export interface MapMarker {
   instanceId?: string; // present on 'account' markers — identifies which bot to teleport
   name: string;
   regionName: string;
+  gridX: number;
+  gridY: number;
+  localX: number;
+  localY: number;
+  localZ: number;
+}
+
+// Landmark info for world map
+export interface LandmarkInfo {
+  name: string;
   gridX: number;
   gridY: number;
   localX: number;

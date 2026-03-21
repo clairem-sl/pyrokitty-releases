@@ -1,11 +1,11 @@
 import { ipcMain, BrowserWindow, Menu, shell } from 'electron';
-import { IPC_CHANNELS, AddAccountRequest, LaunchViewerRequest, ChatMessage, SyncStatus, VoiceState, MapMarker } from '../shared/types';
+import { IPC_CHANNELS, AddAccountRequest, LaunchViewerRequest, ChatMessage, SyncStatus, VoiceState, MapMarker, LandmarkInfo } from '../shared/types';
 import { gridManager } from './network/grid-manager';
 import { accountManager } from './network/account-manager';
 import { viewerManager } from './network/viewer-manager';
 import { connectionManager } from './network/viewer-connection';
 import { metaverseConnectionManager } from './network/metaverse-connection';
-import { Vector3 } from '../../node-metaverse/dist/lib';
+import { Vector3, FolderType, AssetType, UUID as NMUUID } from '../../node-metaverse/dist/lib';
 import { chatLogManager } from './ui/chat-log-manager';
 import { InventorySyncManager } from './ui/inventory-sync-manager';
 import { ViewerInventoryAdapter } from './ui/viewer-inventory-adapter';
@@ -703,6 +703,121 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       },
     ]);
     menu.popup({ window: mainWindow, x, y });
+  });
+
+  // ── Landmarks ──────────────────────────────────────────────
+
+  // Parse SL landmark asset text — extracts region_id and local_pos
+  function parseLandmarkAsset(data: Buffer): { regionId: string; localX: number; localY: number; localZ: number } | null {
+    const text = data.toString('utf-8');
+    const regionMatch = text.match(/region_id\s+([\da-f-]+)/);
+    const posMatch = text.match(/local_pos\s+([\d.e+-]+)\s+([\d.e+-]+)\s+([\d.e+-]+)/);
+    if (!regionMatch) return null;
+
+    return {
+      regionId: regionMatch[1],
+      localX: posMatch ? parseFloat(posMatch[1]) : 128,
+      localY: posMatch ? parseFloat(posMatch[2]) : 128,
+      localZ: posMatch ? parseFloat(posMatch[3]) : 0,
+    };
+  }
+
+  // Region handle cache: regionId → { gridX, gridY }, 10-min TTL (matches Firestorm)
+  const regionHandleCache = new Map<string, { gridX: number; gridY: number; ts: number }>();
+  const REGION_CACHE_TTL = 10 * 60 * 1000;
+
+  ipcMain.handle(IPC_CHANNELS.GET_LANDMARKS, async (_, instanceId: string): Promise<LandmarkInfo[]> => {
+    const metaverse = metaverseConnectionManager.get(instanceId);
+    if (!metaverse) return [];
+
+    // Bot agent is only available in metaverse_connected state
+    const instance = viewerManager.getInstance(instanceId);
+    if (instance && instance.connectionState !== 'metaverse_connected') return [];
+
+    const bot = metaverse.getBot();
+    if (!bot) return [];
+
+    try {
+      const landmarkFolderUUID = bot.agent.inventory.findFolderForType(FolderType.Landmark);
+      if (!landmarkFolderUUID || landmarkFolderUUID.isZero()) return [];
+
+      const skeleton = bot.agent.inventory.main.skeleton;
+      const landmarkFolder = skeleton.get(landmarkFolderUUID.toString());
+      if (!landmarkFolder) return [];
+
+      await landmarkFolder.populate(false);
+
+      // Collect landmark items from folder and all subfolders
+      const allFolders = [landmarkFolder, ...landmarkFolder.getChildFoldersRecursive()];
+      const landmarkItems: any[] = [];
+      for (const folder of allFolders) {
+        if (folder !== landmarkFolder) {
+          try { await folder.populate(false); } catch { continue; }
+        }
+        for (const item of folder.items) {
+          if (item.type === AssetType.Landmark) {
+            landmarkItems.push(item);
+          }
+        }
+      }
+
+      // Download and parse landmark assets in parallel
+      const downloadResults = await Promise.allSettled(
+        landmarkItems.map(async (item) => {
+          const assetData = await bot.clientCommands.asset.downloadAsset(AssetType.Landmark, item.assetID);
+          const p = parseLandmarkAsset(assetData);
+          if (!p) throw new Error('parse failed');
+          return { name: item.name as string, ...p };
+        })
+      );
+      const parsed = downloadResults
+        .filter((r): r is PromiseFulfilledResult<{ name: string; regionId: string; localX: number; localY: number; localZ: number }> => r.status === 'fulfilled')
+        .map(r => r.value);
+
+      // Resolve unique region_ids to grid coordinates (cached, parallel)
+      const now = Date.now();
+      const uniqueRegionIds = [...new Set(parsed.map(p => p.regionId))];
+      const uncached = uniqueRegionIds.filter(id => {
+        const c = regionHandleCache.get(id);
+        return !c || (now - c.ts) > REGION_CACHE_TTL;
+      });
+
+      const handleResults = await Promise.allSettled(
+        uncached.map(async (regionId) => {
+          const handle = await bot.clientCommands.region.getRegionHandle(new NMUUID(regionId));
+          const gridX = Math.floor((handle.high >>> 0) / 256);
+          const gridY = Math.floor((handle.low >>> 0) / 256);
+          regionHandleCache.set(regionId, { gridX, gridY, ts: Date.now() });
+        })
+      );
+      for (let i = 0; i < uncached.length; i++) {
+        if (handleResults[i].status === 'rejected') {
+          console.warn(`[Landmarks] Failed to resolve region ${uncached[i]}`);
+        }
+      }
+
+      // Build results
+      const results: LandmarkInfo[] = [];
+      for (const p of parsed) {
+        const cached = regionHandleCache.get(p.regionId);
+        if (cached) {
+          results.push({
+            name: p.name,
+            gridX: cached.gridX,
+            gridY: cached.gridY,
+            localX: p.localX,
+            localY: p.localY,
+            localZ: p.localZ,
+          });
+        }
+      }
+
+      results.sort((a, b) => a.name.localeCompare(b.name));
+      return results;
+    } catch (err: any) {
+      console.error('[Landmarks] Failed to fetch landmarks:', err.message);
+      return [];
+    }
   });
 
   // ── World map position updates ───────────────────────────

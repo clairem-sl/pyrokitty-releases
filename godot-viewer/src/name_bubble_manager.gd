@@ -182,7 +182,7 @@ func _create_bubble(avatar_id: String) -> void:
 	name_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	name_label.no_depth_test = true  # Always visible through geometry
 	name_label.fixed_size = false
-	name_label.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	name_label.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	name_label.alpha_antialiasing_mode = BaseMaterial3D.ALPHA_ANTIALIASING_ALPHA_TO_COVERAGE
 	name_label.alpha_cut = Label3D.ALPHA_CUT_DISABLED
 	name_label.position = Vector3(0, 0, -0.001)  # Slightly in front of background
@@ -202,7 +202,7 @@ func _create_bubble(avatar_id: String) -> void:
 	chat_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	chat_label.no_depth_test = true
 	chat_label.fixed_size = false
-	chat_label.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	chat_label.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	chat_label.alpha_antialiasing_mode = BaseMaterial3D.ALPHA_ANTIALIASING_ALPHA_TO_COVERAGE
 	chat_label.alpha_cut = Label3D.ALPHA_CUT_DISABLED
 	chat_label.position = Vector3(0, -0.02, -0.001)  # Below name, small gap
@@ -223,7 +223,7 @@ func _create_bubble(avatar_id: String) -> void:
 	typing_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	typing_label.no_depth_test = true
 	typing_label.fixed_size = false
-	typing_label.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	typing_label.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	typing_label.alpha_antialiasing_mode = BaseMaterial3D.ALPHA_ANTIALIASING_ALPHA_TO_COVERAGE
 	typing_label.alpha_cut = Label3D.ALPHA_CUT_DISABLED
 	typing_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

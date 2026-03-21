@@ -254,3 +254,92 @@ html, body, #root {
   margin-left: auto;
   white-space: nowrap;
 }
+
+/* Landmark panel (bottom-right corner) */
+.lm-panel {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  background: rgba(20, 20, 40, 0.92);
+  border: 1px solid rgba(120, 160, 255, 0.3);
+  border-radius: 6px;
+  padding: 6px 0;
+  min-width: 160px;
+  max-width: 260px;
+  z-index: 1000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  display: flex;
+  flex-direction: column;
+  max-height: 50vh;
+}
+
+.lm-panel-title {
+  font-size: 10px;
+  color: #8899bb;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 0 10px 4px;
+  border-bottom: 1px solid rgba(120, 160, 255, 0.15);
+  margin-bottom: 2px;
+}
+
+.lm-loading {
+  padding: 8px 10px;
+  color: #667799;
+  font-size: 11px;
+}
+
+.lm-filter {
+  margin: 4px 8px;
+  padding: 3px 6px;
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 3px;
+  color: #eaeaea;
+  font-size: 11px;
+  outline: none;
+}
+
+.lm-filter:focus {
+  border-color: rgba(120, 160, 255, 0.5);
+}
+
+.lm-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.lm-item {
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+  user-select: none;
+}
+
+.lm-item:hover {
+  background: rgba(120, 160, 255, 0.1);
+}
+
+.lm-item-name {
+  color: #e0e8ff;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+/* Landmark pin on map */
+.lm-pin-icon {
+  background: none !important;
+  border: none !important;
+}
+
+.lm-pin {
+  width: 14px;
+  height: 14px;
+  background: #ffca28;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(255, 202, 40, 0.7), 0 0 12px rgba(255, 202, 40, 0.3);
+}

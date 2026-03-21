@@ -535,10 +535,13 @@ func apply_face_materials(rsi, obj_uuid: String, faces: Array) -> void:
 		# Check if albedo is cached (minimum requirement to apply any material)
 		var albedo_cached: bool = sm.texture_cache.has(texture_id)
 
+		# Hollow prim inner face (SL face 2): draw before outer faces so
+		# alpha blending is back-to-front when viewing through outer shell.
+		var render_pri: int = -1 if face_idx == 2 and color[3] < 1.0 else 0
 		var mat: Material
 		if albedo_cached:
 			mat = _get_or_create_material(
-				texture_id, color, full_bright, double_sided, uv_info, alpha_mode, alpha_cutoff, pbr, mapping_type)
+				texture_id, color, full_bright, double_sided, uv_info, alpha_mode, alpha_cutoff, pbr, mapping_type, render_pri)
 		else:
 			mat = _make_placeholder_material(color, full_bright, double_sided)
 		rsi.set_surface_material(face_idx, mat)
@@ -568,7 +571,7 @@ func _get_double_sided_shader(shader: Shader) -> Shader:
 	return ds
 
 
-func _get_or_create_material(texture_id: String, color: Array, full_bright: bool, double_sided: bool, uv_info: Dictionary = {}, alpha_mode: int = -1, alpha_cutoff: float = 0.5, pbr: Dictionary = {}, mapping_type: int = 0) -> Material:
+func _get_or_create_material(texture_id: String, color: Array, full_bright: bool, double_sided: bool, uv_info: Dictionary = {}, alpha_mode: int = -1, alpha_cutoff: float = 0.5, pbr: Dictionary = {}, mapping_type: int = 0, render_priority: int = 0) -> Material:
 	_material_lookups += 1
 
 	# Resolve effective alpha: promote known-opaque textures to mode 0 (fully opaque)
@@ -622,7 +625,8 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 			metallic_factor, roughness_factor,
 			emissive_factor[0], emissive_factor[1], emissive_factor[2]]
 	var map_key := "m%d" % mapping_type if mapping_type != 0 else ""
-	var key := "%s_%s_%s_%s_%s_%s%s%s" % [texture_id, color_hex, fb_str, ds_str, uv_key, alpha_key, pbr_key, map_key]
+	var pri_key := "p%d" % render_priority if render_priority != 0 else ""
+	var key := "%s_%s_%s_%s_%s_%s%s%s%s" % [texture_id, color_hex, fb_str, ds_str, uv_key, alpha_key, pbr_key, map_key, pri_key]
 
 	if sm.material_cache.has(key):
 		return sm.material_cache[key]
@@ -651,6 +655,8 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 				mat.set_shader_parameter("alpha_scissor_threshold", alpha_cutoff)
 			elif resolved_mode == -1:
 				mat.set_shader_parameter("alpha_scissor_threshold", 0.5)
+		if render_priority != 0:
+			mat.render_priority = render_priority
 		sm.material_cache[key] = mat
 		return mat
 
@@ -677,6 +683,8 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 				smat.set_shader_parameter("alpha_scissor_threshold", alpha_cutoff)
 			elif resolved_mode == -1:
 				smat.set_shader_parameter("alpha_scissor_threshold", 0.5)
+		if render_priority != 0:
+			smat.render_priority = render_priority
 		sm.material_cache[key] = smat
 		return smat
 
@@ -756,6 +764,8 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 		mat.metallic = metallic_factor
 		mat.roughness = roughness_factor
 
+	if render_priority != 0:
+		mat.render_priority = render_priority
 	sm.material_cache[key] = mat
 	return mat
 

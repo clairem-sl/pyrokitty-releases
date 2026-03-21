@@ -165,6 +165,9 @@ func _ready() -> void:
 
 	if not _vr_mode and camera_ctrl:
 		_active_camera = camera_ctrl
+		# TAA: temporal anti-aliasing smooths jagged edges, specular shimmer,
+		# and thin-geometry sparkle (leaves, wires, fences) across frames.
+		get_viewport().use_taa = true
 
 	tcp_server = TCPServer.new()
 	var err := tcp_server.listen(ws_port, "127.0.0.1")
