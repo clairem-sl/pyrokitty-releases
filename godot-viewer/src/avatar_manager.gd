@@ -126,7 +126,6 @@ func handle_avatar_create(msg: Dictionary) -> void:
 			})
 			print("[AvatarSit] Deferred: avatar=%s waiting for seat uuid=%s" % [avatar_id.substr(0, 8), seat_uuid.substr(0, 8)])
 
-	print("[AvatarHeight] raw_sl_pos=%s godot_pos=%s seat=%s" % [pos, godot_pos, seat_uuid.substr(0, 8)])
 	rsi.pos = godot_pos
 	rsi.rot = godot_rot
 
@@ -155,9 +154,7 @@ func handle_avatar_create(msg: Dictionary) -> void:
 	_crumb("avatar_create id=%s step=apply_shape" % avatar_id.substr(0, 8))
 	# Apply pending shape if AvatarAppearance arrived before avatar_create
 	if _avatar_shapes.has(avatar_id):
-		print("[AvatarShape] Applying pending shape for %s at avatar_create" % avatar_id.substr(0, 8))
 		_apply_shape_to_skeleton(shared_skel, _avatar_shapes[avatar_id], avatar_id)
-		_log_bone_rests(shared_skel, avatar_id, "after_shape")
 		# Body size offset + hover (hover from VisualParam 11001, byte 252)
 		# TODO: Firestorm skips hover when sitting (isSitting || sit_ground_constrained).
 		# We need proper sit state tracking before gating this.
@@ -190,6 +187,10 @@ func handle_avatar_create(msg: Dictionary) -> void:
 	# Register ALL descendants (children, grandchildren, etc.) as animesh children.
 	# Handles attachment linksets where child prims also need skeleton rigging.
 	sm.object_mgr._register_animesh_descendants(avatar_id, avatar_id)
+
+	# Create name bubble above head
+	var display_name: String = msg.get("name", "")
+	sm.name_bubble_mgr.on_avatar_created(avatar_id, display_name)
 
 	_crumb("avatar_create id=%s step=DONE" % avatar_id.substr(0, 8))
 	if avatar_id == sm.self_avatar_id:
@@ -299,6 +300,7 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 		_avatar_shapes.erase(avatar_id)
 		_avatar_volume_morphs.erase(avatar_id)
 		_avatar_hover_heights.erase(avatar_id)
+		sm.name_bubble_mgr.on_avatar_killed(avatar_id)
 
 
 # ─── Avatar Shape ─────────────────────────────────────
@@ -326,9 +328,7 @@ func handle_avatar_shape(msg: Dictionary) -> void:
 		return
 
 	_apply_shape_to_skeleton(shared_skel, bones, avatar_id)
-	_log_bone_rests(shared_skel, avatar_id, "after_shape")
 	_reapply_joint_overrides(avatar_id, shared_skel, avatar_id)
-	_log_bone_rests(shared_skel, avatar_id, "after_reapply_overrides")
 
 	# Body size offset (Firestorm: root_pos.Z -= 0.5*bodyH - pelvisToFoot) + hover
 	# TODO: Firestorm skips hover when sitting (isSitting || sit_ground_constrained).
@@ -465,27 +465,3 @@ func _reapply_joint_overrides(root_uuid: String, shared_skel: Skeleton3D, avatar
 			sm.animation_mgr._apply_joint_overrides(glb_skel, shared_skel, override_joints, mesh_id)
 		scene.queue_free()
 
-
-## Debug: log all bones whose rest differs from XML baseline
-func _log_bone_rests(skel: Skeleton3D, avatar_id: String, stage: String) -> void:
-	var xml_bones: Array = sm.skeleton_builder.get_bone_data()
-	var xml_by_name: Dictionary = {}
-	for bd: Dictionary in xml_bones:
-		var sp: Vector3 = bd["pos"]
-		xml_by_name[bd["name"]] = Vector3(sp.x, sp.z, -sp.y)  # SL → Godot
-
-	var modified: int = 0
-	for bi in range(skel.get_bone_count()):
-		var bname: String = skel.get_bone_name(bi)
-		var r: Transform3D = skel.get_bone_rest(bi)
-		var xml_origin: Vector3 = xml_by_name.get(bname, r.origin)
-		var origin_diff: float = (r.origin - xml_origin).length()
-		var basis_is_identity: bool = r.basis.is_equal_approx(Basis.IDENTITY)
-		if origin_diff > 0.0001 or not basis_is_identity:
-			modified += 1
-			print("[AvatarShape] %s %s %s rest=(%s, %s, %s) xml=(%s, %s, %s) delta=%.4f basis_id=%s" % [
-				avatar_id.substr(0, 8), stage, bname,
-				"%.4f" % r.origin.x, "%.4f" % r.origin.y, "%.4f" % r.origin.z,
-				"%.4f" % xml_origin.x, "%.4f" % xml_origin.y, "%.4f" % xml_origin.z,
-				origin_diff, str(basis_is_identity)])
-	print("[AvatarShape] %s %s: %d bones modified from XML baseline" % [avatar_id.substr(0, 8), stage, modified])

@@ -32,6 +32,7 @@ export class GodotUpdateCoalescer {
   private objectsWithLights = new Set<string>();             // object UUIDs that have lights
   private objectAnimeshState = new Map<string, boolean>();   // object UUID → animesh flag
   private _debugFlushSeq = 0;
+  private terseGuardSkips = 0;
 
   constructor(deps: UpdateCoalescerDeps) {
     this.deps = deps;
@@ -197,7 +198,7 @@ export class GodotUpdateCoalescer {
       const existing = this.updateBuffer.get(uid);
       const terseHasMotion = existing?.velocity || this.recentTerse.has(uid);
       if (terseHasMotion && pos) {
-        console.log(`[ObjUpdate] FULL SKIP POS uuid=${uid.slice(0, 8)} seq=${seq} (terse guard)`);
+        this.terseGuardSkips = (this.terseGuardSkips || 0) + 1;
       }
       this.updateBuffer.set(uid, {
         ...(existing || {}),
@@ -237,6 +238,10 @@ export class GodotUpdateCoalescer {
     }
     this.updateBuffer.clear();
     this.recentTerse.clear();
+    if (this.terseGuardSkips > 0) {
+      console.log(`[ObjUpdate] terse guard skipped position for ${this.terseGuardSkips} objects`);
+      this.terseGuardSkips = 0;
+    }
 
     if (physics.length > 0) {
       this.deps.send({ type: 'object_update_physics', objects: physics });

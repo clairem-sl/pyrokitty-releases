@@ -140,6 +140,10 @@ godot-viewer/cache/
 mobile_decompile/
 .godot/
 
+# Voice sidecar test project build artifacts
+electron-ui/voice/tests/bin/
+electron-ui/voice/tests/obj/
+
 # PyroKitty build artifacts
 dist/
 
@@ -156,6 +160,7 @@ roundtrip-glb.ts
 electron-ui/scripts/dump-*
 electron-ui/scripts/inspect-animesh-joints.ts
 electron-ui/scripts/test-orphan-parenting.ts
+electron-ui/scripts/decode-sculpt-test.ts
+electron-ui/scripts/test-object-loading.sh
 Hippolyzer
-electron-ui/scripts/*
 TODO*.md

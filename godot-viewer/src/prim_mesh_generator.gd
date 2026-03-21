@@ -95,7 +95,7 @@ func _generate(s: Dictionary) -> ArrayMesh:
 	var profile_type: int = profile_curve & PROFILE_MASK
 	var hole_type: int = profile_curve & HOLE_MASK
 	var is_path_line: bool = (path_curve & 0xf0) == PATH_LINE
-	var path_open: bool = is_path_line  # linear paths are always open
+	var path_open: bool = is_path_line or path_begin > 0.0 or path_end < 1.0 or absf(path_skew) > 0.001
 
 	# Generate profile (2D cross-section)
 	var profile := _generate_profile(profile_type, hole_type, profile_begin, profile_end, profile_hollow, path_open)
@@ -136,7 +136,8 @@ func _generate(s: Dictionary) -> ArrayMesh:
 		else:
 			_build_side(st, mesh_verts, profile, path, face, path_len, profile_len)
 
-		st.generate_normals()
+		if face.is_cap or face.is_flat:
+			st.generate_normals()
 		st.commit(array_mesh)
 
 	# Fallback: if no faces were generated, create a simple box
@@ -173,9 +174,10 @@ func _generate_profile(profile_type: int, hole_type: int, p_begin: float, p_end:
 				_add_cap_face(result, true)  # PATH_BEGIN cap
 
 			# Add individual side faces for box
-			for i in range(floori(p_begin * 4.0), floori(p_end * 4.0 + 0.999)):
+			var _box_side_offset := floori(p_begin * 4.0)
+			for i in range(_box_side_offset, floori(p_end * 4.0 + 0.999)):
 				var face := ProfileFace.new()
-				face.index = i * 1  # split=0 simplification
+				face.index = i - _box_side_offset
 				face.count = 2
 				face.face_id = 5 + i  # LL_FACE_OUTER_SIDE_0 << i
 				face.is_flat = true
@@ -197,9 +199,10 @@ func _generate_profile(profile_type: int, hole_type: int, p_begin: float, p_end:
 			if path_open:
 				_add_cap_face(result, true)
 
-			for i in range(floori(p_begin * 3.0), floori(p_end * 3.0 + 0.999)):
+			var _tri_side_offset := floori(p_begin * 3.0)
+			for i in range(_tri_side_offset, floori(p_end * 3.0 + 0.999)):
 				var face := ProfileFace.new()
-				face.index = i
+				face.index = i - _tri_side_offset
 				face.count = 2
 				face.face_id = 5 + i
 				face.is_flat = true
@@ -261,10 +264,10 @@ func _generate_profile(profile_type: int, hole_type: int, p_begin: float, p_end:
 	if path_open and result.faces.size() > 0:
 		_add_cap_face(result, false)  # PATH_END cap
 
-	if result.is_open and hollow <= 0:
+	if result.is_open:
 		# Profile begin face
 		var f_begin := ProfileFace.new()
-		f_begin.index = 0
+		f_begin.index = result.points.size() - 1
 		f_begin.count = 2
 		f_begin.face_id = 3  # LL_FACE_PROFILE_BEGIN
 		f_begin.is_flat = true
@@ -361,9 +364,10 @@ func _add_hollow(result: ProfileResult, hole_type: int, hollow: float,
 		_:  # HOLE_SAME
 			inner_sides = default_sides
 
-	# Generate inner profile
+	# Generate inner profile (pass hollow so _gen_ngon skips the center point —
+	# the center is only needed for non-hollow open profiles' cap fans)
 	var inner := ProfileResult.new()
-	_gen_ngon(inner, inner_sides, inner_offset, -1.0, ang_scale, p_begin, p_end, 0.0)
+	_gen_ngon(inner, inner_sides, inner_offset, -1.0, ang_scale, p_begin, p_end, hollow)
 
 	# Scale by hollow amount and reverse order
 	var inner_pts: Array[Vector3] = []
@@ -550,7 +554,10 @@ func _gen_circular_path(p_begin: float, p_end: float, scale_x: float, scale_y: f
 		# Twist + circle rotation
 		var twist_quat := Quaternion(Vector3(0, 0, 1), lerpf(t_twist_begin, t_twist_end, t_val) * TAU - PI)
 		var circle_quat := Quaternion(Vector3(1, 0, 0), ang)
-		pp.rot = Basis(twist_quat * circle_quat)
+		# Godot quaternion convention: q1*q2 applies q2 first, then q1.
+		# Firestorm (LLQuaternion) is opposite: q1*q2 applies q1 first, then q2.
+		# We want twist first (orient profile), then circle (sweep around path).
+		pp.rot = Basis(circle_quat * twist_quat)
 
 		path.append(pp)
 
@@ -576,6 +583,7 @@ func _build_side(st: SurfaceTool, verts: Array[Vector3], profile: ProfileResult,
 		path: Array, face: ProfileFace, path_len: int, profile_len: int) -> void:
 	var begin_s: int = face.index
 	var num_s: int = face.count
+	var smooth: bool = not face.is_flat
 
 	# For flat faces (box/tri sides), normalize S tex coord per-face.
 	# Matches SL's begin_stex subtraction in LLVolumeFace::createSide (llvolume.cpp:6841,6881).
@@ -619,21 +627,46 @@ func _build_side(st: SurfaceTool, verts: Array[Vector3], profile: ProfileResult,
 			var v01 := _sl_to_godot(verts[i01])
 			var v11 := _sl_to_godot(verts[i11])
 
-			# Triangle 1 (winding reversed for SL→Godot coord flip, V inverted)
-			st.set_uv(Vector2(ss0, 1.0 - tt))
-			st.add_vertex(v00)
-			st.set_uv(Vector2(ss0, 1.0 - tt1))
-			st.add_vertex(v01)
-			st.set_uv(Vector2(ss1, 1.0 - tt1))
-			st.add_vertex(v11)
+			# Compute analytical normals for smooth faces — generate_normals()
+			# fails at sphere poles where all path steps converge to one point,
+			# making every triangle degenerate (zero-length cross products).
+			if smooth:
+				var n00 := _swept_normal(profile, path, si0, t)
+				var n10 := _swept_normal(profile, path, si1, t)
+				var n01 := _swept_normal(profile, path, si0, t + 1)
+				var n11 := _swept_normal(profile, path, si1, t + 1)
 
-			# Triangle 2
-			st.set_uv(Vector2(ss0, 1.0 - tt))
-			st.add_vertex(v00)
-			st.set_uv(Vector2(ss1, 1.0 - tt1))
-			st.add_vertex(v11)
-			st.set_uv(Vector2(ss1, 1.0 - tt))
-			st.add_vertex(v10)
+				# Triangle 1
+				st.set_normal(n00); st.set_uv(Vector2(ss0, 1.0 - tt))
+				st.add_vertex(v00)
+				st.set_normal(n01); st.set_uv(Vector2(ss0, 1.0 - tt1))
+				st.add_vertex(v01)
+				st.set_normal(n11); st.set_uv(Vector2(ss1, 1.0 - tt1))
+				st.add_vertex(v11)
+
+				# Triangle 2
+				st.set_normal(n00); st.set_uv(Vector2(ss0, 1.0 - tt))
+				st.add_vertex(v00)
+				st.set_normal(n11); st.set_uv(Vector2(ss1, 1.0 - tt1))
+				st.add_vertex(v11)
+				st.set_normal(n10); st.set_uv(Vector2(ss1, 1.0 - tt))
+				st.add_vertex(v10)
+			else:
+				# Triangle 1 (winding reversed for SL→Godot coord flip, V inverted)
+				st.set_uv(Vector2(ss0, 1.0 - tt))
+				st.add_vertex(v00)
+				st.set_uv(Vector2(ss0, 1.0 - tt1))
+				st.add_vertex(v01)
+				st.set_uv(Vector2(ss1, 1.0 - tt1))
+				st.add_vertex(v11)
+
+				# Triangle 2
+				st.set_uv(Vector2(ss0, 1.0 - tt))
+				st.add_vertex(v00)
+				st.set_uv(Vector2(ss1, 1.0 - tt1))
+				st.add_vertex(v11)
+				st.set_uv(Vector2(ss1, 1.0 - tt))
+				st.add_vertex(v10)
 
 
 func _build_cap(st: SurfaceTool, verts: Array[Vector3], profile: ProfileResult,
@@ -849,6 +882,24 @@ func _cap_uv_from_profile(p: Vector3, is_top: bool) -> Vector2:
 		return Vector2(p.x + 0.5, 0.5 - p.y)
 	else:
 		return Vector2(p.x + 0.5, p.y + 0.5)
+
+
+func _swept_normal(profile: ProfileResult, path: Array, si: int, ti: int) -> Vector3:
+	# Analytical normal for a profile point swept along a path.
+	# The profile's radial outward direction, corrected for path scaling
+	# (inverse-transpose), rotated by path rotation, then SL→Godot.
+	var p := profile.points[si] if si < profile.points.size() else Vector3.ZERO
+	var pn := Vector3(p.x, p.y, 0.0)
+	if pn.length_squared() < 0.0001:
+		pn = Vector3(0, 1, 0)  # fallback for center/zero points
+	else:
+		pn = pn.normalized()
+	var pp = path[ti]
+	# Inverse-transpose of diagonal scale: n' = (nx/sx, ny/sy, 0)
+	var sx: float = pp.scale.x if absf(pp.scale.x) > 0.0001 else 1.0
+	var sy: float = pp.scale.y if absf(pp.scale.y) > 0.0001 else 1.0
+	var scaled_n := Vector3(pn.x / sx, pn.y / sy, 0.0).normalized()
+	return _sl_to_godot(pp.rot * scaled_n)
 
 
 # ─── Utilities ────────────────────────────────────────

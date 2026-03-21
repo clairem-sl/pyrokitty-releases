@@ -474,6 +474,10 @@ func _handle_message(text: String) -> void:
 				camera_ctrl.set_sitting(msg.get("sitting", false))
 		"avatar_shape":
 			scene_manager.handle_avatar_shape(msg)
+		"avatar_chat":
+			scene_manager.handle_avatar_chat(msg)
+		"avatar_typing":
+			scene_manager.handle_avatar_typing(msg)
 		"settings":
 			scene_manager.handle_settings(msg)
 		"electron_stats":

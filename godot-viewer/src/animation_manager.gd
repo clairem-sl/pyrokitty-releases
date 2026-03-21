@@ -685,9 +685,16 @@ func _thread_evaluate_root(root_id: String) -> void:
 	# Get persistent positions for global override computation
 	var persistent_pos: Dictionary = eval_st.get("persistent_pos", {})
 
-	# Compute global pose overrides
+	# Compute global pose overrides for ALL bones (not just active).
+	# Godot's internal bone chain doesn't account for CV rest rotations or
+	# shape deformation, so we must override every bone explicitly.
+	var all_bones := PackedInt32Array()
+	var bone_count: int = int(meta["count"])
+	all_bones.resize(bone_count)
+	for i in range(bone_count):
+		all_bones[i] = i
 	var global_overrides: Dictionary = {}
-	_thread_global_overrides(meta, shape, pose_rotations, persistent_pos, global_overrides, active_bones)
+	_thread_global_overrides(meta, shape, pose_rotations, persistent_pos, global_overrides, all_bones)
 
 	# Write to slot
 	_slots_lock.lock()
@@ -1059,11 +1066,6 @@ func _update_bone_attachments(root_id: String, shared_skel: Skeleton3D) -> void:
 
 		var bone_pos: Vector3 = bone_global_xf.origin
 		var bone_rot: Quaternion = bone_global_xf.basis.orthonormalized().get_rotation_quaternion()
-
-		# Debug: log once per child
-		if not sm._attach_bone_logged.has(child_id):
-			sm._attach_bone_logged[child_id] = true
-			print("[AttachBone] child=%s bone=%s ap=%d root=%s" % [child_id.substr(0, 8), bone_name, sm.attach_point_id.get(child_id, 0), root_id.substr(0, 8)])
 
 		# Include skeleton's local offset (hover height) when computing world position
 		var skel_offset: Vector3 = shared_skel.position

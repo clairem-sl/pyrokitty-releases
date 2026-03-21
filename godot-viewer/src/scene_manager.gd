@@ -16,6 +16,7 @@ const AssetPipelineScript = preload("res://src/asset_pipeline.gd")
 const TerrainEnvironmentScript = preload("res://src/terrain_environment.gd")
 const ObjectPickerScript = preload("res://src/object_picker.gd")
 const SkeletonBuilderScript = preload("res://src/skeleton_builder.gd")
+const NameBubbleManagerScript = preload("res://src/name_bubble_manager.gd")
 
 signal self_avatar_moved(pos: Vector3)
 signal object_properties_received(uuid: String, name: String, description: String)
@@ -131,7 +132,7 @@ var animesh_mesh_instances: Dictionary = {} # uuid (String) -> MeshInstance3D (f
 var attach_bone: Dictionary = {}            # uuid (String) -> bone name (String) for objects attached to avatar bones
 var attach_point_id: Dictionary = {}        # uuid (String) -> attachmentPointId (int)
 var bone_global_overrides: Dictionary = {}  # root uuid (String) -> {bone_name -> Vector3} (global rest positions from meshes)
-var _attach_bone_logged: Dictionary = {}    # uuid (String) -> true (debug: one-time log flag)
+
 
 # Skeleton builder — parses avatar_skeleton.xml once, creates shared skeletons
 var skeleton_builder: RefCounted
@@ -171,6 +172,7 @@ var light_mgr: RefCounted          # LightManager
 var asset_pipeline: RefCounted     # AssetPipeline
 var terrain_env: RefCounted        # TerrainEnvironment
 var object_picker: RefCounted      # ObjectPicker
+var name_bubble_mgr: RefCounted    # NameBubbleManager
 
 
 ## Erase all animesh-related dictionary entries for a given root uuid.
@@ -218,9 +220,9 @@ func _ready() -> void:
 	# Prim geometry generator
 	prim_generator = PrimMeshGeneratorScript.new()
 
-	# Skeleton builder — parse avatar_skeleton.xml once
+	# Skeleton builder — parse avatar_skeleton.json once
 	skeleton_builder = SkeletonBuilderScript.new()
-	skeleton_builder.load_from_xml("res://data/avatar_skeleton.xml")
+	skeleton_builder.load_from_json("res://data/avatar_skeleton.json")
 
 	# Initialize sub-managers
 	object_mgr = ObjectManagerScript.new(self)
@@ -231,6 +233,7 @@ func _ready() -> void:
 	asset_pipeline = AssetPipelineScript.new(self)
 	terrain_env = TerrainEnvironmentScript.new(self)
 	object_picker = ObjectPickerScript.new(self)
+	name_bubble_mgr = NameBubbleManagerScript.new(self)
 
 	asset_pipeline.start_threads()
 
@@ -268,6 +271,9 @@ func _process(delta: float) -> void:
 	if _evict_timer >= EVICT_INTERVAL:
 		_evict_timer = 0.0
 		asset_pipeline.evict_unused_assets()
+
+	# Update name bubbles (position at head bone, fade chat)
+	name_bubble_mgr.process(delta, get_viewport().get_camera_3d())
 
 	# Submit queued mesh work to WorkerThreadPool + finalize textures/meshes
 	asset_pipeline.finalize_frame(delta, _vr_mode, _target_frame_ms)
@@ -345,7 +351,7 @@ func handle_region_change() -> void:
 	region_offsets.clear()
 	attach_bone.clear()
 	attach_point_id.clear()
-	_attach_bone_logged.clear()
+
 
 	# Notify animation thread to clear all state
 	animation_mgr.push_region_change()
@@ -398,6 +404,16 @@ func handle_avatar_update_batch(msg: Dictionary) -> void:
 
 func handle_avatar_kill(msg: Dictionary) -> void:
 	avatar_mgr.handle_avatar_kill(msg)
+
+func handle_avatar_chat(msg: Dictionary) -> void:
+	var avatar_id: String = msg.get("avatarId", "")
+	var message: String = msg.get("message", "")
+	if not avatar_id.is_empty() and not message.is_empty():
+		name_bubble_mgr.on_avatar_chat(avatar_id, message)
+
+func handle_avatar_typing(msg: Dictionary) -> void:
+	var avatar_id: String = msg.get("avatarId", "")
+	name_bubble_mgr.on_avatar_typing(avatar_id, msg.get("typing", false))
 
 # Self avatar
 func set_world_origin(origin_x: float, origin_y: float) -> void:

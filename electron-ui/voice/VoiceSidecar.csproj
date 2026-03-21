@@ -8,6 +8,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="VoiceSidecar.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="tests\**" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="LibreMetaverse" Version="2.5.10.153" />
     <PackageReference Include="LibreMetaverse.StructuredData" Version="2.5.10.153" />
   </ItemGroup>

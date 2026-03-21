@@ -20,6 +20,8 @@ import { EventEmitter } from 'events';
 import type { Bot } from '../../../node-metaverse/dist/lib';
 import type { Region } from '../../../node-metaverse/dist/lib/classes/Region';
 import { Message } from '../../../node-metaverse/dist/lib/enums/Message';
+import { ChatType } from '../../../node-metaverse/dist/lib/enums/ChatType';
+import { ChatSourceType } from '../../../node-metaverse/dist/lib/enums/ChatSourceType';
 import type { SceneManager, ViewerAdapter } from '../network/scene-manager';
 import { MeshFetchQueue } from '../assets/mesh-fetch-queue';
 import { TextureFetchQueue } from '../assets/texture-fetch-queue';
@@ -334,17 +336,11 @@ export class GodotBridge extends EventEmitter {
       if (jointOverrides && jointOverrides.length > 0) {
         console.log(`[MeshReady] meshId=${meshUuid.slice(0, 8)} jointOverrides=${jointOverrides.length}`);
       }
-      if (this.objectSender.selfMeshIds.has(meshUuid)) {
-        console.log(`[SelfAvatar] Mesh ready: meshId=${meshUuid.slice(0, 8)} isRigged=${isRigged} joints=${jointNames?.length ?? 0} overrides=${jointOverrides?.length ?? 0}`);
-      }
       this.send(msg);
     });
 
     this.textureFetchQueue = new TextureFetchQueue(this.bot, (textureUuid, cachePath) => {
       const fwdPath = cachePath.replace(/\\/g, '/');
-      if (this.objectSender.selfTextureIds.has(textureUuid)) {
-        console.log(`[SelfAvatar] Texture ready: textureId=${textureUuid.slice(0, 8)}`);
-      }
       this.send({ type: 'texture_ready', textureId: textureUuid, path: fwdPath });
     });
 
@@ -358,7 +354,6 @@ export class GodotBridge extends EventEmitter {
     });
 
     this.animationFetchQueue = new AnimationFetchQueue(this.bot, (animUuid, data) => {
-      console.log(`[Animesh] animation_ready: ${animUuid.slice(0, 8)} (${data.joints.length} joints, ${data.duration.toFixed(1)}s, loop=${data.loop}, pri=${data.priority ?? '?'})`);
       this.animationManager.checkAnimBatchReady(animUuid);
     });
 
@@ -637,6 +632,24 @@ export class GodotBridge extends EventEmitter {
       console.log('[GodotBridge] Self avatar stood up (ParentID → 0)');
     });
     this.subscriptions.push(selfStandSub);
+
+    // Nearby chat → Godot (name bubbles + typing indicators)
+    const chatSub = events.onNearbyChat.subscribe((event) => {
+      try {
+        const fromId = event.from?.toString() || '';
+        if (!fromId || !this.trackedAvatars.has(fromId)) return;
+
+        if (event.chatType === ChatType.StartTyping) {
+          this.send({ type: 'avatar_typing', avatarId: fromId, typing: true });
+        } else if (event.chatType === ChatType.StopTyping) {
+          this.send({ type: 'avatar_typing', avatarId: fromId, typing: false });
+        } else if (event.sourceType === ChatSourceType.Agent && event.message) {
+          // Normal/whisper/shout chat from an agent
+          this.send({ type: 'avatar_chat', avatarId: fromId, message: event.message });
+        }
+      } catch { /* ignore malformed chat events */ }
+    });
+    this.subscriptions.push(chatSub);
 
     // Kill sweep + deferred promotion: every 2s
     let memLogCounter = 0;

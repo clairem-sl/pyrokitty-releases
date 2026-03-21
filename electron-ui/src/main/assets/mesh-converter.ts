@@ -22,7 +22,7 @@ import type { LLSkin } from '../../../node-metaverse/dist/lib/classes/public/int
 
 const LOD_PREFERENCE = ['high_lod', 'medium_lod', 'low_lod', 'lowest_lod'];
 
-// --- Avatar skeleton hierarchy (parsed from avatar_skeleton.xml) ---
+// --- Avatar skeleton hierarchy (from shared/avatar_skeleton.json) ---
 
 interface SkeletonJoint {
   name: string;
@@ -32,6 +32,7 @@ interface SkeletonJoint {
   scale: [number, number, number];  // local scale in SL coords
   children: string[];
   isCollisionVolume: boolean;
+  aliases?: string[];               // bone aliases from avatar_skeleton.xml
 }
 
 let skeletonCache: Map<string, SkeletonJoint> | null = null;
@@ -39,23 +40,6 @@ let skeletonCache: Map<string, SkeletonJoint> | null = null;
 let attachmentPointCache: Map<string, string> | null = null;
 // Joint alias map: alternative name → canonical name (from XML aliases + attachment points + case fallback)
 let jointAliasCache: Map<string, string> | null = null;
-
-function findCharacterFile(filename: string): string {
-  const candidates = [
-    // Deployed: extraResources/viewer/character/
-    ...(process.resourcesPath ? [path.join(process.resourcesPath, 'viewer', 'character', filename)] : []),
-    // Linux fallback: voice sidecar ships linden character files
-    ...(process.resourcesPath ? [path.join(process.resourcesPath, 'voice', 'linden', 'character', filename)] : []),
-    // Dev: relative to dist/main/
-    path.join(__dirname, '..', '..', 'viewer', 'character', filename),
-    path.join(__dirname, '..', '..', '..', 'viewer', 'character', filename),
-    path.join(__dirname, '..', '..', '..', '..', 'indra', 'newview', 'character', filename),
-  ];
-  for (const p of candidates) {
-    try { return fs.readFileSync(p, 'utf8'); } catch { /* try next */ }
-  }
-  return '';
-}
 
 function findSharedFile(filename: string): string {
   const candidates = [
@@ -72,14 +56,14 @@ function findSharedFile(filename: string): string {
 export function getSkeletonHierarchy(): Map<string, SkeletonJoint> {
   if (skeletonCache) return skeletonCache;
 
-  const xml = findCharacterFile('avatar_skeleton.xml');
-  if (!xml) {
-    console.warn('[mesh-converter] avatar_skeleton.xml not found, skeleton hierarchy unavailable');
+  const json = findSharedFile('avatar_skeleton.json');
+  if (!json) {
+    console.warn('[mesh-converter] avatar_skeleton.json not found, skeleton hierarchy unavailable');
     skeletonCache = new Map();
     return skeletonCache;
   }
 
-  skeletonCache = parseSkeletonXml(xml);
+  skeletonCache = parseSkeletonJson(json);
   console.log(`[mesh-converter] Loaded skeleton hierarchy: ${skeletonCache.size} joints`);
   return skeletonCache;
 }
@@ -93,15 +77,12 @@ function getJointAliasMap(): Map<string, string> {
   if (jointAliasCache) return jointAliasCache;
   jointAliasCache = new Map();
 
-  // 1. Bone aliases from avatar_skeleton.xml
-  const xml = findCharacterFile('avatar_skeleton.xml');
-  if (xml) {
-    const aliasRegex = /<(?:bone|collision_volume)\b[^>]*?\bname="([^"]+)"[^>]*?\baliases="([^"]+)"[^>]*?\/?>/g;
-    let m;
-    while ((m = aliasRegex.exec(xml)) !== null) {
-      const canonicalName = m[1];
-      for (const alias of m[2].split(/\s+/)) {
-        if (alias) jointAliasCache.set(alias, canonicalName);
+  // 1. Bone aliases from avatar_skeleton.json
+  const skeleton = getSkeletonHierarchy();
+  for (const joint of skeleton.values()) {
+    if (joint.aliases) {
+      for (const alias of joint.aliases) {
+        jointAliasCache.set(alias, joint.name);
       }
     }
   }
@@ -120,7 +101,6 @@ function getJointAliasMap(): Map<string, string> {
   // Skip names whose lowercase form matches an attachment point name (e.g.
   // "pelvis" from "PELVIS") — those should remain orphan joints, not alias
   // to the CV bone.
-  const skeleton = getSkeletonHierarchy();
   const attachLower = new Set<string>();
   for (const apName of attachPoints.keys()) {
     attachLower.add(apName.toLowerCase());
@@ -170,65 +150,30 @@ export function getAttachmentPoints(): Map<string, string> {
   return attachmentPointCache;
 }
 
-function parseSkeletonXml(xml: string): Map<string, SkeletonJoint> {
+export function parseSkeletonJson(jsonStr: string): Map<string, SkeletonJoint> {
   const joints = new Map<string, SkeletonJoint>();
-  // Stack-based parser: track parent bone names via nesting depth
-  const parentStack: string[] = [];
+  const entries = JSON.parse(jsonStr) as Array<{
+    name: string; parent: string; pos: number[]; rot: number[];
+    scale: number[]; cv: boolean; aliases?: string[];
+  }>;
 
-  // Match <bone ...> and <collision_volume ...> (opening, may be self-closing) and </bone> (closing)
-  // collision_volume tags are always self-closing children of bone tags.
-  const tagRegex = /<(\/?)(bone|collision_volume)\b([^>]*?)(\/?)>/g;
-  let match;
-  while ((match = tagRegex.exec(xml)) !== null) {
-    const isClosing = match[1] === '/';
-    const tagName = match[2];
-    const attrs = match[3];
-    const isSelfClosing = match[4] === '/';
+  for (const e of entries) {
+    joints.set(e.name, {
+      name: e.name,
+      parent: e.parent || null,
+      pos: [e.pos[0], e.pos[1], e.pos[2]],
+      rot: [e.rot[0], e.rot[1], e.rot[2]],
+      scale: [e.scale[0], e.scale[1], e.scale[2]],
+      children: [],
+      isCollisionVolume: e.cv,
+      aliases: e.aliases,
+    });
+  }
 
-    if (isClosing) {
-      // Only bone tags have closing tags; collision_volume is always self-closing
-      parentStack.pop();
-      continue;
-    }
-
-    const nameMatch = attrs.match(/\bname="([^"]+)"/);
-    const posMatch = attrs.match(/\bpos="([^"]+)"/);
-    const rotMatch = attrs.match(/\brot="([^"]+)"/);
-    if (!nameMatch) continue;
-
-    const name = nameMatch[1];
-    const pos: [number, number, number] = [0, 0, 0];
-    if (posMatch) {
-      const parts = posMatch[1].trim().split(/\s+/).map(Number);
-      if (parts.length >= 3) {
-        pos[0] = parts[0]; pos[1] = parts[1]; pos[2] = parts[2];
-      }
-    }
-    const rot: [number, number, number] = [0, 0, 0];
-    if (rotMatch) {
-      const parts = rotMatch[1].trim().split(/\s+/).map(Number);
-      if (parts.length >= 3) {
-        rot[0] = parts[0]; rot[1] = parts[1]; rot[2] = parts[2];
-      }
-    }
-    const scaleMatch = attrs.match(/\bscale="([^"]+)"/);
-    const scale: [number, number, number] = [1, 1, 1];
-    if (scaleMatch) {
-      const parts = scaleMatch[1].trim().split(/\s+/).map(Number);
-      if (parts.length >= 3) {
-        scale[0] = parts[0]; scale[1] = parts[1]; scale[2] = parts[2];
-      }
-    }
-
-    const parentName = parentStack.length > 0 ? parentStack[parentStack.length - 1] : null;
-    joints.set(name, { name, parent: parentName, pos, rot, scale, children: [], isCollisionVolume: tagName === 'collision_volume' });
-    if (parentName && joints.has(parentName)) {
-      joints.get(parentName)!.children.push(name);
-    }
-
-    // Only bone tags push onto the parent stack (collision_volume is always self-closing)
-    if (!isSelfClosing && tagName === 'bone') {
-      parentStack.push(name);
+  // Build children arrays from parent references
+  for (const joint of joints.values()) {
+    if (joint.parent && joints.has(joint.parent)) {
+      joints.get(joint.parent)!.children.push(joint.name);
     }
   }
   return joints;
@@ -243,7 +188,7 @@ function parseSkeletonXml(xml: string): Map<string, SkeletonJoint> {
 const DEG_TO_RAD = Math.PI / 180;
 
 /** Multiply two column-major 4×4 matrices: result = A * B. */
-function mat4Mul(a: number[], b: number[]): number[] {
+export function mat4Mul(a: number[], b: number[]): number[] {
   const r = new Array(16).fill(0);
   for (let col = 0; col < 4; col++) {
     for (let row = 0; row < 4; row++) {
@@ -256,7 +201,7 @@ function mat4Mul(a: number[], b: number[]): number[] {
 }
 
 /** Invert a column-major 4×4 matrix (general, not just rigid-body). */
-function mat4Inverse(m: number[]): number[] | null {
+export function mat4Inverse(m: number[]): number[] | null {
   // Column-major: m[col*4+row]
   const m00 = m[0], m10 = m[1], m20 = m[2], m30 = m[3];
   const m01 = m[4], m11 = m[5], m21 = m[6], m31 = m[7];
@@ -284,7 +229,7 @@ function mat4Inverse(m: number[]): number[] | null {
   ];
 }
 
-function mat4FromTranslation(tx: number, ty: number, tz: number): number[] {
+export function mat4FromTranslation(tx: number, ty: number, tz: number): number[] {
   return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, tx, ty, tz, 1];
 }
 
@@ -293,7 +238,7 @@ function mat4FromTranslation(tx: number, ty: number, tz: number): number[] {
  * Result is column-major. Matches Python transformations.compose_matrix(scale, angles, translate).
  * M = T * R * S, where R = Rz(az) * Ry(ay) * Rx(ax).
  */
-function composeMatrix(
+export function composeMatrix(
   scale: [number, number, number],
   eulerRad: [number, number, number],
   translate: [number, number, number],
@@ -331,7 +276,7 @@ function composeMatrix(
  * C maps (x,y,z) → (x,z,-y), i.e. a -90° rotation about X.
  * Works on column-major matrices.
  */
-function slToGltfMatrix(m: number[]): number[] {
+export function slToGltfMatrix(m: number[]): number[] {
   // Step 1: Right-multiply by C^(-1): swap columns 1↔2 with negation on new col 2
   const afterCol = [
     m[0], m[1], m[2], m[3],       // col 0 unchanged
@@ -352,16 +297,16 @@ function slToGltfMatrix(m: number[]): number[] {
 }
 
 /** Convert an SL vector to glTF: (x,y,z) → (x,z,-y) */
-function slToGltfVec3(x: number, y: number, z: number): [number, number, number] {
+export function slToGltfVec3(x: number, y: number, z: number): [number, number, number] {
   return [x, z, -y];
 }
 
-function vec3Dist(a: [number, number, number], b: [number, number, number]): number {
+export function vec3Dist(a: [number, number, number], b: [number, number, number]): number {
   const dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-function normalizeVec3(x: number, y: number, z: number): [number, number, number] {
+export function normalizeVec3(x: number, y: number, z: number): [number, number, number] {
   const len = Math.sqrt(x * x + y * y + z * z);
   if (len < 1e-10) return [x, y, z];
   return [x / len, y / len, z / len];
@@ -374,7 +319,7 @@ function normalizeVec3(x: number, y: number, z: number): [number, number, number
  * Blender doesn't handle bone scale/rotation correctly with glTF IBMs, so we move
  * scale+rotation out of the node and bake it into the inverse bind matrices.
  */
-function blenderFixJoint(mat: number[]): { translationOnly: number[]; fixup: number[] } {
+export function blenderFixJoint(mat: number[]): { translationOnly: number[]; fixup: number[] } {
   const tx = mat[12], ty = mat[13], tz = mat[14];
   const translationOnly = mat4FromTranslation(tx, ty, tz);
   const invT = mat4FromTranslation(-tx, -ty, -tz);
@@ -386,7 +331,7 @@ function blenderFixJoint(mat: number[]): { translationOnly: number[]; fixup: num
  * Apply BSM to vertex position (column-vector convention: v' = BSM * v).
  * BSM is column-major from node-metaverse (.all()).
  */
-function applyBSM(
+export function applyBSM(
   px: number, py: number, pz: number, bsm: number[]
 ): [number, number, number] {
   return [
@@ -401,7 +346,7 @@ function applyBSM(
  * For correct normal transformation under non-uniform scale.
  * invT3x3 is row-major 3x3 (9 floats) from computeInvTranspose3x3.
  */
-function applyBSMNormal(
+export function applyBSMNormal(
   nx: number, ny: number, nz: number, invT3x3: number[]
 ): [number, number, number] {
   const ox = invT3x3[0] * nx + invT3x3[1] * ny + invT3x3[2] * nz;
@@ -414,7 +359,7 @@ function applyBSMNormal(
  * Compute the inverse-transpose of the upper 3x3 of a column-major 4x4 matrix.
  * Returns row-major 3x3 (9 floats) for applyBSMNormal.
  */
-function computeInvTranspose3x3(m: number[]): number[] {
+export function computeInvTranspose3x3(m: number[]): number[] {
   // Extract upper 3x3 from column-major (row, col)
   const a = m[0], b = m[4], c = m[8];
   const d = m[1], e = m[5], f = m[9];

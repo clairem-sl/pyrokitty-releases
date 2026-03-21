@@ -11,7 +11,7 @@ Key files: `object_manager.gd`, `skeleton_builder.gd`, `mesh-converter.ts`, `ava
 **One shared Skeleton3D per avatar/animesh root**, built from `avatar_skeleton.xml` (159 bones). All rigged meshes bind to it via skin index remapping. Animation evaluation and shape deformation operate on this single skeleton.
 
 - Skeleton added as parent of MeshInstance3D nodes (Godot's expected hierarchy)
-- `set_bone_global_pose_override()` used for both rotation AND position — Godot's `set_bone_pose_rotation()`/`set_bone_pose_position()` during `_process` are NOT reflected in `get_bone_global_pose()` until a later frame, even with `force_update_all_bone_transforms()`
+- Three-call bone posing pattern: `set_bone_pose_rotation()` for local animation rotations, `set_bone_pose_position()` for animation positions, `set_bone_global_pose_override()` for shape deformation (parent scale + bone scale for skinning). The global pose override is needed because Godot's pose setters during `_process` are NOT reflected in `get_bone_global_pose()` until a later frame, even with `force_update_all_bone_transforms()`
 - Joint overrides from mesh attachments replace bone rest positions (lowest mesh UUID wins, matching SL's `std::map<LLUUID>` in `LLJoint::findActiveOverride`)
 - Worn animesh attachments get their own skeleton (matching Firestorm's `LLControlAvatar`) — their child prims' overrides do NOT affect the avatar's skeleton
 - GLB local rest is authoritative for overrides — do NOT convert world→local (mesh-converter sets rest from `alt_inverse_bind_matrix`)
@@ -86,7 +86,7 @@ Firestorm has 5 procedural motions generated locally by the viewer (not sent via
 | hand_motion | ce986325 | 1 | Default hand poses |
 | pelvis_fix | 0c5dd2a2 | 0 (LOW) | Pelvis position → zero |
 
-**head_rot** is implemented via `compute_head_rot()` in `animation_manager.gd`. It computes per-skeleton "look forward" rotation by:
+**head_rot** is implemented via `_thread_compute_head_rot()` in `animation_manager.gd` (runs on the animation thread). It computes per-skeleton "look forward" rotation by:
 
 1. Walking the pelvis→torso→chest→neck→head chain to find the head's position in root-local space (using animation positions + rest offsets + parent shape scale)
 2. Computing direction from head position toward target (default: 2.5m forward from root, matching Firestorm's privacy-spoofed look-at)
@@ -129,7 +129,7 @@ bone_offset = Σ(weight_i × param_offset_delta_i)
 
 ### SL Bone Scale Semantics (UPDATED 2026-03-15)
 
-Two scale effects in SL's `xform.cpp`, both applied dynamically each frame in `_apply_global_pose_overrides`:
+Two scale effects in SL's `xform.cpp`, both applied dynamically each frame in `_thread_global_overrides` (runs on the animation thread):
 
 1. **Parent scale on child position** (`xform.cpp:76`): `child.worldPos = parent.worldRot * (child.localPos * parent.scale) + parent.worldPos`. Scale does NOT cascade through rotation/basis — only affects child position. Applied dynamically (not baked into rest) so override rest positions match GLB IBMs (both without parent scale).
 
@@ -258,7 +258,7 @@ Godot doesn't do this automatically. We simulate it by "baking" parent scale int
 - **Key insight**: The eye fix and leg break are two sides of the same coin. Override positions need to match the IBM coordinate space. Currently IBMs are computed from XML world transforms (no parent scale), so overrides without parent scale match IBMs correctly. But non-overridden bones have parent scale baked, creating inconsistency.
 
 #### Approach 2: Remove parent scale from BOTH shape and overrides, apply dynamically
-- **Change**: Remove parent scale baking from `_apply_shape_to_skeleton`. Store per-bone shape scales in `sm.bone_shape_scale`. Apply parent scale dynamically in `_apply_global_pose_overrides` (new function) called every frame for all skeletons.
+- **Change**: Remove parent scale baking from `_apply_shape_to_skeleton`. Store per-bone shape scales in `sm.bone_shape_scale`. Apply parent scale dynamically in `_thread_global_overrides` (new function) called every frame for all skeletons.
 - **Result**: Eyes popped out WORSE than Approach 1 — removing parent scale from shape positions changed the rest positions that the IBMs were (partially) aligned with, making the mismatch larger. Unrigged attachments and debug skeleton markers also misaligned because they read rest positions directly, not global pose overrides. Would require updating ALL bone position consumers to use global pose overrides instead of rest positions — too invasive for now.
 
 #### Current State: Baked parent scale (working, not perfect)
@@ -271,7 +271,7 @@ If the mesh converter computed IBMs from the ACTUAL bone positions (including ov
 
 To truly match Firestorm, the dynamic parent scale approach (Approach 2) is correct but requires:
 1. ALL bone position consumers use global pose overrides, not rest positions
-2. The `_apply_global_pose_overrides` function runs unconditionally every frame for all skeletons (already implemented)
+2. The `_thread_global_overrides` function runs unconditionally every frame for all skeletons (already implemented)
 3. IBMs in the GLB need to be computed from the override-modified skeleton, not the XML default (mesh-converter change)
 4. Unrigged attachment positioning needs to read from global pose overrides
 5. Debug markers need to read from global pose overrides
@@ -306,7 +306,7 @@ The dog's head droops in Godot but looks forward in Firestorm. Both viewers have
 
 #### Issue 3: T-Pose Before First Animation
 
-Avatars briefly T-pose before their first animation evaluation. `_apply_global_pose_overrides` is only called inside `process_animesh` during animation eval (30Hz throttled), so before the first eval, bones sit at rest pose. Fix: run `_apply_global_pose_overrides` once when a skeleton is first created or when shape/overrides are applied.
+Avatars briefly T-pose before their first animation evaluation. `_thread_global_overrides` is only called inside `process_animesh` during animation eval (30Hz throttled), so before the first eval, bones sit at rest pose. Fix: run `_thread_global_overrides` once when a skeleton is first created or when shape/overrides are applied.
 
 #### Issue 6: mHead Sex Filtering
 
@@ -316,9 +316,9 @@ Avatars briefly T-pose before their first animation evaluation. `_apply_global_p
 
 Issues 1-4 and 6 were resolved by implementing dynamic parent scale + bone scale in skinning (Approach 2, done properly this time with all consumers updated). The key changes:
 
-1. **Dynamic parent scale**: `_apply_shape_to_skeleton` no longer bakes parent scale. Shape scales stored in `sm.bone_shape_scales`. `_apply_global_pose_overrides` applies parent scale dynamically each frame (matching `xform.cpp:76`). All bone position consumers (`_update_bone_attachments`, debug markers) also use dynamic parent scale.
+1. **Dynamic parent scale**: `_apply_shape_to_skeleton` no longer bakes parent scale. Shape scales stored in `sm.bone_shape_scales`. `_thread_global_overrides` applies parent scale dynamically each frame (matching `xform.cpp:76`). All bone position consumers (`_update_bone_attachments`, debug markers) also use dynamic parent scale.
 
-2. **Bone scale in skinning basis**: `_apply_global_pose_overrides` includes each bone's own shape scale in the global pose override via `Basis.from_scale()`, matching `xform.cpp:93: initAll(mScale, mWorldRot, mWorldPos)`. Scale does NOT cascade to children (matching SL: `worldScale = localScale`).
+2. **Bone scale in skinning basis**: `_thread_global_overrides` includes each bone's own shape scale in the global pose override via `Basis.from_scale()`, matching `xform.cpp:93: initAll(mScale, mWorldRot, mWorldPos)`. Scale does NOT cascade to children (matching SL: `worldScale = localScale`).
 
 3. **AP offset bone scale**: `_get_ap_world_transform` now scales AP offsets by the bone's shape scale (AP is a child joint, subject to `xform.cpp:76`). Fixed boots too low / ears too high.
 

@@ -288,15 +288,12 @@ export class EventQueueClient
                                     case 'AgentGroupDataUpdate':
                                     {
                                         const body = event.body;
-                                        console.log('[EventQueue] AgentGroupDataUpdate received:', JSON.stringify(body, null, 2));
                                         const groupEvent = new AgentGroupDataUpdateEvent();
                                         groupEvent.agentID = new UUID(body.AgentData[0].AgentID);
                                         groupEvent.groups = [];
 
                                         const groupDataArray = body.GroupData || [];
                                         const newGroupDataArray = body.NewGroupData || [];
-
-                                        console.log(`[EventQueue] Processing ${groupDataArray.length} groups`);
 
                                         for (let i = 0; i < groupDataArray.length; i++)
                                         {
@@ -315,7 +312,6 @@ export class EventQueueClient
                                             groupEvent.groups.push(group);
                                         }
 
-                                        console.log(`[EventQueue] Emitting onAgentGroupDataUpdate with ${groupEvent.groups.length} groups`);
                                         this.clientEvents.onAgentGroupDataUpdate.next(groupEvent);
                                         break;
                                     }

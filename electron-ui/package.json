@@ -28,7 +28,10 @@
         "format": "prettier --write src/",
         "format:check": "prettier --check src/",
         "test": "vitest run",
-        "test:watch": "vitest"
+        "test:watch": "vitest",
+        "test:voice": "cd voice/tests && dotnet test --no-restore",
+        "test:godot": "bash scripts/test-godot.sh",
+        "pre:commit": "npm run test && npm run test:voice && npm run test:godot"
     },
     "author": "PyroKitty",
     "license": "LGPL-2.1",
@@ -119,6 +122,13 @@
                 "to": "bin",
                 "filter": [
                     "**/*"
+                ]
+            },
+            {
+                "from": "../shared",
+                "to": "shared",
+                "filter": [
+                    "*.json"
                 ]
             },
             {

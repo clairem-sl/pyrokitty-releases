@@ -131,13 +131,7 @@ export class GodotAvatarManager {
               this.avatarHoverHeights.set(avatarId, hoverHeight);
               this.send({ type: 'avatar_shape', avatarId, bones, volumeMorphs, hoverHeight });
               // Debug: log key bone deltas for leg and body bones
-              const debugBones = ['mPelvis', 'mHipLeft', 'mHipRight', 'mKneeLeft', 'mKneeRight', 'mAnkleLeft', 'mAnkleRight', 'mFootLeft', 'mFootRight', 'mTorso', 'mChest', 'mNeck'];
-              for (const b of debugBones) {
-                if (bones[b]) {
-                  console.log(`[AvatarShape] ${avatarId.slice(0, 8)} bone=${b} scale=[${bones[b].scale.map((v: number) => v.toFixed(6)).join(', ')}] offset=[${bones[b].offset.map((v: number) => v.toFixed(6)).join(', ')}]`);
-                }
-              }
-              console.log(`[AvatarShape] ${avatarId.slice(0, 8)} total: ${bytes.length} params, ${boneCount} bones, ${Object.keys(volumeMorphs).length} volume morphs`);
+              console.log(`[AvatarShape] ${avatarId.slice(0, 8)}: ${boneCount} bones, ${Object.keys(volumeMorphs).length} volume morphs`);
             }
           } catch (shapeErr) {
             console.warn('[AvatarShape] Error computing shape:', (shapeErr as Error).message);
@@ -339,13 +333,6 @@ export class GodotAvatarManager {
     const avLocalId = localId || 0;
     try {
       if (avLocalId > 0) {
-        try {
-          const storeChildren = this.bot.currentRegion.objects.getObjectsByParent(avLocalId);
-          console.log(`[AvatarDebug] ${id.slice(0, 8)} localId=${avLocalId}: getObjectsByParent returned ${storeChildren.length} children`);
-          for (const c of storeChildren.slice(0, 5)) {
-            console.log(`[AvatarDebug]   child localId=${c.ID} IsAttachment=${c.IsAttachment} PCode=${c.PCode} meshId=${c.FullID?.toString()?.slice(0,8) || '?'}`);
-          }
-        } catch (e) { console.log(`[AvatarDebug] getObjectsByParent(${avLocalId}) failed: ${(e as Error).message}`); }
       }
       const attachments = avatar.getAttachments();
       console.log(`[Avatar] ${id.slice(0, 8)} localId=${localId}: ${attachments.size} attachments from getAttachments()`);
@@ -377,7 +364,6 @@ export class GodotAvatarManager {
       const attachSub = avatar.onAttachmentAdded.subscribe((obj: any) => {
         if (!this.connected) return;
         const objUuid = obj.FullID?.toString() || '';
-        console.log(`[AvatarDebug] onAttachmentAdded: avatar=${id.slice(0,8)} obj=${obj.ID} uuid=${objUuid.slice(0,8)} IsAttachment=${obj.IsAttachment} attachPt=${obj.attachmentPoint} PCode=${obj.PCode} isHud=${isHudAttachment(obj)}`);
         if (isHudAttachment(obj)) return;
         if (objUuid && this.trackedObjects.has(objUuid)) return;
         this.objectSender.sendObject(obj, id);
@@ -385,19 +371,6 @@ export class GodotAvatarManager {
       });
       this.avatarAttachSubs.set(id, attachSub);
 
-      // Delayed debug for self-avatar
-      if (id === this.bot.agent?.agentID?.toString()) {
-        setTimeout(() => {
-          try {
-            const storeChildren = this.bot.currentRegion.objects.getObjectsByParent(avLocalId);
-            const attachCount = avatar.getAttachments().size;
-            console.log(`[AvatarDebug] SELF 10s check: avatar=${id.slice(0,8)} localId=${avLocalId}: getObjectsByParent=${storeChildren.length}, getAttachments()=${attachCount}`);
-            for (const c of storeChildren.slice(0, 10)) {
-              console.log(`[AvatarDebug]   child: avatar=${id.slice(0,8)} localId=${c.ID} uuid=${c.FullID?.toString()?.slice(0,8) || '?'} attachPt=${c.attachmentPoint} IsAttachment=${c.IsAttachment}`);
-            }
-          } catch (e) { console.log(`[AvatarDebug] SELF 10s check failed: ${(e as Error).message}`); }
-        }, 10000);
-      }
     }
 
     // Replay buffered avatar animations

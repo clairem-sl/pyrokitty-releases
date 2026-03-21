@@ -244,10 +244,12 @@ func _input(event: InputEvent) -> void:
 				_key_shift = ke.pressed
 
 		# Derive turn/strafe from A/D + shift
-		var new_turn_left := _key_a and not _key_shift
-		var new_turn_right := _key_d and not _key_shift
-		var new_strafe_left := _key_a and _key_shift
-		var new_strafe_right := _key_d and _key_shift
+		# In butt-grab / orbit-hold mode, A/D strafe instead of turn
+		var _ad_strafe := is_butt_grabbing or orbit_hold or _key_shift
+		var new_turn_left := _key_a and not _ad_strafe
+		var new_turn_right := _key_d and not _ad_strafe
+		var new_strafe_left := _key_a and _ad_strafe
+		var new_strafe_right := _key_d and _ad_strafe
 
 		if _key_w != move_forward or _key_s != move_backward \
 			or new_turn_left != turn_left or new_turn_right != turn_right \

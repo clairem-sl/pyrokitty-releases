@@ -105,8 +105,6 @@ func handle_mesh_ready(msg: Dictionary) -> void:
 			sm.mesh_joint_overrides[mesh_id] = overrides
 			print("[AssetPipeline] Stored %d joint overrides for mesh %s" % [overrides.size(), mesh_id.substr(0, 8)])
 		var msg_keys: Array = msg.keys()
-		if msg.get("isRigged", false):
-			print("[AssetPipeline] mesh_ready keys for %s: %s" % [mesh_id.substr(0, 8), str(msg_keys)])
 		# Check how many pending objects need this rigged mesh
 		var waiting: int = 0
 		var self_waiting: bool = false

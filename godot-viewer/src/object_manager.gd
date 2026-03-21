@@ -161,9 +161,6 @@ func handle_object_create(msg: Dictionary) -> void:
 		sm.object_parent[obj_uuid] = parent_uuid
 		sm.child_offset_pos[obj_uuid] = godot_pos
 		sm.child_offset_rot[obj_uuid] = godot_rot
-		var _dbg_ap: int = msg.get("attachmentPoint", 0)
-		if _dbg_ap > 0:
-			print("[AttachDebug] uuid=%s attachPt=%d offset_pos=%s offset_rot=%s" % [_uuid_short(obj_uuid), _dbg_ap, godot_pos, godot_rot])
 
 		if not sm.object_children.has(parent_uuid):
 			sm.object_children[parent_uuid] = []
@@ -231,13 +228,6 @@ func handle_object_create(msg: Dictionary) -> void:
 			if _bi >= 0:
 				sm.attach_bone[obj_uuid] = bone_name
 				sm.attach_point_id[obj_uuid] = attach_point
-				print("[AttachBone] uuid=%s → bone=%s (attachPt=%d) parent=%s" % [_uuid_short(obj_uuid), bone_name, attach_point, _uuid_short(parent_uuid)])
-			else:
-				print("[AttachBone] uuid=%s bone=%s NOT FOUND in skeleton (attachPt=%d)" % [_uuid_short(obj_uuid), bone_name, attach_point])
-		elif bone_name.is_empty():
-			print("[AttachBone] uuid=%s unknown attachmentPoint=%d" % [_uuid_short(obj_uuid), attach_point])
-	elif attach_point > 0 and not parent_uuid.is_empty():
-		print("[AttachBone] uuid=%s attachPt=%d but parent %s not in animesh_roots" % [_uuid_short(obj_uuid), attach_point, _uuid_short(parent_uuid)])
 
 	# Animesh root detection — create a Node3D in the scene tree for skeleton parenting.
 	# Worn animesh (child of avatar) uses the AVATAR's skeleton and root, matching SL behavior

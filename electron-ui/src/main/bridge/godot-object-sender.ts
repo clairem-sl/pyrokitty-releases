@@ -253,12 +253,6 @@ export class GodotObjectSender {
 
     // Log avatar attachments
     const isSelfAttach = parentUuid !== '' && parentUuid === this.selfAvatarUuid;
-    if (parentUuid !== '') {
-      let isAvatarAttach = isSelfAttach || this.trackedAvatars.has(parentUuid);
-      if (isAvatarAttach) {
-        console.log(`[AvatarDebug] Sending attachment: uuid=${objUuid.slice(0, 8)} meshId=${meshId?.slice(0, 8) || 'none'} parentUuid=${parentUuid.slice(0, 8)} isAnimesh=${isAnimesh}`);
-      }
-    }
 
     // Track self-avatar attachments for [SelfAvatar] logging
     if (isSelfAttach) {

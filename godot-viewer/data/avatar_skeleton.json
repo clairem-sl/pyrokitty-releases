@@ -1,0 +1,3601 @@
+[
+ {
+  "name": "mPelvis",
+  "parent": "",
+  "pos": [
+   0,
+   0,
+   1.067
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "hip",
+   "avatar_mPelvis"
+  ]
+ },
+ {
+  "name": "PELVIS",
+  "parent": "mPelvis",
+  "pos": [
+   -0.01,
+   0,
+   -0.02
+  ],
+  "rot": [
+   0,
+   8,
+   0
+  ],
+  "scale": [
+   0.12,
+   0.16,
+   0.17
+  ],
+  "cv": true
+ },
+ {
+  "name": "BUTT",
+  "parent": "mPelvis",
+  "pos": [
+   -0.06,
+   0,
+   -0.1
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   0.1,
+   0.1,
+   0.1
+  ],
+  "cv": true
+ },
+ {
+  "name": "mSpine1",
+  "parent": "mPelvis",
+  "pos": [
+   0,
+   0,
+   0.084
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mSpine1"
+  ]
+ },
+ {
+  "name": "mSpine2",
+  "parent": "mSpine1",
+  "pos": [
+   0,
+   0,
+   -0.084
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mSpine2"
+  ]
+ },
+ {
+  "name": "mTorso",
+  "parent": "mSpine2",
+  "pos": [
+   0,
+   0,
+   0.084
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "abdomen",
+   "avatar_mTorso"
+  ]
+ },
+ {
+  "name": "BELLY",
+  "parent": "mTorso",
+  "pos": [
+   0.028,
+   0,
+   0.04
+  ],
+  "rot": [
+   0,
+   8,
+   0
+  ],
+  "scale": [
+   0.09,
+   0.13,
+   0.15
+  ],
+  "cv": true
+ },
+ {
+  "name": "LEFT_HANDLE",
+  "parent": "mTorso",
+  "pos": [
+   0,
+   0.1,
+   0.058
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   0.05,
+   0.05,
+   0.05
+  ],
+  "cv": true
+ },
+ {
+  "name": "RIGHT_HANDLE",
+  "parent": "mTorso",
+  "pos": [
+   0,
+   -0.1,
+   0.058
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   0.05,
+   0.05,
+   0.05
+  ],
+  "cv": true
+ },
+ {
+  "name": "LOWER_BACK",
+  "parent": "mTorso",
+  "pos": [
+   0,
+   0,
+   0.023
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   0.09,
+   0.13,
+   0.15
+  ],
+  "cv": true
+ },
+ {
+  "name": "mSpine3",
+  "parent": "mTorso",
+  "pos": [
+   -0.015,
+   0,
+   0.205
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mSpine3"
+  ]
+ },
+ {
+  "name": "mSpine4",
+  "parent": "mSpine3",
+  "pos": [
+   0.015,
+   0,
+   -0.205
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mSpine4"
+  ]
+ },
+ {
+  "name": "mChest",
+  "parent": "mSpine4",
+  "pos": [
+   -0.015,
+   0,
+   0.205
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "chest",
+   "avatar_mChest"
+  ]
+ },
+ {
+  "name": "CHEST",
+  "parent": "mChest",
+  "pos": [
+   0.028,
+   0,
+   0.07
+  ],
+  "rot": [
+   0,
+   -10,
+   0
+  ],
+  "scale": [
+   0.11,
+   0.15,
+   0.2
+  ],
+  "cv": true
+ },
+ {
+  "name": "LEFT_PEC",
+  "parent": "mChest",
+  "pos": [
+   0.119,
+   0.082,
+   0.042
+  ],
+  "rot": [
+   0,
+   4.29,
+   0
+  ],
+  "scale": [
+   0.05,
+   0.05,
+   0.05
+  ],
+  "cv": true
+ },
+ {
+  "name": "RIGHT_PEC",
+  "parent": "mChest",
+  "pos": [
+   0.119,
+   -0.082,
+   0.042
+  ],
+  "rot": [
+   0,
+   4.29,
+   0
+  ],
+  "scale": [
+   0.05,
+   0.05,
+   0.05
+  ],
+  "cv": true
+ },
+ {
+  "name": "UPPER_BACK",
+  "parent": "mChest",
+  "pos": [
+   0,
+   0,
+   0.017
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   0.09,
+   0.13,
+   0.15
+  ],
+  "cv": true
+ },
+ {
+  "name": "mNeck",
+  "parent": "mChest",
+  "pos": [
+   -0.01,
+   0,
+   0.251
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "neck",
+   "avatar_mNeck"
+  ]
+ },
+ {
+  "name": "NECK",
+  "parent": "mNeck",
+  "pos": [
+   0,
+   0,
+   0.02
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   0.05,
+   0.06,
+   0.08
+  ],
+  "cv": true
+ },
+ {
+  "name": "mHead",
+  "parent": "mNeck",
+  "pos": [
+   0,
+   0,
+   0.076
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "head",
+   "avatar_mHead"
+  ]
+ },
+ {
+  "name": "HEAD",
+  "parent": "mHead",
+  "pos": [
+   0.02,
+   0,
+   0.07
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   0.11,
+   0.09,
+   0.12
+  ],
+  "cv": true
+ },
+ {
+  "name": "mSkull",
+  "parent": "mHead",
+  "pos": [
+   0,
+   0,
+   0.079
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "figureHair",
+   "avatar_mSkull"
+  ]
+ },
+ {
+  "name": "mEyeRight",
+  "parent": "mHead",
+  "pos": [
+   0.098,
+   -0.036,
+   0.079
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mEyeRight"
+  ]
+ },
+ {
+  "name": "mEyeLeft",
+  "parent": "mHead",
+  "pos": [
+   0.098,
+   0.036,
+   0.079
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mEyeLeft"
+  ]
+ },
+ {
+  "name": "mFaceRoot",
+  "parent": "mHead",
+  "pos": [
+   0.025,
+   0,
+   0.045
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceRoot"
+  ]
+ },
+ {
+  "name": "mFaceEyeAltRight",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.073,
+   -0.036,
+   0.034
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEyeAltRight"
+  ]
+ },
+ {
+  "name": "mFaceEyeAltLeft",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.073,
+   0.036,
+   0.034
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEyeAltLeft"
+  ]
+ },
+ {
+  "name": "mFaceForeheadLeft",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.061,
+   0.035,
+   0.083
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceForeheadLeft"
+  ]
+ },
+ {
+  "name": "mFaceForeheadRight",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.061,
+   -0.035,
+   0.083
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceForeheadRight"
+  ]
+ },
+ {
+  "name": "mFaceEyebrowOuterLeft",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.064,
+   0.051,
+   0.048
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEyebrowOuterLeft"
+  ]
+ },
+ {
+  "name": "mFaceEyebrowCenterLeft",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.07,
+   0.043,
+   0.056
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEyebrowCenterLeft"
+  ]
+ },
+ {
+  "name": "mFaceEyebrowInnerLeft",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.075,
+   0.022,
+   0.051
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEyebrowInnerLeft"
+  ]
+ },
+ {
+  "name": "mFaceEyebrowOuterRight",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.064,
+   -0.051,
+   0.048
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEyebrowOuterRight"
+  ]
+ },
+ {
+  "name": "mFaceEyebrowCenterRight",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.07,
+   -0.043,
+   0.056
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEyebrowCenterRight"
+  ]
+ },
+ {
+  "name": "mFaceEyebrowInnerRight",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.075,
+   -0.022,
+   0.051
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEyebrowInnerRight"
+  ]
+ },
+ {
+  "name": "mFaceEyeLidUpperLeft",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.073,
+   0.036,
+   0.034
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEyeLidUpperLeft"
+  ]
+ },
+ {
+  "name": "mFaceEyeLidLowerLeft",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.073,
+   0.036,
+   0.034
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEyeLidLowerLeft"
+  ]
+ },
+ {
+  "name": "mFaceEyeLidUpperRight",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.073,
+   -0.036,
+   0.034
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEyeLidUpperRight"
+  ]
+ },
+ {
+  "name": "mFaceEyeLidLowerRight",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.073,
+   -0.036,
+   0.034
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEyeLidLowerRight"
+  ]
+ },
+ {
+  "name": "mFaceEar1Left",
+  "parent": "mFaceRoot",
+  "pos": [
+   0,
+   0.08,
+   0.002
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEar1Left"
+  ]
+ },
+ {
+  "name": "mFaceEar2Left",
+  "parent": "mFaceEar1Left",
+  "pos": [
+   -0.019,
+   0.018,
+   0.025
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEar2Left"
+  ]
+ },
+ {
+  "name": "mFaceEar1Right",
+  "parent": "mFaceRoot",
+  "pos": [
+   0,
+   -0.08,
+   0.002
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEar1Right"
+  ]
+ },
+ {
+  "name": "mFaceEar2Right",
+  "parent": "mFaceEar1Right",
+  "pos": [
+   -0.019,
+   -0.018,
+   0.025
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEar2Right"
+  ]
+ },
+ {
+  "name": "mFaceNoseLeft",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.086,
+   0.015,
+   -0.004
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceNoseLeft"
+  ]
+ },
+ {
+  "name": "mFaceNoseCenter",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.102,
+   0,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceNoseCenter"
+  ]
+ },
+ {
+  "name": "mFaceNoseRight",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.086,
+   -0.015,
+   -0.004
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceNoseRight"
+  ]
+ },
+ {
+  "name": "mFaceCheekLowerLeft",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.05,
+   0.034,
+   -0.031
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceCheekLowerLeft"
+  ]
+ },
+ {
+  "name": "mFaceCheekUpperLeft",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.07,
+   0.034,
+   -0.005
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceCheekUpperLeft"
+  ]
+ },
+ {
+  "name": "mFaceCheekLowerRight",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.05,
+   -0.034,
+   -0.031
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceCheekLowerRight"
+  ]
+ },
+ {
+  "name": "mFaceCheekUpperRight",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.07,
+   -0.034,
+   -0.005
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceCheekUpperRight"
+  ]
+ },
+ {
+  "name": "mFaceJaw",
+  "parent": "mFaceRoot",
+  "pos": [
+   -0.001,
+   0,
+   -0.015
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceJaw"
+  ]
+ },
+ {
+  "name": "mFaceChin",
+  "parent": "mFaceJaw",
+  "pos": [
+   0.074,
+   0,
+   -0.054
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceChin"
+  ]
+ },
+ {
+  "name": "mFaceTeethLower",
+  "parent": "mFaceJaw",
+  "pos": [
+   0.021,
+   0,
+   -0.039
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceTeethLower"
+  ]
+ },
+ {
+  "name": "mFaceLipLowerLeft",
+  "parent": "mFaceTeethLower",
+  "pos": [
+   0.045,
+   0,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceLipLowerLeft"
+  ]
+ },
+ {
+  "name": "mFaceLipLowerRight",
+  "parent": "mFaceTeethLower",
+  "pos": [
+   0.045,
+   0,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceLipLowerRight"
+  ]
+ },
+ {
+  "name": "mFaceLipLowerCenter",
+  "parent": "mFaceTeethLower",
+  "pos": [
+   0.045,
+   0,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceLipLowerCenter"
+  ]
+ },
+ {
+  "name": "mFaceTongueBase",
+  "parent": "mFaceTeethLower",
+  "pos": [
+   0.039,
+   0,
+   0.005
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceTongueBase"
+  ]
+ },
+ {
+  "name": "mFaceTongueTip",
+  "parent": "mFaceTongueBase",
+  "pos": [
+   0.022,
+   0,
+   0.007
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceTongueTip"
+  ]
+ },
+ {
+  "name": "mFaceJawShaper",
+  "parent": "mFaceRoot",
+  "pos": [
+   0,
+   0,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceJawShaper"
+  ]
+ },
+ {
+  "name": "mFaceForeheadCenter",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.069,
+   0,
+   0.065
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceForeheadCenter"
+  ]
+ },
+ {
+  "name": "mFaceNoseBase",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.094,
+   0,
+   -0.016
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceNoseBase"
+  ]
+ },
+ {
+  "name": "mFaceTeethUpper",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.02,
+   0,
+   -0.03
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceTeethUpper"
+  ]
+ },
+ {
+  "name": "mFaceLipUpperLeft",
+  "parent": "mFaceTeethUpper",
+  "pos": [
+   0.045,
+   0,
+   -0.003
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceLipUpperLeft"
+  ]
+ },
+ {
+  "name": "mFaceLipUpperRight",
+  "parent": "mFaceTeethUpper",
+  "pos": [
+   0.045,
+   0,
+   -0.003
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceLipUpperRight"
+  ]
+ },
+ {
+  "name": "mFaceLipCornerLeft",
+  "parent": "mFaceTeethUpper",
+  "pos": [
+   0.028,
+   -0.019,
+   -0.01
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceLipCornerLeft"
+  ]
+ },
+ {
+  "name": "mFaceLipCornerRight",
+  "parent": "mFaceTeethUpper",
+  "pos": [
+   0.028,
+   0.019,
+   -0.01
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceLipCornerRight"
+  ]
+ },
+ {
+  "name": "mFaceLipUpperCenter",
+  "parent": "mFaceTeethUpper",
+  "pos": [
+   0.045,
+   0,
+   -0.003
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceLipUpperCenter"
+  ]
+ },
+ {
+  "name": "mFaceEyecornerInnerLeft",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.075,
+   0.017,
+   0.032
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEyecornerInnerLeft"
+  ]
+ },
+ {
+  "name": "mFaceEyecornerInnerRight",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.075,
+   -0.017,
+   0.032
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceEyecornerInnerRight"
+  ]
+ },
+ {
+  "name": "mFaceNoseBridge",
+  "parent": "mFaceRoot",
+  "pos": [
+   0.091,
+   0,
+   0.02
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFaceNoseBridge"
+  ]
+ },
+ {
+  "name": "mCollarLeft",
+  "parent": "mChest",
+  "pos": [
+   -0.021,
+   0.085,
+   0.165
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "lCollar",
+   "avatar_mCollarLeft"
+  ]
+ },
+ {
+  "name": "L_CLAVICLE",
+  "parent": "mCollarLeft",
+  "pos": [
+   0.02,
+   0,
+   0.02
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   0.07,
+   0.14,
+   0.05
+  ],
+  "cv": true
+ },
+ {
+  "name": "mShoulderLeft",
+  "parent": "mCollarLeft",
+  "pos": [
+   0,
+   0.079,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "lShldr",
+   "avatar_mShoulderLeft"
+  ]
+ },
+ {
+  "name": "L_UPPER_ARM",
+  "parent": "mShoulderLeft",
+  "pos": [
+   0,
+   0.12,
+   0.01
+  ],
+  "rot": [
+   -5,
+   0,
+   0
+  ],
+  "scale": [
+   0.05,
+   0.17,
+   0.05
+  ],
+  "cv": true
+ },
+ {
+  "name": "mElbowLeft",
+  "parent": "mShoulderLeft",
+  "pos": [
+   0,
+   0.248,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "lForeArm",
+   "avatar_mElbowLeft"
+  ]
+ },
+ {
+  "name": "L_LOWER_ARM",
+  "parent": "mElbowLeft",
+  "pos": [
+   0,
+   0.1,
+   0
+  ],
+  "rot": [
+   -3,
+   0,
+   0
+  ],
+  "scale": [
+   0.04,
+   0.14,
+   0.04
+  ],
+  "cv": true
+ },
+ {
+  "name": "mWristLeft",
+  "parent": "mElbowLeft",
+  "pos": [
+   0,
+   0.205,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "lHand",
+   "avatar_mWristLeft"
+  ]
+ },
+ {
+  "name": "L_HAND",
+  "parent": "mWristLeft",
+  "pos": [
+   0.01,
+   0.05,
+   0
+  ],
+  "rot": [
+   -3,
+   0,
+   -10
+  ],
+  "scale": [
+   0.05,
+   0.08,
+   0.03
+  ],
+  "cv": true
+ },
+ {
+  "name": "mHandMiddle1Left",
+  "parent": "mWristLeft",
+  "pos": [
+   0.013,
+   0.101,
+   0.015
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandMiddle1Left"
+  ]
+ },
+ {
+  "name": "mHandMiddle2Left",
+  "parent": "mHandMiddle1Left",
+  "pos": [
+   -0.001,
+   0.04,
+   -0.006
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandMiddle2Left"
+  ]
+ },
+ {
+  "name": "mHandMiddle3Left",
+  "parent": "mHandMiddle2Left",
+  "pos": [
+   -0.001,
+   0.049,
+   -0.008
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandMiddle3Left"
+  ]
+ },
+ {
+  "name": "mHandIndex1Left",
+  "parent": "mWristLeft",
+  "pos": [
+   0.038,
+   0.097,
+   0.015
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandIndex1Left"
+  ]
+ },
+ {
+  "name": "mHandIndex2Left",
+  "parent": "mHandIndex1Left",
+  "pos": [
+   0.017,
+   0.036,
+   -0.006
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandIndex2Left"
+  ]
+ },
+ {
+  "name": "mHandIndex3Left",
+  "parent": "mHandIndex2Left",
+  "pos": [
+   0.014,
+   0.032,
+   -0.006
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandIndex3Left"
+  ]
+ },
+ {
+  "name": "mHandRing1Left",
+  "parent": "mWristLeft",
+  "pos": [
+   -0.01,
+   0.099,
+   0.009
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandRing1Left"
+  ]
+ },
+ {
+  "name": "mHandRing2Left",
+  "parent": "mHandRing1Left",
+  "pos": [
+   -0.013,
+   0.038,
+   -0.008
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandRing2Left"
+  ]
+ },
+ {
+  "name": "mHandRing3Left",
+  "parent": "mHandRing2Left",
+  "pos": [
+   -0.013,
+   0.04,
+   -0.009
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandRing3Left"
+  ]
+ },
+ {
+  "name": "mHandPinky1Left",
+  "parent": "mWristLeft",
+  "pos": [
+   -0.031,
+   0.095,
+   0.003
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandPinky1Left"
+  ]
+ },
+ {
+  "name": "mHandPinky2Left",
+  "parent": "mHandPinky1Left",
+  "pos": [
+   -0.024,
+   0.025,
+   -0.006
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandPinky2Left"
+  ]
+ },
+ {
+  "name": "mHandPinky3Left",
+  "parent": "mHandPinky2Left",
+  "pos": [
+   -0.015,
+   0.018,
+   -0.004
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandPinky3Left"
+  ]
+ },
+ {
+  "name": "mHandThumb1Left",
+  "parent": "mWristLeft",
+  "pos": [
+   0.031,
+   0.026,
+   0.004
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandThumb1Left"
+  ]
+ },
+ {
+  "name": "mHandThumb2Left",
+  "parent": "mHandThumb1Left",
+  "pos": [
+   0.028,
+   0.032,
+   -0.001
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandThumb2Left"
+  ]
+ },
+ {
+  "name": "mHandThumb3Left",
+  "parent": "mHandThumb2Left",
+  "pos": [
+   0.023,
+   0.031,
+   -0.001
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandThumb3Left"
+  ]
+ },
+ {
+  "name": "mCollarRight",
+  "parent": "mChest",
+  "pos": [
+   -0.021,
+   -0.085,
+   0.165
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "rCollar",
+   "avatar_mCollarRight"
+  ]
+ },
+ {
+  "name": "R_CLAVICLE",
+  "parent": "mCollarRight",
+  "pos": [
+   0.02,
+   0,
+   0.02
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   0.07,
+   0.14,
+   0.05
+  ],
+  "cv": true
+ },
+ {
+  "name": "mShoulderRight",
+  "parent": "mCollarRight",
+  "pos": [
+   0,
+   -0.079,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "rShldr",
+   "avatar_mShoulderRight"
+  ]
+ },
+ {
+  "name": "R_UPPER_ARM",
+  "parent": "mShoulderRight",
+  "pos": [
+   0,
+   -0.12,
+   0.01
+  ],
+  "rot": [
+   5,
+   0,
+   0
+  ],
+  "scale": [
+   0.05,
+   0.17,
+   0.05
+  ],
+  "cv": true
+ },
+ {
+  "name": "mElbowRight",
+  "parent": "mShoulderRight",
+  "pos": [
+   0,
+   -0.248,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "rForeArm",
+   "avatar_mElbowRight"
+  ]
+ },
+ {
+  "name": "R_LOWER_ARM",
+  "parent": "mElbowRight",
+  "pos": [
+   0,
+   -0.1,
+   0
+  ],
+  "rot": [
+   3,
+   0,
+   0
+  ],
+  "scale": [
+   0.04,
+   0.14,
+   0.04
+  ],
+  "cv": true
+ },
+ {
+  "name": "mWristRight",
+  "parent": "mElbowRight",
+  "pos": [
+   0,
+   -0.205,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "rHand",
+   "avatar_mWristRight"
+  ]
+ },
+ {
+  "name": "R_HAND",
+  "parent": "mWristRight",
+  "pos": [
+   0.01,
+   -0.05,
+   0
+  ],
+  "rot": [
+   3,
+   0,
+   10
+  ],
+  "scale": [
+   0.05,
+   0.08,
+   0.03
+  ],
+  "cv": true
+ },
+ {
+  "name": "mHandMiddle1Right",
+  "parent": "mWristRight",
+  "pos": [
+   0.013,
+   -0.101,
+   0.015
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandMiddle1Right"
+  ]
+ },
+ {
+  "name": "mHandMiddle2Right",
+  "parent": "mHandMiddle1Right",
+  "pos": [
+   -0.001,
+   -0.04,
+   -0.006
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandMiddle2Right"
+  ]
+ },
+ {
+  "name": "mHandMiddle3Right",
+  "parent": "mHandMiddle2Right",
+  "pos": [
+   -0.001,
+   -0.049,
+   -0.008
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandMiddle3Right"
+  ]
+ },
+ {
+  "name": "mHandIndex1Right",
+  "parent": "mWristRight",
+  "pos": [
+   0.038,
+   -0.097,
+   0.015
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandIndex1Right"
+  ]
+ },
+ {
+  "name": "mHandIndex2Right",
+  "parent": "mHandIndex1Right",
+  "pos": [
+   0.017,
+   -0.036,
+   -0.006
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandIndex2Right"
+  ]
+ },
+ {
+  "name": "mHandIndex3Right",
+  "parent": "mHandIndex2Right",
+  "pos": [
+   0.014,
+   -0.032,
+   -0.006
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandIndex3Right"
+  ]
+ },
+ {
+  "name": "mHandRing1Right",
+  "parent": "mWristRight",
+  "pos": [
+   -0.01,
+   -0.099,
+   0.009
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandRing1Right"
+  ]
+ },
+ {
+  "name": "mHandRing2Right",
+  "parent": "mHandRing1Right",
+  "pos": [
+   -0.013,
+   -0.038,
+   -0.008
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandRing2Right"
+  ]
+ },
+ {
+  "name": "mHandRing3Right",
+  "parent": "mHandRing2Right",
+  "pos": [
+   -0.013,
+   -0.04,
+   -0.009
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandRing3Right"
+  ]
+ },
+ {
+  "name": "mHandPinky1Right",
+  "parent": "mWristRight",
+  "pos": [
+   -0.031,
+   -0.095,
+   0.003
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandPinky1Right"
+  ]
+ },
+ {
+  "name": "mHandPinky2Right",
+  "parent": "mHandPinky1Right",
+  "pos": [
+   -0.024,
+   -0.025,
+   -0.006
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandPinky2Right"
+  ]
+ },
+ {
+  "name": "mHandPinky3Right",
+  "parent": "mHandPinky2Right",
+  "pos": [
+   -0.015,
+   -0.018,
+   -0.004
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandPinky3Right"
+  ]
+ },
+ {
+  "name": "mHandThumb1Right",
+  "parent": "mWristRight",
+  "pos": [
+   0.031,
+   -0.026,
+   0.004
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandThumb1Right"
+  ]
+ },
+ {
+  "name": "mHandThumb2Right",
+  "parent": "mHandThumb1Right",
+  "pos": [
+   0.028,
+   -0.032,
+   -0.001
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandThumb2Right"
+  ]
+ },
+ {
+  "name": "mHandThumb3Right",
+  "parent": "mHandThumb2Right",
+  "pos": [
+   0.023,
+   -0.031,
+   -0.001
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHandThumb3Right"
+  ]
+ },
+ {
+  "name": "mWingsRoot",
+  "parent": "mChest",
+  "pos": [
+   -0.014,
+   0,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mWingsRoot"
+  ]
+ },
+ {
+  "name": "mWing1Left",
+  "parent": "mWingsRoot",
+  "pos": [
+   -0.099,
+   0.105,
+   0.181
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mWing1Left"
+  ]
+ },
+ {
+  "name": "mWing2Left",
+  "parent": "mWing1Left",
+  "pos": [
+   -0.168,
+   0.169,
+   0.067
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mWing2Left"
+  ]
+ },
+ {
+  "name": "mWing3Left",
+  "parent": "mWing2Left",
+  "pos": [
+   -0.181,
+   0.183,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mWing3Left"
+  ]
+ },
+ {
+  "name": "mWing4Left",
+  "parent": "mWing3Left",
+  "pos": [
+   -0.171,
+   0.173,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mWing4Left"
+  ]
+ },
+ {
+  "name": "mWing4FanLeft",
+  "parent": "mWing3Left",
+  "pos": [
+   -0.171,
+   0.173,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mWing4FanLeft"
+  ]
+ },
+ {
+  "name": "mWing1Right",
+  "parent": "mWingsRoot",
+  "pos": [
+   -0.099,
+   -0.105,
+   0.181
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mWing1Right"
+  ]
+ },
+ {
+  "name": "mWing2Right",
+  "parent": "mWing1Right",
+  "pos": [
+   -0.168,
+   -0.169,
+   0.067
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mWing2Right"
+  ]
+ },
+ {
+  "name": "mWing3Right",
+  "parent": "mWing2Right",
+  "pos": [
+   -0.181,
+   -0.183,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mWing3Right"
+  ]
+ },
+ {
+  "name": "mWing4Right",
+  "parent": "mWing3Right",
+  "pos": [
+   -0.171,
+   -0.173,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mWing4Right"
+  ]
+ },
+ {
+  "name": "mWing4FanRight",
+  "parent": "mWing3Right",
+  "pos": [
+   -0.171,
+   -0.173,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mWing4FanRight"
+  ]
+ },
+ {
+  "name": "mHipRight",
+  "parent": "mPelvis",
+  "pos": [
+   0.034,
+   -0.129,
+   -0.041
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "rThigh",
+   "avatar_mHipRight"
+  ]
+ },
+ {
+  "name": "R_UPPER_LEG",
+  "parent": "mHipRight",
+  "pos": [
+   -0.02,
+   0.05,
+   -0.22
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   0.09,
+   0.09,
+   0.32
+  ],
+  "cv": true
+ },
+ {
+  "name": "mKneeRight",
+  "parent": "mHipRight",
+  "pos": [
+   -0.001,
+   0.049,
+   -0.491
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "rShin",
+   "avatar_mKneeRight"
+  ]
+ },
+ {
+  "name": "R_LOWER_LEG",
+  "parent": "mKneeRight",
+  "pos": [
+   -0.02,
+   0,
+   -0.2
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   0.06,
+   0.06,
+   0.25
+  ],
+  "cv": true
+ },
+ {
+  "name": "mAnkleRight",
+  "parent": "mKneeRight",
+  "pos": [
+   -0.029,
+   0,
+   -0.468
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "rFoot",
+   "avatar_mAnkleRight"
+  ]
+ },
+ {
+  "name": "R_FOOT",
+  "parent": "mAnkleRight",
+  "pos": [
+   0.077,
+   0,
+   -0.041
+  ],
+  "rot": [
+   0,
+   10,
+   0
+  ],
+  "scale": [
+   0.13,
+   0.05,
+   0.05
+  ],
+  "cv": true
+ },
+ {
+  "name": "mFootRight",
+  "parent": "mAnkleRight",
+  "pos": [
+   0.112,
+   0,
+   -0.061
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFootRight"
+  ]
+ },
+ {
+  "name": "mToeRight",
+  "parent": "mFootRight",
+  "pos": [
+   0.109,
+   0,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mToeRight"
+  ]
+ },
+ {
+  "name": "mHipLeft",
+  "parent": "mPelvis",
+  "pos": [
+   0.034,
+   0.127,
+   -0.041
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "lThigh",
+   "avatar_mHipLeft"
+  ]
+ },
+ {
+  "name": "L_UPPER_LEG",
+  "parent": "mHipLeft",
+  "pos": [
+   -0.02,
+   -0.05,
+   -0.22
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   0.09,
+   0.09,
+   0.32
+  ],
+  "cv": true
+ },
+ {
+  "name": "mKneeLeft",
+  "parent": "mHipLeft",
+  "pos": [
+   -0.001,
+   -0.046,
+   -0.491
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "lShin",
+   "avatar_mKneeLeft"
+  ]
+ },
+ {
+  "name": "L_LOWER_LEG",
+  "parent": "mKneeLeft",
+  "pos": [
+   -0.02,
+   0,
+   -0.2
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   0.06,
+   0.06,
+   0.25
+  ],
+  "cv": true
+ },
+ {
+  "name": "mAnkleLeft",
+  "parent": "mKneeLeft",
+  "pos": [
+   -0.029,
+   0.001,
+   -0.468
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "lFoot",
+   "avatar_mAnkleLeft"
+  ]
+ },
+ {
+  "name": "L_FOOT",
+  "parent": "mAnkleLeft",
+  "pos": [
+   0.077,
+   0,
+   -0.041
+  ],
+  "rot": [
+   0,
+   10,
+   0
+  ],
+  "scale": [
+   0.13,
+   0.05,
+   0.05
+  ],
+  "cv": true
+ },
+ {
+  "name": "mFootLeft",
+  "parent": "mAnkleLeft",
+  "pos": [
+   0.112,
+   0,
+   -0.061
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mFootLeft"
+  ]
+ },
+ {
+  "name": "mToeLeft",
+  "parent": "mFootLeft",
+  "pos": [
+   0.109,
+   0,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mToeLeft"
+  ]
+ },
+ {
+  "name": "mTail1",
+  "parent": "mPelvis",
+  "pos": [
+   -0.116,
+   0,
+   0.047
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mTail1"
+  ]
+ },
+ {
+  "name": "mTail2",
+  "parent": "mTail1",
+  "pos": [
+   -0.197,
+   0,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mTail2"
+  ]
+ },
+ {
+  "name": "mTail3",
+  "parent": "mTail2",
+  "pos": [
+   -0.168,
+   0,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mTail3"
+  ]
+ },
+ {
+  "name": "mTail4",
+  "parent": "mTail3",
+  "pos": [
+   -0.142,
+   0,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mTail4"
+  ]
+ },
+ {
+  "name": "mTail5",
+  "parent": "mTail4",
+  "pos": [
+   -0.112,
+   0,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mTail5"
+  ]
+ },
+ {
+  "name": "mTail6",
+  "parent": "mTail5",
+  "pos": [
+   -0.094,
+   0,
+   0
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mTail6"
+  ]
+ },
+ {
+  "name": "mGroin",
+  "parent": "mPelvis",
+  "pos": [
+   0.064,
+   0,
+   -0.097
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mGroin"
+  ]
+ },
+ {
+  "name": "mHindLimbsRoot",
+  "parent": "mPelvis",
+  "pos": [
+   -0.2,
+   0,
+   0.084
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHindLimbsRoot"
+  ]
+ },
+ {
+  "name": "mHindLimb1Left",
+  "parent": "mHindLimbsRoot",
+  "pos": [
+   -0.204,
+   0.129,
+   -0.125
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHindLimb1Left"
+  ]
+ },
+ {
+  "name": "mHindLimb2Left",
+  "parent": "mHindLimb1Left",
+  "pos": [
+   0.002,
+   -0.046,
+   -0.491
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHindLimb2Left"
+  ]
+ },
+ {
+  "name": "mHindLimb3Left",
+  "parent": "mHindLimb2Left",
+  "pos": [
+   -0.03,
+   -0.003,
+   -0.468
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHindLimb3Left"
+  ]
+ },
+ {
+  "name": "mHindLimb4Left",
+  "parent": "mHindLimb3Left",
+  "pos": [
+   0.112,
+   0,
+   -0.061
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHindLimb4Left"
+  ]
+ },
+ {
+  "name": "mHindLimb1Right",
+  "parent": "mHindLimbsRoot",
+  "pos": [
+   -0.204,
+   -0.129,
+   -0.125
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHindLimb1Right"
+  ]
+ },
+ {
+  "name": "mHindLimb2Right",
+  "parent": "mHindLimb1Right",
+  "pos": [
+   0.002,
+   0.046,
+   -0.491
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHindLimb2Right"
+  ]
+ },
+ {
+  "name": "mHindLimb3Right",
+  "parent": "mHindLimb2Right",
+  "pos": [
+   -0.03,
+   0.003,
+   -0.468
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHindLimb3Right"
+  ]
+ },
+ {
+  "name": "mHindLimb4Right",
+  "parent": "mHindLimb3Right",
+  "pos": [
+   0.112,
+   0,
+   -0.061
+  ],
+  "rot": [
+   0,
+   0,
+   0
+  ],
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "cv": false,
+  "aliases": [
+   "avatar_mHindLimb4Right"
+  ]
+ }
+]

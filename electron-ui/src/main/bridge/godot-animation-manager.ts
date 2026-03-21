@@ -113,7 +113,6 @@ export class GodotAnimationManager {
         if (isTracked && this.connected) {
           this.updateAnimSet(avatarId, animations.map(a => a.animId));
         } else {
-          console.log(`[AnimDebug] AvatarAnimation for ${avatarId.slice(0, 8)}: tracked=${isTracked} connected=${this.connected} (buffered only)`);
         }
       } catch (err) {
         console.error(`[AnimDebug] AvatarAnimation handler error:`, (err as Error).message);
@@ -131,7 +130,6 @@ export class GodotAnimationManager {
     const key = sorted.join(',');
     if (this.animRootLastSet.get(uuid) === key) return;
     this.animRootLastSet.set(uuid, key);
-    console.log(`[AnimDebug] updateAnimSet uuid=${uuid.slice(0, 8)}: ${animIds.length} anims [${animIds.map(id => id.slice(0,8)).join(', ')}]`);
 
     const needed = new Set(sorted.filter(id => id.length > 0));
     this.animRootPending.set(uuid, needed);
@@ -158,7 +156,6 @@ export class GodotAnimationManager {
   private checkAnimBatchReadyForRoot(uuid: string): void {
     const needed = this.animRootPending.get(uuid);
     if (!needed || !this.connected) {
-      console.log(`[AnimDebug] checkBatchReady uuid=${uuid.slice(0, 8)}: skip (needed=${needed?.size ?? 'null'} connected=${this.connected})`);
       return;
     }
 
