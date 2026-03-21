@@ -172,8 +172,12 @@ func handle_object_create(msg: Dictionary) -> void:
 			rsi.pos = parent_rsi.pos + parent_rsi.rot * godot_pos
 			rsi.rot = parent_rsi.rot * godot_rot
 		elif sm.animesh_roots.has(parent_uuid):
-			# Parent is an avatar or animesh root — use scene tree node transform
+			# Parent is an avatar or animesh root — use scene tree node transform.
+			# Use global_position because worn animesh nodes are children of the avatar
+			# node, so their .position is parent-local, not world-space.
 			var root_node: Node3D = sm.animesh_roots[parent_uuid]
+			var _rn_pos: Vector3 = root_node.global_position
+			var _rn_rot: Quaternion = root_node.global_transform.basis.orthonormalized().get_rotation_quaternion()
 			# If this attachment has a bone, use bone position for initial placement.
 			# Shared skeleton has joint position overrides from mesh IBMs applied.
 			var _ap: int = msg.get("attachmentPoint", 0)
@@ -183,19 +187,19 @@ func handle_object_create(msg: Dictionary) -> void:
 				var _bi: int = _ss.find_bone(_bn)
 				if _bi >= 0:
 					var _bpos: Vector3 = sm.animation_mgr._get_bone_global_rest_pos(_ss, _bi)
-					var _bp: Vector3 = root_node.position + root_node.quaternion * _bpos
+					var _bp: Vector3 = _rn_pos + _rn_rot * _bpos
 					var _bg: Transform3D = _ss.get_bone_global_rest(_bi)
-					var _br: Quaternion = root_node.quaternion * _bg.basis.orthonormalized().get_rotation_quaternion()
+					var _br: Quaternion = _rn_rot * _bg.basis.orthonormalized().get_rotation_quaternion()
 					var _bone_scale: Vector3 = sm.bone_shape_scales.get(parent_uuid, {}).get(_bn, Vector3.ONE)
 					var _ap_xf: Array = sm.animation_mgr._get_ap_world_transform(_ap, _bp, _br, _bone_scale)
 					rsi.pos = _ap_xf[0] + _ap_xf[2] * godot_pos
 					rsi.rot = _ap_xf[2] * godot_rot
 				else:
-					rsi.pos = root_node.position + root_node.quaternion * godot_pos
-					rsi.rot = root_node.quaternion * godot_rot
+					rsi.pos = _rn_pos + _rn_rot * godot_pos
+					rsi.rot = _rn_rot * godot_rot
 			else:
-				rsi.pos = root_node.position + root_node.quaternion * godot_pos
-				rsi.rot = root_node.quaternion * godot_rot
+				rsi.pos = _rn_pos + _rn_rot * godot_pos
+				rsi.rot = _rn_rot * godot_rot
 		else:
 			# Parent hasn't arrived — use offset as-is (will be corrected when parent arrives)
 			rsi.pos = godot_pos
@@ -242,8 +246,10 @@ func handle_object_create(msg: Dictionary) -> void:
 			var animesh_node := Node3D.new()
 			animesh_node.name = "worn_animesh_%s" % _uuid_short(obj_uuid)
 			avatar_node.add_child(animesh_node)
-			animesh_node.position = Vector3.ZERO
-			animesh_node.quaternion = Quaternion.IDENTITY
+			# Position at attachment point relative to avatar root (RSI has world-space pos)
+			var _inv_rot: Quaternion = avatar_node.quaternion.inverse()
+			animesh_node.position = _inv_rot * (rsi.pos - avatar_node.position)
+			animesh_node.quaternion = _inv_rot * rsi.rot
 			animesh_node.scale = Vector3.ONE
 			sm.animesh_roots[obj_uuid] = animesh_node
 			sm.animesh_root_for[obj_uuid] = obj_uuid
@@ -467,12 +473,21 @@ func _update_children_transforms(parent_uuid: String) -> void:
 
 
 ## Sync animesh root Node3D transform with its RSInstance (call after any RSInstance transform change)
+## For worn animesh (child of avatar node), convert world-space RSI pos to parent-local space.
 func _sync_animesh_transform(obj_uuid: String, rsi) -> void:
 	if sm.animesh_roots.has(obj_uuid):
 		var node: Node3D = sm.animesh_roots[obj_uuid]
 		if node and is_instance_valid(node):
-			node.position = rsi.pos
-			node.quaternion = rsi.rot
+			var parent_node: Node3D = node.get_parent() as Node3D
+			if parent_node != null and parent_node != sm:
+				# Worn animesh — RSI pos is in world space, convert to parent-local
+				var parent_inv_rot: Quaternion = parent_node.quaternion.inverse()
+				node.position = parent_inv_rot * (rsi.pos - parent_node.position)
+				node.quaternion = parent_inv_rot * rsi.rot
+			else:
+				# Standalone animesh — RSI pos is world space, node is direct child of scene root
+				node.position = rsi.pos
+				node.quaternion = rsi.rot
 			# Scale stays at Vector3.ONE — SL ControlAvatar doesn't scale by prim size
 
 

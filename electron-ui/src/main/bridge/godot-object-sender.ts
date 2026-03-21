@@ -266,10 +266,6 @@ export class GodotObjectSender {
       }
     }
 
-    if (isAnimesh) {
-      console.log(`[Animesh] Detected animesh object uuid=${objUuid} meshId=${meshId || 'none'} parentUuid=${parentUuid.slice(0, 8)}`);
-    }
-
     // Distance gate: skip entirely for far root prims (no placeholder, no assets).
     // They stay in deferredTextures and get created when the bot moves closer.
     if (parentUuid === '') {

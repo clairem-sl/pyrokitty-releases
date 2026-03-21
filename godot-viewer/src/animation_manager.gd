@@ -989,7 +989,7 @@ func _should_consume_lod(root_id: String, camera_pos: Vector3) -> bool:
 	var root_pos: Vector3
 	var root_node: Node3D = sm.animesh_roots.get(root_id)
 	if root_node != null and is_instance_valid(root_node):
-		root_pos = root_node.position
+		root_pos = root_node.global_position
 	elif sm.avatars.has(root_id):
 		root_pos = sm.avatars[root_id].pos
 	else:
@@ -1069,8 +1069,10 @@ func _update_bone_attachments(root_id: String, shared_skel: Skeleton3D) -> void:
 
 		# Include skeleton's local offset (hover height) when computing world position
 		var skel_offset: Vector3 = shared_skel.position
-		var bone_world_pos: Vector3 = root_node.position + root_node.quaternion * (skel_offset + bone_pos)
-		var bone_world_rot: Quaternion = root_node.quaternion * bone_rot
+		var _rn_pos: Vector3 = root_node.global_position
+		var _rn_rot: Quaternion = root_node.global_transform.basis.orthonormalized().get_rotation_quaternion()
+		var bone_world_pos: Vector3 = _rn_pos + _rn_rot * (skel_offset + bone_pos)
+		var bone_world_rot: Quaternion = _rn_rot * bone_rot
 		var ap_id: int = sm.attach_point_id.get(child_id, 0)
 		# Pass bone's shape scale so AP offset is scaled by parent bone (xform.cpp:76)
 		var bone_scale: Vector3 = shape_scales.get(bone_name, Vector3.ONE)

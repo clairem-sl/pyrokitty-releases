@@ -381,7 +381,19 @@ export class GodotBridge extends EventEmitter {
       getLightInfo: (obj) => this.objectSender.getLightInfo(obj),
       send: (msg) => this.send(msg),
       resendObject: (obj) => {
-        this.objectSender.sendObject(obj, obj.ParentID ?? 0);
+        const objUuid = obj.FullID?.toString() || '';
+        // Resolve parent local ID → UUID (ParentID is a number, sendObject expects a UUID string)
+        const parentLocalId = obj.ParentID || 0;
+        let parentUuid = '';
+        if (parentLocalId > 0) {
+          try {
+            const parentObj = obj.region?.objects?.getObjectByLocalID(parentLocalId);
+            parentUuid = parentObj?.FullID?.toString() || '';
+          } catch { /* parent may not be in store */ }
+        }
+        // Untrack so sendObject doesn't skip it, then re-send
+        this.trackedObjects.delete(objUuid);
+        this.objectSender.sendObject(obj, parentUuid);
         this.objectSender.sendChildren(obj);
       },
     });

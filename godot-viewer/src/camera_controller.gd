@@ -348,12 +348,18 @@ func _input(event: InputEvent) -> void:
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
 			if _tooltip_visible:
 				_hide_debug_tooltip()
-			distance = max(min_distance, distance - zoom_speed * (distance * 0.1))
+			if is_alt_orbiting or alt_focus_hold:
+				alt_distance = max(min_distance, alt_distance - zoom_speed * (alt_distance * 0.1))
+			else:
+				distance = max(min_distance, distance - zoom_speed * (distance * 0.1))
 			_update_camera()
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			if _tooltip_visible:
 				_hide_debug_tooltip()
-			distance = min(max_distance, distance + zoom_speed * (distance * 0.1))
+			if is_alt_orbiting or alt_focus_hold:
+				alt_distance = min(max_distance, alt_distance + zoom_speed * (alt_distance * 0.1))
+			else:
+				distance = min(max_distance, distance + zoom_speed * (distance * 0.1))
 			_update_camera()
 
 	if event is InputEventMouseMotion:
