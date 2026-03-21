@@ -112,7 +112,6 @@ export class GodotAnimationManager {
         const isTracked = this.trackedAvatars.has(avatarId);
         if (isTracked && this.connected) {
           this.updateAnimSet(avatarId, animations.map(a => a.animId));
-        } else {
         }
       } catch (err) {
         console.error(`[AnimDebug] AvatarAnimation handler error:`, (err as Error).message);

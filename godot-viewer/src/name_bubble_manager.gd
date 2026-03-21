@@ -351,8 +351,8 @@ func _update_bubble_bg(avatar_id: String) -> void:
 		bg.mesh = quad
 		_bg_quad_size[avatar_id] = new_size
 
-	# Name extends up from y=0, chat extends down. Center of the combined region:
-	var center_y: float = (height - chat_gap - chat_height) * 0.5
+	# Name extends up from y=0, chat/typing extends down. Center of the combined region:
+	var center_y: float = (height - below) * 0.5
 	bg.position = Vector3(0, center_y, 0)
 
 
