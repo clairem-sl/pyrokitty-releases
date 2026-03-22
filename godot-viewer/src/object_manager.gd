@@ -231,6 +231,7 @@ func handle_object_create(msg: Dictionary) -> void:
 			var _bi: int = _ss.find_bone(bone_name)
 			if _bi >= 0:
 				sm.attach_bone[obj_uuid] = bone_name
+				sm.attach_bone_idx[obj_uuid] = _bi
 				sm.attach_point_id[obj_uuid] = attach_point
 
 	# Animesh root detection — create a Node3D in the scene tree for skeleton parenting.
@@ -797,6 +798,7 @@ func _cleanup_object(obj_uuid: String) -> void:
 		sm.animesh_mesh_instances.erase(obj_uuid)
 	sm.object_mesh_id.erase(obj_uuid)
 	sm.attach_bone.erase(obj_uuid)
+	sm.attach_bone_idx.erase(obj_uuid)
 	sm.animesh_root_for.erase(obj_uuid)
 	if sm.animesh_roots.has(obj_uuid):
 		var animesh_ref = sm.animesh_roots[obj_uuid]

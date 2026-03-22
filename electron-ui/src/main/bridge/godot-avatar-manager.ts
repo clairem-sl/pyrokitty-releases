@@ -32,6 +32,10 @@ export class GodotAvatarManager {
   private avatarVolumeMorphs = new Map<string, Record<string, { scale: [number, number, number]; offset: [number, number, number] }>>();
   private avatarHoverHeights = new Map<string, number>(); // avatarUuid → hover height Z (meters)
 
+  // Avatars that got avatar_create but had localId=0 (no ObjectUpdate yet).
+  // Recovered when onNewObject fires for PCode 47 with a matching UUID.
+  deferredAvatars = new Set<string>();
+
   private materialPipeline: GodotMaterialPipeline | null = null;
   private textureFetchQueue: TextureFetchQueue | null = null;
 
@@ -317,11 +321,15 @@ export class GodotAvatarManager {
       rotation: slQuat(rot),
       parentUuid,
     });
-    if (localId > 0) {
-      this.trackedAvatars.add(id);
+    this.trackedAvatars.add(id);
+    if (localId === 0) {
+      // Avatar known from agent list but no ObjectUpdate yet (distant avatar).
+      // Mark as tracked to prevent redundant re-creates, but add to deferred set
+      // so onNewObject can recover it when the ObjectUpdate arrives with a real localId.
+      this.deferredAvatars.add(id);
+      console.log(`[Avatar] ${id.slice(0, 8)} has localId=0, deferring attachments until ObjectUpdate arrives`);
     } else {
-      // Don't mark as tracked — onAvatarEnteredRegion will re-create with real localId
-      console.log(`[Avatar] ${id.slice(0, 8)} has localId=0, deferring tracking until ObjectUpdate arrives`);
+      this.deferredAvatars.delete(id);
     }
 
     // Track self-avatar UUID for attachment tagging
@@ -332,8 +340,6 @@ export class GodotAvatarManager {
     // Send existing attachments
     const avLocalId = localId || 0;
     try {
-      if (avLocalId > 0) {
-      }
       const attachments = avatar.getAttachments();
       console.log(`[Avatar] ${id.slice(0, 8)} localId=${localId}: ${attachments.size} attachments from getAttachments()`);
       let sentCount = 0;
@@ -408,6 +414,7 @@ export class GodotAvatarManager {
     this.avatarAttachSubs.clear();
     this.avatarBakedTextures.clear();
     this.avatarBakeObjects.clear();
+    this.deferredAvatars.clear();
     // NOTE: avatarShapes intentionally NOT cleared — AvatarAppearance messages
     // are only sent on initial appearance or changes. If we clear here, shapes
     // won't be available when the Godot viewer reconnects, causing avatars to

@@ -60,6 +60,9 @@ var _t_active_bones: Dictionary = {}   # root_id -> PackedInt32Array (sorted, pa
 var _lod_frame_counter: Dictionary = {} # root_id -> int (frames since last consumption)
 # Track which bones were set last frame per root (for smart reset instead of resetting all 159)
 var _prev_set_bones: Dictionary = {}   # root_id -> PackedInt32Array
+# Cache last-consumed global_overrides per root so interpolation can reuse them
+# on LOD-gated frames (bone poses unchanged, only root position changed).
+var _last_global_overrides: Dictionary = {} # root_id -> Dictionary[int, Transform3D]
 
 # Main-thread cached CV data (for _get_cv_default_scale and initialization)
 var _cv_default_scales: Dictionary = {}
@@ -335,6 +338,7 @@ func push_avatar_killed(root_id: String) -> void:
 	_slots_lock.unlock()
 	_lod_frame_counter.erase(root_id)
 	_prev_set_bones.erase(root_id)
+	_last_global_overrides.erase(root_id)
 
 
 func push_shape_changed(root_id: String, skeleton: Skeleton3D, shape_scales: Dictionary, cv_volume_morphs: Dictionary) -> void:
@@ -364,6 +368,7 @@ func push_region_change() -> void:
 	_slots_lock.unlock()
 	_lod_frame_counter.clear()
 	_prev_set_bones.clear()
+	_last_global_overrides.clear()
 
 
 func _ensure_cv_data_pushed() -> void:
@@ -971,8 +976,11 @@ func consume_anim_slots(delta: float) -> void:
 			if bi < skel_bone_count:
 				shared_skel.set_bone_global_pose_override(bi, global_overrides[bi], 1.0, true)
 
-		# Update bone attachments (main thread, reads from Skeleton3D)
-		_update_bone_attachments(root_id, shared_skel)
+		# Cache overrides for interpolation calls on LOD-gated frames
+		_last_global_overrides[root_id] = global_overrides
+
+		# Update bone attachments — reuses global_overrides to avoid re-walking bone chains
+		_update_bone_attachments(root_id, shared_skel, global_overrides)
 
 		# Debug markers
 		if _debug_skeleton_visible:
@@ -1024,15 +1032,19 @@ func _should_consume_lod(root_id: String, camera_pos: Vector3) -> bool:
 # ─── Bone Attachments ────────────────────────────────
 
 ## Update non-rigged avatar attachments to follow their attachment bone each frame.
-## Uses the shared skeleton (which has joint position overrides from mesh IBMs applied).
-## Since all meshes bind to the shared skeleton, bone transforms are read directly
-## from it — no per-mesh skeleton search needed.
-func _update_bone_attachments(root_id: String, shared_skel: Skeleton3D) -> void:
+## Reuses global_overrides from the animation thread (bone world transforms already
+## computed) instead of re-walking parent chains via Skeleton3D API.
+func _update_bone_attachments(root_id: String, shared_skel: Skeleton3D, global_overrides: Dictionary) -> void:
 	if not sm.object_children.has(root_id):
 		return
 	var root_node: Node3D = sm.animesh_roots.get(root_id)
 	if root_node == null or not is_instance_valid(root_node):
 		return
+	var shape_scales: Dictionary = sm.bone_shape_scales.get(root_id, {})
+	var skel_offset: Vector3 = shared_skel.position
+	var _rn_pos: Vector3 = root_node.global_position
+	var _rn_rot: Quaternion = root_node.global_transform.basis.orthonormalized().get_rotation_quaternion()
+
 	for child_id: String in sm.object_children[root_id]:
 		if not sm.attach_bone.has(child_id):
 			continue
@@ -1044,33 +1056,24 @@ func _update_bone_attachments(root_id: String, shared_skel: Skeleton3D) -> void:
 			continue
 		var bone_name: String = sm.attach_bone[child_id]
 
-		var bi: int = shared_skel.find_bone(bone_name)
+		# Use cached bone index if available, otherwise look up and cache
+		var bi: int = sm.attach_bone_idx.get(child_id, -1)
 		if bi < 0:
+			bi = shared_skel.find_bone(bone_name)
+			if bi < 0:
+				continue
+			sm.attach_bone_idx[child_id] = bi
+
+		# Reuse the bone's skeleton-local world transform from global_overrides
+		# (already computed by the animation thread — no chain walk needed).
+		# .origin = bone position; .basis has bone shape scale baked in,
+		# orthonormalized() strips it to get pure rotation.
+		if not global_overrides.has(bi):
 			continue
-
-		# Compute bone global transform from shared skeleton (rest * pose through parent chain)
-		var chain: Array[int] = _bone_chain_to_root(shared_skel, bi)
-
-		var shape_scales: Dictionary = sm.bone_shape_scales.get(root_id, {})
-		var bone_global_xf := Transform3D.IDENTITY
-		for idx: int in chain:
-			var rest_xf: Transform3D = shared_skel.get_bone_rest(idx)
-			var pose_rot: Quaternion = shared_skel.get_bone_pose_rotation(idx)
-			var pose_pos: Vector3 = shared_skel.get_bone_pose_position(idx)
-			var parent_idx: int = shared_skel.get_bone_parent(idx)
-			if parent_idx >= 0:
-				var parent_name: String = shared_skel.get_bone_name(parent_idx)
-				if shape_scales.has(parent_name):
-					rest_xf = _apply_parent_scale(rest_xf, shape_scales[parent_name])
-			bone_global_xf = bone_global_xf * rest_xf * Transform3D(Basis(pose_rot), pose_pos)
-
+		var bone_global_xf: Transform3D = global_overrides[bi]
 		var bone_pos: Vector3 = bone_global_xf.origin
 		var bone_rot: Quaternion = bone_global_xf.basis.orthonormalized().get_rotation_quaternion()
 
-		# Include skeleton's local offset (hover height) when computing world position
-		var skel_offset: Vector3 = shared_skel.position
-		var _rn_pos: Vector3 = root_node.global_position
-		var _rn_rot: Quaternion = root_node.global_transform.basis.orthonormalized().get_rotation_quaternion()
 		var bone_world_pos: Vector3 = _rn_pos + _rn_rot * (skel_offset + bone_pos)
 		var bone_world_rot: Quaternion = _rn_rot * bone_rot
 		var ap_id: int = sm.attach_point_id.get(child_id, 0)

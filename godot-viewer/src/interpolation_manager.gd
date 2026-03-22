@@ -84,7 +84,8 @@ func interpolate_avatars(delta: float) -> void:
 				node.quaternion = rsi.rot
 			_update_children_world_pos(avatar_id, rsi.pos, rsi.rot)
 			if sm.animesh_shared_skeleton.has(avatar_id):
-				sm.animation_mgr._update_bone_attachments(avatar_id, sm.animesh_shared_skeleton[avatar_id])
+				var cached_overrides: Dictionary = sm.animation_mgr._last_global_overrides.get(avatar_id, {})
+				sm.animation_mgr._update_bone_attachments(avatar_id, sm.animesh_shared_skeleton[avatar_id], cached_overrides)
 
 		# Emit camera follow signal for self avatar
 		if avatar_id == sm.self_avatar_id:

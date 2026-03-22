@@ -130,9 +130,9 @@ var animesh_mesh_instances: Dictionary = {} # uuid (String) -> MeshInstance3D (f
 
 # Attachment point bone tracking — non-rigged attachments follow their bone each frame
 var attach_bone: Dictionary = {}            # uuid (String) -> bone name (String) for objects attached to avatar bones
+var attach_bone_idx: Dictionary = {}        # uuid (String) -> bone index (int), cached from find_bone at registration
 var attach_point_id: Dictionary = {}        # uuid (String) -> attachmentPointId (int)
 var bone_global_overrides: Dictionary = {}  # root uuid (String) -> {bone_name -> Vector3} (global rest positions from meshes)
-
 
 # Skeleton builder — parses avatar_skeleton.xml once, creates shared skeletons
 var skeleton_builder: RefCounted

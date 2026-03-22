@@ -532,7 +532,21 @@ export class GodotBridge extends EventEmitter {
 
     onNewObject: (event) => {
       const obj = event.object;
-      if (obj.PCode === 47) return;
+      if (obj.PCode === 47) {
+        // Avatar ObjectUpdate arrived — recover deferred avatars that had localId=0
+        const avatarUuid = obj.FullID?.toString() || '';
+        if (avatarUuid && this.avatarManager.deferredAvatars.has(avatarUuid)) {
+          try {
+            const region = obj.region;
+            const avatar = region?.agents?.get(avatarUuid);
+            if (avatar) {
+              console.log(`[Avatar] ${avatarUuid.slice(0, 8)} ObjectUpdate arrived (localId=${obj.ID}), recovering deferred avatar`);
+              this.avatarManager.sendAvatarCreate(avatar, avatarUuid);
+            }
+          } catch { /* avatar may not be accessible */ }
+        }
+        return;
+      }
       if (isHudAttachment(obj)) return;
 
       const parentLocalId = obj.ParentID || 0;
