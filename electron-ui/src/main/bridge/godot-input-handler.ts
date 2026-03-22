@@ -119,7 +119,47 @@ export class GodotInputHandler {
       (agent as any).bodyRotation.w = qw;
     }
 
+    // Update camera from Godot (already in SL coordinates)
+    this.applyCameraData(agent, msg);
+
     agent.sendAgentUpdate();
+  }
+
+  /** Handle standalone camera update (orbit/zoom without movement) */
+  handleCameraUpdate(msg: any): void {
+    const agent = this.bot.agent;
+    if (!agent) return;
+    this.applyCameraData(agent, msg);
+    agent.sendAgentUpdate();
+  }
+
+  /** Apply camera position + axes from Godot message to Agent */
+  private applyCameraData(agent: any, msg: any): void {
+    if (msg.cameraCenter) {
+      const c = msg.cameraCenter;
+      agent.cameraCenter.x = c[0];
+      agent.cameraCenter.y = c[1];
+      agent.cameraCenter.z = c[2];
+      agent.cameraSetByViewer = true;
+    }
+    if (msg.cameraAtAxis) {
+      const a = msg.cameraAtAxis;
+      agent.cameraLookAt.x = a[0];
+      agent.cameraLookAt.y = a[1];
+      agent.cameraLookAt.z = a[2];
+    }
+    if (msg.cameraLeftAxis) {
+      const l = msg.cameraLeftAxis;
+      agent.cameraLeftAxis.x = l[0];
+      agent.cameraLeftAxis.y = l[1];
+      agent.cameraLeftAxis.z = l[2];
+    }
+    if (msg.cameraUpAxis) {
+      const u = msg.cameraUpAxis;
+      agent.cameraUpAxis.x = u[0];
+      agent.cameraUpAxis.y = u[1];
+      agent.cameraUpAxis.z = u[2];
+    }
   }
 
   async handleRequestObjectProperties(uuid: string): Promise<void> {

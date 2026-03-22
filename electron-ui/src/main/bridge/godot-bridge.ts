@@ -5,7 +5,8 @@
  * Orchestrates sub-modules:
  *  - GodotInputHandler — movement, object interaction
  *  - GodotAnimationManager — animation batching for avatars/animesh
- *  - GodotMaterialPipeline — texture/material fetching and processing
+ *  - MaterialResolver — viewer-agnostic material resolution
+ *  - GodotFaceUpdateBatcher — face update batching for Godot
  *  - GodotObjectSender — object serialization, snapshots, sweeps
  *  - GodotAvatarManager — avatar lifecycle and attachment routing
  */
@@ -33,7 +34,8 @@ import { GodotEnvironmentManager } from './godot-environment-manager';
 import { GodotUpdateCoalescer } from './godot-update-coalescer';
 import { GodotInputHandler } from './godot-input-handler';
 import { GodotAnimationManager } from './godot-animation-manager';
-import { GodotMaterialPipeline } from './godot-material-pipeline';
+import { GodotFaceUpdateBatcher, resolvedToGodotFace } from './godot-material-pipeline';
+import { MaterialResolver } from '../materials/material-resolver';
 import { GodotObjectSender } from './godot-object-sender';
 import { GodotAvatarManager } from './godot-avatar-manager';
 import { ObjectReadinessTracker } from './object-readiness-tracker';
@@ -105,7 +107,8 @@ export class GodotBridge extends EventEmitter {
   // Sub-modules
   private inputHandler: GodotInputHandler;
   private animationManager: GodotAnimationManager;
-  private materialPipeline: GodotMaterialPipeline;
+  private materialResolver: MaterialResolver;
+  private faceUpdateBatcher: GodotFaceUpdateBatcher;
   private objectSender: GodotObjectSender;
   private avatarManager: GodotAvatarManager;
 
@@ -143,10 +146,17 @@ export class GodotBridge extends EventEmitter {
     // Initialize sub-modules
     this.inputHandler = new GodotInputHandler(bot, send);
     this.animationManager = new GodotAnimationManager(bot, send, this.trackedAvatars);
-    this.materialPipeline = new GodotMaterialPipeline(bot, send, this.trackedObjects);
+    this.faceUpdateBatcher = new GodotFaceUpdateBatcher(send);
+    this.materialResolver = new MaterialResolver(bot, this.trackedObjects,
+      (objectUuid, faceIndex, material) => {
+        // Convert ResolvedMaterial → Godot face format and queue via batcher
+        const godotFace = resolvedToGodotFace(faceIndex, material, true);
+        this.faceUpdateBatcher.queueFaceUpdate(objectUuid, [godotFace]);
+      },
+    );
     this.objectSender = new GodotObjectSender(
       bot, send, this.trackedObjects, this.trackedAvatars,
-      this.materialPipeline, this.animationManager,
+      this.materialResolver, this.animationManager,
     );
     this.avatarManager = new GodotAvatarManager(
       bot, send, this.trackedObjects, this.trackedAvatars,
@@ -154,7 +164,7 @@ export class GodotBridge extends EventEmitter {
     );
     this.avatarManager.setObjectSender(this.objectSender);
     this.objectSender.setAvatarManager(this.avatarManager);
-    this.materialPipeline.setAvatarManager(this.avatarManager);
+    this.materialResolver.setBakeProvider(this.avatarManager);
 
     // Seed from MetaverseConnection's early ObjectAnimation buffer
     if (options.objectAnimationBuffer) {
@@ -350,7 +360,7 @@ export class GodotBridge extends EventEmitter {
     }, this.textureFetchQueue.decodePool);
 
     this.materialFetchQueue = new MaterialFetchQueue(this.bot, (materialUuid, data) => {
-      this.materialPipeline.handleMaterialReady(materialUuid, data);
+      this.materialResolver.handleMaterialReady(materialUuid, data);
     });
 
     this.animationFetchQueue = new AnimationFetchQueue(this.bot, (animUuid, data) => {
@@ -369,9 +379,9 @@ export class GodotBridge extends EventEmitter {
     this.objectSender.setReadinessTracker(readinessTracker);
 
     // Wire fetch queues to sub-modules
-    this.materialPipeline.initQueues(this.materialFetchQueue, this.textureFetchQueue);
+    this.materialResolver.initQueues(this.materialFetchQueue, this.textureFetchQueue);
     this.animationManager.initFetchQueue(this.animationFetchQueue);
-    this.avatarManager.initBom(this.materialPipeline, this.textureFetchQueue);
+    this.avatarManager.initBom(this.materialResolver);
 
     this.environmentMgr = new GodotEnvironmentManager(this.bot, (msg) => this.send(msg));
 
@@ -442,6 +452,9 @@ export class GodotBridge extends EventEmitter {
         break;
       case 'input_move':
         this.inputHandler.handleInputMove(msg);
+        break;
+      case 'camera_update':
+        this.inputHandler.handleCameraUpdate(msg);
         break;
       case 'pipeline_stats':
         this.lastGodotStats = msg;
@@ -705,7 +718,7 @@ export class GodotBridge extends EventEmitter {
     const godotStr = gs
       ? ` | godot(${gs.fps?.toFixed(0) ?? '?'}fps budget:${gs.budgetElapsed?.toFixed(1) ?? '?'}/${gs.budgetAvail?.toFixed(1) ?? '?'}/${gs.budgetUsed?.toFixed(1) ?? '?'}ms el/av/us): tex: w=${gs.texWorkers}(${gs.texReady ?? '?'}rdy) q=${gs.texQueue} done=${gs.texDone} cached=${gs.texCached} fail=${gs.texFailed} pending=${gs.texPending} [${gs.texTiming ?? '?'}] | mesh: w=${gs.meshWorkers}(${gs.meshReady ?? '?'}rdy) q=${gs.meshQueue} done=${gs.meshDone} cached=${gs.meshCached} fail=${gs.meshFailed} pending=${gs.meshPending} | mats=${gs.materials}(${gs.materialReuse ?? '?'}reuse) opaque=${gs.texOpaque ?? '?'}`
       : '';
-    console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | pbr: ${this.materialPipeline.totalPbrFaceCount} faces | deferred: ${this.objectSender.deferredCount} pending: ${this.objectSender.readinessPendingCount}${godotStr}`);
+    console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | pbr: ${this.materialResolver.totalPbrFaceCount} faces | deferred: ${this.objectSender.deferredCount} pending: ${this.objectSender.readinessPendingCount}${godotStr}`);
   }
 
   /** Send electron-side fetch queue stats to Godot for the stats bar */
@@ -902,7 +915,8 @@ export class GodotBridge extends EventEmitter {
     this.objectSender.cleanup();
     this.avatarManager.cleanup();
     this.animationManager.cleanup();
-    this.materialPipeline.cleanup();
+    this.materialResolver.cleanup();
+    this.faceUpdateBatcher.cleanup();
     this.readinessTracker = null;
     this.sculptFetchQueue = null;
     this.materialFetchQueue = null;

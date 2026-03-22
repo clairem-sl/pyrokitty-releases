@@ -493,21 +493,16 @@ func apply_face_materials(rsi, obj_uuid: String, faces: Array) -> void:
 			"texRotation": fi.get("rotation", 0.0)
 		}
 
-		# PBR fields (optional — only present for faces with glTF material overrides)
+		# PBR fields — everything is PBR-shaped, always extract
 		var pbr: Dictionary = {}
-		if fi.get("isPBR", false):
-			pbr["isPBR"] = true
-			if fi.has("ormTextureId"):
-				pbr["ormTextureId"] = str(fi["ormTextureId"])
-			if fi.has("emissiveTextureId"):
-				pbr["emissiveTextureId"] = str(fi["emissiveTextureId"])
-			if fi.has("emissiveFactor"):
-				pbr["emissiveFactor"] = fi["emissiveFactor"]
-			if fi.has("pbrBaseColor"):
-				pbr["pbrBaseColor"] = fi["pbrBaseColor"]
-		# Normal map and roughness/metallic — shared between PBR and legacy materials
 		if fi.has("normalTextureId"):
 			pbr["normalTextureId"] = str(fi["normalTextureId"])
+		if fi.has("ormTextureId"):
+			pbr["ormTextureId"] = str(fi["ormTextureId"])
+		if fi.has("emissiveTextureId"):
+			pbr["emissiveTextureId"] = str(fi["emissiveTextureId"])
+		if fi.has("emissiveFactor"):
+			pbr["emissiveFactor"] = fi["emissiveFactor"]
 		if fi.has("metallicFactor"):
 			pbr["metallicFactor"] = float(fi["metallicFactor"])
 		if fi.has("roughnessFactor"):
@@ -574,19 +569,17 @@ func _get_double_sided_shader(shader: Shader) -> Shader:
 func _get_or_create_material(texture_id: String, color: Array, full_bright: bool, double_sided: bool, uv_info: Dictionary = {}, alpha_mode: int = -1, alpha_cutoff: float = 0.5, pbr: Dictionary = {}, mapping_type: int = 0, render_priority: int = 0) -> Material:
 	_material_lookups += 1
 
-	# Resolve effective alpha: promote known-opaque textures to mode 0 (fully opaque)
-	# so they skip the transparency pipeline entirely
+	# Alpha mode: 0=opaque, 1=blend, 2=mask. -1=unresolved (legacy faces without
+	# an explicit material — promote to opaque if texture has no alpha channel).
 	var resolved_mode := alpha_mode
 	if alpha_mode == -1 and color[3] >= 1.0 and _texture_opaque.get(texture_id, false):
 		resolved_mode = 0
 
-	# PBR params
-	var is_pbr: bool = pbr.get("isPBR", false)
+	# PBR params — everything is PBR-shaped, resolver provides defaults
 	var normal_id: String = pbr.get("normalTextureId", "")
 	var orm_id: String = pbr.get("ormTextureId", "")
 	var emissive_id: String = pbr.get("emissiveTextureId", "")
-	# Metallic/roughness: PBR defaults differ from legacy (PBR metallic defaults 1.0)
-	var metallic_factor: float = float(pbr.get("metallicFactor", 1.0 if is_pbr else 0.0))
+	var metallic_factor: float = float(pbr.get("metallicFactor", 0.0))
 	var roughness_factor: float = float(pbr.get("roughnessFactor", 1.0))
 	var emissive_factor: Array = pbr.get("emissiveFactor", [0, 0, 0])
 	# Only include PBR tex IDs in key if they're actually cached (so key changes on arrival)
@@ -618,12 +611,11 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 	# protocol noise (e.g. 1.0001 vs 1.0) into shared materials, cutting material count.
 	var uv_key := "%.2f_%.2f_%.2f_%.2f_%.2f" % [ru, rv, ou, ov, tr]
 	var alpha_key := "%d_%.2f" % [resolved_mode, alpha_cutoff]
-	var pbr_key := ""
-	if is_pbr:
-		pbr_key = "_%s_%s_%s_%.2f_%.2f_%.2f_%.2f_%.2f" % [
-			norm_key, orm_key, emis_key,
-			metallic_factor, roughness_factor,
-			emissive_factor[0], emissive_factor[1], emissive_factor[2]]
+	# Always include PBR params in cache key — resolver always provides them
+	var pbr_key := "_%s_%s_%s_%.2f_%.2f_%.2f_%.2f_%.2f" % [
+		norm_key, orm_key, emis_key,
+		metallic_factor, roughness_factor,
+		emissive_factor[0], emissive_factor[1], emissive_factor[2]]
 	var map_key := "m%d" % mapping_type if mapping_type != 0 else ""
 	var pri_key := "p%d" % render_priority if render_priority != 0 else ""
 	var key := "%s_%s_%s_%s_%s_%s%s%s%s" % [texture_id, color_hex, fb_str, ds_str, uv_key, alpha_key, pbr_key, map_key, pri_key]
@@ -702,16 +694,11 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 	if double_sided:
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 
-	# Alpha handling (uses resolved_mode — opaque textures promoted to mode 0)
-	# Values: -1=default(SL), 0=opaque/none, 1=blend, 2=mask, 3=emissive(opaque)
-	# Color alpha (transparency slider) always wins — SL material alpha mode controls
-	# TEXTURE alpha interpretation, not color alpha.
+	# Alpha handling: 0=opaque, 1=blend, 2=mask, -1=unresolved (texture-dependent).
+	# Color alpha (transparency slider) always wins.
 	if color[3] < 1.0:
 		# Transparency slider active — always use alpha blending
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	elif resolved_mode == 0 or resolved_mode == 3:
-		# Fully opaque — no transparency pipeline overhead
-		pass
 	elif resolved_mode == 1:
 		# GLTF BLEND — smooth alpha blending
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -719,10 +706,11 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 		# GLTF MASK — alpha scissor with explicit cutoff
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 		mat.alpha_scissor_threshold = alpha_cutoff
-	else:
-		# Standard SL (alpha_mode == -1), texture has alpha channel
+	elif resolved_mode == -1:
+		# Unresolved legacy face — texture has alpha channel, apply default scissor
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 		mat.alpha_scissor_threshold = 0.5
+	# else: mode 0 (opaque) — no transparency pipeline overhead
 
 	# Fullbright = unshaded
 	if full_bright:
@@ -733,36 +721,31 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 		mat.normal_enabled = true
 		mat.normal_texture = sm.texture_cache[normal_id]
 
-	# --- PBR / legacy specular properties ---
-	if is_pbr:
-		mat.metallic = metallic_factor
-		mat.roughness = roughness_factor
+	# --- Metallic / roughness (always applied — resolver provides defaults) ---
+	mat.metallic = metallic_factor
+	mat.roughness = roughness_factor
 
-		# ORM texture (R=ambient occlusion, G=roughness, B=metallic) — glTF standard
-		if not orm_key.is_empty():
-			var orm_tex: Texture2D = sm.texture_cache[orm_id]
-			mat.metallic_texture = orm_tex
-			mat.metallic_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_BLUE
-			mat.roughness_texture = orm_tex
-			mat.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_GREEN
-			mat.ao_enabled = true
-			mat.ao_texture = orm_tex
-			mat.ao_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
+	# ORM texture (R=ambient occlusion, G=roughness, B=metallic) — glTF standard
+	if not orm_key.is_empty():
+		var orm_tex: Texture2D = sm.texture_cache[orm_id]
+		mat.metallic_texture = orm_tex
+		mat.metallic_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_BLUE
+		mat.roughness_texture = orm_tex
+		mat.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_GREEN
+		mat.ao_enabled = true
+		mat.ao_texture = orm_tex
+		mat.ao_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
 
-		# Emissive
-		var ef: Array = emissive_factor
-		var has_emission_factor: bool = float(ef[0]) > 0 or float(ef[1]) > 0 or float(ef[2]) > 0
-		if has_emission_factor:
-			mat.emission_enabled = true
-			mat.emission = Color(ef[0], ef[1], ef[2])
-			mat.emission_energy_multiplier = 1.0
-		if not emis_key.is_empty():
-			mat.emission_enabled = true
-			mat.emission_texture = sm.texture_cache[emissive_id]
-	elif pbr.has("roughnessFactor") or pbr.has("metallicFactor"):
-		# Legacy Blinn-Phong specular → PBR approximation
-		mat.metallic = metallic_factor
-		mat.roughness = roughness_factor
+	# Emissive
+	var ef: Array = emissive_factor
+	var has_emission_factor: bool = float(ef[0]) > 0 or float(ef[1]) > 0 or float(ef[2]) > 0
+	if has_emission_factor:
+		mat.emission_enabled = true
+		mat.emission = Color(ef[0], ef[1], ef[2])
+		mat.emission_energy_multiplier = 1.0
+	if not emis_key.is_empty():
+		mat.emission_enabled = true
+		mat.emission_texture = sm.texture_cache[emissive_id]
 
 	if render_priority != 0:
 		mat.render_priority = render_priority

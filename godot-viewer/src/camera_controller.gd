@@ -49,6 +49,8 @@ var send_timer: float = 0.0
 var _dbg_was_moving: bool = false  # for movement freeze diagnostics
 var _pending_cursor_pos: Vector2 = Vector2(-1, -1)  # queued mouse pos for cursor update
 var _cursor_timer: float = 0.0
+var _camera_timer: float = 0.0  # throttle for standalone camera updates
+var _last_cam_pos: Vector3 = Vector3.ZERO
 
 # ALT-orbit camera (SL-style focus orbit)
 var is_alt_orbiting: bool = false  # True while ALT + left-drag
@@ -450,6 +452,17 @@ func _update_camera() -> void:
 
 	global_position = focus + offset
 	look_at(focus, Vector3.UP)
+
+	# Send camera update when camera moves without avatar movement (orbit, zoom)
+	# Throttled to ~4 Hz to avoid flooding the WebSocket
+	if global_position.distance_squared_to(_last_cam_pos) > 0.01:
+		_camera_timer -= get_process_delta_time()
+		if _camera_timer <= 0.0:
+			_camera_timer = 0.25
+			_last_cam_pos = global_position
+			var msg := {"type": "camera_update"}
+			_append_camera_data(msg)
+			main_node.send_message(msg)
 
 	# Let the VR rig know where the avatar is so it can position the HMD origin.
 	# Only emit when position or yaw actually changed — moving XROrigin3D every
@@ -886,6 +899,11 @@ func _set_shadow_quality_vr() -> void:
 	light.directional_shadow_max_distance = 30.0
 
 
+## Convert Godot Vector3 to SL coordinate array [x, -z, y]
+static func _godot_to_sl(v: Vector3) -> Array:
+	return [v.x, -v.z, v.y]
+
+
 func _send_movement() -> void:
 	var is_moving := move_forward or move_backward or strafe_left or strafe_right \
 		or turn_left or turn_right or jump or crouch
@@ -911,4 +929,15 @@ func _send_movement() -> void:
 	if fly_toggled:
 		msg["fly"] = flying
 		fly_toggled = false
+	# Include camera transform (Godot→SL coords) for server interest list
+	_append_camera_data(msg)
 	main_node.send_message(msg)
+
+
+## Append camera position + axes to a message dict (Godot→SL coords).
+func _append_camera_data(msg: Dictionary) -> void:
+	var b := global_transform.basis
+	msg["cameraCenter"] = _godot_to_sl(global_position)
+	msg["cameraAtAxis"] = _godot_to_sl(-b.z)   # forward
+	msg["cameraLeftAxis"] = _godot_to_sl(-b.x)  # SL left = Godot -right
+	msg["cameraUpAxis"] = _godot_to_sl(b.y)     # up

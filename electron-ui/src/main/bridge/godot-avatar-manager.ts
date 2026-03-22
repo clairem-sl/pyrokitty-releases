@@ -12,10 +12,9 @@ import type { AvatarAppearanceMessage } from '../../../node-metaverse/dist/lib/c
 import type { Subscription } from 'rxjs';
 import type { GodotObjectSender } from './godot-object-sender';
 import type { GodotAnimationManager } from './godot-animation-manager';
-import type { GodotMaterialPipeline } from './godot-material-pipeline';
-import type { TextureFetchQueue } from '../assets/texture-fetch-queue';
+import type { MaterialResolver } from '../materials/material-resolver';
 import type { SendFn } from './godot-bridge-types';
-import { isHudAttachment, BAKE_MAGIC_UUIDS, BAKE_CHANNEL_NAMES, BAKE_CHANNEL_TO_TE_FACE, ZERO_UUID, slPos, slQuat } from './godot-bridge-types';
+import { isHudAttachment, BAKE_CHANNEL_NAMES, BAKE_CHANNEL_TO_TE_FACE, ZERO_UUID, slPos, slQuat } from './godot-bridge-types';
 import { computeShapeDeltas } from '../avatar/avatar-shape';
 
 export class GodotAvatarManager {
@@ -36,8 +35,7 @@ export class GodotAvatarManager {
   // Recovered when onNewObject fires for PCode 47 with a matching UUID.
   deferredAvatars = new Set<string>();
 
-  private materialPipeline: GodotMaterialPipeline | null = null;
-  private textureFetchQueue: TextureFetchQueue | null = null;
+  private materialResolver: MaterialResolver | null = null;
 
   constructor(
     private bot: Bot,
@@ -53,9 +51,8 @@ export class GodotAvatarManager {
   }
 
   /** Set references needed for BoM re-emit */
-  initBom(materialPipeline: GodotMaterialPipeline, textureFetchQueue: TextureFetchQueue): void {
-    this.materialPipeline = materialPipeline;
-    this.textureFetchQueue = textureFetchQueue;
+  initBom(materialResolver: MaterialResolver): void {
+    this.materialResolver = materialResolver;
   }
 
   setConnected(connected: boolean): void {
@@ -225,7 +222,7 @@ export class GodotAvatarManager {
    * Re-emit face updates for all tracked bake objects of an avatar.
    * Called when AvatarAppearance arrives or changes.
    */
-  private reemitBakeUpdates(avatarId: string, bakes: string[]): void {
+  private reemitBakeUpdates(avatarId: string, _bakes: string[]): void {
     const objectSet = this.avatarBakeObjects.get(avatarId);
     if (!objectSet || objectSet.size === 0) {
       // No tracked bake objects yet — attachments may not have arrived.
@@ -233,55 +230,12 @@ export class GodotAvatarManager {
       return;
     }
 
-    let reemitted = 0;
-    for (const objectUuid of objectSet) {
-      if (!this.trackedObjects.has(objectUuid)) continue;
-      try {
-        const obj = this.bot.currentRegion.objects.getObjectByUUID(objectUuid as any);
-        if (!obj || obj.deleted) continue;
+    if (!this.materialResolver) return;
 
-        const texInfo = this.materialPipeline?.getTextureInfo(obj);
-        if (!texInfo) continue;
-
-        // Substitute magic bake UUIDs with actual baked textures
-        let hadSub = false;
-        for (const face of texInfo.faces) {
-          const channel = BAKE_MAGIC_UUIDS.get(face.textureId);
-          if (channel !== undefined) {
-            const bakedUuid = bakes[channel];
-            if (bakedUuid && bakedUuid !== ZERO_UUID) {
-              face.textureId = bakedUuid;
-              face._isBake = true;
-              face._bakeAvatarUuid = avatarId;
-              face._bakeChannel = channel;
-              hadSub = true;
-            }
-          }
-        }
-
-        if (hadSub) {
-          const objUuid = obj.FullID?.toString() || '';
-          // Queue face update for batched delivery to Godot
-          this.materialPipeline!.queueFaceUpdate(objUuid, texInfo.faces);
-
-          // Fetch the new baked texture assets via appearance service
-          for (const face of texInfo.faces) {
-            if (face.textureId && !BAKE_MAGIC_UUIDS.has(face.textureId) && this.textureFetchQueue) {
-              if (face._bakeChannel != null) {
-                this.textureFetchQueue.requestBake(face.textureId, objUuid, avatarId, face._bakeChannel);
-              } else {
-                this.textureFetchQueue.request(face.textureId, objUuid);
-              }
-            }
-          }
-          reemitted++;
-        }
-      } catch { /* object may not exist anymore */ }
-    }
-
-    if (reemitted > 0) {
-      console.log(`[BoM] Re-emitted face updates for ${reemitted} objects of avatar ${avatarId.slice(0, 8)}`);
-    }
+    // Delegate to MaterialResolver — it handles bake substitution,
+    // face re-resolution, texture fetches, and callback emission.
+    this.materialResolver.handleBakeTextureUpdate(avatarId, objectSet);
+    console.log(`[BoM] Re-emitted face updates for ${objectSet.size} objects of avatar ${avatarId.slice(0, 8)}`);
   }
 
   // ─── Avatar Lifecycle ─────────────────────────────────────────

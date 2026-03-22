@@ -85,6 +85,7 @@ export class Agent {
 
     private readonly headRotation = Quaternion.getIdentity();
     private readonly bodyRotation = Quaternion.getIdentity();
+    public cameraSetByViewer = false;
 
     private wearables?: {
         attachments: Wearable[];
@@ -358,10 +359,13 @@ export class Agent {
         if (!this.currentRegion) {
             return;
         }
-        // Keep camera center in sync with the agent's actual position
-        const selfAvatar = this.currentRegion.agents.get(this.agentID.toString());
-        if (selfAvatar?.position) {
-            this.cameraCenter = selfAvatar.position;
+        // Camera center/axes are set by the viewer (GodotInputHandler.applyCameraData).
+        // Fall back to avatar position if no viewer has updated the camera yet.
+        if (!this.cameraSetByViewer) {
+            const selfAvatar = this.currentRegion.agents.get(this.agentID.toString());
+            if (selfAvatar?.position) {
+                this.cameraCenter = selfAvatar.position;
+            }
         }
 
         // Always include FINISH_ANIM on every AgentUpdate. On the server

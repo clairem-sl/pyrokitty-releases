@@ -11,11 +11,12 @@ import type { MeshFetchQueue } from '../assets/mesh-fetch-queue';
 import type { TextureFetchQueue } from '../assets/texture-fetch-queue';
 import type { SculptFetchQueue } from '../assets/sculpt-fetch-queue';
 import type { GodotUpdateCoalescer } from './godot-update-coalescer';
-import type { GodotMaterialPipeline } from './godot-material-pipeline';
+import { resolvedToGodotFace } from './godot-material-pipeline';
 import type { GodotAnimationManager } from './godot-animation-manager';
 import type { GodotAvatarManager } from './godot-avatar-manager';
 import type { SendFn } from './godot-bridge-types';
-import { isHudAttachment, BAKE_MAGIC_UUIDS, ZERO_UUID, slPos, slQuat, slScale } from './godot-bridge-types';
+import { isHudAttachment, slPos, slQuat, slScale } from './godot-bridge-types';
+import type { MaterialResolver } from '../materials/material-resolver';
 import type { ObjectReadinessTracker } from './object-readiness-tracker';
 
 export class GodotObjectSender {
@@ -43,7 +44,7 @@ export class GodotObjectSender {
     private send: SendFn,
     private trackedObjects: Set<string>,
     private trackedAvatars: Set<string>,
-    private materialPipeline: GodotMaterialPipeline,
+    private materialResolver: MaterialResolver,
     private animationManager: GodotAnimationManager,
   ) { }
 
@@ -198,51 +199,24 @@ export class GodotObjectSender {
     const scl = obj.Scale;
     const meshId = this.getMeshId(obj);
     const sculptInfo = this.getSculptInfo(obj);
-    const texInfo = this.materialPipeline.getTextureInfo(obj);
+    // Resolve all faces via MaterialResolver (handles BoM, PBR, legacy, texture fetches)
+    const resolveResult = this.materialResolver.resolveObject(obj);
+    // Convert resolved faces to Godot wire format for object_complete
+    const texInfo = resolveResult ? {
+      faces: resolveResult.faces.map(f => resolvedToGodotFace(f.index, f.resolved, f.isPBR)),
+      textureIds: resolveResult.textureIds,
+    } : undefined;
     if (!texInfo) {
       const te = obj.TextureEntry;
       console.warn(`[ObjectSender] No texInfo for ${objUuid.slice(0, 8)}: TextureEntry=${te ? 'present' : 'null'}, defaultTexture=${te?.defaultTexture ? 'present' : 'null'}`);
     }
 
-    // BoM: substitute magic bake UUIDs with actual baked textures for avatar attachments
-    if (texInfo && parentUuid !== '' && this.avatarManager) {
-      const avatarId = this.avatarManager.findOwnerAvatar(parentUuid);
-      if (avatarId) {
-        let hasBakeUuids = false;
-        for (const face of texInfo.faces) {
-          if (BAKE_MAGIC_UUIDS.has(face.textureId)) {
-            hasBakeUuids = true;
-            break;
-          }
-        }
-        if (hasBakeUuids) {
-          // Track this object for re-emit when bakes arrive/change
-          this.avatarManager.trackBakeObject(avatarId, objUuid);
-
-          const bakes = this.avatarManager.getBakedTextures(avatarId);
-          if (bakes) {
-            for (const face of texInfo.faces) {
-              const channel = BAKE_MAGIC_UUIDS.get(face.textureId);
-              if (channel !== undefined) {
-                const bakedUuid = bakes[channel];
-                if (bakedUuid && bakedUuid !== ZERO_UUID) {
-                  face.textureId = bakedUuid;
-                  face._isBake = true;
-                  face._bakeAvatarUuid = avatarId;
-                  face._bakeChannel = channel;
-                }
-              }
-            }
-            // Rebuild textureIds after substitution
-            const idSet = new Set<string>();
-            for (const face of texInfo.faces) {
-              idSet.add(face.textureId);
-              if (face.normalTextureId) idSet.add(face.normalTextureId);
-              if (face.ormTextureId) idSet.add(face.ormTextureId);
-              if (face.emissiveTextureId) idSet.add(face.emissiveTextureId);
-            }
-            texInfo.textureIds = Array.from(idSet);
-          }
+    // BoM: track bake objects for re-emit when bakes arrive/change
+    if (resolveResult && parentUuid !== '' && this.avatarManager) {
+      for (const face of resolveResult.faces) {
+        if (face.isBake && face.bakeAvatarUuid) {
+          this.avatarManager.trackBakeObject(face.bakeAvatarUuid, objUuid);
+          break; // only need to track once per object
         }
       }
     }
@@ -337,7 +311,7 @@ export class GodotObjectSender {
 
     // Subscribe to live texture changes
     if (obj.onTextureUpdate) {
-      const texSub = obj.onTextureUpdate.subscribe(() => this.materialPipeline.handleObjectTextureUpdate(obj));
+      const texSub = obj.onTextureUpdate.subscribe(() => this.materialResolver.handleObjectTextureUpdate(obj));
       this.textureUpdateSubs.set(objUuid, texSub);
     }
 
@@ -351,7 +325,7 @@ export class GodotObjectSender {
       console.log(`[GodotBridge] Requesting proj texture ${lightInfo.projTexture} for uuid=${objUuid.slice(0, 8)}`);
       this.textureFetchQueue.request(lightInfo.projTexture, objUuid);
     }
-    this.materialPipeline.fetchTexturesForObject(obj, texInfo);
+    // Texture + material fetches are already handled by materialResolver.resolveObject above
   }
 
   /** Recursively send children of a root/parent object */

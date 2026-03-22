@@ -131,7 +131,7 @@ func _test_planar_alpha_mask_shader() -> void:
 
 func _test_planar_legacy_transparent_color() -> void:
 	_clear_caches()
-	# alpha_mode=-1 (legacy SL), color.a < 1.0 → alpha blend
+	# alpha_mode=-1 (unresolved legacy), color.a < 1.0 → color alpha wins → alpha blend
 	var mat: Material = sm._get_or_create_material(
 		_dummy_tex_id, _make_color(1, 1, 1, 0.5), false, false, _make_uv(), -1, 0.5, {}, 2)
 	_assert(mat is ShaderMaterial, "planar legacy transparent: is ShaderMaterial")
@@ -140,7 +140,7 @@ func _test_planar_legacy_transparent_color() -> void:
 
 func _test_planar_legacy_opaque_with_alpha_tex() -> void:
 	_clear_caches()
-	# alpha_mode=-1 (legacy SL), color.a >= 1.0 → opaque with scissor 0.5
+	# alpha_mode=-1 (unresolved legacy), color.a >= 1.0 → opaque with scissor 0.5
 	var mat: Material = sm._get_or_create_material(
 		_dummy_tex_id, _make_color(1, 1, 1, 1), false, false, _make_uv(), -1, 0.5, {}, 2)
 	_assert(mat is ShaderMaterial, "planar legacy opaque+scissor: is ShaderMaterial")
