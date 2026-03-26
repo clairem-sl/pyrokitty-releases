@@ -90,6 +90,11 @@ The pipeline has three stages with different bottlenecks:
 **Loading bottleneck: Stage 1 (J2K decode)** — the queue drains at the rate WASM can decode.
 **Rendering bottleneck: Stage 4 (draw call count)** — too many unique materials for GPU batching.
 
+### Startup: Cache Initialization
+- `initTextureCache()` scans the texture cache dir and populates an in-memory `Map<uuid, extension>` — called in `godot-bridge.ts:start()` before any texture requests
+- `initSkeletonData()` preloads skeleton XML into memory — called in `godot-bridge.ts:connectWebSocket()` and by each mesh-convert worker at spawn
+- These ensure `isTextureCached()` and `isMeshCached()` remain synchronous (in-memory lookups) while all disk I/O is async
+
 ## Monitoring
 
 Stats line (logged every 30s):
@@ -207,6 +212,24 @@ Main thread: nothing (for textures+materials)
 - When two closures share a scope (e.g., Promise executor + setTimeout callback), V8 keeps all captured variables alive as long as ANY closure in that scope is alive
 - A 60-second timeout pins the entire scope — including multi-MB Buffers not used by the timeout callback
 - **Fix**: Either `clearTimeout` on completion, or move heavy allocations outside the Promise constructor
+
+### Distance Gate Must Precede Material Resolution (Fixed 2026-03-26)
+- `sendObject()` in `godot-object-sender.ts` called `resolveObject()` before the distance check
+- `resolveObject()` calls `textureFetchQueue.request()` as a side effect — triggers texture downloads
+- Far root prims had their textures downloaded even though they were immediately deferred
+- Additionally, children of deferred roots bypassed the distance gate entirely (only root prims were distance-checked)
+- **Symptom**: 9,000 textures loaded in a sparse sandbox, 8GB VRAM, FPS crashed from 35 to 8
+- **Fix**: Distance gate moved before `resolveObject()`. Children of deferred roots are also deferred. `sweepDeferredTextures()` promotes children when their root comes into range.
+- **Files changed**: `godot-object-sender.ts`
+
+### Synchronous File I/O Blocks Event Loop (Fixed 2026-03-26)
+- Asset pipeline cache writes (`writeFileSync`, `mkdirSync`) and lookups (`existsSync`) were synchronous on the Node.js main thread
+- Under heavy loading (2000+ textures queued), dozens of sync writes per second blocked the event loop
+- `input_move` WebSocket messages from Godot couldn't be dispatched until the current write finished
+- **Symptom**: avatar rotation changes took 2+ seconds to reach the SL server, but Godot rendered smoothly (stale body rotation on server)
+- **Fix**: All asset I/O converted to `fs.promises.*` (async). Texture and sculpt cache lookups use in-memory `Map`/`Set` (populated at startup via `initTextureCache()`) to avoid filesystem hits entirely
+- **Files changed**: `texture-fetch-queue.ts`, `gpu-compress-queue.ts`, `animation-fetch-queue.ts`, `sculpt-converter.ts`, `sound-fetch-queue.ts`, `sound-player.ts`
+- Note: `mesh-converter.ts` was also converted but its I/O already ran on worker threads (`mesh-convert-worker.ts`), so it wasn't blocking the main event loop
 
 ### Bundler Binary Mangling
 - Emscripten's `binaryDecode()` uses a custom string encoding for the WASM binary (NOT base64)

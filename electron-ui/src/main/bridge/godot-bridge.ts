@@ -25,7 +25,8 @@ import { ChatType } from '../../../node-metaverse/dist/lib/enums/ChatType';
 import { ChatSourceType } from '../../../node-metaverse/dist/lib/enums/ChatSourceType';
 import type { SceneManager, ViewerAdapter } from '../network/scene-manager';
 import { MeshFetchQueue } from '../assets/mesh-fetch-queue';
-import { TextureFetchQueue } from '../assets/texture-fetch-queue';
+import { initSkeletonData } from '../assets/mesh-converter';
+import { TextureFetchQueue, initTextureCache } from '../assets/texture-fetch-queue';
 import { SculptFetchQueue } from '../assets/sculpt-fetch-queue';
 import { MaterialFetchQueue } from '../assets/material-fetch-queue';
 import { AnimationFetchQueue } from '../assets/animation-fetch-queue';
@@ -195,6 +196,8 @@ export class GodotBridge extends EventEmitter {
     fs.mkdirSync(path.join(cacheBase, 'textures'), { recursive: true });
     fs.mkdirSync(path.join(cacheBase, 'terrain'), { recursive: true });
 
+    await initTextureCache();
+
     // VR config
     const overridePath = path.join(projectPath, 'override.cfg');
     const overrideVrPath = path.join(projectPath, 'override.vr.cfg');
@@ -210,7 +213,7 @@ export class GodotBridge extends EventEmitter {
 
     console.log(`[GodotBridge] Spawning Godot on port ${this.port} — ${godotPath}`);
 
-    const userArgs = [`--ws-port=${this.port}`];
+    const userArgs = [`--ws-port=${this.port}`, `--app-version=${app.getVersion()}`];
     if (this.vrMode) userArgs.push('--vr');
 
     // Pass saved window bounds as engine args (before --) so the window
@@ -332,7 +335,11 @@ export class GodotBridge extends EventEmitter {
     // Send draw distance so Godot's visibility range matches the server value
     this.send({ type: 'settings', draw_distance: this.bot.agent.cameraFar });
 
+    // Preload skeleton/attachment data (async file reads, populates sync caches)
+    await initSkeletonData();
+
     // Init fetch queues
+    const meshCacheDir = path.join(app.getPath('userData'), 'asset-cache', 'meshes');
     this.meshFetchQueue = new MeshFetchQueue(this.bot, (meshUuid, cachePath, isRigged, jointNames, jointOverrides) => {
       const fwdPath = cachePath.replace(/\\/g, '/');
       const msg: any = { type: 'mesh_ready', meshId: meshUuid, path: fwdPath };
@@ -347,7 +354,7 @@ export class GodotBridge extends EventEmitter {
         console.log(`[MeshReady] meshId=${meshUuid.slice(0, 8)} jointOverrides=${jointOverrides.length}`);
       }
       this.send(msg);
-    });
+    }, meshCacheDir);
 
     this.textureFetchQueue = new TextureFetchQueue(this.bot, (textureUuid, cachePath) => {
       const fwdPath = cachePath.replace(/\\/g, '/');
@@ -718,7 +725,7 @@ export class GodotBridge extends EventEmitter {
     const godotStr = gs
       ? ` | godot(${gs.fps?.toFixed(0) ?? '?'}fps budget:${gs.budgetElapsed?.toFixed(1) ?? '?'}/${gs.budgetAvail?.toFixed(1) ?? '?'}/${gs.budgetUsed?.toFixed(1) ?? '?'}ms el/av/us): tex: w=${gs.texWorkers}(${gs.texReady ?? '?'}rdy) q=${gs.texQueue} done=${gs.texDone} cached=${gs.texCached} fail=${gs.texFailed} pending=${gs.texPending} [${gs.texTiming ?? '?'}] | mesh: w=${gs.meshWorkers}(${gs.meshReady ?? '?'}rdy) q=${gs.meshQueue} done=${gs.meshDone} cached=${gs.meshCached} fail=${gs.meshFailed} pending=${gs.meshPending} | mats=${gs.materials}(${gs.materialReuse ?? '?'}reuse) opaque=${gs.texOpaque ?? '?'}`
       : '';
-    console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | pbr: ${this.materialResolver.totalPbrFaceCount} faces | deferred: ${this.objectSender.deferredCount} pending: ${this.objectSender.readinessPendingCount}${godotStr}`);
+    console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: w=${tq?.decodePool?.workerCount ?? '?'} q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | pbr: ${this.materialResolver.totalPbrFaceCount} faces | deferred: ${this.objectSender.deferredCount} pending: ${this.objectSender.readinessPendingCount}${godotStr}`);
   }
 
   /** Send electron-side fetch queue stats to Godot for the stats bar */
@@ -735,6 +742,7 @@ export class GodotBridge extends EventEmitter {
         active: tq?.activeCount ?? 0,
         done: tq?.notifiedCount ?? 0,
         failed: tq?.failedCount ?? 0,
+        decodeWorkers: tq?.decodePool?.workerCount ?? 0,
         decodeQueue: tq?.decodePool?.queueDepth ?? 0,
         decodeActive: tq?.decodePool?.activeCount ?? 0,
         gpuQueue: tq?.gpuQueueDepth ?? 0,

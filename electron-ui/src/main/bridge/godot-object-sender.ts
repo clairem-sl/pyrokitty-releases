@@ -195,6 +195,34 @@ export class GodotObjectSender {
       }
     }
 
+    // Distance gate: skip entirely for far root prims (no placeholder, no assets).
+    // They stay in deferredTextures and get created when the bot moves closer.
+    // MUST be checked before resolveObject() — resolve triggers texture downloads as a side effect.
+    if (parentUuid === '') {
+      try {
+        const botPos = this.getBotPosition();
+        if (botPos) {
+          const worldPos = this.getWorldPosition(obj);
+          if (worldPos) {
+            const dx = worldPos.x - botPos.x, dy = worldPos.y - botPos.y, dz = worldPos.z - botPos.z;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (dist > this.TEXTURE_FETCH_RANGE) {
+              this.deferredTextures.set(objUuid, obj);
+              this.trackedObjects.add(objUuid);
+              return;
+            }
+          }
+        }
+      } catch { /* bot may not be fully connected yet */ }
+    }
+
+    // Skip children of deferred (far) root prims — they'd be invisible anyway
+    if (parentUuid !== '' && this.deferredTextures.has(parentUuid)) {
+      this.deferredTextures.set(objUuid, obj);
+      this.trackedObjects.add(objUuid);
+      return;
+    }
+
     const rot = obj.Rotation;
     const scl = obj.Scale;
     const meshId = this.getMeshId(obj);
@@ -238,26 +266,6 @@ export class GodotObjectSender {
       if (texInfo) {
         for (const tid of texInfo.textureIds) this.selfTextureIds.add(tid);
       }
-    }
-
-    // Distance gate: skip entirely for far root prims (no placeholder, no assets).
-    // They stay in deferredTextures and get created when the bot moves closer.
-    if (parentUuid === '') {
-      try {
-        const botPos = this.getBotPosition();
-        if (botPos) {
-          const worldPos = this.getWorldPosition(obj);
-          if (worldPos) {
-            const dx = worldPos.x - botPos.x, dy = worldPos.y - botPos.y, dz = worldPos.z - botPos.z;
-            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            if (dist > this.TEXTURE_FETCH_RANGE) {
-              this.deferredTextures.set(objUuid, obj);
-              this.trackedObjects.add(objUuid);
-              return;
-            }
-          }
-        }
-      } catch { /* bot may not be fully connected yet */ }
     }
 
     // Phase 1: lightweight object_create with spatial info only
@@ -460,6 +468,7 @@ export class GodotObjectSender {
 
       let promoted = 0;
 
+      // Pass 1: promote root prims within range
       for (const [uuid, _obj] of this.deferredTextures) {
         const live = this.findObjectByUUID(uuid);
         if (!live || live.deleted) {
@@ -468,17 +477,36 @@ export class GodotObjectSender {
         }
 
         const worldPos = this.getWorldPosition(live);
-        if (!worldPos) {
-          continue;
-        }
+        if (!worldPos) continue; // child prim — handled in pass 2
         const dx = worldPos.x - botPos.x, dy = worldPos.y - botPos.y, dz = worldPos.z - botPos.z;
         const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (dist <= this.TEXTURE_FETCH_RANGE) {
           this.deferredTextures.delete(uuid);
-          // Remove from tracked so sendObject doesn't skip it as duplicate
           this.trackedObjects.delete(uuid);
-          // Full send — deferred objects are always roots (parentUuid = '')
           this.sendObject(live, '');
+          promoted++;
+        }
+      }
+
+      // Pass 2: promote children whose root is no longer deferred
+      for (const [uuid, _obj] of this.deferredTextures) {
+        const live = this.findObjectByUUID(uuid);
+        if (!live || live.deleted) {
+          this.deferredTextures.delete(uuid);
+          continue;
+        }
+        if (!live.ParentID || live.ParentID === 0) continue; // root — already handled
+        // Find parent UUID
+        let parentUuid = '';
+        try {
+          const region = live.region ?? this.bot.currentRegion;
+          const parent = region?.objects?.getObjectByLocalID(live.ParentID);
+          parentUuid = parent?.FullID?.toString() || '';
+        } catch { /* */ }
+        if (parentUuid && !this.deferredTextures.has(parentUuid)) {
+          this.deferredTextures.delete(uuid);
+          this.trackedObjects.delete(uuid);
+          this.sendObject(live, parentUuid);
           promoted++;
         }
       }

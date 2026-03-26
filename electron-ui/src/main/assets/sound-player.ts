@@ -23,9 +23,9 @@ function settingsPath(): string {
   return path.join(app.getPath('userData'), 'data', 'sound-settings.json');
 }
 
-function loadVolume(): void {
+async function loadVolume(): Promise<void> {
   try {
-    const data = JSON.parse(fs.readFileSync(settingsPath(), 'utf-8'));
+    const data = JSON.parse(await fs.promises.readFile(settingsPath(), 'utf-8'));
     if (typeof data.masterVolume === 'number') {
       masterVolume = Math.max(0, Math.min(1, data.masterVolume));
     }
@@ -34,11 +34,11 @@ function loadVolume(): void {
   }
 }
 
-function saveVolume(): void {
+async function saveVolume(): Promise<void> {
   try {
     const dir = path.dirname(settingsPath());
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(settingsPath(), JSON.stringify({ masterVolume }));
+    await fs.promises.mkdir(dir, { recursive: true });
+    await fs.promises.writeFile(settingsPath(), JSON.stringify({ masterVolume }));
   } catch (e) {
     console.warn('[SoundPlayer] Failed to save volume:', e);
   }
@@ -48,13 +48,13 @@ function registerHandlers(): void {
   if (handlersRegistered) return;
   handlersRegistered = true;
 
-  // Load saved volume immediately so get-volume works before sound window init
-  loadVolume();
+  // Load saved volume so get-volume works before sound window init
+  loadVolume().catch(() => {});
 
-  ipcMain.handle('sound:set-master-volume', (_, volume: number) => {
+  ipcMain.handle('sound:set-master-volume', async (_, volume: number) => {
     masterVolume = Math.max(0, Math.min(1, volume));
     send('sound:set-master-volume', { volume: masterVolume });
-    saveVolume();
+    await saveVolume();
   });
 
   ipcMain.handle('sound:get-master-volume', () => {
@@ -69,7 +69,7 @@ export async function initSoundPlayer(): Promise<void> {
   if (soundWindow) return;
 
   // Ensure volume is loaded (in case module was imported but volume file was created later)
-  loadVolume();
+  await loadVolume();
 
   const readyPromise = new Promise<void>((resolve) => {
     readyResolve = resolve;

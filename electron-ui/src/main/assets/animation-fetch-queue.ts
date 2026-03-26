@@ -70,17 +70,16 @@ export class AnimationFetchQueue {
   get cachedCount(): number { return this.cache.size; }
 
   /** Check if animation data is available (memory or disk cache) without triggering a fetch */
-  getCached(animUuid: string): AnimationData | null {
+  async getCached(animUuid: string): Promise<AnimationData | null> {
     const mem = this.cache.get(animUuid);
     if (mem) return mem;
     try {
       const diskPath = animCachePath(animUuid);
-      if (fs.existsSync(diskPath)) {
-        const data: AnimationData = JSON.parse(fs.readFileSync(diskPath, 'utf8'));
-        this.cache.set(animUuid, data);
-        return data;
-      }
-    } catch { /* corrupt */ }
+      await fs.promises.access(diskPath);
+      const data: AnimationData = JSON.parse(await fs.promises.readFile(diskPath, 'utf8'));
+      this.cache.set(animUuid, data);
+      return data;
+    } catch { /* corrupt or missing */ }
     return null;
   }
 
@@ -89,7 +88,7 @@ export class AnimationFetchQueue {
     return this.failed.has(animUuid);
   }
 
-  request(animUuid: string, localId: number): void {
+  async request(animUuid: string, localId: number): Promise<void> {
     if (this.destroyed || this.failed.has(animUuid)) {
       if (this.failed.has(animUuid)) console.warn(`[AnimFetchQueue] Skipping previously failed ${animUuid.slice(0, 8)} for localId ${localId}`);
       return;
@@ -105,13 +104,12 @@ export class AnimationFetchQueue {
     // On disk — load into memory and notify
     try {
       const diskPath = animCachePath(animUuid);
-      if (fs.existsSync(diskPath)) {
-        const data: AnimationData = JSON.parse(fs.readFileSync(diskPath, 'utf8'));
-        this.cache.set(animUuid, data);
-        this.onReady(animUuid, data);
-        return;
-      }
-    } catch { /* corrupt file — fall through to download */ }
+      await fs.promises.access(diskPath);
+      const data: AnimationData = JSON.parse(await fs.promises.readFile(diskPath, 'utf8'));
+      this.cache.set(animUuid, data);
+      this.onReady(animUuid, data);
+      return;
+    } catch { /* corrupt file or missing — fall through to download */ }
 
     // Already queued or in-flight
     if (this.pending.has(animUuid)) {
@@ -147,8 +145,8 @@ export class AnimationFetchQueue {
         // Persist to disk
         try {
           const dir = getCacheDir();
-          fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(animCachePath(animUuid), JSON.stringify(data, null, 2));
+          await fs.promises.mkdir(dir, { recursive: true });
+          await fs.promises.writeFile(animCachePath(animUuid), JSON.stringify(data, null, 2));
         } catch { /* non-fatal */ }
         this.onReady(animUuid, data);
       }

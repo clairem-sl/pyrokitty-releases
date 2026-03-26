@@ -95,7 +95,7 @@ function createMapWindow(): void {
     ...(saved?.x != null && saved?.y != null ? { x: saved.x, y: saved.y } : {}),
     minWidth: 400,
     minHeight: 300,
-    title: 'PyroKitty - World Map',
+    title: `World Map - PyroKitty ${app.getVersion()}`,
     icon: getIconPath('pyrokitty2.ico'),
     webPreferences: {
       nodeIntegration: true,
@@ -135,7 +135,7 @@ async function createWindow(): Promise<void> {
     ...(saved?.x != null && saved?.y != null ? { x: saved.x, y: saved.y } : {}),
     minWidth: 600,
     minHeight: 500,
-    title: 'PyroKitty',
+    title: `PyroKitty ${app.getVersion()}`,
     icon: iconPath,
     webPreferences: {
       nodeIntegration: true,
@@ -308,13 +308,20 @@ async function createWindow(): Promise<void> {
 
     const contextMenu = Menu.buildFromTemplate([
       {
-        label: 'Show PyroKitty',
+        label: `PyroKitty ${app.getVersion()}`,
         icon: showIcon,
         click: () => {
           mainWindow?.show();
           mainWindow?.focus();
         },
       },
+      {
+        label: 'World Map',
+        click: () => {
+          createMapWindow();
+        },
+      },
+      { type: 'separator' },
       {
         label: 'Quit',
         click: async () => {

@@ -76,13 +76,19 @@ func _ready() -> void:
 	# Parse command-line args
 	var args := OS.get_cmdline_user_args()
 	var vr_requested := false
+	var app_version := ""
 	for i in range(args.size()):
 		if args[i].begins_with("--ws-port="):
 			ws_port = int(args[i].split("=")[1])
 		elif args[i] == "--ws-port" and i + 1 < args.size():
 			ws_port = int(args[i + 1])
+		elif args[i].begins_with("--app-version="):
+			app_version = args[i].split("=")[1]
 		elif args[i] == "--vr":
 			vr_requested = true
+
+	if app_version != "":
+		get_window().title = "3D View - PyroKitty %s" % app_version
 	# Window size/position is now handled by Godot's built-in --resolution and
 	# --position engine args (passed before -- by godot-bridge.ts), so the window
 	# appears at the correct size/position before the scene loads.
@@ -267,15 +273,6 @@ func _process(_delta: float) -> void:
 	write_breadcrumb("msgs_done total=%d queued=%d → scene_process" % [_msg_count, _low_priority_queue.size()])
 
 
-## Classify a raw JSON string as high-priority without full parsing.
-## Peeks at the first 40 bytes — enough to see any "type":"avatar_*" or "self_id".
-## High-priority messages are dispatched immediately, bypassing the time-budgeted queue.
-func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_1 and event.ctrl_pressed and event.shift_pressed:
-			_stats_bar.visible = not _stats_bar.visible
-
-
 func _update_stats_bar() -> void:
 	var ap = scene_manager.asset_pipeline
 	var fps := Engine.get_frames_per_second()
@@ -408,6 +405,9 @@ func _update_stats_bar() -> void:
 		e_deferred, msg_q])
 
 
+## Classify a raw JSON string as high-priority without full parsing.
+## Peeks at the first 40 bytes — enough to see any "type":"avatar_*" or "self_id".
+## High-priority messages are dispatched immediately, bypassing the time-budgeted queue.
 func _is_high_priority(text: String) -> bool:
 	var prefix := text.left(40)
 	return '"avatar_' in prefix or '"self_id"' in prefix or '"object_update_p' in prefix or '"sitting_state"' in prefix or '"electron_stats"' in prefix
@@ -440,7 +440,11 @@ func _handle_message(text: String) -> void:
 		"object_create":
 			scene_manager.handle_object_create(msg)
 		"object_complete":
-			scene_manager.handle_object_complete(msg)
+			var _oc_uuid: String = str(msg.get("uuid", ""))
+			if scene_manager.asset_pipeline._is_in_range(_oc_uuid, scene_manager._vis_far * scene_manager._vis_far):
+				scene_manager.handle_object_complete(msg)
+			else:
+				scene_manager.asset_pipeline._deferred_mesh_far.append(msg)
 		"object_update_batch", "object_update_physics":
 			scene_manager.handle_object_update_batch(msg)
 		"object_kill":
@@ -495,6 +499,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_planar_debug_mode = (_planar_debug_mode + 1) % 4
 			scene_manager.set_planar_debug_mode(_planar_debug_mode)
 		elif event.keycode == KEY_1 and event.ctrl_pressed and event.shift_pressed:
+			_stats_bar.visible = not _stats_bar.visible
 			scene_manager.toggle_debug_skeleton()
 
 

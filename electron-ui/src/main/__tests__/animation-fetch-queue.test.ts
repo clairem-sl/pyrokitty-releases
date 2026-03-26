@@ -6,14 +6,16 @@ vi.mock('electron', () => ({
   app: { getPath: () => '/tmp/test-app' },
 }));
 
-// Mock fs — vi.hoisted ensures the object exists before vi.mock's hoisted factory runs
-const mockFs = vi.hoisted(() => ({
-  existsSync: vi.fn(() => false),
-  readFileSync: vi.fn(() => '{}'),
-  mkdirSync: vi.fn(),
-  writeFileSync: vi.fn(),
+// Mock fs.promises — vi.hoisted ensures the object exists before vi.mock's hoisted factory runs
+const mockFsPromises = vi.hoisted(() => ({
+  access: vi.fn(() => Promise.reject(new Error('ENOENT'))),
+  readFile: vi.fn(() => Promise.resolve('{}')),
+  mkdir: vi.fn(() => Promise.resolve(undefined)),
+  writeFile: vi.fn(() => Promise.resolve(undefined)),
 }));
-vi.mock('fs', () => mockFs);
+vi.mock('fs', () => ({
+  promises: mockFsPromises,
+}));
 
 // Mock mesh-converter deps used by convertAnimation
 vi.mock('../assets/mesh-converter', () => ({
@@ -85,7 +87,7 @@ describe('AnimationFetchQueue', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFs.existsSync.mockReturnValue(false);
+    mockFsPromises.access.mockRejectedValue(new Error('ENOENT'));
     onReady = vi.fn();
   });
 
@@ -100,9 +102,9 @@ describe('AnimationFetchQueue', () => {
   });
 
   describe('memory cache', () => {
-    it('returns null from getCached when not cached', () => {
+    it('returns null from getCached when not cached', async () => {
       const q = new AnimationFetchQueue(makeMockBot(), onReady);
-      expect(q.getCached('anim-1')).toBeNull();
+      expect(await q.getCached('anim-1')).toBeNull();
     });
 
     it('request calls onReady immediately for memory-cached animation', () => {
@@ -120,13 +122,13 @@ describe('AnimationFetchQueue', () => {
   });
 
   describe('disk cache', () => {
-    it('request loads from disk and calls onReady', () => {
+    it('request loads from disk and calls onReady', async () => {
       const diskData = makeAnimData('anim-disk');
-      mockFs.existsSync.mockReturnValue(true);
-      mockFs.readFileSync.mockReturnValue(JSON.stringify(diskData));
+      mockFsPromises.access.mockResolvedValue(undefined);
+      mockFsPromises.readFile.mockResolvedValue(JSON.stringify(diskData));
 
       const q = new AnimationFetchQueue(makeMockBot(), onReady);
-      q.request('anim-disk', 100);
+      await q.request('anim-disk', 100);
 
       expect(onReady).toHaveBeenCalledOnce();
       expect(onReady).toHaveBeenCalledWith('anim-disk', diskData);
@@ -134,57 +136,57 @@ describe('AnimationFetchQueue', () => {
       expect(q.queueDepth).toBe(0);
     });
 
-    it('getCached loads from disk into memory cache', () => {
+    it('getCached loads from disk into memory cache', async () => {
       const diskData = makeAnimData('anim-disk');
-      mockFs.existsSync.mockReturnValue(true);
-      mockFs.readFileSync.mockReturnValue(JSON.stringify(diskData));
+      mockFsPromises.access.mockResolvedValue(undefined);
+      mockFsPromises.readFile.mockResolvedValue(JSON.stringify(diskData));
 
       const q = new AnimationFetchQueue(makeMockBot(), onReady);
-      const result = q.getCached('anim-disk');
+      const result = await q.getCached('anim-disk');
 
       expect(result).toEqual(diskData);
       expect(q.cachedCount).toBe(1);
     });
 
-    it('handles corrupt disk cache gracefully', () => {
-      mockFs.existsSync.mockReturnValue(true);
-      mockFs.readFileSync.mockImplementation(() => { throw new Error('corrupt'); });
+    it('handles corrupt disk cache gracefully', async () => {
+      mockFsPromises.access.mockResolvedValue(undefined);
+      mockFsPromises.readFile.mockRejectedValue(new Error('corrupt'));
 
       const q = new AnimationFetchQueue(makeMockBot(), onReady);
-      const result = q.getCached('anim-corrupt');
+      const result = await q.getCached('anim-corrupt');
       expect(result).toBeNull();
     });
   });
 
   describe('queueing and deduplication', () => {
-    it('queues a download when not cached', () => {
+    it('queues a download when not cached', async () => {
       const bot = makeMockBot(() => new Promise(() => {})); // never resolves
       const q = new AnimationFetchQueue(bot, onReady);
 
-      q.request('anim-1', 100);
+      await q.request('anim-1', 100);
       // Active because drain starts immediately
       expect(q.activeCount).toBe(1);
     });
 
-    it('deduplicates same UUID from multiple localIds', () => {
+    it('deduplicates same UUID from multiple localIds', async () => {
       const bot = makeMockBot(() => new Promise(() => {}));
       const q = new AnimationFetchQueue(bot, onReady);
 
-      q.request('anim-1', 100);
-      q.request('anim-1', 200);
-      q.request('anim-1', 300);
+      await q.request('anim-1', 100);
+      await q.request('anim-1', 200);
+      await q.request('anim-1', 300);
 
       // Should still be just one active fetch
       expect(q.activeCount).toBe(1);
       expect(q.queueDepth).toBe(0);
     });
 
-    it('queues multiple different UUIDs', () => {
+    it('queues multiple different UUIDs', async () => {
       const bot = makeMockBot(() => new Promise(() => {}));
       const q = new AnimationFetchQueue(bot, onReady);
 
       for (let i = 0; i < 6; i++) {
-        q.request(`anim-${i}`, i);
+        await q.request(`anim-${i}`, i);
       }
 
       // MAX_CONCURRENT = 4, so 4 active + 2 queued
@@ -228,8 +230,8 @@ describe('AnimationFetchQueue', () => {
       q.request('anim-1', 100);
       await vi.waitFor(() => expect(onReady).toHaveBeenCalled());
 
-      expect(mockFs.mkdirSync).toHaveBeenCalled();
-      expect(mockFs.writeFileSync).toHaveBeenCalled();
+      expect(mockFsPromises.mkdir).toHaveBeenCalled();
+      expect(mockFsPromises.writeFile).toHaveBeenCalled();
     });
 
     it('converts position keys with 5x scale factor', async () => {
@@ -255,7 +257,7 @@ describe('AnimationFetchQueue', () => {
       const q = new AnimationFetchQueue(bot, onReady);
 
       // Queue 6 items (4 active + 2 waiting)
-      for (let i = 0; i < 6; i++) q.request(`anim-${i}`, i);
+      for (let i = 0; i < 6; i++) await q.request(`anim-${i}`, i);
       expect(q.activeCount).toBe(4);
       expect(q.queueDepth).toBe(2);
 
@@ -289,7 +291,7 @@ describe('AnimationFetchQueue', () => {
       await vi.waitFor(() => expect(q.hasFailed('anim-fail')).toBe(true));
 
       // Second request should be ignored
-      q.request('anim-fail', 200);
+      await q.request('anim-fail', 200);
       expect(q.queueDepth).toBe(0);
       expect(q.activeCount).toBe(0);
       consoleSpy.mockRestore();
@@ -305,12 +307,12 @@ describe('AnimationFetchQueue', () => {
   });
 
   describe('destroy', () => {
-    it('prevents new requests from being processed', () => {
+    it('prevents new requests from being processed', async () => {
       const bot = makeMockBot(() => new Promise(() => {}));
       const q = new AnimationFetchQueue(bot, onReady);
 
       q.destroy();
-      q.request('anim-1', 100);
+      await q.request('anim-1', 100);
 
       expect(q.queueDepth).toBe(0);
       expect(q.activeCount).toBe(0);
@@ -321,7 +323,7 @@ describe('AnimationFetchQueue', () => {
       const bot = makeMockBot(() => new Promise<Buffer>(r => { resolver = r; }));
       const q = new AnimationFetchQueue(bot, onReady);
 
-      q.request('anim-1', 100);
+      await q.request('anim-1', 100);
       q.destroy();
       resolver!(Buffer.alloc(100));
 

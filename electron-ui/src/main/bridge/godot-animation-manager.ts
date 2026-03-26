@@ -21,6 +21,7 @@ export class GodotAnimationManager {
   private avatarAnimState = new Map<string, { animId: string; sequenceId: number }[]>(); // avatar UUID → latest animation list
   private animationFetchQueue: AnimationFetchQueue | null = null;
   private connected = false;
+  private sentToGodot = new Set<string>(); // anim UUIDs whose keyframe data has been sent
 
   constructor(
     private bot: Bot,
@@ -38,6 +39,9 @@ export class GodotAnimationManager {
 
   setConnected(connected: boolean): void {
     this.connected = connected;
+    if (connected) {
+      this.sentToGodot.clear(); // Godot cache is fresh on reconnect
+    }
   }
 
   initFetchQueue(queue: AnimationFetchQueue): void {
@@ -124,7 +128,7 @@ export class GodotAnimationManager {
    * Dedup: skip if identical to previous set.
    * Batch: request all fetches, then only notify Godot when ALL are cached.
    */
-  updateAnimSet(uuid: string, animIds: string[]): void {
+  async updateAnimSet(uuid: string, animIds: string[]): Promise<void> {
     const sorted = [...animIds].sort();
     const key = sorted.join(',');
     if (this.animRootLastSet.get(uuid) === key) return;
@@ -135,24 +139,24 @@ export class GodotAnimationManager {
 
     if (this.animationFetchQueue) {
       for (const animId of needed) {
-        this.animationFetchQueue.request(animId, 0);
+        await this.animationFetchQueue.request(animId, 0);
       }
     }
 
-    this.checkAnimBatchReadyForRoot(uuid);
+    await this.checkAnimBatchReadyForRoot(uuid);
   }
 
   /** Called when a single animation finishes fetching — check all roots that need it */
-  checkAnimBatchReady(animUuid: string): void {
+  async checkAnimBatchReady(animUuid: string): Promise<void> {
     for (const [uuid, needed] of this.animRootPending) {
       if (needed.has(animUuid)) {
-        this.checkAnimBatchReadyForRoot(uuid);
+        await this.checkAnimBatchReadyForRoot(uuid);
       }
     }
   }
 
   /** Check if all animations for a specific root are cached. If so, send batch to Godot. */
-  private checkAnimBatchReadyForRoot(uuid: string): void {
+  private async checkAnimBatchReadyForRoot(uuid: string): Promise<void> {
     const needed = this.animRootPending.get(uuid);
     if (!needed || !this.connected) {
       return;
@@ -173,9 +177,14 @@ export class GodotAnimationManager {
     const allData: Record<string, any> = {};
     let stillFetching = false;
     for (const animId of needed) {
-      const cached = this.animationFetchQueue.getCached(animId);
+      const cached = await this.animationFetchQueue.getCached(animId);
       if (cached) {
-        allData[animId] = cached;
+        // Only send full keyframe data if Godot hasn't seen this animation yet
+        if (this.sentToGodot.has(animId)) {
+          allData[animId] = { id: animId }; // stub — Godot already has keyframe data
+        } else {
+          allData[animId] = cached;
+        }
       } else if (this.animationFetchQueue.hasFailed(animId)) {
         continue;
       } else {
@@ -207,6 +216,10 @@ export class GodotAnimationManager {
       uuid,
       animations: allData,
     });
+    // Mark all animations in this batch as sent so we don't resend keyframe data
+    for (const animId of Object.keys(allData)) {
+      this.sentToGodot.add(animId);
+    }
   }
 
   /** Clean up state for a deleted object by UUID */

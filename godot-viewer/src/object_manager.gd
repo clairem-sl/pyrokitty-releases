@@ -485,6 +485,9 @@ func _sync_animesh_transform(obj_uuid: String, rsi) -> void:
 				var parent_inv_rot: Quaternion = parent_node.quaternion.inverse()
 				node.position = parent_inv_rot * (rsi.pos - parent_node.position)
 				node.quaternion = parent_inv_rot * rsi.rot
+				# Reapply pelvis offset (constant in skeleton-local space)
+				if sm.animesh_pelvis_offset.has(obj_uuid) and sm.animesh_shared_skeleton.has(obj_uuid):
+					sm.animesh_shared_skeleton[obj_uuid].position = sm.animesh_pelvis_offset[obj_uuid]
 			else:
 				# Standalone animesh — RSI pos is world space, node is direct child of scene root
 				node.position = rsi.pos
@@ -603,6 +606,18 @@ func _instantiate_animesh_mesh(obj_uuid: String, mesh_id: String, animesh_root_u
 	mesh_instance.transform = Transform3D.IDENTITY  # Reset local transform
 	mesh_instance.skeleton = mesh_instance.get_path_to(shared_skel)
 
+	# For root-prim animesh objects (not avatar bodies), shift the skeleton so
+	# mPelvis aligns with the object/bone position. BSM bakes vertices relative
+	# to the skeleton root, but the object IS at the pelvis conceptually — not
+	# at the skeleton root (which is below the pelvis).
+	if obj_uuid == animesh_root_uuid and not sm.bone_shape_scales.has(animesh_root_uuid):
+		var pelvis_bi: int = shared_skel.find_bone("mPelvis")
+		if pelvis_bi >= 0:
+			var pelvis_rest: Vector3 = shared_skel.get_bone_rest(pelvis_bi).origin
+			var pelvis_offset := -pelvis_rest
+			shared_skel.position = pelvis_offset
+			sm.animesh_pelvis_offset[animesh_root_uuid] = pelvis_offset
+
 	# Store reference
 	sm.animesh_mesh_instances[obj_uuid] = mesh_instance
 
@@ -711,10 +726,14 @@ func handle_object_complete(msg: Dictionary) -> void:
 	elif not shape.is_empty():
 		rsi.set_mesh(sm.prim_generator.get_or_generate(shape))
 
-	# Apply face materials (textures should be cached)
+	# Apply face materials (textures should be cached) — defer if out of range
 	if faces.size() > 0:
 		sm.object_faces[obj_uuid] = faces
-		sm.asset_pipeline.apply_face_materials(rsi, obj_uuid, faces)
+		var dist_sq: float = sm._vis_far * sm._vis_far
+		if sm.asset_pipeline._is_in_range(obj_uuid, dist_sq):
+			sm.asset_pipeline.apply_face_materials(rsi, obj_uuid, faces)
+		else:
+			sm.asset_pipeline._deferred_tex_far.append(obj_uuid)
 
 
 # ─── Face/Material Updates ───────────────────────────
@@ -745,7 +764,11 @@ func handle_update_faces(msg: Dictionary) -> void:
 					break
 			if not found:
 				existing.append(new_face)
-	sm.asset_pipeline.apply_face_materials(rsi, obj_uuid, sm.object_faces[obj_uuid])
+	var dist_sq: float = sm._vis_far * sm._vis_far
+	if sm.asset_pipeline._is_in_range(obj_uuid, dist_sq):
+		sm.asset_pipeline.apply_face_materials(rsi, obj_uuid, sm.object_faces[obj_uuid])
+	else:
+		sm.asset_pipeline._deferred_tex_far.append(obj_uuid)
 
 
 ## Handle batched face updates (multiple objects in one message)

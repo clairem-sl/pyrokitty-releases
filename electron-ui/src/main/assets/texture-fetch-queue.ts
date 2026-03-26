@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
 
-const MAX_CONCURRENT_DOWNLOADS = 16;
+const MAX_CONCURRENT_DOWNLOADS = 32;
 
 
 // Zero UUID — skip these
@@ -29,6 +29,38 @@ export type TextureReadyCallback = (textureUuid: string, cachePath: string) => v
 
 function getCacheDir(): string {
   return path.join(app.getPath('userData'), 'asset-cache', 'textures');
+}
+
+const EXT_PRIORITY: readonly string[] = ['.bctex', '.webp', '.png'];
+
+const cachedTextures = new Map<string, string>();
+
+export async function initTextureCache(): Promise<void> {
+  const dir = getCacheDir();
+  await fs.promises.mkdir(dir, { recursive: true });
+  let entries: string[];
+  try {
+    entries = await fs.promises.readdir(dir);
+  } catch {
+    entries = [];
+  }
+  for (const entry of entries) {
+    const ext = path.extname(entry);
+    if (ext === '.bctex' || ext === '.webp' || ext === '.png') {
+      const uuid = path.basename(entry, ext);
+      const existing = cachedTextures.get(uuid);
+      if (!existing || EXT_PRIORITY.indexOf(ext) < EXT_PRIORITY.indexOf(existing)) {
+        cachedTextures.set(uuid, ext);
+      }
+    }
+  }
+}
+
+function recordCached(uuid: string, ext: string): void {
+  const existing = cachedTextures.get(uuid);
+  if (!existing || EXT_PRIORITY.indexOf(ext) < EXT_PRIORITY.indexOf(existing)) {
+    cachedTextures.set(uuid, ext);
+  }
 }
 
 /** Primary cache path — .bctex if GPU available, else .webp */
@@ -47,18 +79,14 @@ function legacyPngPath(textureUuid: string): string {
 }
 
 export function isTextureCached(textureUuid: string): boolean {
-  return fs.existsSync(textureCachePath(textureUuid))
-    || fs.existsSync(webpCachePath(textureUuid))
-    || fs.existsSync(legacyPngPath(textureUuid));
+  return cachedTextures.has(textureUuid);
 }
 
 /** Return the actual cached path (.bctex preferred, then .webp, then .png) */
 function resolvedCachePath(textureUuid: string): string {
-  const bctex = textureCachePath(textureUuid);
-  if (fs.existsSync(bctex)) return bctex;
-  const webp = webpCachePath(textureUuid);
-  if (fs.existsSync(webp)) return webp;
-  return legacyPngPath(textureUuid);
+  const ext = cachedTextures.get(textureUuid);
+  if (ext) return path.join(getCacheDir(), `${textureUuid}${ext}`);
+  return path.join(getCacheDir(), `${textureUuid}.png`);
 }
 
 export class TextureFetchQueue {
@@ -202,6 +230,7 @@ export class TextureFetchQueue {
           const raw = await this.decodePool.decodeRaw(j2cBuf);
           const cachePath = textureCachePath(textureUuid); // .bctex
           await this.gpuQueue.compress(raw.rgbaPixels, raw.width, raw.height, cachePath);
+          recordCached(textureUuid, '.bctex');
           this._gpuCompressCount++;
 
           if (!this.destroyed) {
@@ -219,8 +248,9 @@ export class TextureFetchQueue {
       // Fallback: WebP path (original behavior)
       const webpBuf = await this.decodePool.decode(j2cBuf);
       const cachePath = webpCachePath(textureUuid);
-      fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-      fs.writeFileSync(cachePath, webpBuf);
+      await fs.promises.mkdir(path.dirname(cachePath), { recursive: true });
+      await fs.promises.writeFile(cachePath, webpBuf);
+      recordCached(textureUuid, '.webp');
       this._webpFallbackCount++;
 
       if (!this.destroyed) {

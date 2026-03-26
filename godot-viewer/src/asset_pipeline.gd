@@ -72,6 +72,14 @@ var _double_sided_shader_cache: Dictionary = {}  # Shader -> Shader (cull_back -
 var _pending_complete_by_mesh: Dictionary = {}  # meshId (String) -> Array[Dictionary] (object_complete msgs)
 var _tex_waiting: Dictionary = {}               # textureId (String) -> Array[String] (object uuids needing re-apply)
 
+# Deferred apply queues — drains within frame budget to avoid shader compilation stalls
+var _deferred_tex_apply: Array = []   # Array of String (object uuids needing face material apply)
+var _deferred_mesh_apply: Array = []  # Array of Dictionary (object_complete msgs)
+# Far parking lot — objects beyond draw distance, swept on camera movement
+var _deferred_tex_far: Array = []     # Array of String (object uuids)
+var _deferred_mesh_far: Array = []    # Array of Dictionary (object_complete msgs)
+var _cam_pos: Vector3 = Vector3.ZERO  # updated each frame from scene_manager
+
 # Re-request dedup: avoids sending duplicate texture_request/mesh_request to TS
 var _tex_requested: Dictionary = {}   # textureId -> true, cleared when texture_ready arrives
 var _mesh_requested: Dictionary = {}  # meshId -> true, cleared when mesh_ready arrives
@@ -127,13 +135,19 @@ func handle_mesh_ready(msg: Dictionary) -> void:
 
 
 ## Re-invoke handle_object_complete for objects that were waiting for this mesh.
+## Splits by distance: near objects deferred for budgeted drain, far objects parked.
 func _retry_pending_complete(mesh_id: String) -> void:
 	if not _pending_complete_by_mesh.has(mesh_id):
 		return
 	var msgs: Array = _pending_complete_by_mesh[mesh_id]
 	_pending_complete_by_mesh.erase(mesh_id)
+	var dist_sq: float = sm._vis_far * sm._vis_far
 	for msg: Dictionary in msgs:
-		sm.object_mgr.handle_object_complete(msg)
+		var obj_uuid: String = str(msg.get("uuid", ""))
+		if _is_in_range(obj_uuid, dist_sq):
+			_deferred_mesh_apply.append(msg)
+		else:
+			_deferred_mesh_far.append(msg)
 
 
 ## Submit queued meshes to WorkerThreadPool (throttled)
@@ -214,7 +228,8 @@ func _texture_worker_loop() -> void:
 		var texture_id: String = job["textureId"]
 		var tex_path: String = job["path"]
 
-		# Pre-compressed .bctex — load directly, skip generate_mipmaps + compress
+		# Primary path: .bctex files are GPU-compressed (BC1/BC3 + mipmaps) by
+		# Electron's WebGPU pipeline. Just load the raw blocks — no CPU work needed.
 		if tex_path.ends_with(".bctex"):
 			var t0 := Time.get_ticks_usec()
 			var img := _load_bctex(tex_path)
@@ -231,6 +246,9 @@ func _texture_worker_loop() -> void:
 			_texture_results_lock.unlock()
 			continue
 
+		# Fallback path: .webp files from the WebP decode path (GPU compression
+		# unavailable or failed). Must generate mipmaps + S3TC compress on CPU here.
+		# This is ~10-40ms per texture vs ~2ms for .bctex above.
 		var t0 := Time.get_ticks_usec()
 		var img := Image.new()
 		var err := img.load(tex_path)
@@ -308,6 +326,7 @@ func _load_bctex(bctex_path: String) -> Image:
 
 
 ## Re-apply face materials for all objects waiting on a newly-cached texture.
+## Splits by distance: near objects go to budgeted drain, far objects parked for sweep.
 func _apply_texture_to_waiting(texture_id: String) -> void:
 	# Apply projection texture to any lights waiting for it
 	sm.light_mgr.apply_pending_proj_texture(texture_id)
@@ -317,14 +336,47 @@ func _apply_texture_to_waiting(texture_id: String) -> void:
 
 	var obj_uuids: Array = _tex_waiting[texture_id]
 	_tex_waiting.erase(texture_id)
-
+	var dist_sq: float = sm._vis_far * sm._vis_far
 	for obj_uuid: String in obj_uuids:
-		var rsi = sm.objects.get(obj_uuid)
-		if rsi == null:
-			continue
-		if not sm.object_faces.has(obj_uuid):
-			continue
-		apply_face_materials(rsi, obj_uuid, sm.object_faces[obj_uuid])
+		if _is_in_range(obj_uuid, dist_sq):
+			_deferred_tex_apply.append(obj_uuid)
+		else:
+			_deferred_tex_far.append(obj_uuid)
+
+
+func _is_in_range(obj_uuid: String, dist_sq: float) -> bool:
+	var rsi = sm.objects.get(obj_uuid)
+	if rsi == null:
+		return false
+	return rsi.pos.distance_squared_to(_cam_pos) < dist_sq
+
+
+## Sweep far parking lots — promote objects now within range to budgeted drain queues.
+func sweep_deferred_far() -> void:
+	var dist_sq: float = sm._vis_far * sm._vis_far
+	var promoted := 0
+	var remaining_tex: Array = []
+	for obj_uuid: String in _deferred_tex_far:
+		if _is_in_range(obj_uuid, dist_sq):
+			_deferred_tex_apply.append(obj_uuid)
+			promoted += 1
+		else:
+			remaining_tex.append(obj_uuid)
+	_deferred_tex_far = remaining_tex
+
+	var remaining_mesh: Array = []
+	for msg: Dictionary in _deferred_mesh_far:
+		var obj_uuid: String = str(msg.get("uuid", ""))
+		if _is_in_range(obj_uuid, dist_sq):
+			_deferred_mesh_apply.append(msg)
+			promoted += 1
+		else:
+			remaining_mesh.append(msg)
+	_deferred_mesh_far = remaining_mesh
+
+	if promoted > 0:
+		print("[AssetPipeline] Sweep promoted %d objects (far_tex=%d far_mesh=%d)" % [
+			promoted, _deferred_tex_far.size(), _deferred_mesh_far.size()])
 
 
 # ─── Finalization (_process budget) ──────────────────
@@ -455,6 +507,22 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 							_mesh_finalized_count += 1
 		for task_id: int in done_ids:
 			_mesh_tasks.erase(task_id)
+
+	# Drain deferred apply queues (budget-controlled, one item at a time)
+	var apply_budget_ms: float = budget_ms - ((Time.get_ticks_usec() / 1000.0) - start_ms)
+	if apply_budget_ms > 0.0:
+		var apply_start := Time.get_ticks_usec() / 1000.0
+		while _deferred_tex_apply.size() > 0 or _deferred_mesh_apply.size() > 0:
+			if (Time.get_ticks_usec() / 1000.0) - apply_start >= apply_budget_ms:
+				break
+			if _deferred_tex_apply.size() > 0:
+				var obj_uuid: String = _deferred_tex_apply.pop_front()
+				var rsi = sm.objects.get(obj_uuid)
+				if rsi != null and sm.object_faces.has(obj_uuid):
+					apply_face_materials(rsi, obj_uuid, sm.object_faces[obj_uuid])
+			elif _deferred_mesh_apply.size() > 0:
+				var msg: Dictionary = _deferred_mesh_apply.pop_front()
+				sm.object_mgr.handle_object_complete(msg)
 
 	# Track budget stats
 	_budget_samples += 1

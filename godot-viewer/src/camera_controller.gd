@@ -91,6 +91,10 @@ var _drag_offset: Vector2 = Vector2.ZERO
 var _highlight_material: StandardMaterial3D
 var _highlighted_rid: RID = RID()
 
+# Debug click marker — small sphere shown at raycast hit point
+var _click_marker: MeshInstance3D = null
+var _click_marker_timer: float = 0.0
+
 
 func _ready() -> void:
 	if scene_manager:
@@ -192,6 +196,12 @@ func _process(delta: float) -> void:
 		_send_movement()
 		move_dirty = false
 		send_timer = 0.05
+
+	# Fade click marker
+	if _click_marker_timer > 0.0:
+		_click_marker_timer -= delta
+		if _click_marker_timer <= 0.0 and _click_marker != null:
+			_click_marker.visible = false
 
 	# Throttled cursor shape update (~10 Hz)
 	_cursor_timer -= delta
@@ -681,6 +691,8 @@ func _handle_debug_pick(screen_pos: Vector2) -> void:
 		return
 	var obj_uuid: String = hit["uuid"]
 	var dist: float = hit["distance"]
+	# Debug click marker
+	_show_click_marker(ray_from + ray_dir * dist)
 	# Highlight the picked object
 	_clear_highlight()
 	var rid: RID = scene_manager.get_object_rid(obj_uuid)
@@ -702,6 +714,8 @@ func _handle_touch_pick(screen_pos: Vector2) -> void:
 	var hit: Dictionary = scene_manager.pick_object_detailed(ray_from, ray_dir)
 	if hit.is_empty():
 		return
+	# Debug click marker
+	_show_click_marker(ray_from + ray_dir * hit["distance"])
 	# Convert object-local vectors from Godot coords (Y-up) to SL coords (Z-up)
 	# Godot (x, y, z) -> SL (x, z, -y)
 	var pos_local: Vector3 = hit["hitPosLocal"]
@@ -897,6 +911,31 @@ func _set_shadow_quality_vr() -> void:
 		return
 	light.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	light.directional_shadow_max_distance = 30.0
+
+
+## Show a debug marker sphere at a world-space position for a few seconds.
+## Only active in debug mode (Ctrl+Shift+1).
+func _show_click_marker(world_pos: Vector3) -> void:
+	if not main_node._stats_bar.visible:
+		return
+	if _click_marker == null:
+		_click_marker = MeshInstance3D.new()
+		var sphere := SphereMesh.new()
+		sphere.radius = 0.05
+		sphere.height = 0.1
+		sphere.radial_segments = 8
+		sphere.rings = 4
+		_click_marker.mesh = sphere
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(1, 0, 0, 0.8)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.no_depth_test = true
+		_click_marker.material_override = mat
+		get_tree().root.add_child(_click_marker)
+	_click_marker.global_position = world_pos
+	_click_marker.visible = true
+	_click_marker_timer = 3.0
 
 
 ## Convert Godot Vector3 to SL coordinate array [x, -z, y]

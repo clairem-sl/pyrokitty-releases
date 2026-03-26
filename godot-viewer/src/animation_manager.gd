@@ -66,6 +66,8 @@ var _last_global_overrides: Dictionary = {} # root_id -> Dictionary[int, Transfo
 
 # Main-thread cached CV data (for _get_cv_default_scale and initialization)
 var _cv_default_scales: Dictionary = {}
+# Cache key for last applied animation set per root — skip rebuild if unchanged
+var _last_anim_set_key: Dictionary = {}  # root_id -> String (sorted anim IDs)
 var _sl_cv_rest_rotations: Dictionary = {}
 var _cv_data_sent: bool = false
 
@@ -175,12 +177,21 @@ func _apply_pending_animations(obj_uuid: String) -> void:
 
 	# Collect all available animations with their raw data
 	var available: Array = []
+	var available_ids: Array = []
 	var missing: int = 0
 	for anim_id: String in pending_anims:
 		if sm.animesh_anim_data.has(anim_id):
 			available.append(sm.animesh_anim_data[anim_id] as Dictionary)
+			available_ids.append(anim_id)
 		else:
 			missing += 1
+
+	# Skip rebuild if the exact same animation set was already applied
+	available_ids.sort()
+	var set_key: String = ",".join(available_ids)
+	if _last_anim_set_key.get(root_id, "") == set_key and missing == 0:
+		return
+	_last_anim_set_key[root_id] = set_key
 
 	if available.is_empty():
 		if sm.object_mgr._is_self_avatar(root_id):
@@ -289,8 +300,9 @@ func _apply_pending_animations(obj_uuid: String) -> void:
 	}
 	sm.animesh_eval_active = true
 
-	# Push to animation thread
-	_push_cmd({"type": CMD_ANIM_CHANGED, "root_id": root_id, "joints": merged_joints.duplicate(true)})
+	# Push to animation thread (no duplicate needed — merged_joints is freshly created
+	# each call, main thread replaces sm.animesh_eval[root_id] wholesale, thread holds its own ref)
+	_push_cmd({"type": CMD_ANIM_CHANGED, "root_id": root_id, "joints": merged_joints})
 
 	if sm.object_mgr._is_self_avatar(root_id):
 		print("[SelfAvatar] Animations applied: %d joints merged from %d animations" % [merged_joints.size(), available.size()])
@@ -1048,12 +1060,6 @@ func _update_bone_attachments(root_id: String, shared_skel: Skeleton3D, global_o
 	for child_id: String in sm.object_children[root_id]:
 		if not sm.attach_bone.has(child_id):
 			continue
-		# Skip rigged mesh attachments — they follow the skeleton via skinning
-		if sm.animesh_mesh_instances.has(child_id):
-			continue
-		var child_rsi = sm.objects.get(child_id)
-		if child_rsi == null:
-			continue
 		var bone_name: String = sm.attach_bone[child_id]
 
 		# Use cached bone index if available, otherwise look up and cache
@@ -1063,6 +1069,31 @@ func _update_bone_attachments(root_id: String, shared_skel: Skeleton3D, global_o
 			if bi < 0:
 				continue
 			sm.attach_bone_idx[child_id] = bi
+
+		# Worn animesh with rigged mesh: skip RSI repositioning (mesh follows
+		# skeleton via skinning) but keep syncing the animesh node to track
+		# the avatar's bone — important for shape-deformed/quadruped avatars.
+		if sm.animesh_mesh_instances.has(child_id):
+			if sm.animesh_roots.has(child_id) and global_overrides.has(bi):
+				var _gxf: Transform3D = global_overrides[bi]
+				var _bwp: Vector3 = _rn_pos + _rn_rot * (skel_offset + _gxf.origin)
+				var _bwr: Quaternion = _rn_rot * _gxf.basis.orthonormalized().get_rotation_quaternion()
+				var _ap: int = sm.attach_point_id.get(child_id, 0)
+				var _bs: Vector3 = shape_scales.get(bone_name, Vector3.ONE)
+				var _axf: Array = _get_ap_world_transform(_ap, _bwp, _bwr, _bs)
+				var _op: Vector3 = sm.child_offset_pos.get(child_id, Vector3.ZERO)
+				var _or: Quaternion = sm.child_offset_rot.get(child_id, Quaternion.IDENTITY)
+				var _rsi = sm.objects.get(child_id)
+				if _rsi:
+					_rsi.pos = _axf[0] + _axf[2] * _op
+					_rsi.rot = _axf[2] * _or
+					_rsi.push_transform()
+					sm.object_mgr._sync_animesh_transform(child_id, _rsi)
+			continue
+
+		var child_rsi = sm.objects.get(child_id)
+		if child_rsi == null:
+			continue
 
 		# Reuse the bone's skeleton-local world transform from global_overrides
 		# (already computed by the animation thread — no chain walk needed).

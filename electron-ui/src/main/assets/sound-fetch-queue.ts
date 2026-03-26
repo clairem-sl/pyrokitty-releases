@@ -24,12 +24,13 @@ export class SoundFetchQueue {
   private cache = new Map<string, string>(); // soundUuid → disk path
   private destroyed = false;
   private cacheDir: string;
+  private dirReady: Promise<void>;
 
   constructor(bot: Bot, onReady: SoundReadyCallback) {
     this.bot = bot;
     this.onReady = onReady;
     this.cacheDir = path.join(app.getPath('userData'), 'asset-cache', 'sounds');
-    fs.mkdirSync(this.cacheDir, { recursive: true });
+    this.dirReady = fs.promises.mkdir(this.cacheDir, { recursive: true }).then(() => {});
   }
 
   get queueDepth(): number { return this.queue.length; }
@@ -46,16 +47,6 @@ export class SoundFetchQueue {
       this.onReady(soundUuid, cached);
       return;
     }
-
-    // Check disk cache
-    const diskPath = path.join(this.cacheDir, `${soundUuid}.ogg`);
-    try {
-      if (fs.existsSync(diskPath)) {
-        this.cache.set(soundUuid, diskPath);
-        this.onReady(soundUuid, diskPath);
-        return;
-      }
-    } catch { /* proceed to download */ }
 
     // Already queued or in-flight
     if (this.pending.has(soundUuid)) return;
@@ -79,12 +70,22 @@ export class SoundFetchQueue {
 
   private async fetchAndCache(soundUuid: string): Promise<void> {
     try {
+      await this.dirReady;
+
+      // Check disk cache
+      const diskPath = path.join(this.cacheDir, `${soundUuid}.ogg`);
+      try {
+        await fs.promises.access(diskPath);
+        this.cache.set(soundUuid, diskPath);
+        this.onReady(soundUuid, diskPath);
+        return;
+      } catch { /* not on disk, download */ }
+
       const buf = await this.bot.clientCommands.asset.downloadAsset(
         AssetType.Sound, soundUuid
       );
       if (this.destroyed) return;
-      const diskPath = path.join(this.cacheDir, `${soundUuid}.ogg`);
-      fs.writeFileSync(diskPath, buf);
+      await fs.promises.writeFile(diskPath, buf);
       this.cache.set(soundUuid, diskPath);
       this.onReady(soundUuid, diskPath);
     } catch (err) {

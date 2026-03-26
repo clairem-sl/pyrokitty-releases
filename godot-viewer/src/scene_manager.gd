@@ -120,6 +120,7 @@ var animesh_shared_skeleton: Dictionary = {} # root uuid (String) -> Skeleton3D 
 var animesh_root_for: Dictionary = {}      # uuid (String) -> root uuid (String) (maps object to its animesh root)
 var rigged_mesh_paths: Dictionary = {}     # meshId (String) -> GLB path (for generate_scene)
 var mesh_joint_overrides: Dictionary = {} # meshId (String) -> Array[String] (joints with custom positions)
+var animesh_pelvis_offset: Dictionary = {} # animesh root uuid -> Vector3 (negated pelvis rest, for root-prim animesh)
 var bone_override_owner: Dictionary = {}  # root uuid (String) -> Dictionary { boneName -> meshId } (lowest UUID wins)
 var bone_shape_scales: Dictionary = {}   # root uuid (String) -> Dictionary { boneName -> Vector3 (SL space scale) }
 var cv_volume_morphs: Dictionary = {}    # root uuid (String) -> Dictionary { cvName -> { scale: Vec3, offset: Vec3 } }
@@ -155,6 +156,10 @@ var _vis_fade: float = 32.0
 var send_fn: Callable  # set by main.gd; routes messages back to TS over WebSocket
 var _evict_timer: float = 0.0
 const EVICT_INTERVAL: float = 60.0
+var _sweep_timer: float = 0.0
+var _sweep_last_pos: Vector3 = Vector3.ZERO
+const SWEEP_INTERVAL: float = 3.0
+const SWEEP_MOVE_DIST_SQ: float = 100.0  # 10m squared
 
 
 # Loading fade-in overlay (opaque black → transparent)
@@ -274,6 +279,19 @@ func _process(delta: float) -> void:
 
 	# Update name bubbles (position at head bone, fade chat)
 	name_bubble_mgr.process(delta, get_viewport().get_camera_3d())
+
+	# Update camera position for distance-filtered asset apply
+	var _cam := get_viewport().get_camera_3d()
+	if _cam:
+		asset_pipeline._cam_pos = _cam.global_position
+		# Sweep far parking lot: when camera moves OR queues are non-empty (initial load)
+		_sweep_timer += delta
+		if _sweep_timer >= SWEEP_INTERVAL:
+			var _has_far: bool = asset_pipeline._deferred_tex_far.size() > 0 or asset_pipeline._deferred_mesh_far.size() > 0
+			if _has_far or asset_pipeline._cam_pos.distance_squared_to(_sweep_last_pos) > SWEEP_MOVE_DIST_SQ:
+				asset_pipeline.sweep_deferred_far()
+				_sweep_last_pos = asset_pipeline._cam_pos
+			_sweep_timer = 0.0
 
 	# Submit queued mesh work to WorkerThreadPool + finalize textures/meshes
 	asset_pipeline.finalize_frame(delta, _vr_mode, _target_frame_ms)

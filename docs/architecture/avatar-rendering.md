@@ -1,35 +1,16 @@
 # Avatar Rendering
 
-Technical reference for avatar rendering in the Godot viewer. Covers skeleton architecture, animations, shape deformation, and SL protocol quirks.
+Technical reference for **avatar-specific** rendering: shape deformation, BoM, built-in motions, and protocol quirks. For the shared skeleton/animation/mesh pipeline (used by both avatars and animesh), see **[animesh.md](animesh.md)**.
 
-Key files: `object_manager.gd`, `skeleton_builder.gd`, `mesh-converter.ts`, `avatar-shape.ts`, `godot-avatar-manager.ts`
-
----
-
-## Skeleton Architecture
-
-**One shared Skeleton3D per avatar/animesh root**, built from `avatar_skeleton.xml` (159 bones). All rigged meshes bind to it via skin index remapping. Animation evaluation and shape deformation operate on this single skeleton.
-
-- Skeleton added as parent of MeshInstance3D nodes (Godot's expected hierarchy)
-- Three-call bone posing pattern: `set_bone_pose_rotation()` for local animation rotations, `set_bone_pose_position()` for animation positions, `set_bone_global_pose_override()` for shape deformation (parent scale + bone scale for skinning). The global pose override is needed because Godot's pose setters during `_process` are NOT reflected in `get_bone_global_pose()` until a later frame, even with `force_update_all_bone_transforms()`
-- Joint overrides from mesh attachments replace bone rest positions (lowest mesh UUID wins, matching SL's `std::map<LLUUID>` in `LLJoint::findActiveOverride`)
-- Worn animesh attachments get their own skeleton (matching Firestorm's `LLControlAvatar`) — their child prims' overrides do NOT affect the avatar's skeleton
-- GLB local rest is authoritative for overrides — do NOT convert world→local (mesh-converter sets rest from `alt_inverse_bind_matrix`)
-
-### What Failed (Do Not Retry)
-- **AnimationPlayer**: World rotation composition order mismatch — SL `operator*` is reversed Hamilton, equivalent to standard `parent_world * local`. AnimationPlayer can't be configured for this.
-- **Per-mesh skeletons as siblings**: Adding Skeleton3D as scene tree sibling breaks Godot skin binding
-- **Basis.from_scale() on rest**: Cascades through entire subtree (SL only scales direct child positions)
+Key files: `avatar-shape.ts`, `godot-avatar-manager.ts`, `avatar_manager.gd`
 
 ---
 
-## Coordinate Systems
+## Skeleton & Animation
 
-| Data | SL space | Godot space |
-|------|----------|-------------|
-| Position | (x, y, z) | (x, z, -y) |
-| Quaternion | (x, y, z, w) | (x, z, -y, w) |
-| Scale (shape) | (sx, sy, sz) | applied in SL space before pos conversion |
+Avatars use the same shared skeleton architecture and threaded animation evaluation as animesh objects — see [animesh.md sections 7-8](animesh.md#7-skeleton-building-skeleton_buildergd). The Godot three-call bone posing pattern (`set_bone_pose_rotation` / `set_bone_pose_position` / `set_bone_global_pose_override`) applies to both.
+
+This document covers avatar-specific extensions to that system.
 
 ### IBM Transform (mesh-converter.ts)
 SL uses row-vector convention. Column-major IBM layout with sign flip:
@@ -51,15 +32,7 @@ q.z = cos(xr)cos(yr)sin(zr) - sin(xr)sin(yr)cos(zr)
 
 ---
 
-## Animation System
-
-Single evaluation pass per skeleton in `process_animesh`. Animations are priority-merged per joint.
-
-### Key Behaviors
-- **Position keyframes are ABSOLUTE joint positions** (replace, not add). Compressed to [-5, 5] meters via UInt16. Godot's pose position is additive on rest, so we subtract rest origin to convert.
-- **Rotation keyframes**: UInt16 compressed [-1, 1] per component (NOT Euler). Decoded as quaternion directly.
-- **Per-channel priority**: Rotation and position priority tracked INDEPENDENTLY per joint. An animation with position keys but no rotation keys claims position only — does NOT block lower-priority rotation.
-- **Bone rotation order**: SL `operator*` is reversed Hamilton; our code uses standard `parent_world * local` which is equivalent.
+## Avatar-Specific Animation Behaviors
 
 ### Micro-Loop Quirk (Hand/Finger Poses)
 SL hand/finger poses are micro-loops (duration ~0.083s) with an identity first keyframe meant for the ease-in system, NOT for playback. Without handling, fingers twitch between identity and target each loop.
@@ -193,9 +166,61 @@ Baked skin/clothing textures from SL's appearance service replace magic UUID pla
 
 ## Collision Volume Bones
 
-CV bones use `inverse(alt_inverse_bind_matrix)` for local transform ONLY when BSM is identity. Non-identity BSM taints raw IBM (`inverse(rawIBM) = BSM * jointWorld`), producing 100x-scaled transforms.
+CV bones use `inverse(alt_inverse_bind_matrix)` for local transform derivation when BSM is identity. When BSM is non-identity, the raw IBM is tainted (`inverse(rawIBM) = BSM * jointWorld`), so mesh-converter skips the CV local transform derivation and uses XML defaults instead.
 
 CV rotation/scale is baked into GLB IBMs via Hippolyzer-style fixup. Rest transforms are translation-only.
+
+---
+
+## Bind Shape Matrix (BSM) and Vertex Positions
+
+### Firestorm Reference (confirmed 2026-03-22)
+
+Firestorm's mesh vertices are **unit-cube normalized** — `PositionDomain min/max = (-0.5, -0.5, -0.5) to (0.5, 0.5, 0.5)` (confirmed via debug log in `llvolume.cpp:unpackVolumeFacesInternal`). BSM is stored separately and is **not baked into vertex positions**. Firestorm's skinning palette (`llskinningutil.cpp`) uses `mat[i] = IBM * bone_world` with no BSM term.
+
+The raw IBMs from the SL mesh asset (`inverse_bind_matrix`) encode `inverse(jointWorld)` — they do **not** include BSM.
+
+### Our Pipeline (mesh-converter.ts)
+
+Our mesh-converter **bakes BSM into vertex positions**: `vertex_glb = BSM * vertex_raw`. This produces correctly-positioned meshes in Blender but creates a mismatch in Godot:
+
+- **Avatar body meshes**: skeleton root = avatar pelvis = BSM's reference origin. BSM-baked vertices are at correct heights relative to the skeleton root. `bone_pose * IBM ≈ identity` in rest, leaving `vertex_world = skeleton_root + BSM * vertex_raw`. Works correctly because BSM positions body parts relative to the pelvis, which IS the skeleton root.
+
+- **Animesh objects** (standalone or worn): skeleton root = object position or attachment bone, NOT the avatar pelvis. BSM-baked vertices include the pelvis-to-bone offset (e.g., 1.64m for a jaw-area mesh). `vertex_world = object_pos + BSM * vertex_raw` = mesh floating 1.64m above the object. **This is the root cause of animesh positional offset bugs.**
+
+### Why Avatar Bodies Work but Animesh Doesn't
+
+Both go through `_instantiate_animesh_mesh`. Both have BSM baked into vertices. The difference is **where the skeleton root is**:
+
+| Mesh type | Skeleton root | BSM effect | Result |
+|-----------|--------------|------------|--------|
+| Avatar body | Avatar pelvis | Positions body relative to pelvis | Correct |
+| Animesh (standalone) | Object world position | Positions mesh relative to a pelvis that isn't there | Floating |
+| Animesh (worn) | Attachment bone position | Same — pelvis offset from a non-pelvis root | Floating |
+
+### Fix (IMPLEMENTED 2026-03-22)
+
+In `_instantiate_animesh_mesh`, when the rigged mesh IS the animesh root prim (`obj_uuid == animesh_root_uuid`) and not an avatar (`!bone_shape_scales.has(root)`), shift the skeleton so `mPelvis` aligns with the object/bone position: `shared_skel.position = -pelvis_rest`. This makes the skeleton's pelvis — the BSM's implicit reference origin — coincide with where the object actually is.
+
+Detection: avatars always have shape data (`bone_shape_scales`); animesh objects never do. Only root-prim animesh objects (where the rigged mesh is the root prim itself) need the offset — full-body animesh characters have rigged meshes as children and their BSM is already relative to the skeleton root.
+
+For worn animesh, `_sync_animesh_transform` reapplies the pelvis offset after repositioning the animesh node, and `_update_bone_attachments` continues tracking the avatar's bone so the animesh node follows shape deformation and animation.
+
+---
+
+## Debugging Methodology (lessons from BSM/animesh fix, 2026-03-22)
+
+When a rigged mesh or animesh renders at the wrong position:
+
+1. **Check the GLB in Blender first.** If the mesh is correctly positioned on the skeleton in Blender, the problem is in Godot's rendering/positioning — not in the mesh-converter. This bisects the problem immediately.
+
+2. **Compare with Firestorm.** Add temporary logging to Firestorm (e.g. `PositionDomain` values in `llvolume.cpp:unpackVolumeFacesInternal`, skinning matrices in `llskinningutil.cpp`) to see what vertex positions and transforms Firestorm actually uses. A single log line confirmed our vertices were BSM-baked while Firestorm's were unit-cube normalized — that was the breakthrough.
+
+3. **Diagnose before fixing.** Add position logging in Godot (`animesh_node.global_position`, `shared_skel.position`, RSI positions) to see actual runtime values before writing any fix code. Most wrong fixes in this session were based on theoretical skinning math that turned out to be incomplete.
+
+4. **When something works, understand WHY.** The skull animesh rendered correctly. That meant the positioning system was fundamentally sound. Fixes that broke the skull were wrong by definition — the skull's success was a constraint, not a coincidence.
+
+5. **Scope changes to the broken case.** The tongue was the only broken mesh. Changes to the mesh-converter (affecting all meshes), all animesh, or the IBM computation were too broad. The fix needed to target root-prim animesh with non-avatar skeletons specifically.
 
 ---
 
@@ -219,6 +244,8 @@ CV rotation/scale is baked into GLB IBMs via Hippolyzer-style fixup. Rest transf
 | Visual param groups | `indra/llcharacter/llvisualparam.h` lines 47-51 |
 | Appearance byte count | `indra/newview/llvoavatar.cpp` `expected_tweakable_count` |
 | Driver weight mapping | `indra/llappearance/lldriverparam.cpp` `getDrivenWeight()` |
+
+See also [animesh.md Firestorm References](animesh.md#firestorm-source-references) for skeleton/override/skinning references.
 
 ## External References
 
@@ -280,15 +307,11 @@ This is a significant refactor. The baked approach works acceptably for now.
 
 ### Other Fixes Made (Solid, Keep These)
 
-1. **Worn animesh gets own skeleton** — `object_manager.gd` now creates a separate Node3D + Skeleton3D for worn animesh attachments, matching Firestorm's `LLControlAvatar`. Previously, worn animesh child prims' joint overrides clobbered the avatar's skeleton.
+1. **Worn animesh gets own skeleton** — see [animesh.md section 9](animesh.md#9-rezzed-animesh-vs-worn-animesh) for details.
 
-2. **Race condition in animesh root assignment** — Added `not sm.animesh_root_for.has(local_id)` guard so child tracking code doesn't overwrite the animesh root assignment made by the animesh detection code.
+2. **Override priority & no-op filter** — see [animesh.md section 6](animesh.md#6-animesh-mesh-instantiation-object_managergd) for joint override mechanics.
 
-3. **Override priority: lowest mesh UUID wins** — `_apply_joint_overrides` now tracks per-bone ownership by mesh UUID via `sm.bone_override_owner`. Matches SL's `std::map<LLUUID>` ordering in `LLJoint::findActiveOverride()`.
-
-4. **No-op override filter** — Godot-side threshold check (0.0001) skips overrides whose position matches XML default, matching Firestorm's `aboveJointPosThreshold`. Prevents default-position overrides from replacing shape-modified positions.
-
-5. **Avatar shape unit tests** — `avatar-shape.test.ts` with regression data from real avatars (dog avatar 8f99e602, human avatar 27df63dc). Validates scale computation against Firestorm output.
+3. **Avatar shape unit tests** — `avatar-shape.test.ts` with regression data from real avatars (dog avatar 8f99e602, human avatar 27df63dc). Validates scale computation against Firestorm output.
 
 ### Remaining Issues & Next Steps
 
@@ -352,4 +375,3 @@ Issues 1-4 and 6 were resolved by implementing dynamic parent scale + bone scale
 | Override threshold | `lljoint.cpp` | `aboveJointPosThreshold` line 398 (0.1mm) |
 | Shape scale application | `llpolyskeletaldistortion.cpp` | `apply()` lines 189-227 |
 | Sex filtering | `llpolyskeletaldistortion.cpp` | `apply()`: `(getSex() & avatar_sex) ? mCurWeight : getDefaultWeight()` |
-| ControlAvatar (worn animesh) | `llcontrolavatar.cpp` | Separate avatar with own skeleton |

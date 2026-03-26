@@ -15,7 +15,12 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { app } from 'electron';
+// Lazy-import electron app — unavailable in worker_threads context
+let _app: typeof import('electron').app | null = null;
+function getApp(): typeof import('electron').app {
+  if (!_app) _app = require('electron').app as typeof import('electron').app;
+  return _app!;
+}
 import type { LLMesh } from '../../../node-metaverse/dist/lib/classes/public/LLMesh';
 import type { LLSubMesh } from '../../../node-metaverse/dist/lib/classes/public/interfaces/LLSubMesh';
 import type { LLSkin } from '../../../node-metaverse/dist/lib/classes/public/interfaces/LLSkin';
@@ -41,31 +46,47 @@ let attachmentPointCache: Map<string, string> | null = null;
 // Joint alias map: alternative name → canonical name (from XML aliases + attachment points + case fallback)
 let jointAliasCache: Map<string, string> | null = null;
 
-function findSharedFile(filename: string): string {
+async function findSharedFile(filename: string): Promise<string> {
   const candidates = [
     ...(process.resourcesPath ? [path.join(process.resourcesPath, 'shared', filename)] : []),
     path.join(__dirname, '..', '..', '..', 'shared', filename),
     path.join(__dirname, '..', '..', '..', '..', 'shared', filename),
   ];
   for (const p of candidates) {
-    try { return fs.readFileSync(p, 'utf8'); } catch { /* try next */ }
+    try { return await fs.promises.readFile(p, 'utf8'); } catch { /* try next */ }
   }
   return '';
 }
 
 export function getSkeletonHierarchy(): Map<string, SkeletonJoint> {
   if (skeletonCache) return skeletonCache;
+  skeletonCache = new Map();
+  return skeletonCache;
+}
 
-  const json = findSharedFile('avatar_skeleton.json');
+export async function initSkeletonData(): Promise<void> {
+  if (skeletonCache && skeletonCache.size > 0) return;
+
+  const json = await findSharedFile('avatar_skeleton.json');
   if (!json) {
     console.warn('[mesh-converter] avatar_skeleton.json not found, skeleton hierarchy unavailable');
     skeletonCache = new Map();
-    return skeletonCache;
+  } else {
+    skeletonCache = parseSkeletonJson(json);
+    console.log(`[mesh-converter] Loaded skeleton hierarchy: ${skeletonCache.size} joints`);
   }
 
-  skeletonCache = parseSkeletonJson(json);
-  console.log(`[mesh-converter] Loaded skeleton hierarchy: ${skeletonCache.size} joints`);
-  return skeletonCache;
+  const apJson = await findSharedFile('avatar_lad_attachments.json');
+  if (!apJson) {
+    console.warn('[mesh-converter] avatar_lad_attachments.json not found, attachment points unavailable');
+    attachmentPointCache = new Map();
+  } else {
+    const obj = JSON.parse(apJson) as Record<string, string>;
+    attachmentPointCache = new Map(Object.entries(obj));
+    console.log(`[mesh-converter] Loaded attachment points: ${attachmentPointCache.size} points`);
+  }
+
+  getJointAliasMap();
 }
 
 /**
@@ -136,17 +157,7 @@ function resolveJointName(name: string): string {
 /** Get attachment point name → parent joint name mapping from avatar_lad_attachments.json */
 export function getAttachmentPoints(): Map<string, string> {
   if (attachmentPointCache) return attachmentPointCache;
-
-  const json = findSharedFile('avatar_lad_attachments.json');
-  if (!json) {
-    console.warn('[mesh-converter] avatar_lad_attachments.json not found, attachment points unavailable');
-    attachmentPointCache = new Map();
-    return attachmentPointCache;
-  }
-
-  const obj = JSON.parse(json) as Record<string, string>;
-  attachmentPointCache = new Map(Object.entries(obj));
-  console.log(`[mesh-converter] Loaded attachment points: ${attachmentPointCache.size} points`);
+  attachmentPointCache = new Map();
   return attachmentPointCache;
 }
 
@@ -402,8 +413,12 @@ interface JointContext {
 
 // --- Cache / meta functions ---
 
+let _cacheDir: string | null = null;
+const _meshCacheSet = new Set<string>();
+/** Inject cache directory (for worker threads where app.getPath is unavailable). */
+export function setCacheDir(dir: string): void { _cacheDir = dir; }
 function getCacheDir(): string {
-  return path.join(app.getPath('userData'), 'asset-cache', 'meshes');
+  return _cacheDir ?? path.join(getApp().getPath('userData'), 'asset-cache', 'meshes');
 }
 
 export function meshCachePath(meshUuid: string): string {
@@ -411,7 +426,7 @@ export function meshCachePath(meshUuid: string): string {
 }
 
 export function isMeshCached(meshUuid: string): boolean {
-  return fs.existsSync(meshCachePath(meshUuid));
+  return _meshCacheSet.has(meshUuid);
 }
 
 function metaPath(meshUuid: string): string {
@@ -420,36 +435,39 @@ function metaPath(meshUuid: string): string {
 
 /** Read persisted rigged/jointNames info for a cached mesh.
  *  Falls back to scanning the GLB JSON chunk for "skins" if no .meta file exists. */
-export function readMeshMeta(meshUuid: string): { isRigged: boolean; jointNames?: string[]; jointOverrides?: string[] } | undefined {
+export async function readMeshMeta(meshUuid: string): Promise<{ isRigged: boolean; jointNames?: string[]; jointOverrides?: string[] } | undefined> {
   // Fast path: .meta sidecar exists
   try {
-    const data = JSON.parse(fs.readFileSync(metaPath(meshUuid), 'utf8'));
+    const raw = await fs.promises.readFile(metaPath(meshUuid), 'utf8');
+    const data = JSON.parse(raw);
+    _meshCacheSet.add(meshUuid);
     return { isRigged: !!data.isRigged, jointNames: data.jointNames, jointOverrides: data.jointOverrides };
   } catch { /* no meta file — fall through to GLB scan */ }
 
   // Fallback: scan GLB JSON chunk for "skins" (handles meshes cached before meta was added)
   try {
     const glbPath = meshCachePath(meshUuid);
-    const fd = fs.openSync(glbPath, 'r');
+    const fh = await fs.promises.open(glbPath, 'r');
     try {
       // GLB header: 12 bytes (magic + version + length)
       // Chunk 0 header: 4 bytes length + 4 bytes type
       const header = Buffer.alloc(20);
-      fs.readSync(fd, header, 0, 20, 0);
+      await fh.read(header, 0, 20, 0);
       const jsonLen = header.readUInt32LE(12);
       // Read just enough of the JSON chunk to detect "skins"
       const readLen = Math.min(jsonLen, 8192);
       const jsonBuf = Buffer.alloc(readLen);
-      fs.readSync(fd, jsonBuf, 0, readLen, 20);
+      await fh.read(jsonBuf, 0, readLen, 20);
       const jsonStr = jsonBuf.toString('utf8');
       const isRigged = jsonStr.includes('"skins"');
       // Persist for next time
       if (isRigged) {
-        try { fs.writeFileSync(metaPath(meshUuid), JSON.stringify({ isRigged })); } catch { /* ignore */ }
+        try { await fs.promises.writeFile(metaPath(meshUuid), JSON.stringify({ isRigged })); } catch { /* ignore */ }
       }
+      _meshCacheSet.add(meshUuid);
       return { isRigged };
     } finally {
-      fs.closeSync(fd);
+      await fh.close();
     }
   } catch { return undefined; }
 }
@@ -488,10 +506,13 @@ export async function ensureMeshCached(meshUuid: string, mesh: LLMesh): Promise<
   const cachePath = meshCachePath(meshUuid);
   const meta = buildMeshMeta(mesh);
 
-  if (fs.existsSync(cachePath)) {
+  const exists = await fs.promises.access(cachePath).then(() => true, () => false);
+  if (exists) {
+    _meshCacheSet.add(meshUuid);
     // Persist meta if missing
-    if (!fs.existsSync(metaPath(meshUuid)) && meta.isRigged) {
-      try { fs.writeFileSync(metaPath(meshUuid), JSON.stringify(meta)); } catch { /* ignore */ }
+    const metaExists = await fs.promises.access(metaPath(meshUuid)).then(() => true, () => false);
+    if (!metaExists && meta.isRigged) {
+      try { await fs.promises.writeFile(metaPath(meshUuid), JSON.stringify(meta)); } catch { /* ignore */ }
     }
     return { cachePath, ...meta };
   }
@@ -499,11 +520,12 @@ export async function ensureMeshCached(meshUuid: string, mesh: LLMesh): Promise<
   const glb = llMeshToGlb(mesh);
   if (!glb) throw new Error(`Failed to convert mesh ${meshUuid} to GLB`);
 
-  fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-  fs.writeFileSync(cachePath, glb);
+  await fs.promises.mkdir(path.dirname(cachePath), { recursive: true });
+  await fs.promises.writeFile(cachePath, glb);
+  _meshCacheSet.add(meshUuid);
 
   if (meta.isRigged) {
-    try { fs.writeFileSync(metaPath(meshUuid), JSON.stringify(meta)); } catch { /* ignore */ }
+    try { await fs.promises.writeFile(metaPath(meshUuid), JSON.stringify(meta)); } catch { /* ignore */ }
   }
   return { cachePath, ...meta };
 }

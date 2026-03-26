@@ -12,6 +12,8 @@ import type { DecodePool } from './decode-pool';
 
 type Vec3 = { x: number; y: number; z: number };
 
+const cachedSculpts = new Set<string>();
+
 function getCacheDir(): string {
   return path.join(app.getPath('userData'), 'asset-cache', 'meshes');
 }
@@ -21,7 +23,7 @@ export function sculptCachePath(textureUuid: string, sculptType: number): string
 }
 
 export function isSculptCached(textureUuid: string, sculptType: number): boolean {
-  return fs.existsSync(sculptCachePath(textureUuid, sculptType));
+  return cachedSculpts.has(`${textureUuid}_${sculptType}`);
 }
 
 /** Sculpt mesh ID used as meshId in Godot messages */
@@ -271,8 +273,15 @@ export async function ensureSculptCached(
   textureUuid: string, sculptType: number, j2cBuffer: Buffer,
   decodePool: DecodePool,
 ): Promise<string> {
+  const cacheKey = `${textureUuid}_${sculptType}`;
   const cachePath = sculptCachePath(textureUuid, sculptType);
-  if (fs.existsSync(cachePath)) return cachePath;
+  if (cachedSculpts.has(cacheKey)) return cachePath;
+
+  try {
+    await fs.promises.access(cachePath);
+    cachedSculpts.add(cacheKey);
+    return cachePath;
+  } catch {}
 
   const raw = await decodePool.decodeRaw(j2cBuffer);
   const pixels: Buffer = raw.rgbaPixels;
@@ -284,7 +293,8 @@ export async function ensureSculptCached(
   const mesh = buildSculptMesh(grid, sculptType);
   const glb = sculptMeshToGlb(mesh);
 
-  fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-  fs.writeFileSync(cachePath, glb);
+  await fs.promises.mkdir(path.dirname(cachePath), { recursive: true });
+  await fs.promises.writeFile(cachePath, glb);
+  cachedSculpts.add(cacheKey);
   return cachePath;
 }

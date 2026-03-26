@@ -86,8 +86,8 @@ export class GpuCompressQueue {
         dataSize: compressedData.length,
       };
       const bctexBuf = encodeBctex(header, compressedData);
-      fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-      fs.writeFileSync(cachePath, bctexBuf);
+      await fs.promises.mkdir(path.dirname(cachePath), { recursive: true });
+      await fs.promises.writeFile(cachePath, bctexBuf);
 
       const timeMs = performance.now() - startMs;
       item.resolve({ cachePath, format, mipCount, timeMs });

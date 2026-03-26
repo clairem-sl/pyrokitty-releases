@@ -3,9 +3,10 @@
  * Max 4 concurrent downloads; shared meshes fetched once.
  */
 
-import { AssetType, LLMesh } from '../../../node-metaverse/dist/lib';
+import { AssetType } from '../../../node-metaverse/dist/lib';
 import type { Bot } from '../../../node-metaverse/dist/lib';
-import { isMeshCached, meshCachePath, readMeshMeta, ensureMeshCached } from './mesh-converter';
+import { isMeshCached, meshCachePath, readMeshMeta } from './mesh-converter';
+import { MeshConvertPool } from './mesh-convert-pool';
 
 const MAX_CONCURRENT = 8;
 
@@ -14,6 +15,7 @@ export type MeshReadyCallback = (meshUuid: string, cachePath: string, isRigged?:
 export class MeshFetchQueue {
   private bot: Bot;
   private onReady: MeshReadyCallback;
+  private convertPool: MeshConvertPool;
   private pending = new Map<string, Set<number | string>>(); // meshUuid → object ids waiting
   private active = 0;
   private queue: string[] = [];
@@ -26,9 +28,10 @@ export class MeshFetchQueue {
   /** Called when a mesh download fails. */
   onFailed?: (meshUuid: string) => void;
 
-  constructor(bot: Bot, onReady: MeshReadyCallback) {
+  constructor(bot: Bot, onReady: MeshReadyCallback, cacheDir: string) {
     this.bot = bot;
     this.onReady = onReady;
+    this.convertPool = new MeshConvertPool(cacheDir);
   }
 
   get queueDepth(): number { return this.queue.length; }
@@ -54,9 +57,11 @@ export class MeshFetchQueue {
     // On disk but Godot doesn't know yet — notify once (with rigged info from meta)
     if (isMeshCached(meshUuid)) {
       this.notified.add(meshUuid);
-      const meta = readMeshMeta(meshUuid);
-      this.onReady(meshUuid, meshCachePath(meshUuid), meta?.isRigged, meta?.jointNames, meta?.jointOverrides);
-      this.onResolved?.(meshUuid);
+      readMeshMeta(meshUuid).then((meta) => {
+        if (this.destroyed) return;
+        this.onReady(meshUuid, meshCachePath(meshUuid), meta?.isRigged, meta?.jointNames, meta?.jointOverrides);
+        this.onResolved?.(meshUuid);
+      });
       return;
     }
 
@@ -88,8 +93,7 @@ export class MeshFetchQueue {
       const buf = await this.bot.clientCommands.asset.downloadAsset(
         AssetType.Mesh, meshUuid
       );
-      const llmesh = await LLMesh.from(buf);
-      const result = await ensureMeshCached(meshUuid, llmesh);
+      const result = await this.convertPool.convert(meshUuid, buf);
       if (!this.destroyed) {
         this.notified.add(meshUuid);
         this.onReady(meshUuid, result.cachePath, result.isRigged, result.jointNames, result.jointOverrides);
@@ -120,5 +124,6 @@ export class MeshFetchQueue {
     this.destroyed = true;
     this.queue = [];
     this.pending.clear();
+    this.convertPool.destroy();
   }
 }
