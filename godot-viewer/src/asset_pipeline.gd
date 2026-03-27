@@ -53,7 +53,8 @@ var _mesh_in_flight: Dictionary = {}     # meshId (String) -> true (dedup)
 var _mesh_queue: Array = []              # queued { meshId, path } waiting to be submitted
 var MESH_MAX_IN_FLIGHT: int = FrameBudget.MESH_MAX_IN_FLIGHT
 
-# Texture alpha tracking: textureId -> true if fully opaque (DXT1/BC1, no alpha channel)
+# Texture alpha tracking: textureId -> true if fully opaque (DXT1/BC1, no alpha channel).
+# Used to promote blend→opaque for legacy faces without a material (perf optimization).
 var _texture_opaque: Dictionary = {}
 var _material_lookups: int = 0   # total calls to _get_or_create_material (lifetime)
 
@@ -452,7 +453,6 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 			if img == null:
 				sm.texture_load_failed[texture_id] = true
 			else:
-				# DXT1 = opaque (no alpha), DXT5 = has alpha channel
 				_texture_opaque[texture_id] = (img.get_format() == Image.FORMAT_DXT1)
 				var _t0 := Time.get_ticks_usec()
 				sm.texture_cache[texture_id] = ImageTexture.create_from_image(img)
@@ -538,11 +538,14 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 func apply_face_materials(rsi, obj_uuid: String, faces: Array) -> void:
 	rsi.set_material_override(null)
 	var surface_count: int = rsi.mesh.get_surface_count() if rsi.mesh else 0
-	# For animesh objects, the real mesh is on the MeshInstance3D, not the RSI (which has a placeholder box).
-	# Use the animesh mesh's surface count so we don't skip faces beyond the placeholder's 1 surface.
+	# For animesh/flexi objects, the real mesh is on a MeshInstance3D, not the RSI (placeholder box).
+	# Use the real mesh's surface count so we don't skip faces beyond the placeholder's 1 surface.
 	var ami: MeshInstance3D = sm.animesh_mesh_instances.get(obj_uuid)
 	if ami and ami.mesh:
 		surface_count = maxi(surface_count, ami.mesh.get_surface_count())
+	var fmi: MeshInstance3D = sm.flexi_mgr.get_mesh_instance(obj_uuid) if sm.flexi_params.has(obj_uuid) else null
+	if fmi and fmi.mesh:
+		surface_count = maxi(surface_count, fmi.mesh.get_surface_count())
 
 	for fi: Dictionary in faces:
 		var face_idx: int = int(fi.get("index", 0))
@@ -550,7 +553,7 @@ func apply_face_materials(rsi, obj_uuid: String, faces: Array) -> void:
 		var color: Array = fi.get("color", [1, 1, 1, 1])
 		var full_bright: bool = fi.get("fullBright", false)
 		var double_sided: bool = fi.get("doubleSided", false)
-		var alpha_mode: int = int(fi.get("alphaMode", -1))
+		var alpha_mode: int = int(fi.get("alphaMode", 0))
 		var alpha_cutoff: float = float(fi.get("alphaCutoff", 0.5))
 		var mapping_type: int = int(fi.get("mappingType", 0))
 		var uv_info: Dictionary = {
@@ -611,6 +614,9 @@ func apply_face_materials(rsi, obj_uuid: String, faces: Array) -> void:
 		# Also apply to animesh MeshInstance3D if this object has one
 		if ami and ami.mesh and face_idx < ami.mesh.get_surface_count():
 			ami.set_surface_override_material(face_idx, mat)
+		# Also apply to flexi prim MeshInstance3D if this object has one
+		if fmi and fmi.mesh and face_idx < fmi.mesh.get_surface_count():
+			fmi.set_surface_override_material(face_idx, mat)
 
 		# Register under uncached texture IDs for re-apply when they load
 		for tid: String in all_tex_ids:
@@ -634,13 +640,14 @@ func _get_double_sided_shader(shader: Shader) -> Shader:
 	return ds
 
 
-func _get_or_create_material(texture_id: String, color: Array, full_bright: bool, double_sided: bool, uv_info: Dictionary = {}, alpha_mode: int = -1, alpha_cutoff: float = 0.5, pbr: Dictionary = {}, mapping_type: int = 0, render_priority: int = 0) -> Material:
+func _get_or_create_material(texture_id: String, color: Array, full_bright: bool, double_sided: bool, uv_info: Dictionary = {}, alpha_mode: int = 0, alpha_cutoff: float = 0.5, pbr: Dictionary = {}, mapping_type: int = 0, render_priority: int = 0) -> Material:
 	_material_lookups += 1
 
-	# Alpha mode: 0=opaque, 1=blend, 2=mask. -1=unresolved (legacy faces without
-	# an explicit material — promote to opaque if texture has no alpha channel).
+	# Alpha mode: 0=opaque, 1=blend, 2=mask (resolver always provides a resolved value).
+	# Promote blend→opaque when texture is known-opaque (DXT1/BC1, no alpha channel).
+	# This avoids expensive transparent render path for legacy faces without a material.
 	var resolved_mode := alpha_mode
-	if alpha_mode == -1 and color[3] >= 1.0 and _texture_opaque.get(texture_id, false):
+	if alpha_mode == 1 and color[3] >= 1.0 and _texture_opaque.get(texture_id, false):
 		resolved_mode = 0
 
 	# PBR params — everything is PBR-shaped, resolver provides defaults
@@ -710,11 +717,8 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 		mat.set_shader_parameter("tex_rotation", tr)
 		mat.set_shader_parameter("full_bright", full_bright)
 		# Alpha scissor (opaque variant only — alpha variant uses smooth blending)
-		if not use_alpha:
-			if resolved_mode == 2:
-				mat.set_shader_parameter("alpha_scissor_threshold", alpha_cutoff)
-			elif resolved_mode == -1:
-				mat.set_shader_parameter("alpha_scissor_threshold", 0.5)
+		if not use_alpha and resolved_mode == 2:
+			mat.set_shader_parameter("alpha_scissor_threshold", alpha_cutoff)
 		if render_priority != 0:
 			mat.render_priority = render_priority
 		sm.material_cache[key] = mat
@@ -738,11 +742,8 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 		smat.set_shader_parameter("tex_rotation", tr)
 		smat.set_shader_parameter("full_bright", full_bright)
 		# Alpha scissor (opaque variant only — alpha variant uses smooth blending)
-		if not use_alpha:
-			if resolved_mode == 2:
-				smat.set_shader_parameter("alpha_scissor_threshold", alpha_cutoff)
-			elif resolved_mode == -1:
-				smat.set_shader_parameter("alpha_scissor_threshold", 0.5)
+		if not use_alpha and resolved_mode == 2:
+			smat.set_shader_parameter("alpha_scissor_threshold", alpha_cutoff)
 		if render_priority != 0:
 			smat.render_priority = render_priority
 		sm.material_cache[key] = smat
@@ -762,7 +763,7 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 	if double_sided:
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 
-	# Alpha handling: 0=opaque, 1=blend, 2=mask, -1=unresolved (texture-dependent).
+	# Alpha handling: 0=opaque, 1=blend, 2=mask (resolver always provides resolved value).
 	# Color alpha (transparency slider) always wins.
 	if color[3] < 1.0:
 		# Transparency slider active — always use alpha blending
@@ -771,13 +772,9 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 		# GLTF BLEND — smooth alpha blending
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	elif resolved_mode == 2:
-		# GLTF MASK — alpha scissor with explicit cutoff
+		# GLTF MASK — alpha scissor with cutoff
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 		mat.alpha_scissor_threshold = alpha_cutoff
-	elif resolved_mode == -1:
-		# Unresolved legacy face — texture has alpha channel, apply default scissor
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-		mat.alpha_scissor_threshold = 0.5
 	# else: mode 0 (opaque) — no transparency pipeline overhead
 
 	# Fullbright = unshaded
@@ -997,7 +994,6 @@ func get_pipeline_stats() -> Dictionary:
 		"materials": sm.material_cache.size(),
 		"materialLookups": _material_lookups,
 		"materialReuse": _material_lookups - sm.material_cache.size(),
-		"texOpaque": _texture_opaque.values().count(true),
 		"lightsActive": sm.light_mgr._light_count,
 		"lightsTotal": sm.light_mgr._object_light_data.size(),
 	}

@@ -732,7 +732,7 @@ func _handle_touch_pick(screen_pos: Vector2) -> void:
 
 
 const _MAPPING_NAMES: Dictionary = { 0: "default", 2: "planar", 4: "spherical", 6: "cylindrical" }
-const _ALPHA_NAMES: Dictionary = { -1: "auto", 0: "none", 1: "blend", 2: "mask", 3: "emissive" }
+const _ALPHA_NAMES: Dictionary = { 0: "none", 1: "blend", 2: "mask", 3: "emissive" }
 
 func _show_debug_tooltip(screen_pos: Vector2, dist: float, info: Dictionary, faces: Array) -> void:
 	_inspected_uuid = str(info.get("uuid", ""))
@@ -790,10 +790,9 @@ func _show_debug_tooltip(screen_pos: Vector2, dist: float, info: Dictionary, fac
 			color_hex = "%02x%02x%02x" % [rv, gv, bv]
 		else:
 			color_hex = str(color_raw)
-		var am: int = int(fi.get("alphaMode", -1))
+		var am: int = int(fi.get("alphaMode", 0))
 		var full_bright: bool = fi.get("fullBright", false)
 		var ds: bool = fi.get("doubleSided", false)
-		var is_pbr: bool = fi.get("isPBR", false)
 
 		fb += "[b]Face %d[/b]  tex: [color=#aaaaff]%s[/color]\n" % [idx, tid.substr(0, 8) if tid.length() >= 8 else tid]
 		fb += "  map: %s" % _MAPPING_NAMES.get(mt, str(mt))
@@ -810,23 +809,23 @@ func _show_debug_tooltip(screen_pos: Vector2, dist: float, info: Dictionary, fac
 			fb += "  [color=#88ffff]doubleSided[/color]"
 		fb += "\n"
 
-		# PBR section
-		if is_pbr:
-			var pbr: Dictionary = fi.get("pbr", {})
+		# PBR details (everything is PBR-shaped — show when non-default values present)
+		var nid: String = str(fi.get("normalTextureId", ""))
+		var oid: String = str(fi.get("ormTextureId", ""))
+		var eid: String = str(fi.get("emissiveTextureId", ""))
+		var metallic: float = float(fi.get("metallicFactor", 0.0))
+		var roughness: float = float(fi.get("roughnessFactor", 1.0))
+		var ef: Array = fi.get("emissiveFactor", [])
+		var has_pbr: bool = not nid.is_empty() or not oid.is_empty() or not eid.is_empty() or metallic > 0.001 or roughness < 0.999 or ef.size() >= 3
+		if has_pbr:
 			fb += "  [color=#88ff88][b]PBR[/b][/color]"
-			var nid: String = pbr.get("normalTextureId", "")
-			var oid: String = pbr.get("ormTextureId", "")
-			var eid: String = pbr.get("emissiveTextureId", "")
 			if not nid.is_empty():
 				fb += "  nrm: %s" % nid.substr(0, 8)
 			if not oid.is_empty():
 				fb += "  orm: %s" % oid.substr(0, 8)
 			if not eid.is_empty():
 				fb += "  emi: %s" % eid.substr(0, 8)
-			var metallic: float = float(pbr.get("metallicFactor", 0.0))
-			var roughness: float = float(pbr.get("roughnessFactor", 1.0))
 			fb += "  met: %.2f  rgh: %.2f" % [metallic, roughness]
-			var ef: Array = pbr.get("emissiveFactor", [])
 			if ef.size() >= 3:
 				fb += "  emF: (%.1f,%.1f,%.1f)" % [float(ef[0]), float(ef[1]), float(ef[2])]
 			fb += "\n"

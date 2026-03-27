@@ -317,6 +317,19 @@ func _update_stats_bar() -> void:
 	var e_sculpt_q: int = int(es_sculpt.get("queue", 0)) + int(es_sculpt.get("active", 0))
 	var e_deferred: int = int(es.get("deferred", 0))
 
+	# Per-subsystem timing (ms/frame averages, reset each stats update)
+	var timing: Dictionary = scene_manager.get_process_timing()
+	var t_terrain: float = timing.get("terrain", 0.0)
+	var t_interp_av: float = timing.get("interpAv", 0.0)
+	var t_interp_obj: float = timing.get("interpObj", 0.0)
+	var t_anim: float = timing.get("anim", 0.0)
+	var t_flexi: float = timing.get("flexi", 0.0)
+	var t_bubbles: float = timing.get("bubbles", 0.0)
+	var t_finalize: float = timing.get("finalize", 0.0)
+	var t_total: float = t_terrain + t_interp_av + t_interp_obj + t_anim + t_flexi + t_bubbles + t_finalize
+	var anim_roots: int = int(timing.get("animRoots", 0))
+	var interp_targets: int = int(timing.get("interpTargets", 0))
+
 	# BBCode color helpers
 	const C_GREEN := "color=#88ee88"   # done / cached
 	const C_YELLOW := "color=#eedd66"  # loading / in-flight
@@ -388,6 +401,17 @@ func _update_stats_bar() -> void:
 			bb += "[%s]Def:[/color] [%s]%d[/color]  " % [C_WHITE, C_BLUE, e_deferred]
 		if msg_q > 0:
 			bb += "[%s]MsgQ:[/color] [%s]%d[/color]" % [C_WHITE, C_YELLOW, msg_q]
+		bb += "\n"
+		# Per-subsystem timing
+		bb += "[%s]CPU:[/color] " % C_WHITE
+		bb += "[%s]%.1fms[/color]  " % [C_CYAN, t_total]
+		bb += "[%s]terrain=[/color][%s]%.2f[/color] " % [C_WHITE, C_CYAN, t_terrain]
+		bb += "[%s]interp=[/color][%s]%.2f[/color](%da+%do) " % [C_WHITE, C_CYAN, t_interp_av + t_interp_obj, avatar_count, interp_targets]
+		bb += "[%s]anim=[/color][%s]%.2f[/color](%d) " % [C_WHITE, C_CYAN, t_anim, anim_roots]
+		if t_flexi > 0.01:
+			bb += "[%s]flexi=[/color][%s]%.2f[/color] " % [C_WHITE, C_CYAN, t_flexi]
+		bb += "[%s]bubbles=[/color][%s]%.2f[/color] " % [C_WHITE, C_CYAN, t_bubbles]
+		bb += "[%s]finalize=[/color][%s]%.2f[/color]" % [C_WHITE, C_CYAN, t_finalize]
 		_stats_label.text = bb
 
 	# Console log (plain text, once per second)
@@ -395,14 +419,16 @@ func _update_stats_bar() -> void:
 	var mesh_fail_str := ("  %d FAILED" % mesh_failed) if mesh_failed > 0 else ""
 	var e_tex_fail_str := ("  %d FAIL" % e_tex_fail) if e_tex_fail > 0 else ""
 	var e_mesh_fail_str := ("  %d FAIL" % e_mesh_fail) if e_mesh_fail > 0 else ""
-	print("[Stats] FPS: %.0f | Obj: %d Av: %d Lights: %d/%d Mat: %d | VRAM: tex=%.1fMB buf=%.1fMB | Tex: %d cached %d decoding %d placeholder%s [eDL:%d q:%d dec:%d gpu:%d done:%d%s] | Mesh: %d cached %d decoding %d pending%s [eDL:%d q:%d sculpt:%d done:%d%s] | Def: %d MsgQ: %d" % [
+	print("[Stats] FPS: %.0f | Obj: %d Av: %d Lights: %d/%d Mat: %d | VRAM: tex=%.1fMB buf=%.1fMB | Tex: %d cached %d decoding %d placeholder%s [eDL:%d q:%d dec:%d gpu:%d done:%d%s] | Mesh: %d cached %d decoding %d pending%s [eDL:%d q:%d sculpt:%d done:%d%s] | Def: %d MsgQ: %d | CPU: %.1fms [terrain=%.2f interp=%.2f(%da+%do) anim=%.2f(%d) flexi=%.2f bubbles=%.2f final=%.2f]" % [
 		fps, obj_count, avatar_count, lights_active, lights_total, mat_count,
 		tex_mem / 1048576.0, buf_mem / 1048576.0,
 		tex_cached, tex_loading, tex_waiting, tex_fail_str,
 		e_tex_dl, e_tex_q, e_tex_dec, e_tex_gpu, e_tex_done, e_tex_fail_str,
 		mesh_cached, mesh_loading, mesh_pending, mesh_fail_str,
 		e_mesh_dl, e_mesh_q, e_sculpt_q, e_mesh_done, e_mesh_fail_str,
-		e_deferred, msg_q])
+		e_deferred, msg_q,
+		t_total, t_terrain, t_interp_av + t_interp_obj, avatar_count, interp_targets,
+		t_anim, anim_roots, t_flexi, t_bubbles, t_finalize])
 
 
 ## Classify a raw JSON string as high-priority without full parsing.

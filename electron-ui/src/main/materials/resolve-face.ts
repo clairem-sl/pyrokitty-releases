@@ -23,7 +23,7 @@ export interface FaceInput {
 
 /** Cached legacy material properties (already fetched from SL) */
 export interface LegacyCachedMaterial {
-  alphaMode: number;       // diffuseAlphaMode (0/1/2; -1 = unresolved)
+  alphaMode: number;       // diffuseAlphaMode (0=opaque, 1=blend, 2=mask)
   alphaCutoff: number;     // already scaled to 0-1 range
   normMap?: string;
   specExp?: number;        // raw SpecExp (0-255)
@@ -68,7 +68,7 @@ const FULLBRIGHT_MASK = 0x20;
  * - legacyCached.normMap → normalTexture
  * - legacyCached.specExp → roughnessFactor (1 - specExp/255)
  * - legacyCached.envIntensity → metallicFactor (envIntensity/255)
- * - legacyCached.alphaMode → alphaMode (0/1/2; -1 or absent → 0)
+ * - legacyCached.alphaMode → alphaMode (0/1/2; absent → 1 blend)
  * - legacyCached.alphaCutoff → alphaCutoff
  */
 export function resolveLegacyFace(
@@ -78,16 +78,14 @@ export function resolveLegacyFace(
   const fullBright = (face.materialFlags & FULLBRIGHT_MASK) !== 0;
   const glow = face.glow || 0;
 
-  let alphaMode = -1; // -1 = unresolved — viewer decides based on texture format
+  let alphaMode = 1; // default blend — matches SL behavior for faces without a material
   let alphaCutoff = 0.5;
   let normalTexture: string | undefined;
   let metallicFactor = 0;
   let roughnessFactor = 1;
 
   if (legacyCached) {
-    if (legacyCached.alphaMode >= 0) {
-      alphaMode = legacyCached.alphaMode;
-    }
+    alphaMode = legacyCached.alphaMode;
     alphaCutoff = legacyCached.alphaCutoff;
 
     normalTexture = legacyCached.normMap;

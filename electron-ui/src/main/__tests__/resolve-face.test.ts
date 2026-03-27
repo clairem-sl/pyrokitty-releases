@@ -61,10 +61,10 @@ describe('resolveLegacyFace', () => {
     expect(result.rotation).toBe(1.5);
   });
 
-  it('defaults to unresolved (-1) with no legacy material', () => {
+  it('defaults to blend (1) with no legacy material', () => {
     const result = resolveLegacyFace(makeFace());
 
-    expect(result.alphaMode).toBe(-1);
+    expect(result.alphaMode).toBe(1);
     expect(result.alphaCutoff).toBe(0.5);
     expect(result.metallicFactor).toBe(0);
     expect(result.roughnessFactor).toBe(1);
@@ -106,9 +106,9 @@ describe('resolveLegacyFace', () => {
     expect(result.alphaCutoff).toBe(0.3);
   });
 
-  it('passes through alphaMode -1 as unresolved', () => {
-    const cached = makeLegacyCached({ alphaMode: -1 });
-    expect(resolveLegacyFace(makeFace(), cached).alphaMode).toBe(-1);
+  it('passes through alphaMode from cached material', () => {
+    const cached = makeLegacyCached({ alphaMode: 0 });
+    expect(resolveLegacyFace(makeFace(), cached).alphaMode).toBe(0);
   });
 
   it('alpha mask mode (2) with cutoff', () => {

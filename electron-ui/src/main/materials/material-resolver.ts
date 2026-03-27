@@ -229,7 +229,7 @@ export class MaterialResolver {
    *               (used for initial object_complete).
    */
   resolveObject(obj: any, emit = false): {
-    faces: { index: number; resolved: ResolvedMaterial; isPBR: boolean; isBake: boolean; bakeAvatarUuid?: string; bakeChannel?: number }[];
+    faces: { index: number; resolved: ResolvedMaterial; isBake: boolean; bakeAvatarUuid?: string; bakeChannel?: number }[];
     textureIds: string[];
   } | undefined {
     try {
@@ -263,7 +263,7 @@ export class MaterialResolver {
         }
       }
 
-      const resultFaces: { index: number; resolved: ResolvedMaterial; isPBR: boolean; isBake: boolean; bakeAvatarUuid?: string; bakeChannel?: number }[] = [];
+      const resultFaces: { index: number; resolved: ResolvedMaterial; isBake: boolean; bakeAvatarUuid?: string; bakeChannel?: number }[] = [];
       const textureIdSet = new Set<string>();
 
       for (let i = 0; i < 8; i++) {
@@ -305,7 +305,7 @@ export class MaterialResolver {
           this.pbrFaceCount++;
 
           resultFaces.push({
-            index: i, resolved, isPBR: true,
+            index: i, resolved,
             isBake: bakeResult.isBake, bakeAvatarUuid: bakeResult.bakeAvatarUuid, bakeChannel: bakeResult.bakeChannel,
           });
           this.collectTextureIds(resolved, textureIdSet);
@@ -324,7 +324,7 @@ export class MaterialResolver {
           if (emit) this.onResolved(objectUuid, i, resolved);
 
           resultFaces.push({
-            index: i, resolved, isPBR: false,
+            index: i, resolved,
             isBake: bakeResult.isBake, bakeAvatarUuid: bakeResult.bakeAvatarUuid, bakeChannel: bakeResult.bakeChannel,
           });
           this.collectTextureIds(resolved, textureIdSet);
@@ -448,7 +448,7 @@ export class MaterialResolver {
       for (const [uuid, mat] of Object.entries(uuids)) {
         if (mat) {
           const entry: LegacyCachedMaterial = {
-            alphaMode: mat.diffuseAlphaMode ?? -1,
+            alphaMode: mat.diffuseAlphaMode ?? 1,
             alphaCutoff: mat.alphaMaskCutoff != null ? mat.alphaMaskCutoff / 255 : 0.5,
           };
           const normMap = mat.normMap?.toString();

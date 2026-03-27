@@ -1,23 +1,23 @@
 extends RefCounted
 
-## Terrain heightmap, water (OceanFFT + flat fallback), underwater fog, and sky/environment.
+## Terrain heightmap, water (OceanFFT), underwater fog (GPU shader), and sky/environment.
 
 const Ocean3DScript = preload("res://addons/tessarakkt.oceanfft/components/Ocean3D.gd")
 const QuadTree3DScript = preload("res://addons/tessarakkt.oceanfft/components/QuadTree3D.gd")
+const UnderwaterFogShader = preload("res://src/underwater_fog.gdshader")
 
 var sm  # scene_manager reference
 
 var terrain_nodes: Dictionary = {}    # cacheID (String) -> MeshInstance3D
 var terrain_heights: Dictionary = {}  # cacheID (String) -> PackedFloat32Array (256x256)
 var terrain_grid: Dictionary = {}     # "gridX,gridY" -> cacheID — for neighbor lookups
-var water_node: MeshInstance3D  # flat fallback (only if OceanFFT unavailable)
 var _ocean = null  # Ocean3D
 var _ocean_quad_tree = null  # QuadTree3D
 var _ocean_logged_ready: bool = false
 var _water_height: float = 20.0       # SL water surface Y (Godot coords), set by handle_terrain_ready
-var _camera_underwater: bool = false   # true when camera is below water surface
 var _underwater_fog_color: Color = Color(0.03, 0.06, 0.12)  # EEP waterFogColor
 var _underwater_fog_density: float = 0.12                     # EEP waterFogDensity
+var _underwater_fog_quad: MeshInstance3D  # fullscreen quad with underwater fog shader
 
 # Sun/ambient fade-in — starts at 0, ramps to target over 10s
 var _sun_target_energy: float = 0.0
@@ -33,13 +33,14 @@ func _init(scene_manager) -> void:
 
 ## Called from scene_manager._process every frame
 func process(_delta: float) -> void:
-	# OceanFFT simulation
+	# OceanFFT simulation (pure GPU — no CPU readback)
 	if _ocean != null and _ocean.initialized:
 		_ocean.simulate(_delta)
-
-	# Underwater fog check
-	if _ocean_quad_tree != null or water_node != null:
-		_update_underwater_fog()
+		# Sync wind scroll to underwater fog shader so wave heights track
+		if _underwater_fog_quad != null:
+			var fog_mat: ShaderMaterial = _underwater_fog_quad.material_override
+			if fog_mat:
+				fog_mat.set_shader_parameter("wind_uv_offset", _ocean.wind_uv_offset)
 
 	# Fade sun/ambient toward targets
 	if _sun_energy < _sun_target_energy or _ambient_energy < _ambient_target_energy:
@@ -62,9 +63,6 @@ func clear() -> void:
 	terrain_nodes.clear()
 	terrain_heights.clear()
 	terrain_grid.clear()
-	if water_node:
-		water_node.queue_free()
-		water_node = null
 	if _ocean != null:
 		if _ocean is Node and is_instance_valid(_ocean):
 			_ocean.queue_free()
@@ -73,6 +71,10 @@ func clear() -> void:
 		if _ocean_quad_tree is Node and is_instance_valid(_ocean_quad_tree):
 			_ocean_quad_tree.queue_free()
 		_ocean_quad_tree = null
+	if _underwater_fog_quad != null:
+		if is_instance_valid(_underwater_fog_quad):
+			_underwater_fog_quad.queue_free()
+		_underwater_fog_quad = null
 	_ocean_logged_ready = false
 
 
@@ -258,21 +260,17 @@ func _build_water_plane(water_height: float) -> void:
 	print("[Water] _build_water_plane called, water_height=", water_height)
 
 	# Tear down any existing water
-	if water_node:
-		water_node.queue_free()
-		water_node = null
 	if _ocean_quad_tree:
 		_ocean_quad_tree.queue_free()
 		_ocean_quad_tree = null
+	if _underwater_fog_quad != null:
+		if is_instance_valid(_underwater_fog_quad):
+			_underwater_fog_quad.queue_free()
+		_underwater_fog_quad = null
 	_ocean = null
 	_ocean_logged_ready = false
 
-	# Try OceanFFT addon
 	var qt_scene = load("res://addons/tessarakkt.oceanfft/components/QuadTree3D.tscn")
-	if qt_scene == null:
-		push_warning("[Water] OceanFFT addon not found — using flat water fallback")
-		_build_flat_water(water_height)
-		return
 
 	# Create Ocean3D resource (FFT simulation)
 	_ocean = Ocean3DScript.new()
@@ -283,6 +281,7 @@ func _build_water_plane(water_height: float) -> void:
 	_ocean.choppiness = 0.6
 	_ocean.time_scale = 1.0
 	_ocean.simulation_frameskip = 1
+	_ocean.heightmap_sync_frameskip = -1  # no GPU→CPU readback — fog is GPU-side
 	_ocean.simulation_enabled = true
 	_ocean.initialize_simulation()
 
@@ -315,6 +314,9 @@ func _build_water_plane(water_height: float) -> void:
 	# Layer 2 so spot/omni lights don't cast blocky shadow artifacts on water
 	_set_layer_recursive(_ocean_quad_tree, 2)
 
+	# GPU underwater fog — fullscreen quad with depth-based shader
+	_create_underwater_fog_quad(water_height)
+
 	print("[Water] OceanFFT water added at height ", water_height)
 
 
@@ -328,53 +330,49 @@ func _set_layer_recursive(node: Node, layer: int) -> void:
 		_set_layer_recursive(child, layer)
 
 
-func _update_underwater_fog() -> void:
-	var camera: Camera3D = sm.get_node_or_null("../Camera3D")
-	if camera == null:
-		return
-	# Use FFT wave height at camera position when available
-	var effective_water_y := _water_height
+## Create the fullscreen quad that handles underwater fog entirely on the GPU.
+## The shader checks camera Y vs water_height and applies depth-based fog — no CPU readback.
+func _create_underwater_fog_quad(water_height: float) -> void:
+	if _underwater_fog_quad != null:
+		if is_instance_valid(_underwater_fog_quad):
+			_underwater_fog_quad.queue_free()
+
+	_underwater_fog_quad = MeshInstance3D.new()
+	var quad := QuadMesh.new()
+	quad.size = Vector2(2.0, 2.0)
+	_underwater_fog_quad.mesh = quad
+
+	var mat := ShaderMaterial.new()
+	mat.shader = UnderwaterFogShader
+	mat.set_shader_parameter("water_height", water_height)
+	mat.set_shader_parameter("fog_color", Vector3(_underwater_fog_color.r, _underwater_fog_color.g, _underwater_fog_color.b))
+	mat.set_shader_parameter("fog_density", _underwater_fog_density)
+
+	# Share the OceanFFT displacement textures so the fog responds to wave heights
 	if _ocean != null and _ocean.initialized:
-		effective_water_y = _ocean.get_wave_height(camera, camera.global_position) + _water_height
-	var is_underwater := camera.global_position.y < effective_water_y
+		var ocean_mat: ShaderMaterial = _ocean.material
+		mat.set_shader_parameter("cascade_displacements", ocean_mat.get_shader_parameter("cascade_displacements"))
+		mat.set_shader_parameter("cascade_uv_scales", ocean_mat.get_shader_parameter("cascade_uv_scales"))
+		mat.set_shader_parameter("uv_scale", ocean_mat.get_shader_parameter("uv_scale"))
+		mat.set_shader_parameter("wind_uv_offset", ocean_mat.get_shader_parameter("wind_uv_offset"))
 
-	if is_underwater == _camera_underwater:
-		return  # no state change
-	_camera_underwater = is_underwater
+	# Render after everything else
+	mat.render_priority = 100
+	_underwater_fog_quad.material_override = mat
 
-	var world_env: WorldEnvironment = sm.get_node_or_null("../WorldEnvironment")
-	if world_env == null or world_env.environment == null:
+	# Ensure it's not affected by culling or transforms
+	_underwater_fog_quad.extra_cull_margin = 16384.0
+	sm.add_child(_underwater_fog_quad)
+
+## Update underwater fog shader uniforms when EEP settings change.
+func _update_underwater_fog_uniforms() -> void:
+	if _underwater_fog_quad == null or not is_instance_valid(_underwater_fog_quad):
 		return
-	var env := world_env.environment
+	var mat: ShaderMaterial = _underwater_fog_quad.material_override
+	if mat:
+		mat.set_shader_parameter("fog_color", Vector3(_underwater_fog_color.r, _underwater_fog_color.g, _underwater_fog_color.b))
+		mat.set_shader_parameter("fog_density", _underwater_fog_density)
 
-	if is_underwater:
-		env.fog_enabled = true
-		env.fog_light_color = _underwater_fog_color
-		env.fog_density = _underwater_fog_density
-		env.fog_light_energy = 0.6
-	else:
-		# Reset underwater fog color back to defaults
-		env.fog_light_color = Color.WHITE
-		env.fog_light_energy = 1.0
-		env.fog_enabled = false
-
-
-func _build_flat_water(water_height: float) -> void:
-	water_node = MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(256.0, 256.0)
-	water_node.mesh = plane
-	water_node.position = Vector3(127.5, water_height, -127.5)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.1, 0.3, 0.5, 0.5)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mat.roughness = 0.1
-	mat.metallic = 0.3
-	water_node.material_override = mat
-	water_node.set_layer_mask_value(1, false)
-	water_node.set_layer_mask_value(2, true)
-	sm.add_child(water_node)
 
 
 func handle_environment_data(msg: Dictionary) -> void:
@@ -440,13 +438,18 @@ func handle_environment_data(msg: Dictionary) -> void:
 
 	# --- Water settings from EEP ---
 	# Underwater fog color/density
+	var fog_changed := false
 	if msg.has("waterFogColor"):
 		var wfc: Array = msg["waterFogColor"]
 		_underwater_fog_color = Color(float(wfc[0]), float(wfc[1]), float(wfc[2]))
+		fog_changed = true
 	if msg.has("waterFogDensity"):
 		# SL fog density is an exponential factor (typically 1-16); map to Godot's 0-1 range
 		var sl_density: float = float(msg["waterFogDensity"])
 		_underwater_fog_density = clampf(sl_density * 0.02, 0.01, 0.5)
+		fog_changed = true
+	if fog_changed:
+		_update_underwater_fog_uniforms()
 
 	# Ocean wave direction and shader params
 	if _ocean != null and _ocean.initialized:

@@ -134,6 +134,11 @@ func handle_object_create(msg: Dictionary) -> void:
 		"description": "",
 	}
 
+	# Store flexi params if this is a flexible prim (ponytails, ribbons, flags, etc.)
+	var flexi_data = msg.get("flexible")
+	if flexi_data is Dictionary:
+		sm.flexi_params[obj_uuid] = flexi_data
+
 	# Phase 1 placeholder — mesh, shape, and faces arrive later via object_complete
 	# Sculpts skip the placeholder box — their real mesh may be a megaprim and the
 	# placeholder box at that scale wrecks the scene until the sculpt mesh loads.
@@ -442,6 +447,10 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 		# Sync animesh root Node3D transform with RSInstance
 		_sync_animesh_transform(obj_uuid, rsi)
 
+		# Sync flexi prim root transform with RSInstance
+		if sm.flexi_params.has(obj_uuid):
+			sm.flexi_mgr.update_transform(obj_uuid, rsi.pos, rsi.rot)
+
 		# Update light (may be added, changed, or removed)
 		if obj.has("light"):
 			if obj["light"] is Dictionary:
@@ -468,6 +477,9 @@ func _update_children_transforms(parent_uuid: String) -> void:
 			child_rsi.push_transform()
 			# Sync animesh root Node3D for child animesh objects
 			_sync_animesh_transform(child_uuid, child_rsi)
+			# Sync flexi prim root Node3D
+			if sm.flexi_params.has(child_uuid):
+				sm.flexi_mgr.update_transform(child_uuid, child_rsi.pos, child_rsi.rot)
 			# Move child's light with it
 			if sm.light_mgr.object_lights.has(child_uuid):
 				sm.light_mgr.update_light_transform(child_uuid, child_rsi)
@@ -724,9 +736,19 @@ func handle_object_complete(msg: Dictionary) -> void:
 			if not sm.asset_pipeline._mesh_in_flight.has(mesh_id):
 				sm.asset_pipeline._request_mesh(mesh_id)
 	elif not shape.is_empty():
-		rsi.set_mesh(sm.prim_generator.get_or_generate(shape))
+		var is_flexi: bool = sm.flexi_params.has(obj_uuid)
+		# Flexi prims need higher tessellation for bone deformation (14 path points, matching Firestorm)
+		var prim_mesh: ArrayMesh = sm.prim_generator.generate_flexi(shape) if is_flexi else sm.prim_generator.get_or_generate(shape)
+		rsi.set_mesh(prim_mesh)
+		if is_flexi:
+			var flexi_root: Node3D = sm.flexi_mgr.create_flexi(
+				obj_uuid, sm.flexi_params[obj_uuid], prim_mesh,
+				rsi.pos, rsi.rot, rsi.scl)
+			if flexi_root != null:
+				RenderingServer.instance_set_visible(rsi.rid, false)
 
 	# Apply face materials (textures should be cached) — defer if out of range
+	# For flexi prims, asset_pipeline auto-applies to the MeshInstance3D too.
 	if faces.size() > 0:
 		sm.object_faces[obj_uuid] = faces
 		var dist_sq: float = sm._vis_far * sm._vis_far
@@ -812,6 +834,11 @@ func _cleanup_object(obj_uuid: String) -> void:
 	sm.light_mgr.destroy_light(obj_uuid)
 	sm.light_mgr._object_light_data.erase(obj_uuid)
 	sm.object_targets.erase(obj_uuid)
+
+	# Clean up flexi prim
+	if sm.flexi_params.has(obj_uuid):
+		sm.flexi_mgr.destroy_flexi(obj_uuid)
+		sm.flexi_params.erase(obj_uuid)
 
 	# Clean up animesh mesh instance (child of shared skeleton, freed individually)
 	if sm.animesh_mesh_instances.has(obj_uuid):

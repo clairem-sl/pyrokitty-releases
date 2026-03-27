@@ -40,6 +40,13 @@ func get_or_generate(shape: Dictionary) -> ArrayMesh:
 	return mesh
 
 
+## Generate a flexi prim mesh with extra path tessellation for bone deformation.
+## Firestorm uses up to 13 render sections — we match that for smooth bending.
+## Not cached — each flexi prim gets unique rigged vertices anyway.
+func generate_flexi(shape: Dictionary, min_path_points: int = 14) -> ArrayMesh:
+	return _generate(shape, min_path_points)
+
+
 func get_cache_size() -> int:
 	return _cache.size()
 
@@ -47,9 +54,13 @@ func get_cache_size() -> int:
 # ─── Hash ─────────────────────────────────────────────
 
 func _hash_shape(s: Dictionary) -> String:
-	# Quantize floats to avoid near-duplicate cache entries
+	# Quantize floats to avoid near-duplicate cache entries.
+	# Normalize PATH_FLEXIBLE (0x80) → PATH_LINE (0x10) since they produce the same mesh.
+	var pc: int = int(s.get("pathCurve", 16))
+	if (pc & 0xf0) == 0x80:
+		pc = 0x10 | (pc & 0x0f)
 	return "%d_%d_%.3f_%.3f_%.3f_%.3f_%.3f_%.3f_%.3f_%.3f_%.3f_%.3f_%.3f_%.3f_%.3f_%.3f_%.3f_%.3f" % [
-		int(s.get("pathCurve", 16)),
+		pc,
 		int(s.get("profileCurve", 1)),
 		s.get("pathBegin", 0.0),
 		s.get("pathEnd", 1.0),
@@ -72,7 +83,7 @@ func _hash_shape(s: Dictionary) -> String:
 
 # ─── Main Generate ────────────────────────────────────
 
-func _generate(s: Dictionary) -> ArrayMesh:
+func _generate(s: Dictionary, min_path_points: int = 0) -> ArrayMesh:
 	var path_curve: int   = int(s.get("pathCurve", 16))
 	var profile_curve: int = int(s.get("profileCurve", 1))
 	var path_begin: float  = float(s.get("pathBegin", 0.0))
@@ -94,7 +105,7 @@ func _generate(s: Dictionary) -> ArrayMesh:
 
 	var profile_type: int = profile_curve & PROFILE_MASK
 	var hole_type: int = profile_curve & HOLE_MASK
-	var is_path_line: bool = (path_curve & 0xf0) == PATH_LINE
+	var is_path_line: bool = (path_curve & 0xf0) == PATH_LINE or (path_curve & 0xf0) == 0x80  # 0x80 = PATH_FLEXIBLE
 	var path_open: bool = is_path_line or path_begin > 0.0 or path_end < 1.0 or absf(path_skew) > 0.001
 
 	# Generate profile (2D cross-section)
@@ -104,7 +115,7 @@ func _generate(s: Dictionary) -> ArrayMesh:
 	var path := _generate_path(path_curve, path_begin, path_end, path_scale_x, path_scale_y,
 		path_shear_x, path_shear_y, path_twist, path_twist_begin,
 		path_radius_offset, path_taper_x, path_taper_y, path_revolutions, path_skew,
-		profile_type)
+		profile_type, min_path_points)
 
 	# Sweep profile along path to create vertex grid
 	var mesh_verts: Array[Vector3] = []
@@ -426,13 +437,20 @@ func _generate_path(path_curve: int, p_begin: float, p_end: float,
 		scale_x: float, scale_y: float, shear_x: float, shear_y: float,
 		twist: float, twist_begin: float, radius_offset: float,
 		taper_x: float, taper_y: float, revolutions: float, skew: float,
-		profile_type: int) -> Array:  # Array[PathPoint]
+		profile_type: int, min_path_points: int = 0) -> Array:  # Array[PathPoint]
 
 	var path: Array = []
 
-	if (path_curve & 0xf0) == PATH_LINE:
-		path = _gen_linear_path(p_begin, p_end, scale_x, scale_y, shear_x, shear_y, twist, twist_begin)
-	elif (path_curve & 0xf0) == PATH_CIRCLE:
+	# PATH_FLEXIBLE (0x80) uses the same linear path as PATH_LINE for its base shape.
+	# In SL the physics simulation replaces the path at runtime, but the shape params
+	# (taper, twist, shear) are still valid for generating the static mesh geometry.
+	var effective_curve: int = path_curve & 0xf0
+	if effective_curve == 0x80:  # LL_PCODE_PATH_FLEXIBLE
+		effective_curve = PATH_LINE
+
+	if effective_curve == PATH_LINE:
+		path = _gen_linear_path(p_begin, p_end, scale_x, scale_y, shear_x, shear_y, twist, twist_begin, min_path_points)
+	elif effective_curve == PATH_CIRCLE:
 		path = _gen_circular_path(p_begin, p_end, scale_x, scale_y, shear_x, shear_y,
 			twist, twist_begin, radius_offset, taper_x, taper_y, revolutions, skew, profile_type)
 	else:
@@ -443,7 +461,8 @@ func _generate_path(path_curve: int, p_begin: float, p_end: float,
 
 
 func _gen_linear_path(p_begin: float, p_end: float, scale_x: float, scale_y: float,
-		shear_x: float, shear_y: float, twist_val: float, twist_begin_val: float) -> Array:
+		shear_x: float, shear_y: float, twist_val: float, twist_begin_val: float,
+		min_points: int = 0) -> Array:
 	var path: Array = []
 
 	# Compute begin/end scale from pathScaleX/Y
@@ -458,9 +477,9 @@ func _gen_linear_path(p_begin: float, p_end: float, scale_x: float, scale_y: flo
 	if scale_y < 1.0:
 		end_scale.y = scale_y
 
-	# Number of path points based on twist
+	# Number of path points based on twist (min 2, or min_points for flexi)
 	var np: int = floori(absf(twist_begin_val - twist_val) * 3.5 * (DETAIL - 0.5)) + 2
-	np = maxi(np, 2)
+	np = maxi(np, maxi(2, min_points))
 
 	var step := 1.0 / float(np - 1)
 

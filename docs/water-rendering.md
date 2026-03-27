@@ -6,13 +6,14 @@
 - **Refraction**: Screen-texture UV offset by world-space wave normals
 - **Old approach**: `water_ssr.gdshader` (noise waves + SSR) is kept on disk as reference but no longer loaded
 - **Render layer**: Water on layer 2 (set recursively on QuadTree3D children), lights on layer 1 only — prevents blocky shadow artifacts
-- **Underwater fog**: `_update_underwater_fog()` uses `Ocean3D.get_wave_height()` for wave-accurate detection
+- **Underwater fog**: GPU shader (`underwater_fog.gdshader`) — fullscreen quad samples the live FFT displacement textures at the camera's XZ position, applies depth-based exponential fog when camera is below the local wave surface. No CPU readback needed — fog color/density driven by EEP uniforms.
 
 ## OceanFFT Configuration (scene_manager.gd)
 ```
 fft_resolution: 128, horizontal_dimension: 256
 wind_speed: 12.0, wind_direction_degrees: 45.0
 choppiness: 0.6, time_scale: 1.0, simulation_frameskip: 1
+heightmap_sync_frameskip: -1  (disabled — no GPU→CPU readback)
 QuadTree: lod_level=5, quad_size=4096, mesh_vertex_resolution=64, morph_range=0.3
 LOD ranges: [48, 96, 192, 384, 768, 1536]
 ```
@@ -91,7 +92,7 @@ New pipeline:
 ## Key Files
 - `godot-viewer/addons/tessarakkt.oceanfft/shaders/SurfaceVisual.gdshader` — main water shader (FFT waves + SSR + refraction)
 - `godot-viewer/addons/tessarakkt.oceanfft/Ocean.tres` — material resource with shader parameter defaults
-- `godot-viewer/src/scene_manager.gd` — `_build_water_plane()`, Ocean3D/QuadTree3D setup, `_update_underwater_fog()`
-- `godot-viewer/shaders/water_ssr.gdshader` — old standalone SSR water shader (reference only)
+- `godot-viewer/src/terrain_environment.gd` — `_build_water_plane()`, Ocean3D/QuadTree3D setup, fog quad creation
+- `godot-viewer/src/underwater_fog.gdshader` — GPU underwater fog (samples FFT displacement textures)
 - `godot-viewer/tests/test_water_setup.gd` — headless tests for shader compilation, initialization guards, material params
 - `electron-ui/src/main/godot-bridge.ts` — kills Godot process on `SHADER ERROR` in stdout

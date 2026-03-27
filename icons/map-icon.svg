@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="land" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7ec850"/>
+      <stop offset="50%" stop-color="#5a9e3a"/>
+      <stop offset="100%" stop-color="#3d7a28"/>
+    </linearGradient>
+    <linearGradient id="shore" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#c8b870"/>
+      <stop offset="100%" stop-color="#a89848"/>
+    </linearGradient>
+    <radialGradient id="ocean" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1a3a5c"/>
+      <stop offset="100%" stop-color="#0d1f33"/>
+    </radialGradient>
+    <linearGradient id="trunk" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8B6914"/>
+      <stop offset="50%" stop-color="#a07828"/>
+      <stop offset="100%" stop-color="#705010"/>
+    </linearGradient>
+    <filter id="landShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+    <clipPath id="circleClip">
+      <circle cx="256" cy="256" r="252"/>
+    </clipPath>
+  </defs>
+
+  <!-- Ocean circle -->
+  <circle cx="256" cy="256" r="252" fill="url(#ocean)"/>
+
+  <!-- Everything clipped to circle -->
+  <g clip-path="url(#circleClip)">
+    <!-- Grid lines (subtle) -->
+    <line x1="128" y1="0" x2="128" y2="512" stroke="#ffffff" stroke-width="1" opacity="0.08"/>
+    <line x1="256" y1="0" x2="256" y2="512" stroke="#ffffff" stroke-width="1" opacity="0.08"/>
+    <line x1="384" y1="0" x2="384" y2="512" stroke="#ffffff" stroke-width="1" opacity="0.08"/>
+    <line x1="0" y1="128" x2="512" y2="128" stroke="#ffffff" stroke-width="1" opacity="0.08"/>
+    <line x1="0" y1="256" x2="512" y2="256" stroke="#ffffff" stroke-width="1" opacity="0.08"/>
+    <line x1="0" y1="384" x2="512" y2="384" stroke="#ffffff" stroke-width="1" opacity="0.08"/>
+
+    <!-- Banana continent - stem points right, curve opens upward -->
+    <!-- Shore outline -->
+    <path d="M 400 392
+             C 355 424, 280 437, 210 417
+             C 140 397, 100 357, 85 312
+             C 78 282, 80 262, 90 252
+             C 95 264, 110 287, 140 307
+             C 185 337, 250 357, 310 362
+             C 345 365, 370 364, 388 372
+             Z"
+          fill="url(#shore)" filter="url(#landShadow)"/>
+
+    <!-- Land mass (inner) -->
+    <path d="M 390 384
+             C 350 412, 280 422, 215 405
+             C 148 390, 110 354, 96 312
+             C 90 290, 90 270, 98 262
+             C 102 272, 118 290, 145 305
+             C 190 332, 252 347, 310 352
+             C 340 355, 364 357, 380 368
+             Z"
+          fill="url(#land)"/>
+
+    <!-- Mountain ridges along the spine -->
+    <path d="M 270 357 L 255 340 L 240 357" fill="none" stroke="#4a8830" stroke-width="4" stroke-linejoin="round" opacity="0.55"/>
+    <path d="M 200 342 L 182 322 L 167 342" fill="none" stroke="#4a8830" stroke-width="4" stroke-linejoin="round" opacity="0.5"/>
+    <path d="M 330 364 L 317 348 L 302 364" fill="none" stroke="#4a8830" stroke-width="3.5" stroke-linejoin="round" opacity="0.45"/>
+
+    <!-- Palm tree trunk (NW corner of island, grows upward) -->
+    <path d="M 95 260 C 88 242, 82 220, 80 195"
+          fill="none" stroke="url(#trunk)" stroke-width="8" stroke-linecap="round"/>
+    <!-- Trunk segments -->
+    <path d="M 90 245 L 86 240" stroke="#705010" stroke-width="1.5" opacity="0.5"/>
+    <path d="M 86 228 L 82 223" stroke="#705010" stroke-width="1.5" opacity="0.5"/>
+    <path d="M 83 212 L 79 207" stroke="#705010" stroke-width="1.5" opacity="0.5"/>
+
+    <!-- Palm fronds (radiating from treetop) -->
+    <path d="M 80 195 C 60 185, 38 190, 25 205" fill="none" stroke="#4a9030" stroke-width="4" stroke-linecap="round"/>
+    <path d="M 80 195 C 55 178, 38 172, 22 178" fill="none" stroke="#5aa038" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M 80 195 C 68 170, 65 150, 72 135" fill="none" stroke="#4a9030" stroke-width="4" stroke-linecap="round"/>
+    <path d="M 80 195 C 88 168, 95 148, 108 138" fill="none" stroke="#5aa038" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M 80 195 C 102 182, 120 178, 138 180" fill="none" stroke="#4a9030" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M 80 195 C 75 170, 68 152, 55 142" fill="none" stroke="#5aa838" stroke-width="3" stroke-linecap="round"/>
+    <!-- Frond leaflets -->
+    <path d="M 48 190 L 40 186 M 55 182 L 48 176 M 35 185 L 28 182" fill="none" stroke="#4a9030" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+    <path d="M 95 175 L 98 167 M 105 170 L 110 162 M 88 180 L 88 172" fill="none" stroke="#4a9030" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+
+    <!-- Small island -->
+    <ellipse cx="210" cy="185" rx="28" ry="16" fill="url(#shore)" filter="url(#landShadow)"/>
+    <ellipse cx="210" cy="185" rx="20" ry="11" fill="url(#land)"/>
+
+    <!-- Tiny island -->
+    <ellipse cx="270" cy="155" rx="12" ry="7" fill="url(#shore)"/>
+    <ellipse cx="270" cy="155" rx="8" ry="5" fill="url(#land)"/>
+
+    <!-- Avatar dot -->
+    <circle cx="240" cy="350" r="12" fill="#4cff4c" opacity="0.9"/>
+    <circle cx="240" cy="350" r="20" fill="none" stroke="#4cff4c" stroke-width="3" opacity="0.4"/>
+  </g>
+
+  <!-- Border ring -->
+  <circle cx="256" cy="256" r="250" fill="none" stroke="#3388cc" stroke-width="3" opacity="0.5"/>
+  <circle cx="256" cy="256" r="246" fill="none" stroke="#55aaee" stroke-width="1" opacity="0.25"/>
+</svg>

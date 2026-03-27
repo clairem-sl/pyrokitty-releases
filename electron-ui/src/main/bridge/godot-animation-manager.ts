@@ -22,6 +22,7 @@ export class GodotAnimationManager {
   private animationFetchQueue: AnimationFetchQueue | null = null;
   private connected = false;
   private sentToGodot = new Set<string>(); // anim UUIDs whose keyframe data has been sent
+  private batchCheckInFlight = new Set<string>(); // roots currently being checked (race guard)
 
   constructor(
     private bot: Bot,
@@ -157,10 +158,13 @@ export class GodotAnimationManager {
 
   /** Check if all animations for a specific root are cached. If so, send batch to Godot. */
   private async checkAnimBatchReadyForRoot(uuid: string): Promise<void> {
+    if (this.batchCheckInFlight.has(uuid)) return; // another call already processing this root
     const needed = this.animRootPending.get(uuid);
     if (!needed || !this.connected) {
       return;
     }
+    this.batchCheckInFlight.add(uuid);
+    try {
 
     // Empty animation set — send empty batch so Godot clears the old animations
     if (needed.size === 0 || !this.animationFetchQueue) {
@@ -220,6 +224,10 @@ export class GodotAnimationManager {
     for (const animId of Object.keys(allData)) {
       this.sentToGodot.add(animId);
     }
+
+    } finally {
+      this.batchCheckInFlight.delete(uuid);
+    }
   }
 
   /** Clean up state for a deleted object by UUID */
@@ -243,6 +251,7 @@ export class GodotAnimationManager {
     this.animeshAnimState.clear();
     this.animeshObjects.clear();
     this.avatarAnimState.clear();
+    this.batchCheckInFlight.clear();
     this.animationFetchQueue?.clearPending();
   }
 
@@ -252,6 +261,7 @@ export class GodotAnimationManager {
     this.animeshAnimState.clear();
     this.animeshObjects.clear();
     this.avatarAnimState.clear();
+    this.batchCheckInFlight.clear();
     if (this.animationFetchQueue) {
       this.animationFetchQueue.destroy();
       this.animationFetchQueue = null;

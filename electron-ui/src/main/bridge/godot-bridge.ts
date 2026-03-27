@@ -151,7 +151,7 @@ export class GodotBridge extends EventEmitter {
     this.materialResolver = new MaterialResolver(bot, this.trackedObjects,
       (objectUuid, faceIndex, material) => {
         // Convert ResolvedMaterial → Godot face format and queue via batcher
-        const godotFace = resolvedToGodotFace(faceIndex, material, true);
+        const godotFace = resolvedToGodotFace(faceIndex, material);
         this.faceUpdateBatcher.queueFaceUpdate(objectUuid, [godotFace]);
       },
     );
@@ -528,13 +528,104 @@ export class GodotBridge extends EventEmitter {
     this.sendTimer = null;
     if (this.sendBuffer.length === 0) return;
 
+    // Coalesce: for last-write-wins message types, keep only the latest per UUID.
+    // Walk the buffer backwards so we see the newest entry first; mark older dupes
+    // for removal. This avoids sending redundant updates that Godot would queue up.
+    const seenObjUpdate = new Set<string>();  // uuid for object_update_batch entries
+    const seenAvatarUpdate = new Set<string>(); // id for avatar_update_batch entries
+    const seenAnimBatch = new Set<string>();  // uuid for animations_batch
+    const seenFaces = new Set<string>();       // uuid for object_update_faces
+    const keep = new Array<boolean>(this.sendBuffer.length).fill(true);
+
+    for (let i = this.sendBuffer.length - 1; i >= 0; i--) {
+      const msg = this.sendBuffer[i] as any;
+      const type = msg.type;
+
+      if (type === 'object_update_batch' || type === 'object_update_physics') {
+        // Each message has an `objects` array — filter out UUIDs already seen in a later message
+        const objects: any[] = msg.objects;
+        if (objects) {
+          const filtered = objects.filter((o: any) => {
+            const uuid = o.uuid;
+            if (seenObjUpdate.has(uuid)) return false;
+            seenObjUpdate.add(uuid);
+            return true;
+          });
+          if (filtered.length === 0) {
+            keep[i] = false; // entire message redundant
+          } else {
+            msg.objects = filtered;
+          }
+        }
+      } else if (type === 'avatar_update_batch') {
+        const avatars: any[] = msg.avatars;
+        if (avatars) {
+          const filtered = avatars.filter((a: any) => {
+            const id = a.id;
+            if (seenAvatarUpdate.has(id)) return false;
+            seenAvatarUpdate.add(id);
+            return true;
+          });
+          if (filtered.length === 0) {
+            keep[i] = false;
+          } else {
+            msg.avatars = filtered;
+          }
+        }
+      } else if (type === 'animations_batch') {
+        const uuid = msg.uuid;
+        if (uuid) {
+          if (seenAnimBatch.has(uuid)) {
+            keep[i] = false;
+          } else {
+            seenAnimBatch.add(uuid);
+          }
+        }
+      } else if (type === 'object_update_faces' || type === 'object_update_faces_batch') {
+        if (type === 'object_update_faces') {
+          const uuid = msg.uuid;
+          if (uuid) {
+            if (seenFaces.has(uuid)) {
+              keep[i] = false;
+            } else {
+              seenFaces.add(uuid);
+            }
+          }
+        } else {
+          const objects: any[] = msg.objects;
+          if (objects) {
+            const filtered = objects.filter((o: any) => {
+              const uuid = o.uuid;
+              if (seenFaces.has(uuid)) return false;
+              seenFaces.add(uuid);
+              return true;
+            });
+            if (filtered.length === 0) {
+              keep[i] = false;
+            } else {
+              msg.objects = filtered;
+            }
+          }
+        }
+      }
+    }
+
+    // Build coalesced buffer, preserving order (oldest first)
+    const coalesced: object[] = [];
+    for (let i = 0; i < this.sendBuffer.length; i++) {
+      if (keep[i]) coalesced.push(this.sendBuffer[i]);
+    }
+    this.sendBuffer = [];
+
     const BATCH_SIZE = 200;
-    const batch = this.sendBuffer.splice(0, BATCH_SIZE);
+    const batch = coalesced.splice(0, BATCH_SIZE);
     for (const msg of batch) {
       this.sendRaw(msg);
     }
 
-    if (this.sendBuffer.length > 0) {
+    // Re-queue anything beyond the batch size
+    if (coalesced.length > 0) {
+      this.sendBuffer = coalesced.concat(this.sendBuffer);
       this.sendTimer = setTimeout(() => this.flushSendBuffer(), 50);
     }
   }

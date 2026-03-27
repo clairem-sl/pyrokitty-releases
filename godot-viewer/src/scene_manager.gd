@@ -17,6 +17,7 @@ const TerrainEnvironmentScript = preload("res://src/terrain_environment.gd")
 const ObjectPickerScript = preload("res://src/object_picker.gd")
 const SkeletonBuilderScript = preload("res://src/skeleton_builder.gd")
 const NameBubbleManagerScript = preload("res://src/name_bubble_manager.gd")
+const FlexiPrimManagerScript = preload("res://src/flexi_prim_manager.gd")
 
 signal self_avatar_moved(pos: Vector3)
 signal object_properties_received(uuid: String, name: String, description: String)
@@ -130,6 +131,9 @@ var animesh_worn_anims: Dictionary = {}   # root uuid (String) -> Array[animId S
 var animesh_mesh_instances: Dictionary = {} # uuid (String) -> MeshInstance3D (for texture application)
 
 # Attachment point bone tracking — non-rigged attachments follow their bone each frame
+# Flexi (flexible) prim tracking — flexi prims bypass RSInstance and use Skeleton3D+SpringBone
+var flexi_params: Dictionary = {}             # uuid (String) -> Dictionary (SL flexi params from object_create)
+
 var attach_bone: Dictionary = {}            # uuid (String) -> bone name (String) for objects attached to avatar bones
 var attach_bone_idx: Dictionary = {}        # uuid (String) -> bone index (int), cached from find_bone at registration
 var attach_point_id: Dictionary = {}        # uuid (String) -> attachmentPointId (int)
@@ -178,6 +182,7 @@ var asset_pipeline: RefCounted     # AssetPipeline
 var terrain_env: RefCounted        # TerrainEnvironment
 var object_picker: RefCounted      # ObjectPicker
 var name_bubble_mgr: RefCounted    # NameBubbleManager
+var flexi_mgr: RefCounted          # FlexiPrimManager
 
 
 ## Erase all animesh-related dictionary entries for a given root uuid.
@@ -239,6 +244,7 @@ func _ready() -> void:
 	terrain_env = TerrainEnvironmentScript.new(self)
 	object_picker = ObjectPickerScript.new(self)
 	name_bubble_mgr = NameBubbleManagerScript.new(self)
+	flexi_mgr = FlexiPrimManagerScript.new(self)
 
 	asset_pipeline.start_threads()
 
@@ -252,18 +258,68 @@ func _ready() -> void:
 	add_child(fade_layer)
 
 
+## Per-subsystem timing accumulators (milliseconds, averaged over 1s windows).
+## Reset each time stats are collected via get_process_timing().
+var _timing_samples: int = 0
+var _timing_terrain_ms: float = 0.0
+var _timing_interp_av_ms: float = 0.0
+var _timing_interp_obj_ms: float = 0.0
+var _timing_anim_ms: float = 0.0
+var _timing_flexi_ms: float = 0.0
+var _timing_bubbles_ms: float = 0.0
+var _timing_finalize_ms: float = 0.0
+
+func get_process_timing() -> Dictionary:
+	var n := maxf(_timing_samples, 1)
+	var result := {
+		"terrain": _timing_terrain_ms / n,
+		"interpAv": _timing_interp_av_ms / n,
+		"interpObj": _timing_interp_obj_ms / n,
+		"anim": _timing_anim_ms / n,
+		"flexi": _timing_flexi_ms / n,
+		"bubbles": _timing_bubbles_ms / n,
+		"finalize": _timing_finalize_ms / n,
+		"animRoots": animation_mgr._slots.size(),
+		"interpTargets": object_targets.size(),
+	}
+	_timing_samples = 0
+	_timing_terrain_ms = 0.0
+	_timing_interp_av_ms = 0.0
+	_timing_interp_obj_ms = 0.0
+	_timing_anim_ms = 0.0
+	_timing_flexi_ms = 0.0
+	_timing_bubbles_ms = 0.0
+	_timing_finalize_ms = 0.0
+	return result
+
 func _process(delta: float) -> void:
+	_timing_samples += 1
+	var _t0: float
+
 	# Terrain/water/sky processing
+	_t0 = Time.get_ticks_usec()
 	terrain_env.process(delta)
+	_timing_terrain_ms += (Time.get_ticks_usec() - _t0) / 1000.0
 
 	# Interpolate avatar positions/rotations toward their targets
+	_t0 = Time.get_ticks_usec()
 	interp_mgr.interpolate_avatars(delta)
+	_timing_interp_av_ms += (Time.get_ticks_usec() - _t0) / 1000.0
 
 	# Interpolate moving objects (physical objects with velocity)
+	_t0 = Time.get_ticks_usec()
 	interp_mgr.interpolate_objects(delta)
+	_timing_interp_obj_ms += (Time.get_ticks_usec() - _t0) / 1000.0
+
+	# Flexi prim Verlet simulation (world-space physics → bone rotations)
+	_t0 = Time.get_ticks_usec()
+	flexi_mgr.simulate(delta)
+	_timing_flexi_ms += (Time.get_ticks_usec() - _t0) / 1000.0
 
 	# Consume animation thread output slots and apply to Skeleton3D
+	_t0 = Time.get_ticks_usec()
 	animation_mgr.consume_anim_slots(delta)
+	_timing_anim_ms += (Time.get_ticks_usec() - _t0) / 1000.0
 
 	# Periodic light distance culling sweep
 	light_mgr._light_cull_timer += delta
@@ -278,7 +334,9 @@ func _process(delta: float) -> void:
 		asset_pipeline.evict_unused_assets()
 
 	# Update name bubbles (position at head bone, fade chat)
+	_t0 = Time.get_ticks_usec()
 	name_bubble_mgr.process(delta, get_viewport().get_camera_3d())
+	_timing_bubbles_ms += (Time.get_ticks_usec() - _t0) / 1000.0
 
 	# Update camera position for distance-filtered asset apply
 	var _cam := get_viewport().get_camera_3d()
@@ -294,7 +352,9 @@ func _process(delta: float) -> void:
 			_sweep_timer = 0.0
 
 	# Submit queued mesh work to WorkerThreadPool + finalize textures/meshes
+	_t0 = Time.get_ticks_usec()
 	asset_pipeline.finalize_frame(delta, _vr_mode, _target_frame_ms)
+	_timing_finalize_ms += (Time.get_ticks_usec() - _t0) / 1000.0
 
 	# Loading fade-in overlay
 	if _fade_overlay != null:

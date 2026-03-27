@@ -75,12 +75,12 @@ electron-ui/
 
 **Asset Pipelines** (`src/main/assets/`): Parallel fetch queues with disk caching. Each queue deduplicates requests, downloads from the SL CDN, converts to a Godot-friendly format, writes to disk, and notifies Godot. See [Asset Pipeline](#asset-pipeline) below.
 
-**Godot Bridge** (`src/main/bridge/`): Manages the WebSocket connection to Godot, batches outbound messages (200 max per 50ms flush), and routes inbound input/interaction events back to the protocol layer. Key files:
-- `godot-bridge.ts` — spawns Godot, manages connection lifecycle
+**Godot Bridge** (`src/main/bridge/`): Manages the WebSocket connection to Godot, batches outbound messages (200 max per 50ms flush with per-UUID coalescing), and routes inbound input/interaction events back to the protocol layer. Key files:
+- `godot-bridge.ts` — spawns Godot, manages connection lifecycle, send buffer coalescing (deduplicates per-UUID object/avatar/animation/face updates before serialization)
 - `godot-object-sender.ts` — two-phase object creation (placeholder then full mesh)
 - `godot-update-coalescer.ts` — batches position/rotation updates at 16ms intervals
 - `godot-avatar-manager.ts` — avatar lifecycle, shape morphs, Baked-on-Mesh textures
-- `godot-animation-manager.ts` — animation list changes for avatars and animesh
+- `godot-animation-manager.ts` — animation list changes for avatars and animesh (in-flight guard prevents duplicate batch sends)
 
 **Voice Manager** (`src/main/voice/`): Spawns the C# voice sidecar as a child process and communicates over stdin/stdout JSON messages. See [Voice System](#voice-system).
 
@@ -107,11 +107,12 @@ godot-viewer/
     prim_mesh_generator.gd    # Prim extrusion with UV generation
     asset_pipeline.gd         # Asset loading from disk (GLB, textures)
     light_manager.gd          # Point/spot/projection lights
-    terrain_environment.gd    # Terrain heightmaps, region textures, water
+    terrain_environment.gd    # Terrain heightmaps, OceanFFT water, GPU underwater fog
     interpolation_manager.gd  # Smooth object/avatar movement between updates
     name_bubble_manager.gd    # Floating name labels
     object_picker.gd          # Raycasting for object selection
     frame_budget.gd           # Per-frame time budget (VR perf)
+    underwater_fog.gdshader   # GPU underwater fog (samples FFT displacement)
   shaders/
     planar_map.gdshader       # SL planar-projected UVs
     standard_uv.gdshader      # Standard mesh UVs with SL texture transforms
@@ -126,7 +127,9 @@ Godot runs a TCP server (default port 9200) and accepts a single WebSocket clien
 
 **High-priority messages** (processed immediately every frame): avatar lifecycle, self ID, object position updates with physics, sitting state, stats. These ensure the player's view stays responsive.
 
-**Low-priority messages** (time-budgeted queue): `object_create`, `object_complete`, `mesh_ready`, `texture_ready`. Processed within a 16ms frame budget to maintain framerate.
+**Low-priority messages** (time-budgeted queue): `object_create`, `object_complete`, `mesh_ready`, `texture_ready`. Processed within a 12ms frame budget to maintain framerate.
+
+**Per-subsystem timing**: `scene_manager.gd` tracks ms/frame for terrain, interpolation, animation, flexi, name bubbles, and finalization. Reported in the stats line as `CPU: Xms [terrain=... interp=... anim=... ...]`.
 
 ### Shared Skeleton
 
@@ -295,6 +298,7 @@ The `shared/` directory contains avatar skeleton and attachment point definition
 | Fix voice chat | `electron-ui/voice/`, [voice-system.md](architecture/voice-system.md) |
 | Add an MCP tool | `sl-mcp/src/tools/` |
 | Fix prim rendering | `godot-viewer/src/prim_mesh_generator.gd`, [primmesher-reference.md](architecture/primmesher-reference.md) |
+| Fix flexi prims | `godot-viewer/src/flexi_prim_manager.gd`, [flexi-prims.md](architecture/flexi-prims.md) |
 | Fix movement/interpolation | `godot-viewer/src/interpolation_manager.gd`, [slerp.md](architecture/slerp.md) |
 | Fix camera behavior | `godot-viewer/src/camera_controller.gd` |
 | Fix lighting | `godot-viewer/src/light_manager.gd`, [lights.md](architecture/lights.md) |
@@ -324,6 +328,7 @@ Detailed documentation for specific subsystems lives in `docs/architecture/`:
 | [shadow-system.md](architecture/shadow-system.md) | Cascaded shadow mapping |
 | [prim-mesh-uv.md](architecture/prim-mesh-uv.md) | Prim UV generation and SL texture transforms |
 | [primmesher-reference.md](architecture/primmesher-reference.md) | Prim extrusion algorithm |
+| [flexi-prims.md](architecture/flexi-prims.md) | Flexible prim Verlet physics and skeleton rigging |
 | [puppetry-system.md](architecture/puppetry-system.md) | Real-time motion capture input |
 | [lights.md](architecture/lights.md) | Projection lights and Godot limitations |
 | [slerp.md](architecture/slerp.md) | Object/avatar movement interpolation protocol |

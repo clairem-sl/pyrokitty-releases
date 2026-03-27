@@ -96,7 +96,7 @@ function createMapWindow(): void {
     minWidth: 400,
     minHeight: 300,
     title: `World Map - PyroKitty ${app.getVersion()}`,
-    icon: getIconPath('pyrokitty2.ico'),
+    icon: getIconPath('map-icon.ico'),
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -104,6 +104,11 @@ function createMapWindow(): void {
     backgroundColor: '#1a1a2e',
   });
   trackWindow(win, 'map');
+  const mapTitle = `World Map — PyroKitty ${app.getVersion()}`;
+  win.webContents.on('page-title-updated', (e) => {
+    e.preventDefault();
+    win.setTitle(mapTitle);
+  });
 
   const htmlPath = path.join(__dirname, '../map-renderer/map.html');
   win.loadFile(htmlPath);
@@ -145,6 +150,11 @@ async function createWindow(): Promise<void> {
   });
   trackWindow(mainWindow, 'main');
   if (saved?.isMaximized) mainWindow.maximize();
+  const versionTitle = `PyroKitty ${app.getVersion()}`;
+  mainWindow.webContents.on('page-title-updated', (e) => {
+    e.preventDefault();
+    mainWindow!.setTitle(versionTitle);
+  });
 
   // Initialize GPU compression (hidden BrowserWindow for WebGPU)
   initGpuCompressWindow().catch((err) => {
@@ -317,6 +327,7 @@ async function createWindow(): Promise<void> {
       },
       {
         label: 'World Map',
+        icon: nativeImage.createFromPath(getIconPath('map-icon_16.png')),
         click: () => {
           createMapWindow();
         },

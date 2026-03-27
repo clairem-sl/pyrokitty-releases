@@ -9,7 +9,7 @@ import type { SendFn } from './godot-bridge-types';
 import type { ResolvedMaterial } from '../materials/resolved-material';
 
 /** Convert a ResolvedMaterial to the legacy Godot face wire format */
-export function resolvedToGodotFace(index: number, material: ResolvedMaterial, isPBR: boolean): any {
+export function resolvedToGodotFace(index: number, material: ResolvedMaterial): any {
   const face: any = {
     index,
     textureId: material.baseColorTexture,
@@ -25,11 +25,6 @@ export function resolvedToGodotFace(index: number, material: ResolvedMaterial, i
     rotation: material.rotation,
   };
   if (material.mappingType) face.mappingType = material.mappingType;
-
-  if (isPBR) {
-    face.isPBR = true;
-    face.pbrBaseColor = material.baseColorFactor;
-  }
   if (material.normalTexture) face.normalTextureId = material.normalTexture;
   if (material.ormTexture) face.ormTextureId = material.ormTexture;
   if (material.emissiveTexture) face.emissiveTextureId = material.emissiveTexture;

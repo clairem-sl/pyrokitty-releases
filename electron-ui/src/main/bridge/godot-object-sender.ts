@@ -138,6 +138,20 @@ export class GodotObjectSender {
     };
   }
 
+  /** Returns flexi prim parameters if obj is flexible, else undefined */
+  getFlexiInfo(obj: any): { softness: number; tension: number; drag: number; gravity: number; wind: number; force: number[] } | undefined {
+    const fd = obj.extraParams?.flexibleData;
+    if (!fd) return undefined;
+    return {
+      softness: fd.Softness ?? 0,
+      tension: fd.Tension ?? 0,
+      drag: fd.Drag ?? 0,
+      gravity: fd.Gravity ?? 0,
+      wind: fd.Wind ?? 0,
+      force: slPos(fd.Force ?? { x: 0, y: 0, z: 0 }),
+    };
+  }
+
   /** Returns sculpt texture UUID and type flags if obj is a sculpted prim, else undefined */
   getSculptInfo(obj: any): { textureUuid: string; sculptType: number } | undefined {
     const sd = obj.extraParams?.sculptData;
@@ -231,7 +245,7 @@ export class GodotObjectSender {
     const resolveResult = this.materialResolver.resolveObject(obj);
     // Convert resolved faces to Godot wire format for object_complete
     const texInfo = resolveResult ? {
-      faces: resolveResult.faces.map(f => resolvedToGodotFace(f.index, f.resolved, f.isPBR)),
+      faces: resolveResult.faces.map(f => resolvedToGodotFace(f.index, f.resolved)),
       textureIds: resolveResult.textureIds,
     } : undefined;
     if (!texInfo) {
@@ -250,6 +264,7 @@ export class GodotObjectSender {
     }
 
     const lightInfo = this.getLightInfo(obj);
+    const flexiInfo = this.getFlexiInfo(obj);
 
     const isAnimesh = !!(obj.extraParams?.extendedMeshData?.flags & 0x1);
 
@@ -281,6 +296,7 @@ export class GodotObjectSender {
       ...(lightInfo ? { light: lightInfo } : {}),
       ...(isAnimesh ? { animesh: true } : {}),
       ...(sculptInfo ? { sculpt: true } : {}),
+      ...(flexiInfo ? { flexible: flexiInfo } : {}),
       ...(obj.attachmentPoint > 0 ? { attachmentPoint: obj.attachmentPoint } : {}),
     });
 
