@@ -139,24 +139,28 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         {messages.length === 0 ? (
           <div className="chat-empty">No messages yet</div>
         ) : (
-          messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`chat-message ${msg.isOutgoing ? 'outgoing' : ''} ${msg.chatType || ''}`}
-            >
-              <span className="chat-time">{formatTime(msg.timestamp)}</span>
-              <span
-                className="chat-sender"
-                onContextMenu={(e) => handleUserContextMenu(e, msg.fromId, msg.fromName)}
-              >{displayName(msg.fromName)}</span>
-              {msg.chatType && msg.chatType !== 'normal' && (
-                <span className={`chat-type-badge ${msg.chatType}`}>
-                  {msg.chatType}
-                </span>
-              )}
-              <span className="chat-text">{renderMessageText(msg.message)}</span>
-            </div>
-          ))
+          messages.map((msg) => {
+            const isEmote = msg.message.startsWith('/me ') || msg.message === '/me';
+            const messageText = isEmote ? msg.message.slice(3) : msg.message;
+            return (
+              <div
+                key={msg.id}
+                className={`chat-message ${msg.isOutgoing ? 'outgoing' : ''} ${msg.chatType || ''} ${isEmote ? 'emote' : ''}`}
+              >
+                <span className="chat-time">{formatTime(msg.timestamp)}</span>
+                <span
+                  className="chat-sender"
+                  onContextMenu={(e) => handleUserContextMenu(e, msg.fromId, msg.fromName)}
+                >{displayName(msg.fromName)}</span>
+                {msg.chatType && msg.chatType !== 'normal' && (
+                  <span className={`chat-type-badge ${msg.chatType}`}>
+                    {msg.chatType}
+                  </span>
+                )}
+                <span className="chat-text">{renderMessageText(messageText)}</span>
+              </div>
+            );
+          })
         )}
         <div ref={messagesEndRef} />
       </div>

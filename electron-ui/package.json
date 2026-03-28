@@ -138,6 +138,14 @@
             {
                 "from": "../icons/pyrokitty2_16.png",
                 "to": "icons/pyrokitty2_16.png"
+            },
+            {
+                "from": "../icons/map-icon.ico",
+                "to": "icons/map-icon.ico"
+            },
+            {
+                "from": "../icons/map-icon_16.png",
+                "to": "icons/map-icon_16.png"
             }
         ],
         "win": {

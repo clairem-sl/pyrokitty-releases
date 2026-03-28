@@ -602,6 +602,14 @@ body {
   color: var(--text-primary);
 }
 
+.chat-message.emote {
+  font-style: italic;
+}
+
+.chat-message.emote .chat-sender {
+  margin-right: 0;
+}
+
 .chat-link {
   color: #7cb3ff;
   text-decoration: none;
