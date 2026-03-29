@@ -6,7 +6,7 @@
     "scripts": {
         "start": "npm run build && electron .",
         "dev": "npm run build && concurrently --kill-others \"npm run watch:main\" \"npm run watch:renderer\" \"electron .\"",
-        "build": "npm run build:metaverse && npm run build:main && npm run build:renderer && npm run build:map && npm run build:gpu-compress && npm run build:sound-player",
+        "build": "npm run build:metaverse && npm run build:main && npm run build:renderer && npm run build:map && npm run build:3d-map && npm run build:gpu-compress && npm run build:sound-player",
         "build:metaverse": "cd node-metaverse && npm run build",
         "build:voice": "cd voice && dotnet publish -c Release -r win-x64 --self-contained -o ../dist/voice",
         "build:main": "esbuild src/main/index.ts --bundle --outfile=dist/main/index.js --platform=node --target=node18 --format=cjs --external:electron --external:sharp && esbuild src/main/assets/texture-decode-worker.ts --bundle --outfile=dist/main/texture-decode-worker.js --platform=node --target=node18 --format=cjs --external:sharp && esbuild src/main/assets/mesh-convert-worker.ts --bundle --outfile=dist/main/mesh-convert-worker.js --platform=node --target=node18 --format=cjs --external:electron",
@@ -15,6 +15,8 @@
         "build:renderer": "esbuild src/renderer/index.tsx --bundle --outfile=dist/renderer/index.js --platform=browser --target=chrome114 --external:electron && esbuild src/renderer/styles/index.css --bundle --outfile=dist/renderer/styles/index.css && npm run copy:assets",
         "build:map": "esbuild src/map-renderer/index.tsx --bundle --outfile=dist/map-renderer/index.js --platform=browser --target=chrome114 --external:electron && esbuild src/map-renderer/styles/index.css --bundle --outfile=dist/map-renderer/styles/index.css --loader:.png=file --asset-names=[name] && npm run copy:map-assets",
         "copy:assets": "node -e \"const fs=require('fs');fs.copyFileSync('src/renderer/index.html','dist/renderer/index.html');\"",
+        "build:3d-map": "esbuild src/3d-map/index.ts --bundle --outfile=dist/3d-map/index.js --platform=browser --target=chrome120 --external:electron && esbuild src/3d-map/styles/index.css --bundle --outfile=dist/3d-map/styles/index.css && npm run copy:3d-map-assets",
+        "copy:3d-map-assets": "node -e \"const fs=require('fs');fs.mkdirSync('dist/3d-map',{recursive:true});fs.copyFileSync('src/3d-map/index.html','dist/3d-map/index.html');\"",
         "copy:map-assets": "node -e \"const fs=require('fs');fs.copyFileSync('src/map-renderer/map.html','dist/map-renderer/map.html');\"",
         "watch:main": "esbuild src/main/index.ts --bundle --outfile=dist/main/index.js --platform=node --target=node18 --format=cjs --external:electron --watch",
         "watch:renderer": "concurrently \"esbuild src/renderer/index.tsx --bundle --outfile=dist/renderer/index.js --platform=browser --target=chrome114 --external:electron --watch\" \"esbuild src/renderer/styles/index.css --bundle --outfile=dist/renderer/styles/index.css --watch\"",
@@ -62,6 +64,7 @@
         "@mantine/core": "^8.3.14",
         "@mantine/hooks": "^8.3.14",
         "@react-leaflet/core": "^2.1.0",
+        "@types/three": "^0.183.1",
         "chokidar": "^5.0.0",
         "fast-xml-parser": "^5.5.5",
         "leaflet": "^1.9.4",
@@ -71,6 +74,7 @@
         "react-leaflet": "^4.2.1",
         "react-leaflet-markercluster": "^3.0.0-rc1",
         "sharp": "^0.34.5",
+        "three": "^0.183.2",
         "ws": "^8.16.0"
     },
     "build": {

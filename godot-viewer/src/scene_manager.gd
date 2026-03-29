@@ -17,6 +17,7 @@ const TerrainEnvironmentScript = preload("res://src/terrain_environment.gd")
 const ObjectPickerScript = preload("res://src/object_picker.gd")
 const SkeletonBuilderScript = preload("res://src/skeleton_builder.gd")
 const NameBubbleManagerScript = preload("res://src/name_bubble_manager.gd")
+const NameBubble3DManagerScript = preload("res://src/name_bubble_3d_manager.gd")
 const FlexiPrimManagerScript = preload("res://src/flexi_prim_manager.gd")
 
 signal self_avatar_moved(pos: Vector3)
@@ -181,7 +182,10 @@ var light_mgr: RefCounted          # LightManager
 var asset_pipeline: RefCounted     # AssetPipeline
 var terrain_env: RefCounted        # TerrainEnvironment
 var object_picker: RefCounted      # ObjectPicker
-var name_bubble_mgr: RefCounted    # NameBubbleManager
+var name_bubble_mgr: RefCounted    # NameBubbleManager (2D screen-space)
+var name_bubble_3d_mgr: RefCounted # NameBubble3DManager (3D world-space)
+var _bubble_2d_active: bool = true   # desktop default; VR flips these
+var _bubble_3d_active: bool = false
 var flexi_mgr: RefCounted          # FlexiPrimManager
 
 
@@ -244,6 +248,7 @@ func _ready() -> void:
 	terrain_env = TerrainEnvironmentScript.new(self)
 	object_picker = ObjectPickerScript.new(self)
 	name_bubble_mgr = NameBubbleManagerScript.new(self)
+	name_bubble_3d_mgr = NameBubble3DManagerScript.new(self)
 	flexi_mgr = FlexiPrimManagerScript.new(self)
 
 	asset_pipeline.start_threads()
@@ -335,7 +340,11 @@ func _process(delta: float) -> void:
 
 	# Update name bubbles (position at head bone, fade chat)
 	_t0 = Time.get_ticks_usec()
-	name_bubble_mgr.process(delta, get_viewport().get_camera_3d())
+	var _bubble_cam := get_viewport().get_camera_3d()
+	if _bubble_2d_active:
+		name_bubble_mgr.process(delta, _bubble_cam)
+	if _bubble_3d_active:
+		name_bubble_3d_mgr.process(delta, _bubble_cam)
 	_timing_bubbles_ms += (Time.get_ticks_usec() - _t0) / 1000.0
 
 	# Update camera position for distance-filtered asset apply
@@ -488,10 +497,12 @@ func handle_avatar_chat(msg: Dictionary) -> void:
 	var message: String = msg.get("message", "")
 	if not avatar_id.is_empty() and not message.is_empty():
 		name_bubble_mgr.on_avatar_chat(avatar_id, message)
+		name_bubble_3d_mgr.on_avatar_chat(avatar_id, message)
 
 func handle_avatar_typing(msg: Dictionary) -> void:
 	var avatar_id: String = msg.get("avatarId", "")
 	name_bubble_mgr.on_avatar_typing(avatar_id, msg.get("typing", false))
+	name_bubble_3d_mgr.on_avatar_typing(avatar_id, msg.get("typing", false))
 
 # Self avatar
 func set_world_origin(origin_x: float, origin_y: float) -> void:
@@ -530,6 +541,7 @@ func handle_settings(msg: Dictionary) -> void:
 
 func set_vr_mode(enabled: bool) -> void:
 	avatar_mgr.set_vr_mode(enabled)
+	set_bubble_vr_mode(enabled)
 
 func set_first_person_mode(enabled: bool) -> void:
 	avatar_mgr.set_first_person_mode(enabled)
@@ -582,6 +594,17 @@ func set_planar_debug_mode(mode: int) -> void:
 
 func toggle_debug_skeleton() -> void:
 	animation_mgr.toggle_debug_skeleton()
+
+## Switch name bubbles to VR mode (3D world-space) or desktop mode (2D overlay).
+## Called by set_vr_mode() during init.
+func set_bubble_vr_mode(vr: bool) -> void:
+	_bubble_2d_active = not vr
+	_bubble_3d_active = vr
+	if name_bubble_mgr and name_bubble_mgr._canvas_layer:
+		name_bubble_mgr._canvas_layer.visible = _bubble_2d_active
+	if name_bubble_3d_mgr:
+		name_bubble_3d_mgr.set_all_visible(_bubble_3d_active)
+	print("[SceneManager] Name bubbles: %s" % ("3D world-space" if vr else "2D screen-space"))
 
 # Stats
 func get_pipeline_stats() -> Dictionary:

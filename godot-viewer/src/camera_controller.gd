@@ -95,6 +95,10 @@ var _highlighted_rid: RID = RID()
 var _click_marker: MeshInstance3D = null
 var _click_marker_timer: float = 0.0
 
+# Action bar — context-aware floating interaction menu
+const ActionBarScript = preload("res://src/action_bar.gd")
+var _action_bar: RefCounted = null
+
 
 func _ready() -> void:
 	if scene_manager:
@@ -103,6 +107,9 @@ func _ready() -> void:
 	_create_stand_button()
 	_create_debug_tooltip()
 	_update_camera()
+	# Action bar — init deferred so scene_manager is ready
+	if scene_manager:
+		_action_bar = ActionBarScript.new(scene_manager, self, func(msg: Dictionary): main_node.send_message(msg))
 
 
 func _notification(what: int) -> void:
@@ -147,6 +154,9 @@ func set_vr_mode(enabled: bool) -> void:
 		# depth reprojection. Hide it — there's no mouse cursor in VR anyway.
 		if _tooltip_layer:
 			_tooltip_layer.visible = false
+		# Action bar 2D overlay also hidden in VR (3D version will be used instead)
+		if _action_bar:
+			_action_bar.deselect()
 
 
 func _on_self_avatar_moved(pos: Vector3) -> void:
@@ -196,6 +206,10 @@ func _process(delta: float) -> void:
 		_send_movement()
 		move_dirty = false
 		send_timer = 0.05
+
+	# Update action bar position tracking
+	if _action_bar:
+		_action_bar.process(delta)
 
 	# Fade click marker
 	if _click_marker_timer > 0.0:
@@ -284,9 +298,11 @@ func _input(event: InputEvent) -> void:
 				pitch = default_pitch
 				_update_camera()
 
-		# Escape dismisses tooltip first, then resets camera
+		# Escape dismisses action bar first, then tooltip, then resets camera
 		if ke.keycode == KEY_ESCAPE and ke.pressed and not ke.echo:
-			if _tooltip_visible:
+			if _action_bar and _action_bar.is_active():
+				_action_bar.deselect()
+			elif _tooltip_visible:
 				_hide_debug_tooltip()
 			elif is_alt_orbiting or alt_focus_hold:
 				is_alt_orbiting = false
@@ -355,7 +371,10 @@ func _input(event: InputEvent) -> void:
 
 		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			if not _is_click_on_panel(mb.position):
-				_handle_debug_pick(mb.position)
+				if _action_bar:
+					_action_bar.handle_click(mb.position)
+				else:
+					_handle_debug_pick(mb.position)
 
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
 			if _tooltip_visible:
@@ -566,6 +585,11 @@ func set_sitting(sitting: bool) -> void:
 
 func _on_stand_button_pressed() -> void:
 	main_node.send_message({"type": "stand_up"})
+
+
+func handle_pay_message(msg: Dictionary) -> void:
+	if _action_bar:
+		_action_bar.handle_pay_message(msg)
 
 
 func _create_debug_tooltip() -> void:

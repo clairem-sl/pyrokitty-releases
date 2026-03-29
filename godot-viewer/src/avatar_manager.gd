@@ -191,6 +191,7 @@ func handle_avatar_create(msg: Dictionary) -> void:
 	# Create name bubble above head
 	var display_name: String = msg.get("name", "")
 	sm.name_bubble_mgr.on_avatar_created(avatar_id, display_name)
+	sm.name_bubble_3d_mgr.on_avatar_created(avatar_id, display_name)
 
 	_crumb("avatar_create id=%s step=DONE" % avatar_id.substr(0, 8))
 	if avatar_id == sm.self_avatar_id:
@@ -301,6 +302,7 @@ func handle_avatar_kill(msg: Dictionary) -> void:
 		_avatar_volume_morphs.erase(avatar_id)
 		_avatar_hover_heights.erase(avatar_id)
 		sm.name_bubble_mgr.on_avatar_killed(avatar_id)
+		sm.name_bubble_3d_mgr.on_avatar_killed(avatar_id)
 
 
 # ─── Avatar Shape ─────────────────────────────────────

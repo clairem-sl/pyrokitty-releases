@@ -38,6 +38,14 @@ export class GodotAnimationManager {
     console.log(`[GodotBridge] Seeded ${buffer.size} ObjectAnimation entries from login buffer`);
   }
 
+  /** Seed from MetaverseConnection's AvatarAnimation buffer (survives bridge restarts) */
+  seedAvatarAnimationBuffer(buffer: Map<string, { animId: string; sequenceId: number }[]>): void {
+    for (const [avatarId, anims] of buffer) {
+      this.avatarAnimState.set(avatarId, anims);
+    }
+    console.log(`[GodotBridge] Seeded ${buffer.size} AvatarAnimation entries from login buffer`);
+  }
+
   setConnected(connected: boolean): void {
     this.connected = connected;
     if (connected) {

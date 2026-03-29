@@ -10,11 +10,9 @@ interface WindowBounds {
   isMaximized?: boolean;
 }
 
-interface WindowStateFile {
-  main?: WindowBounds;
-  map?: WindowBounds;
-  godot?: WindowBounds;
-}
+export type WindowKey = 'main' | 'map' | 'map3d' | 'godot';
+
+type WindowStateFile = Partial<Record<WindowKey, WindowBounds>>;
 
 const SAVE_DEBOUNCE_MS = 500;
 
@@ -66,7 +64,7 @@ function isVisibleOnAnyDisplay(bounds: WindowBounds): boolean {
  * Get saved bounds for a window key, validated against current displays.
  * Returns undefined if no saved state or saved position is offscreen.
  */
-export function getSavedBounds(key: 'main' | 'map' | 'godot'): WindowBounds | undefined {
+export function getSavedBounds(key: WindowKey): WindowBounds | undefined {
   const state = loadState();
   const bounds = state[key];
   if (!bounds) return undefined;
@@ -85,13 +83,13 @@ export function getSavedBounds(key: 'main' | 'map' | 'godot'): WindowBounds | un
 /**
  * Save bounds for a non-BrowserWindow (e.g. Godot sidecar).
  */
-export function saveExternalBounds(key: 'godot', bounds: WindowBounds): void {
+export function saveExternalBounds(key: WindowKey, bounds: WindowBounds): void {
   const state = loadState();
   state[key] = bounds;
   saveState(state);
 }
 
-export function trackWindow(win: BrowserWindow, key: 'main' | 'map'): void {
+export function trackWindow(win: BrowserWindow, key: WindowKey): void {
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   const scheduleSave = () => {

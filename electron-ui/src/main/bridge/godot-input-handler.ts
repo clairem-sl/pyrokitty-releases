@@ -7,6 +7,10 @@ import { ControlFlags, PacketFlags } from '../../../node-metaverse/dist/lib';
 import { ObjectSelectMessage } from '../../../node-metaverse/dist/lib/classes/messages/ObjectSelect';
 import { ObjectDeselectMessage } from '../../../node-metaverse/dist/lib/classes/messages/ObjectDeselect';
 import { SetAlwaysRunMessage } from '../../../node-metaverse/dist/lib/classes/messages/SetAlwaysRun';
+import { RequestPayPriceMessage } from '../../../node-metaverse/dist/lib/classes/messages/RequestPayPrice';
+import type { PayPriceReplyMessage } from '../../../node-metaverse/dist/lib/classes/messages/PayPriceReply';
+import { Message } from '../../../node-metaverse/dist/lib/enums/Message';
+import { FilterResponse } from '../../../node-metaverse/dist/lib/enums/FilterResponse';
 import type { SendFn } from './godot-bridge-types';
 
 const CLICK_ACTION_SIT = 1;
@@ -283,6 +287,94 @@ export class GodotInputHandler {
       position: this._sitPosition,
       rotation: this._sitRotation,
     };
+  }
+
+  async handleObjectPay(msg: any): Promise<void> {
+    try {
+      const region = this.bot.currentRegion;
+      if (!region) return;
+      const objectUuid: string = msg.uuid;
+      const { UUID } = await import('../../../node-metaverse/dist/lib/classes/UUID');
+      const obj = region.objects?.getObjectByUUID(new UUID(objectUuid));
+      if (!obj) {
+        console.warn(`[GodotBridge] object_pay: object ${objectUuid} not found`);
+        return;
+      }
+      // Request pay price options from the server
+      const reqMsg = new RequestPayPriceMessage();
+      reqMsg.ObjectData = { ObjectID: new UUID(objectUuid) };
+      region.circuit.sendMessage(reqMsg, PacketFlags.Reliable);
+      const reply = await region.circuit.waitForMessage<PayPriceReplyMessage>(
+        Message.PayPriceReply, 10000,
+        (m: PayPriceReplyMessage): FilterResponse => {
+          if (m.ObjectData.ObjectID.toString() === objectUuid) return FilterResponse.Finish;
+          return FilterResponse.NoMatch;
+        },
+      );
+      const defaultPrice = reply.ObjectData.DefaultPayPrice;
+      const buttons = reply.ButtonData.map(b => b.PayButton);
+      console.log(`[GodotBridge] PayPrice for ${objectUuid.slice(0, 8)}: default=${defaultPrice} buttons=[${buttons.join(',')}]`);
+      // Send pay options to Godot for UI display
+      this.send({
+        type: 'pay_options',
+        uuid: objectUuid,
+        defaultPrice,
+        buttons,
+      });
+    } catch (e) {
+      console.error(`[GodotBridge] object_pay failed for ${msg.uuid}:`, e);
+    }
+  }
+
+  async handlePayConfirm(msg: any): Promise<void> {
+    try {
+      const region = this.bot.currentRegion;
+      if (!region) return;
+      const objectUuid: string = msg.uuid;
+      const amount: number = msg.amount;
+      if (!amount || amount <= 0) {
+        console.warn(`[GodotBridge] pay_confirm: invalid amount ${amount}`);
+        return;
+      }
+      const { UUID } = await import('../../../node-metaverse/dist/lib/classes/UUID');
+      const obj = region.objects?.getObjectByUUID(new UUID(objectUuid));
+      if (!obj) {
+        console.warn(`[GodotBridge] pay_confirm: object ${objectUuid} not found`);
+        return;
+      }
+      await this.bot.clientCommands.grid.payObject(obj, amount);
+      console.log(`[GodotBridge] Paid L$${amount} to object ${objectUuid.slice(0, 8)}`);
+      this.send({ type: 'pay_result', uuid: objectUuid, success: true, amount });
+    } catch (e) {
+      console.error(`[GodotBridge] pay_confirm failed for ${msg.uuid}:`, e);
+      this.send({ type: 'pay_result', uuid: msg.uuid, success: false, amount: msg.amount });
+    }
+  }
+
+  async handleObjectSit(msg: any): Promise<void> {
+    try {
+      const region = this.bot.currentRegion;
+      if (!region) return;
+      const objectUuid: string = msg.uuid;
+      const { UUID } = await import('../../../node-metaverse/dist/lib/classes/UUID');
+      const { Vector3 } = await import('../../../node-metaverse/dist/lib/classes/Vector3');
+      const obj = region.objects?.getObjectByUUID(new UUID(objectUuid));
+      if (!obj) {
+        console.warn(`[GodotBridge] object_sit: object ${objectUuid} not found`);
+        return;
+      }
+      const localId = obj.ID;
+      if (this._sittingOnLocalId === localId) {
+        console.log(`[GodotBridge] Already sitting on ${objectUuid.slice(0, 8)}, ignoring`);
+        return;
+      }
+      const targetUuid = new UUID(obj.FullID.toString());
+      await this.bot.clientCommands.movement.sitOnObject(targetUuid, Vector3.getZero());
+      this._sittingOnLocalId = localId;
+      console.log(`[GodotBridge] Sat on object ${objectUuid.slice(0, 8)} (action bar)`);
+    } catch (e) {
+      console.error(`[GodotBridge] object_sit failed for ${msg.uuid}:`, e);
+    }
   }
 
   async handleObjectTouch(msg: any): Promise<void> {

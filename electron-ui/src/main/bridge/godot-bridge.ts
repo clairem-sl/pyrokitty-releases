@@ -135,7 +135,7 @@ export class GodotBridge extends EventEmitter {
   private killSweepTimer: ReturnType<typeof setInterval> | null = null;
   private electronStatsCounter = 0;
 
-  constructor(bot: Bot, sceneManager: SceneManager, options: { vrMode?: boolean; objectAnimationBuffer?: Map<string, { animId: string; sequenceId: number }[]>; avatarAppearanceBuffer?: Map<string, string[]>; visualParamBuffer?: Map<string, number[]> } = {}) {
+  constructor(bot: Bot, sceneManager: SceneManager, options: { vrMode?: boolean; objectAnimationBuffer?: Map<string, { animId: string; sequenceId: number }[]>; avatarAnimationBuffer?: Map<string, { animId: string; sequenceId: number }[]>; avatarAppearanceBuffer?: Map<string, string[]>; visualParamBuffer?: Map<string, number[]> } = {}) {
     super();
     this.bot = bot;
     this.sceneManager = sceneManager;
@@ -150,8 +150,12 @@ export class GodotBridge extends EventEmitter {
     this.faceUpdateBatcher = new GodotFaceUpdateBatcher(send);
     this.materialResolver = new MaterialResolver(bot, this.trackedObjects,
       (objectUuid, faceIndex, material) => {
-        // Convert ResolvedMaterial → Godot face format and queue via batcher
         const godotFace = resolvedToGodotFace(faceIndex, material);
+        // If object_complete hasn't shipped yet, patch it directly — no race
+        if (this.readinessTracker?.updatePendingFaces(objectUuid, godotFace)) {
+          return;
+        }
+        // Already sent — deliver via face update batcher
         this.faceUpdateBatcher.queueFaceUpdate(objectUuid, [godotFace]);
       },
     );
@@ -170,6 +174,11 @@ export class GodotBridge extends EventEmitter {
     // Seed from MetaverseConnection's early ObjectAnimation buffer
     if (options.objectAnimationBuffer) {
       this.animationManager.seedObjectAnimationBuffer(options.objectAnimationBuffer);
+    }
+
+    // Seed from MetaverseConnection's AvatarAnimation buffer (survives bridge restarts)
+    if (options.avatarAnimationBuffer) {
+      this.animationManager.seedAvatarAnimationBuffer(options.avatarAnimationBuffer);
     }
 
     // Seed from MetaverseConnection's early AvatarAppearance buffer
@@ -477,6 +486,24 @@ export class GodotBridge extends EventEmitter {
         break;
       case 'object_touch':
         this.inputHandler.handleObjectTouch(msg);
+        break;
+      case 'object_sit':
+        this.inputHandler.handleObjectSit(msg);
+        break;
+      case 'object_pay':
+        this.inputHandler.handleObjectPay(msg);
+        break;
+      case 'pay_confirm':
+        this.inputHandler.handlePayConfirm(msg);
+        break;
+      case 'object_buy':
+        console.log(`[GodotBridge] Buy requested for ${msg.uuid?.slice(0, 8)} (not yet implemented)`);
+        break;
+      case 'object_edit':
+        console.log(`[GodotBridge] Edit requested for ${msg.uuid?.slice(0, 8)} (not yet implemented)`);
+        break;
+      case 'object_inspect':
+        console.log(`[GodotBridge] Inspect requested for ${msg.uuid?.slice(0, 8)} (not yet implemented)`);
         break;
       case 'stand_up':
         this.inputHandler.handleStandUp();

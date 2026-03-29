@@ -96,6 +96,28 @@ export class ObjectReadinessTracker {
   /** No-op — textures no longer gate object completion. Kept for API compat. */
   addTextures(_uuid: string, _textureIds: Set<string>): void {}
 
+  /**
+   * Patch a pending object_complete's face data before it ships.
+   * Called when async material resolution (PBR or legacy) completes while
+   * the object is still waiting for its mesh. Returns true if patched.
+   */
+  updatePendingFaces(uuid: string, faceData: any): boolean {
+    const entry = this.pending.get(uuid);
+    if (!entry) return false;
+
+    if (!entry.completeMsg.faces) {
+      entry.completeMsg.faces = [faceData];
+    } else {
+      const idx = entry.completeMsg.faces.findIndex((f: any) => f.index === faceData.index);
+      if (idx >= 0) {
+        entry.completeMsg.faces[idx] = faceData;
+      } else {
+        entry.completeMsg.faces.push(faceData);
+      }
+    }
+    return true;
+  }
+
   /** Remove object from tracking (killed before completion). */
   remove(uuid: string): void {
     const entry = this.pending.get(uuid);

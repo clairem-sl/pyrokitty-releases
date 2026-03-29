@@ -274,6 +274,7 @@ export class ViewerManager extends EventEmitter {
     const bridge = new GodotBridge(bot, sceneManager, {
       vrMode,
       objectAnimationBuffer: metaverse.getObjectAnimationBuffer(),
+      avatarAnimationBuffer: metaverse.getAvatarAnimationBuffer(),
       avatarAppearanceBuffer: metaverse.getAvatarAppearanceBuffer(),
       visualParamBuffer: metaverse.getVisualParamBuffer(),
     });

@@ -138,13 +138,17 @@ func process(delta: float, camera: Camera3D) -> void:
 
 		var head_world: Vector3 = avatar_node.global_transform * (head_local + Vector3(0, BUBBLE_OFFSET_Y, 0))
 
+		var distance: float = camera.global_position.distance_to(head_world)
+		if distance > sm._vis_far:
+			panel.visible = false
+			continue
+
 		# Behind camera check
 		if camera.is_position_behind(head_world):
 			panel.visible = false
 			continue
 
 		var screen_pos: Vector2 = camera.unproject_position(head_world)
-		var distance: float = camera.global_position.distance_to(head_world)
 
 		# Non-linear scale: stays larger at moderate distances
 		var s: float = clampf(sqrt(REF_DISTANCE / maxf(distance, 0.5)), 0.3, 1.5)

@@ -60,9 +60,14 @@ export class GodotEnvironmentManager {
       }
     }
 
+    const terrainDir = path.join(getCacheDirBase(), 'terrain');
     const safeName = cacheId.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const cachePath = path.join(getCacheDirBase(), 'terrain', `${safeName}.bin`);
+    const cachePath = path.join(terrainDir, `${safeName}.bin`);
     fs.writeFileSync(cachePath, buf);
+
+    // Also write grid-indexed copy for 3D map lookup
+    const gridPath = path.join(terrainDir, `grid-${gridX}-${gridY}.bin`);
+    fs.writeFileSync(gridPath, buf);
     const fwdPath = cachePath.replace(/\\/g, '/');
 
     console.log(`[GodotBridge] Terrain cached for region ${gridX},${gridY} (waterHeight=${waterHeight})`);

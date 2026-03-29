@@ -158,6 +158,7 @@ func _ready() -> void:
 			var xr_cam := xr_rig.get_node_or_null("XRCamera3D") as Camera3D
 			if xr_cam:
 				xr_cam.far = FrameBudget.VR_CAMERA_FAR
+				xr_cam.current = true  # Ensure get_viewport().get_camera_3d() returns the XR camera
 				_active_camera = xr_cam
 			# Tighten the finalization budget to fit the 90Hz frame window
 			if scene_manager and scene_manager.has_method("set_vr_mode"):
@@ -436,7 +437,7 @@ func _update_stats_bar() -> void:
 ## High-priority messages are dispatched immediately, bypassing the time-budgeted queue.
 func _is_high_priority(text: String) -> bool:
 	var prefix := text.left(40)
-	return '"avatar_' in prefix or '"self_id"' in prefix or '"object_update_p' in prefix or '"sitting_state"' in prefix or '"electron_stats"' in prefix
+	return '"avatar_' in prefix or '"self_id"' in prefix or '"object_update_p' in prefix or '"sitting_state"' in prefix or '"electron_stats"' in prefix or '"pay_' in prefix
 
 
 func _handle_message(text: String) -> void:
@@ -515,6 +516,10 @@ func _handle_message(text: String) -> void:
 			scene_manager.handle_settings(msg)
 		"electron_stats":
 			_electron_stats = msg
+		"pay_options", "pay_result":
+			var camera_ctrl := get_node_or_null("Camera3D")
+			if camera_ctrl and camera_ctrl.has_method("handle_pay_message"):
+				camera_ctrl.handle_pay_message(msg)
 		_:
 			push_warning("[Main] Unknown message type: %s" % msg_type)
 

@@ -247,6 +247,7 @@ export const IPC_CHANNELS = {
 
   // World map
   MAP_OPEN: 'map:open',
+  MAP_3D_OPEN: 'map3d:open',
   MAP_POSITION_UPDATE: 'map:position-update',
   MAP_GET_POSITIONS: 'map:get-positions',
   MAP_SELECTED_ACCOUNT: 'map:selected-account',

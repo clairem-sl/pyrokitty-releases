@@ -23,6 +23,7 @@ import type { AttachedSoundMessage } from '../../../node-metaverse/dist/lib/clas
 import type { AttachedSoundGainChangeMessage } from '../../../node-metaverse/dist/lib/classes/messages/AttachedSoundGainChange';
 import type { PreloadSoundMessage } from '../../../node-metaverse/dist/lib/classes/messages/PreloadSound';
 import type { ObjectAnimationMessage } from '../../../node-metaverse/dist/lib/classes/messages/ObjectAnimation';
+import type { AvatarAnimationMessage } from '../../../node-metaverse/dist/lib/classes/messages/AvatarAnimation';
 import { SoundFetchQueue } from '../assets/sound-fetch-queue';
 import * as SoundPlayer from '../assets/sound-player';
 import {
@@ -131,6 +132,12 @@ export class MetaverseConnection extends EventEmitter {
   private objectAnimationBuffer = new Map<string, { animId: string; sequenceId: number }[]>(); // senderUUID → anim list
   private objectAnimationSub: { unsubscribe: () => void } | null = null;
 
+  // Buffer AvatarAnimation messages so GodotBridge restarts (e.g. VR switch) can replay them.
+  // SL only sends AvatarAnimation when the anim list changes, so a stationary avatar won't
+  // re-send during the brief window between bridge restarts.
+  private avatarAnimationBuffer = new Map<string, { animId: string; sequenceId: number }[]>(); // avatarUUID → anim list
+  private avatarAnimationSub: { unsubscribe: () => void } | null = null;
+
   // Buffer AvatarAppearance bake textures from login time (arrive before GodotBridge subscribes)
   private avatarAppearanceBuffer = new Map<string, string[]>(); // avatarUUID → 11 bake texture UUIDs
   private avatarVisualParamBuffer = new Map<string, number[]>(); // avatarUUID → VisualParam bytes
@@ -230,8 +237,9 @@ export class MetaverseConnection extends EventEmitter {
       // Subscribe to world sound messages (circuit is available after connectToSim)
       this.setupSoundSubscriptions();
 
-      // Buffer ObjectAnimation + AvatarAppearance messages from login time for later GodotBridge replay
+      // Buffer ObjectAnimation + AvatarAnimation + AvatarAppearance messages from login time for later GodotBridge replay
       this.setupObjectAnimationBuffer();
+      this.setupAvatarAnimationBuffer();
       this.setupAvatarAppearanceBuffer();
 
       // Resolve display names for all friends in background
@@ -302,10 +310,13 @@ export class MetaverseConnection extends EventEmitter {
     for (const triggerId of this.triggerSounds.keys()) SoundPlayer.stopAttached(triggerId);
     this.attachedSoundGains.clear();
     this.triggerSounds.clear();
-    // Clean up ObjectAnimation + AvatarAppearance buffers
+    // Clean up ObjectAnimation + AvatarAnimation + AvatarAppearance buffers
     this.objectAnimationSub?.unsubscribe();
     this.objectAnimationSub = null;
     this.objectAnimationBuffer.clear();
+    this.avatarAnimationSub?.unsubscribe();
+    this.avatarAnimationSub = null;
+    this.avatarAnimationBuffer.clear();
     this.avatarAppearanceSub?.unsubscribe();
     this.avatarAppearanceSub = null;
     this.avatarAppearanceBuffer.clear();
@@ -548,6 +559,9 @@ export class MetaverseConnection extends EventEmitter {
       this.objectAnimationSub?.unsubscribe();
       this.objectAnimationSub = null;
       this.objectAnimationBuffer.clear();
+      this.avatarAnimationSub?.unsubscribe();
+      this.avatarAnimationSub = null;
+      this.avatarAnimationBuffer.clear();
       this.avatarAppearanceSub?.unsubscribe();
       this.avatarAppearanceSub = null;
       this.avatarAppearanceBuffer.clear();
@@ -720,6 +734,39 @@ export class MetaverseConnection extends EventEmitter {
   /** Returns the buffered ObjectAnimation state for all animesh objects seen since login. */
   getObjectAnimationBuffer(): Map<string, { animId: string; sequenceId: number }[]> {
     return this.objectAnimationBuffer;
+  }
+
+  /**
+   * Subscribe to AvatarAnimation circuit messages and buffer them.
+   * SL only sends AvatarAnimation when the animation list changes, so a
+   * stationary avatar won't re-send during a GodotBridge restart (e.g. VR switch).
+   * Buffering here ensures the new bridge can seed the animation state.
+   */
+  private setupAvatarAnimationBuffer(): void {
+    try {
+      const circuit = this.bot?.currentRegion?.circuit;
+      if (!circuit) return;
+
+      this.avatarAnimationSub = circuit.subscribeToMessages([
+        Message.AvatarAnimation,
+      ], (packet: any) => {
+        const msg = packet.message as AvatarAnimationMessage;
+        const avatarId = msg.Sender.ID.toString();
+        const animations = msg.AnimationList.map((a: any) => ({
+          animId: a.AnimID.toString(),
+          sequenceId: a.AnimSequenceID,
+        }));
+        this.avatarAnimationBuffer.set(avatarId, animations);
+      });
+      console.log('[MetaverseConnection] Subscribed to AvatarAnimation (buffering for GodotBridge)');
+    } catch {
+      console.warn('[MetaverseConnection] Could not subscribe to AvatarAnimation (circuit not ready)');
+    }
+  }
+
+  /** Returns the buffered AvatarAnimation state for all avatars seen since login. */
+  getAvatarAnimationBuffer(): Map<string, { animId: string; sequenceId: number }[]> {
+    return this.avatarAnimationBuffer;
   }
 
   /**

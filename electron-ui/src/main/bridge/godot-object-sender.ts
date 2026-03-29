@@ -268,6 +268,11 @@ export class GodotObjectSender {
 
     const isAnimesh = !!(obj.extraParams?.extendedMeshData?.flags & 0x1);
 
+    // Interaction metadata for action bar context filtering
+    const clickAction: number = obj.ClickAction ?? 0;
+    const ownerID: string = obj.OwnerID?.toString() ?? '';
+    const primFlags: number = obj.Flags ?? 0;
+
     // Log avatar attachments
     const isSelfAttach = parentUuid !== '' && parentUuid === this.selfAvatarUuid;
 
@@ -298,6 +303,9 @@ export class GodotObjectSender {
       ...(sculptInfo ? { sculpt: true } : {}),
       ...(flexiInfo ? { flexible: flexiInfo } : {}),
       ...(obj.attachmentPoint > 0 ? { attachmentPoint: obj.attachmentPoint } : {}),
+      ...(clickAction !== 0 ? { clickAction } : {}),
+      ...(ownerID !== '' ? { ownerID } : {}),
+      ...(primFlags !== 0 ? { primFlags } : {}),
     });
 
     // Phase 2: build and track object_complete

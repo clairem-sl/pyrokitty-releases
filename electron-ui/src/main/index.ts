@@ -8,6 +8,7 @@ import { viewerManager } from './network/viewer-manager';
 import { chatLogManager } from './ui/chat-log-manager';
 import { IPC_CHANNELS } from '../shared/types';
 import { setMapWindow, getMapWindow } from './ui/map-window';
+import { set3DMapWindow, get3DMapWindow } from './ui/map3d-window';
 import { voiceRegistry } from './voice/voice-registry';
 import { InventoryFolder } from '../../node-metaverse/dist/lib/classes/InventoryFolder';
 import { initGpuCompressWindow, destroyGpuCompressWindow } from './assets/gpu-compress-window';
@@ -120,6 +121,45 @@ function createMapWindow(): void {
   setMapWindow(win);
 }
 
+function create3DMapWindow(): void {
+  const existing = get3DMapWindow();
+  if (existing) {
+    existing.focus();
+    return;
+  }
+
+  const saved = getSavedBounds('map3d');
+  const win = new BrowserWindow({
+    width: saved?.width ?? 1100,
+    height: saved?.height ?? 800,
+    ...(saved?.x != null && saved?.y != null ? { x: saved.x, y: saved.y } : {}),
+    minWidth: 600,
+    minHeight: 400,
+    title: `3D World Map — PyroKitty ${app.getVersion()}`,
+    icon: getIconPath('map-icon.ico'),
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+    backgroundColor: '#060612',
+  });
+  trackWindow(win, 'map3d');
+  const mapTitle = `3D World Map — PyroKitty ${app.getVersion()}`;
+  win.webContents.on('page-title-updated', (e) => {
+    e.preventDefault();
+    win.setTitle(mapTitle);
+  });
+
+  const htmlPath = path.join(__dirname, '../3d-map/index.html');
+  win.loadFile(htmlPath);
+
+  win.on('closed', () => {
+    set3DMapWindow(null);
+  });
+
+  set3DMapWindow(win);
+}
+
 async function performCleanup(): Promise<void> {
   if (cleanupDone) return;
   cleanupDone = true;
@@ -171,6 +211,10 @@ async function createWindow(): Promise<void> {
   // Map window IPC
   ipcMain.handle(IPC_CHANNELS.MAP_OPEN, async () => {
     createMapWindow();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAP_3D_OPEN, async () => {
+    create3DMapWindow();
   });
 
   // Forward selected account from main renderer to map window + voice routing
@@ -330,6 +374,13 @@ async function createWindow(): Promise<void> {
         icon: nativeImage.createFromPath(getIconPath('map-icon_16.png')),
         click: () => {
           createMapWindow();
+        },
+      },
+      {
+        label: '3D World Map',
+        icon: nativeImage.createFromPath(getIconPath('map-icon_16.png')),
+        click: () => {
+          create3DMapWindow();
         },
       },
       { type: 'separator' },

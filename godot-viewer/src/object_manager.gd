@@ -132,6 +132,9 @@ func handle_object_create(msg: Dictionary) -> void:
 		"uuid": obj_uuid,
 		"name": "",
 		"description": "",
+		"clickAction": int(msg.get("clickAction", 0)),
+		"ownerID": str(msg.get("ownerID", "")),
+		"primFlags": int(msg.get("primFlags", 0)),
 	}
 
 	# Store flexi params if this is a flexible prim (ponytails, ribbons, flags, etc.)
