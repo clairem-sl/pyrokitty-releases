@@ -33,6 +33,7 @@ class RSInstance extends RefCounted:
 	var scl_divisor: Vector3 = Vector3.ONE  # Rigged mesh AABB size correction
 	var scl_center: Vector3 = Vector3.ZERO  # Rigged mesh AABB center offset
 	var mesh: Mesh = null
+	var on_transform_pushed: Callable
 
 	func _init(scenario: RID, vis_far: float = 128.0, vis_fade: float = 32.0) -> void:
 		rid = RenderingServer.instance_create()
@@ -52,7 +53,10 @@ class RSInstance extends RefCounted:
 		# Center mesh on prim position: subtract scaled AABB center so the mesh
 		# midpoint aligns with the prim origin (SL convention for unrigged meshes)
 		var adjusted_pos: Vector3 = pos - Basis(rot) * (effective_scl * scl_center)
-		RenderingServer.instance_set_transform(rid, Transform3D(Basis(rot) * Basis.from_scale(effective_scl), adjusted_pos))
+		var xform := Transform3D(Basis(rot) * Basis.from_scale(effective_scl), adjusted_pos)
+		RenderingServer.instance_set_transform(rid, xform)
+		if on_transform_pushed.is_valid():
+			on_transform_pushed.call(xform)
 
 	func set_material_override(mat: Material) -> void:
 		if mat == null:
@@ -386,6 +390,9 @@ func _update_loading_fade(delta: float) -> void:
 # Region change — clear entire scene for cross-region teleport
 func handle_region_change() -> void:
 	print("[SceneManager] Region change — clearing all objects, avatars, and lights")
+
+	# Destroy all pick bodies before clearing objects
+	object_picker.destroy_all_pick_bodies()
 
 	# Destroy all object RSInstances
 	for uuid: String in objects:

@@ -720,8 +720,10 @@ func handle_object_complete(msg: Dictionary) -> void:
 					rsi.scl_divisor = aabb.size
 					rsi.scl_center = aabb.get_center()
 				rsi.push_transform()
+				sm.object_picker._create_pick_body(obj_uuid, cached_mesh, mesh_id, rsi)
 			else:
 				rsi.set_mesh(sm.mesh_cache[mesh_id])
+				sm.object_picker._create_pick_body(obj_uuid, sm.mesh_cache[mesh_id], mesh_id, rsi)
 
 			sm.object_mesh_id[obj_uuid] = mesh_id
 
@@ -743,6 +745,7 @@ func handle_object_complete(msg: Dictionary) -> void:
 		# Flexi prims need higher tessellation for bone deformation (14 path points, matching Firestorm)
 		var prim_mesh: ArrayMesh = sm.prim_generator.generate_flexi(shape) if is_flexi else sm.prim_generator.get_or_generate(shape)
 		rsi.set_mesh(prim_mesh)
+		sm.object_picker._create_pick_body(obj_uuid, prim_mesh, "", rsi)
 		if is_flexi:
 			var flexi_root: Node3D = sm.flexi_mgr.create_flexi(
 				obj_uuid, sm.flexi_params[obj_uuid], prim_mesh,
@@ -827,6 +830,9 @@ func _cleanup_object(obj_uuid: String) -> void:
 		if sm.object_children.has(pid):
 			sm.object_children[pid].erase(obj_uuid)
 		sm.object_parent.erase(obj_uuid)
+
+	# Free pick body before destroying RSInstance
+	sm.object_picker._destroy_pick_body(obj_uuid)
 
 	# Free the RenderingServer instance
 	if sm.objects.has(obj_uuid):

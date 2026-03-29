@@ -1,224 +1,248 @@
 extends RefCounted
 
-## Raycasting, object picking, debug inspection, and object properties.
+## Physics-based object picker using ConcavePolygonShape3D and intersect_ray().
+## Replaces GDScript per-triangle Moller-Trumbore with C++ BVH-backed raycasting.
 
 var sm  # scene_manager reference
+
+const PICK_LAYER: int = 1 << 20  # Collision layer bit 20 (isolated from game physics)
+const MAX_PICK_DIST: float = 200.0
+
+# Physics body tracking
+var _body_to_uuid: Dictionary = {}     # body RID get_id() (int) -> UUID (String)
+var _uuid_to_body: Dictionary = {}     # UUID (String) -> body RID
+var _mesh_shape_cache: Dictionary = {} # cache_key (String) -> ConcavePolygonShape3D
+var _mesh_tri_map: Dictionary = {}     # cache_key (String) -> Array of [surface_idx, tri_in_surface]
+var _uuid_to_cache_key: Dictionary = {} # UUID (String) -> cache_key (String)
 
 
 func _init(scene_manager) -> void:
 	sm = scene_manager
 
 
-## Raycast against objects. AABB broad phase on all objects, then per-triangle
-## narrow phase on candidates for precise picking.
-func pick_object(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
-	# Broad phase: AABB test (skip objects far from camera)
-	var max_pick_dist := 200.0
-	var candidates: Array = []  # Array of { uuid, xform, inv, local_from, local_dir }
-	for obj_uuid: String in sm.objects:
-		var rsi = sm.objects[obj_uuid]
-		if rsi.mesh == null:
-			continue
-		if ray_origin.distance_to(rsi.pos) > max_pick_dist:
-			continue
-		var xform := Transform3D(Basis(rsi.rot) * Basis.from_scale(rsi.scl), rsi.pos)
-		var inv := xform.affine_inverse()
-		var local_from := inv * ray_origin
-		var local_dir := (inv.basis * ray_dir).normalized()
-		if rsi.mesh.get_aabb().intersects_ray(local_from, local_dir) != null:
-			candidates.append({ "uuid": obj_uuid, "mesh": rsi.mesh, "xform": xform, "local_from": local_from, "local_dir": local_dir })
+## Create a static physics body with trimesh shape for an object.
+func _create_pick_body(obj_uuid: String, mesh: Mesh, mesh_id: String, rsi) -> void:
+	if _uuid_to_body.has(obj_uuid):
+		_destroy_pick_body(obj_uuid)
 
-	if candidates.size() == 0:
-		return {}
+	if mesh == null:
+		return
 
-	# Narrow phase: per-triangle intersection on AABB candidates
-	var best_uuid: String = ""
-	var best_dist: float = INF
-	for c: Dictionary in candidates:
-		var dist := _ray_mesh_intersect(c["mesh"], c["local_from"], c["local_dir"], c["xform"])
-		if dist >= 0.0 and dist < best_dist:
-			best_dist = dist
-			best_uuid = c["uuid"]
+	var cache_key: String = mesh_id if not mesh_id.is_empty() else str(mesh.get_rid().get_id())
 
-	# Fallback: if triangle test missed all (degenerate mesh), use nearest AABB hit
-	if best_uuid.is_empty():
-		for c: Dictionary in candidates:
-			var hit = (c["mesh"] as Mesh).get_aabb().intersects_ray(c["local_from"], c["local_dir"])
-			if hit != null:
-				var world_hit: Vector3 = (c["xform"] as Transform3D) * hit
-				var dist: float = ray_origin.distance_to(world_hit)
-				if dist < best_dist:
-					best_dist = dist
-					best_uuid = c["uuid"]
+	# Get or create trimesh shape
+	var shape: ConcavePolygonShape3D
+	if _mesh_shape_cache.has(cache_key):
+		shape = _mesh_shape_cache[cache_key]
+	else:
+		shape = mesh.create_trimesh_shape()
+		if shape == null:
+			return
+		_mesh_shape_cache[cache_key] = shape
+		_mesh_tri_map[cache_key] = _build_tri_map(mesh)
 
-	if best_uuid.is_empty():
-		return {}
-	return { "uuid": best_uuid, "distance": best_dist }
+	_uuid_to_cache_key[obj_uuid] = cache_key
+
+	# Create static body
+	var body: RID = PhysicsServer3D.body_create()
+	PhysicsServer3D.body_set_mode(body, PhysicsServer3D.BODY_MODE_STATIC)
+	PhysicsServer3D.body_add_shape(body, shape.get_rid())
+	PhysicsServer3D.body_set_collision_layer(body, PICK_LAYER)
+	PhysicsServer3D.body_set_collision_mask(body, 0)
+
+	# Set initial transform to match RSInstance
+	var effective_scl: Vector3 = rsi.scl / rsi.scl_divisor
+	var adjusted_pos: Vector3 = rsi.pos - Basis(rsi.rot) * (effective_scl * rsi.scl_center)
+	var xform := Transform3D(Basis(rsi.rot) * Basis.from_scale(effective_scl), adjusted_pos)
+	PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_TRANSFORM, xform)
+
+	# Add to physics space
+	PhysicsServer3D.body_set_space(body, sm.get_world_3d().space)
+
+	# Track
+	_body_to_uuid[body.get_id()] = obj_uuid
+	_uuid_to_body[obj_uuid] = body
+
+	# Wire RSInstance callback for automatic transform sync
+	rsi.on_transform_pushed = func(xf: Transform3D) -> void:
+		PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_TRANSFORM, xf)
 
 
-## Test ray against mesh triangles. Returns world-space distance or -1.0 on miss.
-func _ray_mesh_intersect(mesh: Mesh, local_from: Vector3, local_dir: Vector3, xform: Transform3D) -> float:
-	var best_t: float = -1.0
+## Destroy the physics body for an object.
+func _destroy_pick_body(obj_uuid: String) -> void:
+	if not _uuid_to_body.has(obj_uuid):
+		return
+	var body: RID = _uuid_to_body[obj_uuid]
+
+	# Clear the RSInstance callback before freeing body
+	var rsi = sm.objects.get(obj_uuid)
+	if rsi != null:
+		rsi.on_transform_pushed = Callable()
+
+	_body_to_uuid.erase(body.get_id())
+	_uuid_to_body.erase(obj_uuid)
+	_uuid_to_cache_key.erase(obj_uuid)
+	PhysicsServer3D.free_rid(body)
+
+
+## Bulk destroy all physics bodies (region change).
+func destroy_all_pick_bodies() -> void:
+	for obj_uuid: String in _uuid_to_body.keys():
+		PhysicsServer3D.free_rid(_uuid_to_body[obj_uuid])
+	_body_to_uuid.clear()
+	_uuid_to_body.clear()
+	_uuid_to_cache_key.clear()
+	_mesh_shape_cache.clear()
+	_mesh_tri_map.clear()
+
+
+## Build mapping from flat triangle index to [surface_idx, tri_within_surface].
+## Matches Mesh.get_faces() ordering used by create_trimesh_shape().
+func _build_tri_map(mesh: Mesh) -> Array:
+	var tri_map: Array = []
 	for si: int in range(mesh.get_surface_count()):
+		if mesh.surface_get_primitive_type(si) != Mesh.PRIMITIVE_TRIANGLES:
+			continue
 		var arrays: Array = mesh.surface_get_arrays(si)
 		if arrays.size() == 0:
 			continue
 		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 		var indices = arrays[Mesh.ARRAY_INDEX]
+		var tri_count: int = 0
 		if indices != null and indices.size() >= 3:
-			var idx_count: int = indices.size()
-			var i := 0
-			while i < idx_count - 2:
-				var t := _ray_tri(local_from, local_dir,
-					verts[indices[i]], verts[indices[i + 1]], verts[indices[i + 2]])
-				if t >= 0.0:
-					var world_hit: Vector3 = xform * (local_from + local_dir * t)
-					var dist: float = (xform * local_from).distance_to(world_hit)
-					if best_t < 0.0 or dist < best_t:
-						best_t = dist
-				i += 3
+			tri_count = indices.size() / 3
 		elif verts.size() >= 3:
-			var i := 0
-			while i < verts.size() - 2:
-				var t := _ray_tri(local_from, local_dir,
-					verts[i], verts[i + 1], verts[i + 2])
-				if t >= 0.0:
-					var world_hit: Vector3 = xform * (local_from + local_dir * t)
-					var dist: float = (xform * local_from).distance_to(world_hit)
-					if best_t < 0.0 or dist < best_t:
-						best_t = dist
-				i += 3
-	return best_t
+			tri_count = verts.size() / 3
+		for ti: int in range(tri_count):
+			tri_map.append([si, ti])
+	return tri_map
 
 
-## Moller-Trumbore ray-triangle intersection. Returns t >= 0 on hit, -1.0 on miss.
-func _ray_tri(origin: Vector3, dir: Vector3, v0: Vector3, v1: Vector3, v2: Vector3) -> float:
-	var e1 := v1 - v0
-	var e2 := v2 - v0
-	var h := dir.cross(e2)
-	var a := e1.dot(h)
-	if absf(a) < 1e-8:
-		return -1.0
-	var f := 1.0 / a
-	var s := origin - v0
-	var u := f * s.dot(h)
-	if u < 0.0 or u > 1.0:
-		return -1.0
-	var q := s.cross(e1)
-	var v := f * dir.dot(q)
-	if v < 0.0 or u + v > 1.0:
-		return -1.0
-	var t := f * e2.dot(q)
-	if t < 1e-6:
-		return -1.0
-	return t
-
-
-## Like _ray_tri but also returns barycentric coords (u, v) for interpolation.
-## Returns { t, u, v } on hit, empty dict on miss.
-func _ray_tri_bary(origin: Vector3, dir: Vector3, v0: Vector3, v1: Vector3, v2: Vector3) -> Dictionary:
-	var e1 := v1 - v0
-	var e2 := v2 - v0
-	var h := dir.cross(e2)
-	var a := e1.dot(h)
-	if absf(a) < 1e-8:
+## Raycast against objects using physics. Returns { uuid, distance } or {}.
+func pick_object(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
+	var space_state: PhysicsDirectSpaceState3D = sm.get_world_3d().direct_space_state
+	if space_state == null:
 		return {}
-	var f := 1.0 / a
-	var s := origin - v0
-	var bary_u := f * s.dot(h)
-	if bary_u < 0.0 or bary_u > 1.0:
+	var ray_end := ray_origin + ray_dir * MAX_PICK_DIST
+	var query := PhysicsRayQueryParameters3D.create(ray_origin, ray_end, PICK_LAYER)
+	var result: Dictionary = space_state.intersect_ray(query)
+	if result.is_empty():
 		return {}
-	var q := s.cross(e1)
-	var bary_v := f * dir.dot(q)
-	if bary_v < 0.0 or bary_u + bary_v > 1.0:
+	var obj_uuid: String = _body_to_uuid.get(result["rid"].get_id(), "")
+	if obj_uuid.is_empty():
 		return {}
-	var t := f * e2.dot(q)
-	if t < 1e-6:
-		return {}
-	return { "t": t, "u": bary_u, "v": bary_v }
+	return { "uuid": obj_uuid, "distance": ray_origin.distance_to(result["position"]) }
 
 
 ## Detailed raycast returning face index, interpolated UV/normal, and hit position.
-## Returns {} on miss. Positions/normals are in object-local space.
 func pick_object_detailed(ray_origin: Vector3, ray_dir: Vector3) -> Dictionary:
-	var max_pick_dist := 200.0
-	var candidates: Array = []
-	for obj_uuid: String in sm.objects:
-		var rsi = sm.objects[obj_uuid]
-		if rsi.mesh == null:
-			continue
-		if ray_origin.distance_to(rsi.pos) > max_pick_dist:
-			continue
-		var xform := Transform3D(Basis(rsi.rot) * Basis.from_scale(rsi.scl), rsi.pos)
-		var inv := xform.affine_inverse()
-		var local_from := inv * ray_origin
-		var local_dir := (inv.basis * ray_dir).normalized()
-		if rsi.mesh.get_aabb().intersects_ray(local_from, local_dir) != null:
-			candidates.append({ "uuid": obj_uuid, "mesh": rsi.mesh, "xform": xform, "inv": inv,
-				"local_from": local_from, "local_dir": local_dir })
-
-	if candidates.size() == 0:
+	var space_state: PhysicsDirectSpaceState3D = sm.get_world_3d().direct_space_state
+	if space_state == null:
+		return {}
+	var ray_end := ray_origin + ray_dir * MAX_PICK_DIST
+	var query := PhysicsRayQueryParameters3D.create(ray_origin, ray_end, PICK_LAYER)
+	var result: Dictionary = space_state.intersect_ray(query)
+	if result.is_empty():
 		return {}
 
-	var best: Dictionary = {}
-	var best_dist: float = INF
+	var obj_uuid: String = _body_to_uuid.get(result["rid"].get_id(), "")
+	if obj_uuid.is_empty():
+		return {}
 
-	for c: Dictionary in candidates:
-		var mesh: Mesh = c["mesh"]
-		var local_from: Vector3 = c["local_from"]
-		var local_dir: Vector3 = c["local_dir"]
-		var xform: Transform3D = c["xform"]
+	var distance: float = ray_origin.distance_to(result["position"])
+	var face_index: int = result.get("face_index", -1)
+	var cache_key: String = _uuid_to_cache_key.get(obj_uuid, "")
+	var tri_map: Array = _mesh_tri_map.get(cache_key, [])
 
-		for si: int in range(mesh.get_surface_count()):
-			var arrays: Array = mesh.surface_get_arrays(si)
-			if arrays.size() == 0:
-				continue
-			var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-			var uvs = arrays[Mesh.ARRAY_TEX_UV]
-			var normals = arrays[Mesh.ARRAY_NORMAL]
-			var indices = arrays[Mesh.ARRAY_INDEX]
+	# Fallback if no tri map or face_index out of range
+	if cache_key.is_empty() or face_index < 0 or face_index >= tri_map.size():
+		return { "uuid": obj_uuid, "distance": distance, "faceIndex": 0,
+				 "st": Vector2.ZERO, "normal": result.get("normal", Vector3.UP),
+				 "hitPosLocal": Vector3.ZERO }
 
-			var tri_list: Array[Array] = []
-			if indices != null and indices.size() >= 3:
-				var i := 0
-				while i < indices.size() - 2:
-					tri_list.append([indices[i], indices[i + 1], indices[i + 2]])
-					i += 3
-			elif verts.size() >= 3:
-				var i := 0
-				while i < verts.size() - 2:
-					tri_list.append([i, i + 1, i + 2])
-					i += 3
+	var surface_idx: int = tri_map[face_index][0]
+	var tri_in_surface: int = tri_map[face_index][1]
 
-			for tri: Array in tri_list:
-				var hit := _ray_tri_bary(local_from, local_dir,
-					verts[tri[0]], verts[tri[1]], verts[tri[2]])
-				if hit.is_empty():
-					continue
-				var world_hit: Vector3 = xform * (local_from + local_dir * hit["t"])
-				var dist: float = (xform * local_from).distance_to(world_hit)
-				if dist < best_dist:
-					best_dist = dist
-					var bary_u: float = hit["u"]
-					var bary_v: float = hit["v"]
-					var bary_w: float = 1.0 - bary_u - bary_v
-					var interp_uv := Vector2.ZERO
-					if uvs != null and uvs.size() > tri[2]:
-						interp_uv = uvs[tri[0]] * bary_w + uvs[tri[1]] * bary_u + uvs[tri[2]] * bary_v
-					var interp_normal := Vector3.UP
-					if normals != null and normals.size() > tri[2]:
-						interp_normal = (normals[tri[0]] * bary_w + normals[tri[1]] * bary_u + normals[tri[2]] * bary_v).normalized()
-					var local_hit: Vector3 = local_from + local_dir * hit["t"]
-					best = {
-						"uuid": c["uuid"],
-						"distance": dist,
-						"faceIndex": si,
-						"st": interp_uv,
-						"normal": interp_normal,
-						"hitPosLocal": local_hit,
-					}
+	var rsi = sm.objects.get(obj_uuid)
+	if rsi == null or rsi.mesh == null:
+		return { "uuid": obj_uuid, "distance": distance, "faceIndex": surface_idx,
+				 "st": Vector2.ZERO, "normal": result.get("normal", Vector3.UP),
+				 "hitPosLocal": Vector3.ZERO }
 
-	return best
+	var arrays: Array = rsi.mesh.surface_get_arrays(surface_idx)
+	if arrays.size() == 0:
+		return { "uuid": obj_uuid, "distance": distance, "faceIndex": surface_idx,
+				 "st": Vector2.ZERO, "normal": result.get("normal", Vector3.UP),
+				 "hitPosLocal": Vector3.ZERO }
+
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var uvs = arrays[Mesh.ARRAY_TEX_UV]
+	var norms = arrays[Mesh.ARRAY_NORMAL]
+	var indices = arrays[Mesh.ARRAY_INDEX]
+
+	# Get triangle vertex indices
+	var i0: int; var i1: int; var i2: int
+	if indices != null and indices.size() >= (tri_in_surface + 1) * 3:
+		i0 = indices[tri_in_surface * 3]
+		i1 = indices[tri_in_surface * 3 + 1]
+		i2 = indices[tri_in_surface * 3 + 2]
+	else:
+		i0 = tri_in_surface * 3
+		i1 = tri_in_surface * 3 + 1
+		i2 = tri_in_surface * 3 + 2
+
+	if i2 >= verts.size():
+		return { "uuid": obj_uuid, "distance": distance, "faceIndex": surface_idx,
+				 "st": Vector2.ZERO, "normal": result.get("normal", Vector3.UP),
+				 "hitPosLocal": Vector3.ZERO }
+
+	# Transform world hit to local space
+	var effective_scl: Vector3 = rsi.scl / rsi.scl_divisor
+	var adjusted_pos: Vector3 = rsi.pos - Basis(rsi.rot) * (effective_scl * rsi.scl_center)
+	var xform := Transform3D(Basis(rsi.rot) * Basis.from_scale(effective_scl), adjusted_pos)
+	var local_hit: Vector3 = xform.affine_inverse() * result["position"]
+
+	# Barycentric interpolation on the winning triangle
+	var v0: Vector3 = verts[i0]
+	var v1: Vector3 = verts[i1]
+	var v2: Vector3 = verts[i2]
+	var bary := _barycentric(local_hit, v0, v1, v2)
+
+	var interp_uv := Vector2.ZERO
+	if uvs != null and uvs.size() > maxi(maxi(i0, i1), i2):
+		interp_uv = uvs[i0] * bary.x + uvs[i1] * bary.y + uvs[i2] * bary.z
+
+	var interp_normal: Vector3 = result.get("normal", Vector3.UP)
+	if norms != null and norms.size() > maxi(maxi(i0, i1), i2):
+		interp_normal = (norms[i0] * bary.x + norms[i1] * bary.y + norms[i2] * bary.z).normalized()
+
+	return {
+		"uuid": obj_uuid,
+		"distance": distance,
+		"faceIndex": surface_idx,
+		"st": interp_uv,
+		"normal": interp_normal,
+		"hitPosLocal": local_hit,
+	}
+
+
+## Barycentric coordinates of p in triangle (a, b, c). Returns Vector3(w, u, v).
+func _barycentric(p: Vector3, a: Vector3, b: Vector3, c: Vector3) -> Vector3:
+	var ab := b - a
+	var ac := c - a
+	var ap := p - a
+	var d00 := ab.dot(ab)
+	var d01 := ab.dot(ac)
+	var d11 := ac.dot(ac)
+	var d20 := ap.dot(ab)
+	var d21 := ap.dot(ac)
+	var denom := d00 * d11 - d01 * d01
+	if absf(denom) < 1e-12:
+		return Vector3(1.0, 0.0, 0.0)
+	var inv := 1.0 / denom
+	var u := (d11 * d20 - d01 * d21) * inv
+	var v := (d00 * d21 - d01 * d20) * inv
+	return Vector3(1.0 - u - v, u, v)
 
 
 ## Return the RenderingServer instance RID for an object (used for highlight overlay).
@@ -242,7 +266,6 @@ func set_planar_debug_mode(mode: int) -> void:
 		var mat: Material = sm.material_cache[key]
 		if mat is ShaderMaterial:
 			var smat := mat as ShaderMaterial
-			# Only set on shaders that have the debug_mode uniform (planar variants)
 			if smat.shader != null and "debug_mode" in smat.shader.code:
 				smat.set_shader_parameter("debug_mode", mode)
 				count += 1
