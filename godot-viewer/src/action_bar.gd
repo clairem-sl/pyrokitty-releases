@@ -15,6 +15,7 @@ extends RefCounted
 var sm  # scene_manager reference
 var _camera: Camera3D
 var _send_fn: Callable  # routes messages back to Electron over WebSocket
+var _inspect_fn: Callable  # opens debug tooltip — set by camera_controller
 
 # Selection state
 var _selected_uuid: String = ""
@@ -280,9 +281,12 @@ func handle_click(screen_pos: Vector2) -> bool:
 		_execute_default_action(obj_uuid, hit)
 		return true
 
-	# Single tap → select
+	# Single tap → select at the click point (not object center)
 	_last_tap_uuid = obj_uuid
 	_last_tap_time = now
+	var hit_dist: float = hit.get("distance", 0.0)
+	if hit_dist > 0.0:
+		hit["_world_hit_pos"] = ray_from + ray_dir * hit_dist
 	_select_object(obj_uuid, hit)
 	return true
 
@@ -303,11 +307,8 @@ func deselect() -> void:
 func process(delta: float) -> void:
 	if not _visible or _selected_uuid.is_empty():
 		return
-	# Track the selected object's world position
-	if sm.objects.has(_selected_uuid):
-		var rsi = sm.objects[_selected_uuid]
-		_selected_world_pos = rsi.pos
-	else:
+	# Check that the selected object still exists (don't overwrite click position)
+	if not sm.objects.has(_selected_uuid):
 		# Object was deleted
 		deselect()
 		return
@@ -340,10 +341,11 @@ func _select_object(obj_uuid: String, hit: Dictionary) -> void:
 	_selected_owner_id = str(meta.get("ownerID", ""))
 	_selected_prim_flags = int(meta.get("primFlags", 0))
 
-	# World position from RSInstance
-	if sm.objects.has(obj_uuid):
-		var rsi = sm.objects[obj_uuid]
-		_selected_world_pos = rsi.pos
+	# Position bar at the click point if available, otherwise object center
+	if hit.has("_world_hit_pos"):
+		_selected_world_pos = hit["_world_hit_pos"]
+	elif sm.objects.has(obj_uuid):
+		_selected_world_pos = sm.objects[obj_uuid].pos
 
 	# Highlight
 	_apply_highlight(obj_uuid)
@@ -419,12 +421,9 @@ func _on_action_pressed(action_name: String) -> void:
 
 	match action_name:
 		"touch":
-			# Re-pick for UV/face data (we don't store the original hit)
-			_send_fn.call({ "type": "object_touch", "uuid": _selected_uuid,
-				"faceIndex": 0,
-				"st": { "x": 0.5, "y": 0.5 },
-				"position": { "x": 0.0, "y": 0.0, "z": 0.0 },
-				"normal": { "x": 0.0, "y": 0.0, "z": 1.0 },
+			sm.touch_mgr.touch_instant({
+				"uuid": _selected_uuid, "faceIndex": 0, "st": Vector2(0.5, 0.5),
+				"normal": Vector3.FORWARD, "hitPosLocal": Vector3.ZERO,
 			})
 		"sit":
 			_send_fn.call({ "type": "object_sit", "uuid": _selected_uuid })
@@ -435,7 +434,8 @@ func _on_action_pressed(action_name: String) -> void:
 		"edit":
 			_send_fn.call({ "type": "object_edit", "uuid": _selected_uuid })
 		"inspect":
-			_send_fn.call({ "type": "object_inspect", "uuid": _selected_uuid })
+			if _inspect_fn.is_valid():
+				_inspect_fn.call(_selected_uuid)
 
 	# Deselect after action (except inspect/edit/pay which keep selection)
 	if action_name not in ["inspect", "edit", "pay"]:
@@ -443,17 +443,8 @@ func _on_action_pressed(action_name: String) -> void:
 
 
 func _send_touch(obj_uuid: String, hit: Dictionary) -> void:
-	var pos_local: Vector3 = hit.get("hitPosLocal", Vector3.ZERO)
-	var norm: Vector3 = hit.get("normal", Vector3.FORWARD)
-	var st: Vector2 = hit.get("st", Vector2(0.5, 0.5))
-	_send_fn.call({
-		"type": "object_touch",
-		"uuid": obj_uuid,
-		"faceIndex": hit.get("faceIndex", 0),
-		"st": { "x": st.x, "y": st.y },
-		"position": { "x": pos_local.x, "y": pos_local.z, "z": -pos_local.y },
-		"normal": { "x": norm.x, "y": norm.z, "z": -norm.y },
-	})
+	hit["uuid"] = obj_uuid
+	sm.touch_mgr.touch_instant(hit)
 
 
 # ─── Highlight ───────────��──────────────────────────────

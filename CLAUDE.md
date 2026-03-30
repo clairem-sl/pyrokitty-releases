@@ -5,7 +5,7 @@ Version is set in `godot-viewer/godot-version.txt`.
 Run all tests (headless, no window):
 
 ```bash
-cd godot-viewer && GODOT=$(cat godot-version.txt | tr -d '[:space:]') && for s in tests/test_*.tscn; do ./$GODOT/${GODOT}_console.exe --headless --quit-after 5 --scene "$s" 2>&1 | grep -E "passed|failed"; done
+cd godot-viewer && for s in tests/test_*.tscn; do ./Godot_v4.7-dev2_mono_win64/Godot_v4.7-dev2_mono_win64_console.exe --headless --quit-after 5 --scene "$s" 2>&1 | grep -E "passed|failed"; done
 ```
 
 Test run with window:

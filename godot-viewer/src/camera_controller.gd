@@ -110,6 +110,7 @@ func _ready() -> void:
 	# Action bar — init deferred so scene_manager is ready
 	if scene_manager:
 		_action_bar = ActionBarScript.new(scene_manager, self, func(msg: Dictionary): main_node.send_message(msg))
+		_action_bar._inspect_fn = func(uuid: String): _inspect_object(uuid)
 
 
 func _notification(what: int) -> void:
@@ -360,6 +361,8 @@ func _input(event: InputEvent) -> void:
 					_handle_touch_pick(mb.position)
 			else:
 				_dragging_panel = false
+				if scene_manager and scene_manager.touch_mgr.is_grabbing():
+					_handle_touch_release(mb.position)
 				if is_alt_orbiting:
 					alt_focus_hold = true
 					is_alt_orbiting = false
@@ -424,6 +427,9 @@ func _input(event: InputEvent) -> void:
 			pitch = clamp(pitch, -PI * 0.49, PI * 0.49)
 			move_dirty = true
 			_update_camera()
+		elif scene_manager and scene_manager.touch_mgr.is_grabbing():
+			# Touch drag — send touch_move with current ray pick
+			_handle_touch_move(mm.position)
 		else:
 			# Update cursor shape based on what's under the mouse (throttled)
 			_pending_cursor_pos = mm.position
@@ -704,6 +710,21 @@ func _create_debug_tooltip() -> void:
 	_tooltip_tabs.add_child(_faces_label)
 
 
+## Open the debug tooltip for an object by UUID (called from action bar inspect button).
+func _inspect_object(obj_uuid: String) -> void:
+	if scene_manager == null:
+		return
+	var info: Dictionary = scene_manager.get_object_debug_info(obj_uuid)
+	var faces: Array = scene_manager.get_object_face_info(obj_uuid)
+	# Project object position to screen for tooltip placement
+	var rsi = scene_manager.objects.get(obj_uuid)
+	var screen_pos := Vector2(200, 200)
+	if rsi != null:
+		screen_pos = unproject_position(rsi.pos)
+	_show_debug_tooltip(screen_pos, 0.0, info, faces)
+	main_node.send_message({ "type": "request_object_properties", "uuid": obj_uuid })
+
+
 func _handle_debug_pick(screen_pos: Vector2) -> void:
 	if scene_manager == null:
 		return
@@ -738,21 +759,26 @@ func _handle_touch_pick(screen_pos: Vector2) -> void:
 	var hit: Dictionary = scene_manager.pick_object_detailed(ray_from, ray_dir)
 	if hit.is_empty():
 		return
-	# Debug click marker
 	_show_click_marker(ray_from + ray_dir * hit["distance"])
-	# Convert object-local vectors from Godot coords (Y-up) to SL coords (Z-up)
-	# Godot (x, y, z) -> SL (x, z, -y)
-	var pos_local: Vector3 = hit["hitPosLocal"]
-	var norm: Vector3 = hit["normal"]
-	var st: Vector2 = hit["st"]
-	main_node.send_message({
-		"type": "object_touch",
-		"uuid": hit["uuid"],
-		"faceIndex": hit["faceIndex"],
-		"st": { "x": st.x, "y": st.y },
-		"position": { "x": pos_local.x, "y": pos_local.z, "z": -pos_local.y },
-		"normal": { "x": norm.x, "y": norm.z, "z": -norm.y },
-	})
+	scene_manager.touch_mgr.touch_start(hit)
+
+
+func _handle_touch_move(screen_pos: Vector2) -> void:
+	if scene_manager == null or not scene_manager.touch_mgr.is_grabbing():
+		return
+	var ray_from := project_ray_origin(screen_pos)
+	var ray_dir := project_ray_normal(screen_pos)
+	var hit: Dictionary = scene_manager.pick_object_detailed(ray_from, ray_dir)
+	scene_manager.touch_mgr.touch_move(hit)
+
+
+func _handle_touch_release(screen_pos: Vector2) -> void:
+	if scene_manager == null or not scene_manager.touch_mgr.is_grabbing():
+		return
+	var ray_from := project_ray_origin(screen_pos)
+	var ray_dir := project_ray_normal(screen_pos)
+	var hit: Dictionary = scene_manager.pick_object_detailed(ray_from, ray_dir)
+	scene_manager.touch_mgr.touch_end(hit)
 
 
 const _MAPPING_NAMES: Dictionary = { 0: "default", 2: "planar", 4: "spherical", 6: "cylindrical" }

@@ -389,7 +389,7 @@ export class GodotInputHandler {
         return;
       }
 
-      const localId = obj.ID; // sim protocol still uses localId
+      const localId = obj.ID;
 
       // If the object's default action is SIT and we're not already sitting on it, sit.
       if (obj.ClickAction === CLICK_ACTION_SIT && this._sittingOnLocalId !== localId) {
@@ -401,23 +401,107 @@ export class GodotInputHandler {
         return;
       }
 
-      const { Vector3 } = await import('../../../node-metaverse/lib/classes/Vector3');
-      const pos = msg.position || {};
-      const norm = msg.normal || {};
-      const st = msg.st || {};
-      const faceIndex: number = msg.faceIndex || 0;
-      const position = new Vector3(pos.x || 0, pos.y || 0, pos.z || 0);
-      const normal = new Vector3(norm.x || 0, norm.y || 0, norm.z || 0);
-      const stCoord = new Vector3(st.x || 0, st.y || 0, 0);
-      const uvCoord = new Vector3(st.x || 0, st.y || 0, 0);
-      const grabOffset = new Vector3(pos.x || 0, pos.y || 0, pos.z || 0);
-      const binormal = Vector3.getZero();
-      await this.bot.clientCommands.region.touchObject(
-        localId, grabOffset, uvCoord, stCoord, faceIndex, position, normal, binormal
+      const surface = this._parseSurfaceInfo(msg);
+      // Legacy single-shot touch: grab + degrab
+      await this.bot.clientCommands.region.grabObject(
+        localId, surface.grabOffset, surface.uvCoord, surface.stCoord,
+        surface.faceIndex, surface.position, surface.normal, surface.binormal
       );
-      console.log(`[GodotBridge] Touched object ${objectUuid.slice(0, 8)} face=${faceIndex} st=(${st.x?.toFixed(2)},${st.y?.toFixed(2)})`);
+      await this.bot.clientCommands.region.deGrabObject(
+        localId, surface.grabOffset, surface.uvCoord, surface.stCoord,
+        surface.faceIndex, surface.position, surface.normal, surface.binormal
+      );
+      console.log(`[GodotBridge] Touched object ${objectUuid.slice(0, 8)} face=${surface.faceIndex} st=(${msg.st?.x?.toFixed(2)},${msg.st?.y?.toFixed(2)})`);
     } catch (e) {
       console.error(`[GodotBridge] object_touch failed for ${msg.uuid}:`, e);
     }
+  }
+
+  async handleObjectTouchStart(msg: any): Promise<void> {
+    try {
+      const region = this.bot.currentRegion;
+      if (!region) return;
+      const objectUuid: string = msg.uuid;
+      const { UUID } = await import('../../../node-metaverse/dist/lib/classes/UUID');
+      const obj = region.objects?.getObjectByUUID(new UUID(objectUuid));
+      if (!obj) return;
+
+      // SIT override
+      if (obj.ClickAction === CLICK_ACTION_SIT && this._sittingOnLocalId !== obj.ID) {
+        const { Vector3 } = await import('../../../node-metaverse/dist/lib/classes/Vector3');
+        await this.bot.clientCommands.movement.sitOnObject(new UUID(obj.FullID.toString()), Vector3.getZero());
+        this._sittingOnLocalId = obj.ID;
+        console.log(`[GodotBridge] Sat on object ${objectUuid.slice(0, 8)} (ClickAction=Sit)`);
+        return;
+      }
+
+      const surface = this._parseSurfaceInfo(msg);
+      await this.bot.clientCommands.region.grabObject(
+        obj.ID, surface.grabOffset, surface.uvCoord, surface.stCoord,
+        surface.faceIndex, surface.position, surface.normal, surface.binormal
+      );
+      console.log(`[GodotBridge] touch_start ${objectUuid.slice(0, 8)} face=${surface.faceIndex} st=(${msg.st?.x?.toFixed(2)},${msg.st?.y?.toFixed(2)})`);
+    } catch (e) {
+      console.error(`[GodotBridge] object_touch_start failed for ${msg.uuid}:`, e);
+    }
+  }
+
+  async handleObjectTouchMove(msg: any): Promise<void> {
+    try {
+      const region = this.bot.currentRegion;
+      if (!region) return;
+      const { UUID } = await import('../../../node-metaverse/dist/lib/classes/UUID');
+      const obj = region.objects?.getObjectByUUID(new UUID(msg.uuid));
+      if (!obj) return;
+
+      const surface = this._parseSurfaceInfo(msg);
+      const { Vector3 } = await import('../../../node-metaverse/lib/classes/Vector3');
+      const grabPos = msg.grabPosition
+        ? new Vector3(msg.grabPosition.x || 0, msg.grabPosition.y || 0, msg.grabPosition.z || 0)
+        : surface.position;
+      await this.bot.clientCommands.region.dragGrabbedObject(
+        new UUID(obj.FullID.toString()), grabPos, surface.grabOffset,
+        surface.uvCoord, surface.stCoord, surface.faceIndex,
+        surface.position, surface.normal, surface.binormal
+      );
+    } catch (e) {
+      console.error(`[GodotBridge] object_touch_move failed for ${msg.uuid}:`, e);
+    }
+  }
+
+  async handleObjectTouchEnd(msg: any): Promise<void> {
+    try {
+      const region = this.bot.currentRegion;
+      if (!region) return;
+      const { UUID } = await import('../../../node-metaverse/dist/lib/classes/UUID');
+      const obj = region.objects?.getObjectByUUID(new UUID(msg.uuid));
+      if (!obj) return;
+
+      const surface = this._parseSurfaceInfo(msg);
+      await this.bot.clientCommands.region.deGrabObject(
+        obj.ID, surface.grabOffset, surface.uvCoord, surface.stCoord,
+        surface.faceIndex, surface.position, surface.normal, surface.binormal
+      );
+      console.log(`[GodotBridge] touch_end ${msg.uuid.slice(0, 8)} face=${surface.faceIndex}`);
+    } catch (e) {
+      console.error(`[GodotBridge] object_touch_end failed for ${msg.uuid}:`, e);
+    }
+  }
+
+  private _parseSurfaceInfo(msg: any) {
+    // Lazy import — cached after first call by Node.js module system
+    const Vector3 = require('../../../node-metaverse/lib/classes/Vector3').Vector3;
+    const pos = msg.position || {};
+    const norm = msg.normal || {};
+    const st = msg.st || {};
+    return {
+      faceIndex: msg.faceIndex || 0,
+      position: new Vector3(pos.x || 0, pos.y || 0, pos.z || 0),
+      normal: new Vector3(norm.x || 0, norm.y || 0, norm.z || 0),
+      stCoord: new Vector3(st.x || 0, st.y || 0, 0),
+      uvCoord: new Vector3(st.x || 0, st.y || 0, 0),
+      grabOffset: new Vector3(pos.x || 0, pos.y || 0, pos.z || 0),
+      binormal: Vector3.getZero(),
+    };
   }
 }

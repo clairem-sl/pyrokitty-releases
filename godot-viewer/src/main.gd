@@ -532,6 +532,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_1 and event.ctrl_pressed and event.shift_pressed:
 			_stats_bar.visible = not _stats_bar.visible
 			scene_manager.toggle_debug_skeleton()
+		elif event.keycode == KEY_F10:
+			scene_manager.toggle_pick_debug()
 
 
 func send_message(msg: Dictionary) -> void:

@@ -129,78 +129,100 @@ func _update_laser(delta: float) -> void:
 		_laser_dot.visible = false
 		return
 
-	# Throttle the expensive pick — reuse cached result between picks
+	var ray_origin: Vector3 = _right_controller.global_position
+	var ray_dir: Vector3 = -_right_controller.global_transform.basis.z
+	var sm = _camera_ctrl.scene_manager if _camera_ctrl else null
+
+	# Aim the pick camera along the controller ray every frame so the ID buffer
+	# viewport renders from the controller's perspective (no headset parallax).
+	if sm:
+		sm.object_picker.update_pick_camera_ray(ray_origin, ray_dir)
+
+	# Throttle picks — hover uses cheap pick_object (ID buffer + bone distance),
+	# detailed pick only runs on trigger press/drag (pick_object_detailed with CPU skinning).
 	_pick_timer += delta
 	if _pick_timer >= PICK_INTERVAL:
 		_pick_timer = 0.0
-		var ray_origin: Vector3 = _right_controller.global_position
-		var ray_dir: Vector3 = -_right_controller.global_transform.basis.z
-		var sm = _camera_ctrl.scene_manager if _camera_ctrl else null
 		if sm:
-			_cached_hit = sm.pick_object_detailed(ray_origin, ray_dir)
+			if sm.touch_mgr.is_grabbing():
+				# Dragging — need full detail for UV/face updates
+				_cached_hit = sm.pick_object_detailed(ray_origin, ray_dir)
+				sm.touch_mgr.touch_move(_cached_hit)
+			else:
+				# Hovering — cheap ID + distance for beam/highlight
+				_cached_hit = sm.pick_object(ray_origin, ray_dir)
+				sm.object_picker.set_hover_highlight(_cached_hit["uuid"] if not _cached_hit.is_empty() else "")
 		else:
 			_cached_hit = {}
 		_cached_beam_len = _cached_hit["distance"] if not _cached_hit.is_empty() else _laser_length
 
-	if not _cached_hit.is_empty():
-		var ray_origin: Vector3 = _right_controller.global_position
-		var ray_dir: Vector3 = -_right_controller.global_transform.basis.z
-		_laser_dot.global_position = ray_origin + ray_dir * _cached_beam_len
-		_laser_dot.visible = true
-	else:
-		_laser_dot.visible = false
+	_laser_dot.visible = false
 
-	_laser_mesh.scale = Vector3(1.0, 1.0, _cached_beam_len)
-	_laser_mesh.position = Vector3(0.0, 0.0, -_cached_beam_len * 0.5)
+	# Shorten laser beam to the hit distance so it doesn't poke through objects
+	var beam: float = _cached_beam_len if not _cached_hit.is_empty() else _laser_length
+	_laser_mesh.scale = Vector3(1.0, 1.0, beam)
+	_laser_mesh.position = Vector3(0.0, 0.0, -beam * 0.5)
 	_laser_mesh.visible = true
 
 
 # ─── Input Handling ────────────────────────────────────────
 
 
+var _trigger_held: bool = false
+var _grip_held: bool = false
+
 func _on_right_button_pressed(button_name: String) -> void:
 	if button_name == "trigger_click":
-		_laser_active = true
+		_trigger_held = true
 	elif button_name == "grip_click":
-		pass  # reserved for future secondary action
+		_grip_held = true
+	# Either button activates the laser
+	if not _laser_active and (_trigger_held or _grip_held):
+		_laser_active = true
+	# Both buttons together = touch
+	if _trigger_held and _grip_held:
+		_fire_touch_start()
 
 
 func _on_right_button_released(button_name: String) -> void:
 	if button_name == "trigger_click":
-		# Fire the pick on release (like mouse click)
-		if _laser_active:
-			_fire_laser_pick()
+		_trigger_held = false
+	elif button_name == "grip_click":
+		_grip_held = false
+	# Touch ends when either button is released
+	var sm_rel = _camera_ctrl.scene_manager if _camera_ctrl else null
+	if sm_rel and sm_rel.touch_mgr.is_grabbing() and not (_trigger_held and _grip_held):
+		_fire_touch_end()
+	# Laser off when both buttons released
+	if not _trigger_held and not _grip_held:
 		_laser_active = false
 
 
-func _fire_laser_pick() -> void:
+func _fire_touch_start() -> void:
 	if not _right_controller:
+		return
+	var sm = _camera_ctrl.scene_manager if _camera_ctrl else null
+	if not sm or sm.touch_mgr.is_grabbing():
 		return
 	var ray_origin: Vector3 = _right_controller.global_position
 	var ray_dir: Vector3 = -_right_controller.global_transform.basis.z
+	var hit: Dictionary = sm.pick_object_detailed(ray_origin, ray_dir)
+	var uuid: String = sm.touch_mgr.touch_start(hit)
+	if not uuid.is_empty():
+		vr_object_picked.emit(hit)
+
+
+func _fire_touch_end() -> void:
 	var sm = _camera_ctrl.scene_manager if _camera_ctrl else null
 	if not sm:
 		return
-	var hit: Dictionary = sm.pick_object_detailed(ray_origin, ray_dir)
-	if not hit.is_empty():
-		# Route through action bar if available, matching desktop click flow
-		if _camera_ctrl._action_bar:
-			# Convert to a screen position for the action bar (it needs one for UI placement)
-			# In VR mode, the 3D action bar will be used instead, but for now
-			# we emit the signal so the system can handle it
-			vr_object_picked.emit(hit)
-			# Direct touch for now — the 3D action bar (Task #5) will replace this
-			var pos_local: Vector3 = hit.get("hitPosLocal", Vector3.ZERO)
-			var norm: Vector3 = hit.get("normal", Vector3.FORWARD)
-			var st: Vector2 = hit.get("st", Vector2(0.5, 0.5))
-			_main_node.send_message({
-				"type": "object_touch",
-				"uuid": hit["uuid"],
-				"faceIndex": hit.get("faceIndex", 0),
-				"st": { "x": st.x, "y": st.y },
-				"position": { "x": pos_local.x, "y": pos_local.z, "z": -pos_local.y },
-				"normal": { "x": norm.x, "y": norm.z, "z": -norm.y },
-			})
+	if _right_controller:
+		var ray_origin: Vector3 = _right_controller.global_position
+		var ray_dir: Vector3 = -_right_controller.global_transform.basis.z
+		var hit: Dictionary = sm.pick_object_detailed(ray_origin, ray_dir)
+		sm.touch_mgr.touch_end(hit)
+	else:
+		sm.touch_mgr.touch_end()
 
 
 func _on_left_thumbstick(action_name: String, value: Vector2) -> void:

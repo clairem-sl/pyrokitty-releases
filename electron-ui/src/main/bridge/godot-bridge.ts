@@ -487,6 +487,15 @@ export class GodotBridge extends EventEmitter {
       case 'object_touch':
         this.inputHandler.handleObjectTouch(msg);
         break;
+      case 'object_touch_start':
+        this.inputHandler.handleObjectTouchStart(msg);
+        break;
+      case 'object_touch_move':
+        this.inputHandler.handleObjectTouchMove(msg);
+        break;
+      case 'object_touch_end':
+        this.inputHandler.handleObjectTouchEnd(msg);
+        break;
       case 'object_sit':
         this.inputHandler.handleObjectSit(msg);
         break;

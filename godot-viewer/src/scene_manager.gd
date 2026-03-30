@@ -19,6 +19,7 @@ const SkeletonBuilderScript = preload("res://src/skeleton_builder.gd")
 const NameBubbleManagerScript = preload("res://src/name_bubble_manager.gd")
 const NameBubble3DManagerScript = preload("res://src/name_bubble_3d_manager.gd")
 const FlexiPrimManagerScript = preload("res://src/flexi_prim_manager.gd")
+const TouchManagerScript = preload("res://src/touch_manager.gd")
 
 signal self_avatar_moved(pos: Vector3)
 signal object_properties_received(uuid: String, name: String, description: String)
@@ -186,6 +187,7 @@ var light_mgr: RefCounted          # LightManager
 var asset_pipeline: RefCounted     # AssetPipeline
 var terrain_env: RefCounted        # TerrainEnvironment
 var object_picker: RefCounted      # ObjectPicker
+var touch_mgr: RefCounted          # TouchManager
 var name_bubble_mgr: RefCounted    # NameBubbleManager (2D screen-space)
 var name_bubble_3d_mgr: RefCounted # NameBubble3DManager (3D world-space)
 var _bubble_2d_active: bool = true   # desktop default; VR flips these
@@ -251,6 +253,7 @@ func _ready() -> void:
 	asset_pipeline = AssetPipelineScript.new(self)
 	terrain_env = TerrainEnvironmentScript.new(self)
 	object_picker = ObjectPickerScript.new(self)
+	touch_mgr = TouchManagerScript.new(func(msg: Dictionary): if send_fn.is_valid(): send_fn.call(msg))
 	name_bubble_mgr = NameBubbleManagerScript.new(self)
 	name_bubble_3d_mgr = NameBubble3DManagerScript.new(self)
 	flexi_mgr = FlexiPrimManagerScript.new(self)
@@ -304,6 +307,9 @@ func get_process_timing() -> Dictionary:
 func _process(delta: float) -> void:
 	_timing_samples += 1
 	var _t0: float
+
+	# Mirror main camera to pick viewport (renders continuously for ID buffer picking)
+	object_picker.update_pick_camera()
 
 	# Terrain/water/sky processing
 	_t0 = Time.get_ticks_usec()
@@ -391,8 +397,8 @@ func _update_loading_fade(delta: float) -> void:
 func handle_region_change() -> void:
 	print("[SceneManager] Region change — clearing all objects, avatars, and lights")
 
-	# Destroy all pick bodies before clearing objects
-	object_picker.destroy_all_pick_bodies()
+	# Destroy all pick resources (physics bodies + ID buffer instances) before clearing objects
+	object_picker.destroy_all_pick_resources()
 
 	# Destroy all object RSInstances
 	for uuid: String in objects:
@@ -601,6 +607,9 @@ func set_planar_debug_mode(mode: int) -> void:
 
 func toggle_debug_skeleton() -> void:
 	animation_mgr.toggle_debug_skeleton()
+
+func toggle_pick_debug() -> void:
+	object_picker.toggle_pick_debug()
 
 ## Switch name bubbles to VR mode (3D world-space) or desktop mode (2D overlay).
 ## Called by set_vr_mode() during init.
