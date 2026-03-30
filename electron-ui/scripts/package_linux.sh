@@ -198,7 +198,7 @@ if command -v dotnet &>/dev/null; then
     if needs_rebuild "$ELECTRON_DIR/voice" "$VOICE_STAGING/VoiceSidecar" "*.cs"; then
         echo "  Building voice sidecar (linux-x64)..."
         cd "$ELECTRON_DIR/voice"
-        dotnet publish -c Release -r linux-x64 --self-contained -o "$ELECTRON_DIR/dist/voice"
+        dotnet publish -c Release -r linux-x64 --no-self-contained -o "$ELECTRON_DIR/dist/voice"
 
         rm -rf "$VOICE_STAGING"
         mkdir -p "$VOICE_STAGING"
