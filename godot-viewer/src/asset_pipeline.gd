@@ -543,7 +543,7 @@ func apply_face_materials(rsi, obj_uuid: String, faces: Array) -> void:
 	var ami: MeshInstance3D = sm.animesh_mesh_instances.get(obj_uuid)
 	if ami and ami.mesh:
 		surface_count = maxi(surface_count, ami.mesh.get_surface_count())
-	var fmi: MeshInstance3D = sm.flexi_mgr.get_mesh_instance(obj_uuid) if sm.flexi_params.has(obj_uuid) else null
+	var fmi: MeshInstance3D = sm.flexi_mgr.GetMeshInstance(obj_uuid) if sm.flexi_params.has(obj_uuid) else null
 	if fmi and fmi.mesh:
 		surface_count = maxi(surface_count, fmi.mesh.get_surface_count())
 

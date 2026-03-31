@@ -18,7 +18,7 @@ const ObjectPickerScript = preload("res://src/object_picker.gd")
 const SkeletonBuilderScript = preload("res://src/skeleton_builder.gd")
 const NameBubbleManagerScript = preload("res://src/name_bubble_manager.gd")
 const NameBubble3DManagerScript = preload("res://src/name_bubble_3d_manager.gd")
-const FlexiPrimManagerScript = preload("res://src/flexi_prim_manager.gd")
+const FlexiPrimManagerScript = preload("res://src/FlexiPrimManager.cs")
 const TouchManagerScript = preload("res://src/touch_manager.gd")
 
 signal self_avatar_moved(pos: Vector3)
@@ -214,6 +214,7 @@ func erase_animesh_state(root_uuid: String) -> void:
 
 func _exit_tree() -> void:
 	animation_mgr.shutdown()
+	flexi_mgr.Shutdown()
 	asset_pipeline.shutdown()
 	# Skip all cleanup — process is about to die anyway.
 	# RenderingServer RIDs, threads, and memory are freed by the OS on exit.
@@ -256,7 +257,8 @@ func _ready() -> void:
 	touch_mgr = TouchManagerScript.new(func(msg: Dictionary): if send_fn.is_valid(): send_fn.call(msg))
 	name_bubble_mgr = NameBubbleManagerScript.new(self)
 	name_bubble_3d_mgr = NameBubble3DManagerScript.new(self)
-	flexi_mgr = FlexiPrimManagerScript.new(self)
+	flexi_mgr = FlexiPrimManagerScript.new()
+	flexi_mgr.Init(self)
 
 	asset_pipeline.start_threads()
 
@@ -328,7 +330,7 @@ func _process(delta: float) -> void:
 
 	# Flexi prim Verlet simulation (world-space physics → bone rotations)
 	_t0 = Time.get_ticks_usec()
-	flexi_mgr.simulate(delta)
+	flexi_mgr.ConsumeSlots()
 	_timing_flexi_ms += (Time.get_ticks_usec() - _t0) / 1000.0
 
 	# Consume animation thread output slots and apply to Skeleton3D

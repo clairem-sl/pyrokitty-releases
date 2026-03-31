@@ -165,12 +165,19 @@ if [ -d "$GODOT_SRC" ]; then
     cp "$GODOT_SRC/project.godot" "$GODOT_STAGING/"
     cp "$GODOT_SRC/main.tscn"     "$GODOT_STAGING/"
     cp -r "$GODOT_SRC/src"        "$GODOT_STAGING/"
+    cp "$GODOT_SRC/PyroKitty 3D.csproj" "$GODOT_STAGING/"
     [ -d "$GODOT_SRC/data" ]    && cp -r "$GODOT_SRC/data"    "$GODOT_STAGING/"
     [ -d "$GODOT_SRC/addons" ]  && cp -r "$GODOT_SRC/addons"  "$GODOT_STAGING/"
     [ -d "$GODOT_SRC/shaders" ] && cp -r "$GODOT_SRC/shaders" "$GODOT_STAGING/"
     for f in icon.png icon.png.import openxr_action_map.tres override.vr.cfg; do
         [ -f "$GODOT_SRC/$f" ] && cp "$GODOT_SRC/$f" "$GODOT_STAGING/"
     done
+
+    # Build C# assembly (must happen before Godot import)
+    echo "  Building C# assembly..."
+    cd "$GODOT_STAGING"
+    dotnet build "PyroKitty 3D.csproj" -c Release
+    cd "$ELECTRON_DIR"
 
     # Run headless import so .godot/imported/ gets populated
     # (OceanFFT compute shaders need this to compile .glsl → SPIR-V)

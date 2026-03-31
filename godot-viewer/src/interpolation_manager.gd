@@ -176,6 +176,6 @@ func _update_children_world_pos(parent_uuid: String, parent_pos: Vector3, parent
 		sm.object_mgr._sync_animesh_transform(child_id, child_rsi)
 		# Sync flexi prim root Node3D so Verlet simulation anchors to new position
 		if sm.flexi_params.has(child_id):
-			sm.flexi_mgr.update_transform(child_id, child_rsi.pos, child_rsi.rot)
+			sm.flexi_mgr.UpdateTransform(child_id, child_rsi.pos, child_rsi.rot)
 		# Recurse into grandchildren (attachment linksets)
 		_update_children_world_pos(child_id, child_rsi.pos, child_rsi.rot)

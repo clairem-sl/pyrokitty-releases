@@ -240,6 +240,7 @@ if [ -d "$GODOT_SRC" ]; then
         cp "$GODOT_SRC/project.godot" "$GODOT_STAGING/"
         cp "$GODOT_SRC/main.tscn" "$GODOT_STAGING/"
         cp -r "$GODOT_SRC/src" "$GODOT_STAGING/"
+        cp "$GODOT_SRC/PyroKitty 3D.csproj" "$GODOT_STAGING/"
         if [ -d "$GODOT_SRC/data" ]; then
             cp -r "$GODOT_SRC/data" "$GODOT_STAGING/"
         fi
@@ -256,6 +257,12 @@ if [ -d "$GODOT_SRC" ]; then
         if [ -d "$GODOT_SRC/shaders" ]; then
             cp -r "$GODOT_SRC/shaders" "$GODOT_STAGING/"
         fi
+
+        # Build C# assembly (must happen before Godot import)
+        echo "  Building C# assembly..."
+        cd "$GODOT_STAGING"
+        dotnet build "PyroKitty 3D.csproj" -c Release
+        cd "$ELECTRON_DIR"
 
         # Run headless import so .godot/imported/ gets populated
         # (OceanFFT compute shaders need this to compile .glsl → SPIR-V)

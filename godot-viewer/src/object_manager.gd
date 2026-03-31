@@ -452,7 +452,7 @@ func handle_object_update_batch(msg: Dictionary) -> void:
 
 		# Sync flexi prim root transform with RSInstance
 		if sm.flexi_params.has(obj_uuid):
-			sm.flexi_mgr.update_transform(obj_uuid, rsi.pos, rsi.rot)
+			sm.flexi_mgr.UpdateTransform(obj_uuid, rsi.pos, rsi.rot)
 
 		# Update light (may be added, changed, or removed)
 		if obj.has("light"):
@@ -482,7 +482,7 @@ func _update_children_transforms(parent_uuid: String) -> void:
 			_sync_animesh_transform(child_uuid, child_rsi)
 			# Sync flexi prim root Node3D
 			if sm.flexi_params.has(child_uuid):
-				sm.flexi_mgr.update_transform(child_uuid, child_rsi.pos, child_rsi.rot)
+				sm.flexi_mgr.UpdateTransform(child_uuid, child_rsi.pos, child_rsi.rot)
 			# Move child's light with it
 			if sm.light_mgr.object_lights.has(child_uuid):
 				sm.light_mgr.update_light_transform(child_uuid, child_rsi)
@@ -750,7 +750,7 @@ func handle_object_complete(msg: Dictionary) -> void:
 		rsi.set_mesh(prim_mesh)
 		sm.object_picker.create_pick_resources(obj_uuid, prim_mesh, "", rsi)
 		if is_flexi:
-			var flexi_root: Node3D = sm.flexi_mgr.create_flexi(
+			var flexi_root: Node3D = sm.flexi_mgr.CreateFlexi(
 				obj_uuid, sm.flexi_params[obj_uuid], prim_mesh,
 				rsi.pos, rsi.rot, rsi.scl)
 			if flexi_root != null:
@@ -849,7 +849,7 @@ func _cleanup_object(obj_uuid: String) -> void:
 
 	# Clean up flexi prim
 	if sm.flexi_params.has(obj_uuid):
-		sm.flexi_mgr.destroy_flexi(obj_uuid)
+		sm.flexi_mgr.DestroyFlexi(obj_uuid)
 		sm.flexi_params.erase(obj_uuid)
 
 	# Clean up animesh mesh instance (child of shared skeleton, freed individually)
