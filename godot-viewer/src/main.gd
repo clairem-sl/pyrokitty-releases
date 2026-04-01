@@ -285,7 +285,7 @@ func _update_stats_bar() -> void:
 	var tex_failed: int = scene_manager.texture_load_failed.size()
 	var mesh_cached: int = scene_manager.mesh_cache.size()
 	var mesh_loading: int = (ap._mesh_tasks as Dictionary).size()
-	var mesh_pending: int = (ap._pending_complete_by_mesh as Dictionary).size()
+	var mesh_pending: int = (ap._waiting_for_mesh as Dictionary).size()
 	var mesh_failed: int = scene_manager.mesh_load_failed.size()
 	var mat_count: int = scene_manager.material_cache.size()
 	var msg_q := _low_priority_queue.size()
@@ -464,14 +464,8 @@ func _handle_message(text: String) -> void:
 			scene_manager.handle_region_change()
 		"self_id":
 			scene_manager.set_self_avatar_id(msg.get("id", ""))
-		"object_create":
-			scene_manager.handle_object_create(msg)
-		"object_complete":
-			var _oc_uuid: String = str(msg.get("uuid", ""))
-			if scene_manager.asset_pipeline._is_in_range(_oc_uuid, scene_manager._vis_far * scene_manager._vis_far):
-				scene_manager.handle_object_complete(msg)
-			else:
-				scene_manager.asset_pipeline._deferred_mesh_far.append(msg)
+		"object_render":
+			scene_manager.handle_object_render(msg)
 		"object_update_batch", "object_update_physics":
 			scene_manager.handle_object_update_batch(msg)
 		"object_kill":
@@ -484,10 +478,7 @@ func _handle_message(text: String) -> void:
 			scene_manager.handle_avatar_update_batch(msg)
 		"avatar_kill":
 			scene_manager.handle_avatar_kill(msg)
-		"mesh_ready":
-			scene_manager.handle_mesh_ready(msg)
-		"texture_ready":
-			scene_manager.handle_texture_ready(msg)
+		# mesh_ready / texture_ready removed — Electron sends paths in object_render
 		"object_update_faces":
 			scene_manager.handle_update_faces(msg)
 		"object_update_faces_batch":

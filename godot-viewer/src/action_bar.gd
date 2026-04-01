@@ -14,6 +14,7 @@ extends RefCounted
 
 var sm  # scene_manager reference
 var _camera: Camera3D
+var _pick_camera_fn: Callable  # returns the active camera for ray projection (XR camera in VR)
 var _send_fn: Callable  # routes messages back to Electron over WebSocket
 var _inspect_fn: Callable  # opens debug tooltip — set by camera_controller
 
@@ -81,6 +82,7 @@ const BAR_SCALE_REF_DIST: float = 5.0
 func _init(scene_manager, camera: Camera3D, send_fn: Callable) -> void:
 	sm = scene_manager
 	_camera = camera
+	_pick_camera_fn = Callable()
 	_send_fn = send_fn
 	_create_highlight_material()
 	_create_2d_bar()
@@ -263,8 +265,9 @@ func handle_click(screen_pos: Vector2) -> bool:
 		return true
 
 	# Raycast to find object
-	var ray_from := _camera.project_ray_origin(screen_pos)
-	var ray_dir := _camera.project_ray_normal(screen_pos)
+	var _pc: Camera3D = _pick_camera_fn.call() if _pick_camera_fn.is_valid() else _camera
+	var ray_from := _pc.project_ray_origin(screen_pos)
+	var ray_dir := _pc.project_ray_normal(screen_pos)
 	var hit: Dictionary = sm.pick_object_detailed(ray_from, ray_dir)
 
 	if hit.is_empty():
@@ -484,14 +487,15 @@ func _hide_bar() -> void:
 func _update_bar_position() -> void:
 	if not _visible or _camera == null:
 		return
+	var _pc: Camera3D = _pick_camera_fn.call() if _pick_camera_fn.is_valid() else _camera
 	# Project object world position to screen
-	if _camera.is_position_behind(_selected_world_pos):
+	if _pc.is_position_behind(_selected_world_pos):
 		_bar_panel.visible = false
 		return
 	_bar_panel.visible = true
 
-	var screen_pos: Vector2 = _camera.unproject_position(_selected_world_pos)
-	var dist: float = _camera.global_position.distance_to(_selected_world_pos)
+	var screen_pos: Vector2 = _pc.unproject_position(_selected_world_pos)
+	var dist: float = _pc.global_position.distance_to(_selected_world_pos)
 
 	# Scale bar based on distance (same formula as name bubbles)
 	var scale_factor: float = sqrt(BAR_SCALE_REF_DIST / max(dist, 0.5))

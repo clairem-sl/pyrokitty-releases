@@ -231,6 +231,7 @@ export class MaterialResolver {
   resolveObject(obj: any, emit = false): {
     faces: { index: number; resolved: ResolvedMaterial; isBake: boolean; bakeAvatarUuid?: string; bakeChannel?: number }[];
     textureIds: string[];
+    materialIds: string[];
   } | undefined {
     try {
       const te = obj.TextureEntry;
@@ -265,6 +266,7 @@ export class MaterialResolver {
 
       const resultFaces: { index: number; resolved: ResolvedMaterial; isBake: boolean; bakeAvatarUuid?: string; bakeChannel?: number }[] = [];
       const textureIdSet = new Set<string>();
+      const materialIdSet = new Set<string>();
 
       for (let i = 0; i < 8; i++) {
         const rawFace = te.faces[i] ?? te.defaultTexture;
@@ -284,8 +286,12 @@ export class MaterialResolver {
             this.materialToFaces.set(materialUuid, list);
           }
           list.push({ objectUuid, faceIndex: i, face, inlineOverride });
+          materialIdSet.add(materialUuid);
 
-          if (this.materialFetchQueue) {
+          // Only request during live updates (emit=true). For initial objects,
+          // the sender calls requestMaterials() after track() to ensure the
+          // readiness tracker can patch pending faces when the callback fires.
+          if (emit && this.materialFetchQueue) {
             this.materialFetchQueue.request(materialUuid);
           }
         } else if (inlineOverride) {
@@ -349,7 +355,7 @@ export class MaterialResolver {
       }
 
       if (resultFaces.length === 0 && materialFaceIndices.size === 0) return undefined;
-      return { faces: resultFaces, textureIds: Array.from(textureIdSet) };
+      return { faces: resultFaces, textureIds: Array.from(textureIdSet), materialIds: Array.from(materialIdSet) };
     } catch (err) {
       const objUuid = obj.FullID?.toString() || 'unknown';
       console.error(`[MaterialResolver] resolveObject failed for ${objUuid.slice(0, 8)}:`, err);
@@ -357,15 +363,30 @@ export class MaterialResolver {
     }
   }
 
-  /** Collect all texture IDs from a resolved material into a set */
+  /** Collect fetchable texture IDs from a resolved material into a set.
+   *  Skips the same unfetchable UUIDs that requestTexture() skips. */
   private collectTextureIds(material: ResolvedMaterial, out: Set<string>): void {
-    if (material.baseColorTexture) out.add(material.baseColorTexture);
-    if (material.normalTexture) out.add(material.normalTexture);
-    if (material.ormTexture) out.add(material.ormTexture);
-    if (material.emissiveTexture) out.add(material.emissiveTexture);
+    for (const tid of [material.baseColorTexture, material.normalTexture, material.ormTexture, material.emissiveTexture]) {
+      if (!tid) continue;
+      if (TRANSPARENT_TEXTURES.has(tid)) continue;
+      if (SOLID_COLOR_TEXTURES.has(tid)) continue;
+      if (WATER_EXCLUSION_TEXTURES.has(tid)) continue;
+      if (BAKE_MAGIC_UUIDS.has(tid)) continue;
+      out.add(tid);
+    }
   }
 
-  // ── PBR material arrival ─────────────────────────────────────────
+  // ── PBR material fetch ───────────────────────────────────────────
+
+  /** Request material assets from the fetch queue. Called by the sender AFTER
+   *  the readiness tracker has registered the object, so synchronous cache-hit
+   *  callbacks can patch pending face data via updatePendingFaces(). */
+  requestMaterials(materialIds: string[]): void {
+    if (!this.materialFetchQueue) return;
+    for (const matId of materialIds) {
+      this.materialFetchQueue.request(matId);
+    }
+  }
 
   /**
    * Handle a PBR material asset being fetched and parsed.
@@ -399,6 +420,12 @@ export class MaterialResolver {
       );
     }
 
+    this.materialToFaces.delete(materialUuid);
+  }
+
+  /** Clean up tracking state for a material that failed to fetch.
+   *  The faces that depended on this material will render with legacy appearance. */
+  handleMaterialFailed(materialUuid: string): void {
     this.materialToFaces.delete(materialUuid);
   }
 

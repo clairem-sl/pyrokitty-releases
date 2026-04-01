@@ -69,8 +69,12 @@ export class GodotObjectSender {
     this.readinessTracker = tracker;
   }
 
-  /** Build the object_complete message for an object */
-  private buildCompleteMsg(obj: any, meshId: string | undefined, sculptInfo: ReturnType<GodotObjectSender['getSculptInfo']>, texInfo: any): any {
+  /** Build the unified object_render message (spatial + mesh + faces + metadata) */
+  private buildRenderMsg(
+    obj: any, parentUuid: string, meshId: string | undefined,
+    sculptInfo: ReturnType<GodotObjectSender['getSculptInfo']>,
+    texInfo: any, lightInfo: any, flexiInfo: any, isAnimesh: boolean,
+  ): any {
     const sculpt_meshId = sculptInfo ? sculptMeshId(sculptInfo.textureUuid, sculptInfo.sculptType) : undefined;
     const effectiveMeshId = meshId || sculpt_meshId || undefined;
     const shapeParams = (!meshId && !sculptInfo) ? {
@@ -93,12 +97,35 @@ export class GodotObjectSender {
       profileEnd: obj.ProfileEnd ?? 1,
       profileHollow: obj.ProfileHollow ?? 0,
     } : undefined;
+    const pos = obj.Position;
+    const rot = obj.Rotation;
+    const scl = obj.Scale;
+    const regionCacheID = obj.region?.cacheID?.toString() ?? '';
+    const clickAction: number = obj.ClickAction ?? 0;
+    const ownerID: string = obj.OwnerID?.toString() ?? '';
+    const primFlags: number = obj.Flags ?? 0;
+
     return {
-      type: 'object_complete',
+      type: 'object_render',
       uuid: obj.FullID?.toString() || '',
+      parentUuid,
+      cacheID: regionCacheID,
+      position: slPos(pos),
+      rotation: rot ? slQuat(rot) : [0, 0, 0, 1],
+      scale: scl ? slScale(scl) : [0.5, 0.5, 0.5],
       ...(effectiveMeshId ? { meshId: effectiveMeshId } : {}),
+      // meshPath, isRigged, jointOverrides filled by enrichFn at emit time
       ...(shapeParams ? { shape: shapeParams } : {}),
       ...(texInfo ? { faces: texInfo.faces } : {}),
+      // texturePath per face filled by enrichFn at emit time
+      ...(lightInfo ? { light: lightInfo } : {}),
+      ...(isAnimesh ? { animesh: true } : {}),
+      ...(sculptInfo ? { sculpt: true } : {}),
+      ...(flexiInfo ? { flexible: flexiInfo } : {}),
+      ...(obj.attachmentPoint > 0 ? { attachmentPoint: obj.attachmentPoint } : {}),
+      ...(clickAction !== 0 ? { clickAction } : {}),
+      ...(ownerID !== '' ? { ownerID } : {}),
+      ...(primFlags !== 0 ? { primFlags } : {}),
     };
   }
 
@@ -237,13 +264,11 @@ export class GodotObjectSender {
       return;
     }
 
-    const rot = obj.Rotation;
-    const scl = obj.Scale;
     const meshId = this.getMeshId(obj);
     const sculptInfo = this.getSculptInfo(obj);
     // Resolve all faces via MaterialResolver (handles BoM, PBR, legacy, texture fetches)
     const resolveResult = this.materialResolver.resolveObject(obj);
-    // Convert resolved faces to Godot wire format for object_complete
+    // Convert resolved faces to Godot wire format
     const texInfo = resolveResult ? {
       faces: resolveResult.faces.map(f => resolvedToGodotFace(f.index, f.resolved)),
       textureIds: resolveResult.textureIds,
@@ -265,18 +290,10 @@ export class GodotObjectSender {
 
     const lightInfo = this.getLightInfo(obj);
     const flexiInfo = this.getFlexiInfo(obj);
-
     const isAnimesh = !!(obj.extraParams?.extendedMeshData?.flags & 0x1);
-
-    // Interaction metadata for action bar context filtering
-    const clickAction: number = obj.ClickAction ?? 0;
-    const ownerID: string = obj.OwnerID?.toString() ?? '';
-    const primFlags: number = obj.Flags ?? 0;
 
     // Log avatar attachments
     const isSelfAttach = parentUuid !== '' && parentUuid === this.selfAvatarUuid;
-
-    // Track self-avatar attachments for [SelfAvatar] logging
     if (isSelfAttach) {
       this.selfAttachmentIds.add(objUuid);
       const faceCount = texInfo?.faces?.length ?? 0;
@@ -288,33 +305,27 @@ export class GodotObjectSender {
       }
     }
 
-    // Phase 1: lightweight object_create with spatial info only
-    const regionCacheID = obj.region?.cacheID?.toString() ?? '';
-    this.send({
-      type: 'object_create',
-      uuid: objUuid,
-      parentUuid: parentUuid,
-      cacheID: regionCacheID,
-      position: slPos(pos),
-      rotation: rot ? slQuat(rot) : [0, 0, 0, 1],
-      scale: scl ? slScale(scl) : [0.5, 0.5, 0.5],
-      ...(lightInfo ? { light: lightInfo } : {}),
-      ...(isAnimesh ? { animesh: true } : {}),
-      ...(sculptInfo ? { sculpt: true } : {}),
-      ...(flexiInfo ? { flexible: flexiInfo } : {}),
-      ...(obj.attachmentPoint > 0 ? { attachmentPoint: obj.attachmentPoint } : {}),
-      ...(clickAction !== 0 ? { clickAction } : {}),
-      ...(ownerID !== '' ? { ownerID } : {}),
-      ...(primFlags !== 0 ? { primFlags } : {}),
-    });
-
-    // Phase 2: build and track object_complete
-    const completeMsg = this.buildCompleteMsg(obj, meshId, sculptInfo, texInfo);
-    const effectiveMeshId = completeMsg.meshId || undefined;
+    // Build unified object_render message — sent when all assets are on disk
+    const renderMsg = this.buildRenderMsg(obj, parentUuid, meshId, sculptInfo, texInfo, lightInfo, flexiInfo, isAnimesh);
+    const effectiveMeshId = renderMsg.meshId || undefined;
+    // Collect all texture IDs this object depends on, filtering out unfetchable UUIDs
+    const ZERO = '00000000-0000-0000-0000-000000000000';
+    const textureIds = new Set<string>(
+      (texInfo?.textureIds ?? []).filter((id: string) => id && id !== ZERO)
+    );
+    // Collect PBR material asset UUIDs that must resolve before emit
+    const materialIds = new Set<string>(
+      (resolveResult?.materialIds ?? []).filter((id: string) => id && id !== ZERO)
+    );
     if (this.readinessTracker) {
-      this.readinessTracker.track(objUuid, effectiveMeshId || null, new Set(), completeMsg);
+      this.readinessTracker.track(objUuid, effectiveMeshId || null, textureIds, materialIds, renderMsg, parentUuid);
+      // Request materials AFTER track() so synchronous cache-hit callbacks
+      // can patch pending face data via updatePendingFaces + addTextures.
+      if (materialIds.size > 0) {
+        this.materialResolver.requestMaterials(Array.from(materialIds));
+      }
     } else {
-      this.send(completeMsg);
+      this.send(renderMsg);
     }
     if (lightInfo) {
       this.updateCoalescer?.trackLight(objUuid);

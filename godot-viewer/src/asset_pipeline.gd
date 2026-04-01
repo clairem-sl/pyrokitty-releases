@@ -44,7 +44,7 @@ var _fin_tex_create_ms: float = 0.0    # ImageTexture.create_from_image
 var _fin_tex_apply_ms: float = 0.0     # _apply_texture_to_waiting
 var _fin_tex_count: int = 0
 var _fin_mesh_extract_ms: float = 0.0  # ImporterMesh.get_mesh
-var _fin_mesh_apply_ms: float = 0.0    # _retry_pending_complete
+var _fin_mesh_apply_ms: float = 0.0    # _flush_mesh_waiters
 var _fin_mesh_count: int = 0
 
 # Async mesh loading (WorkerThreadPool)
@@ -55,7 +55,7 @@ var MESH_MAX_IN_FLIGHT: int = FrameBudget.MESH_MAX_IN_FLIGHT
 
 # Texture alpha tracking: textureId -> true if fully opaque (DXT1/BC1, no alpha channel).
 # Used to promote blend→opaque for legacy faces without a material (perf optimization).
-var _texture_opaque: Dictionary = {}
+# _texture_opaque removed — blend→opaque promotion now done by Electron (textureOpaque flag)
 var _material_lookups: int = 0   # total calls to _get_or_create_material (lifetime)
 
 # Initial loading mode: skip time budget and process all pending textures/meshes.
@@ -69,21 +69,13 @@ var _placeholder_cache: Dictionary = {}
 # Double-sided shader cache
 var _double_sided_shader_cache: Dictionary = {}  # Shader -> Shader (cull_back -> cull_disabled variant)
 
-# Two-phase object creation: retry queues for async asset loading races
-var _pending_complete_by_mesh: Dictionary = {}  # meshId (String) -> Array[Dictionary] (object_complete msgs)
-var _tex_waiting: Dictionary = {}               # textureId (String) -> Array[String] (object uuids needing re-apply)
+# Mesh waiter: objects waiting for a mesh to finish disk→GPU loading.
+# meshId (String) -> Array[String] (object UUIDs). Flushed by _flush_mesh_waiters.
+var _waiting_for_mesh: Dictionary = {}
+# Texture waiter: objects needing face re-apply when a texture finishes disk→GPU loading.
+# textureId (String) -> Array[String] (object UUIDs).
+var _tex_waiting: Dictionary = {}
 
-# Deferred apply queues — drains within frame budget to avoid shader compilation stalls
-var _deferred_tex_apply: Array = []   # Array of String (object uuids needing face material apply)
-var _deferred_mesh_apply: Array = []  # Array of Dictionary (object_complete msgs)
-# Far parking lot — objects beyond draw distance, swept on camera movement
-var _deferred_tex_far: Array = []     # Array of String (object uuids)
-var _deferred_mesh_far: Array = []    # Array of Dictionary (object_complete msgs)
-var _cam_pos: Vector3 = Vector3.ZERO  # updated each frame from scene_manager
-
-# Re-request dedup: avoids sending duplicate texture_request/mesh_request to TS
-var _tex_requested: Dictionary = {}   # textureId -> true, cleared when texture_ready arrives
-var _mesh_requested: Dictionary = {}  # meshId -> true, cleared when mesh_ready arrives
 
 
 func _init(scene_manager) -> void:
@@ -100,55 +92,52 @@ func shutdown() -> void:
 
 # ─── Mesh Pipeline ───────────────────────────────────
 
-func handle_mesh_ready(msg: Dictionary) -> void:
-	var mesh_id: String = msg.get("meshId", "")
-	var glb_path: String = msg.get("path", "")
+## Queue a mesh load from a disk path (object_render path).
+## If already cached or in-flight, does nothing.
+func queue_mesh_load(mesh_id: String, glb_path: String, msg: Dictionary = {}) -> void:
 	if mesh_id.is_empty() or glb_path.is_empty():
 		return
-
-	# Track rigged mesh GLB paths for animesh scene instantiation
+	# Track rigged mesh info from the render message
 	if msg.get("isRigged", false):
 		sm.rigged_mesh_paths[mesh_id] = glb_path
 		var overrides: Array = msg.get("jointOverrides", [])
 		if overrides.size() > 0:
 			sm.mesh_joint_overrides[mesh_id] = overrides
-			print("[AssetPipeline] Stored %d joint overrides for mesh %s" % [overrides.size(), mesh_id.substr(0, 8)])
-		var msg_keys: Array = msg.keys()
-		# Check how many pending objects need this rigged mesh
-		var waiting: int = 0
-		var self_waiting: bool = false
-		if _pending_complete_by_mesh.has(mesh_id):
-			waiting = _pending_complete_by_mesh[mesh_id].size()
-			for m: Dictionary in _pending_complete_by_mesh[mesh_id]:
-				if sm.object_mgr._is_self_avatar(str(m.get("uuid", ""))):
-					self_waiting = true
-					break
-		if self_waiting:
-			print("[SelfAvatar] Rigged mesh ready: meshId=%s (%d objects waiting)" % [mesh_id.substr(0, 8), waiting])
-
-	# Skip if already cached, in-flight, or previously failed
 	if _shutting_down or sm.mesh_cache.has(mesh_id) or _mesh_in_flight.has(mesh_id) or sm.mesh_load_failed.has(mesh_id):
 		return
-
 	_mesh_in_flight[mesh_id] = true
-	_mesh_requested.erase(mesh_id)
 	_mesh_queue.append({ "meshId": mesh_id, "path": glb_path })
 
 
-## Re-invoke handle_object_complete for objects that were waiting for this mesh.
-## Splits by distance: near objects deferred for budgeted drain, far objects parked.
-func _retry_pending_complete(mesh_id: String) -> void:
-	if not _pending_complete_by_mesh.has(mesh_id):
+## Queue a texture load from a disk path (object_render path).
+## If already cached or in-flight, does nothing.
+func queue_texture_load(texture_id: String, tex_path: String) -> void:
+	if texture_id.is_empty() or tex_path.is_empty():
 		return
-	var msgs: Array = _pending_complete_by_mesh[mesh_id]
-	_pending_complete_by_mesh.erase(mesh_id)
-	var dist_sq: float = sm._vis_far * sm._vis_far
-	for msg: Dictionary in msgs:
-		var obj_uuid: String = str(msg.get("uuid", ""))
-		if _is_in_range(obj_uuid, dist_sq):
-			_deferred_mesh_apply.append(msg)
-		else:
-			_deferred_mesh_far.append(msg)
+	if _shutting_down or sm.texture_cache.has(texture_id) or _texture_in_flight.has(texture_id) or sm.texture_load_failed.has(texture_id):
+		return
+	_texture_in_flight[texture_id] = true
+	_texture_queue_lock.lock()
+	_texture_queue.append({ "textureId": texture_id, "path": tex_path })
+	_texture_queue_lock.unlock()
+
+
+## Register an object as waiting for a mesh to become GPU-ready.
+func register_mesh_waiter(mesh_id: String, obj_uuid: String) -> void:
+	if not _waiting_for_mesh.has(mesh_id):
+		_waiting_for_mesh[mesh_id] = []
+	_waiting_for_mesh[mesh_id].append(obj_uuid)
+
+
+## Apply mesh + faces to all objects that were waiting for this mesh.
+func _flush_mesh_waiters(mesh_id: String) -> void:
+	if not _waiting_for_mesh.has(mesh_id):
+		return
+	var uuids: Array = _waiting_for_mesh[mesh_id]
+	_waiting_for_mesh.erase(mesh_id)
+	for obj_uuid: String in uuids:
+		sm.object_mgr._apply_mesh(obj_uuid, mesh_id)
+		sm.object_mgr._apply_faces(obj_uuid)
 
 
 ## Submit queued meshes to WorkerThreadPool (throttled)
@@ -176,23 +165,6 @@ func _submit_mesh_tasks() -> void:
 
 
 # ─── Texture Pipeline ────────────────────────────────
-
-func handle_texture_ready(msg: Dictionary) -> void:
-	var texture_id: String = msg.get("textureId", "")
-	var tex_path: String = msg.get("path", "")
-	if texture_id.is_empty() or tex_path.is_empty():
-		return
-
-	# Skip if shutting down, already cached, in-flight, or previously failed
-	if _shutting_down or sm.texture_cache.has(texture_id) or _texture_in_flight.has(texture_id) or sm.texture_load_failed.has(texture_id):
-		return
-
-	_texture_in_flight[texture_id] = true
-	_tex_requested.erase(texture_id)
-	_texture_queue_lock.lock()
-	_texture_queue.append({ "textureId": texture_id, "path": tex_path })
-	_texture_queue_lock.unlock()
-
 
 ## Start dedicated texture worker threads (called once from start_threads)
 func _start_texture_threads() -> void:
@@ -327,7 +299,6 @@ func _load_bctex(bctex_path: String) -> Image:
 
 
 ## Re-apply face materials for all objects waiting on a newly-cached texture.
-## Splits by distance: near objects go to budgeted drain, far objects parked for sweep.
 func _apply_texture_to_waiting(texture_id: String) -> void:
 	# Apply projection texture to any lights waiting for it
 	sm.light_mgr.apply_pending_proj_texture(texture_id)
@@ -337,47 +308,10 @@ func _apply_texture_to_waiting(texture_id: String) -> void:
 
 	var obj_uuids: Array = _tex_waiting[texture_id]
 	_tex_waiting.erase(texture_id)
-	var dist_sq: float = sm._vis_far * sm._vis_far
 	for obj_uuid: String in obj_uuids:
-		if _is_in_range(obj_uuid, dist_sq):
-			_deferred_tex_apply.append(obj_uuid)
-		else:
-			_deferred_tex_far.append(obj_uuid)
-
-
-func _is_in_range(obj_uuid: String, dist_sq: float) -> bool:
-	var rsi = sm.objects.get(obj_uuid)
-	if rsi == null:
-		return false
-	return rsi.pos.distance_squared_to(_cam_pos) < dist_sq
-
-
-## Sweep far parking lots — promote objects now within range to budgeted drain queues.
-func sweep_deferred_far() -> void:
-	var dist_sq: float = sm._vis_far * sm._vis_far
-	var promoted := 0
-	var remaining_tex: Array = []
-	for obj_uuid: String in _deferred_tex_far:
-		if _is_in_range(obj_uuid, dist_sq):
-			_deferred_tex_apply.append(obj_uuid)
-			promoted += 1
-		else:
-			remaining_tex.append(obj_uuid)
-	_deferred_tex_far = remaining_tex
-
-	var remaining_mesh: Array = []
-	for msg: Dictionary in _deferred_mesh_far:
-		var obj_uuid: String = str(msg.get("uuid", ""))
-		if _is_in_range(obj_uuid, dist_sq):
-			_deferred_mesh_apply.append(msg)
-			promoted += 1
-		else:
-			remaining_mesh.append(msg)
-	_deferred_mesh_far = remaining_mesh
-
-	if promoted > 0:
-		print("[AssetPipeline] Sweep promoted %d objects (far_tex=%d far_mesh=%d)" % [
-			promoted, _deferred_tex_far.size(), _deferred_mesh_far.size()])
+		var rsi = sm.objects.get(obj_uuid)
+		if rsi != null and sm.object_faces.has(obj_uuid):
+			apply_face_materials(rsi, obj_uuid, sm.object_faces[obj_uuid])
 
 
 # ─── Finalization (_process budget) ──────────────────
@@ -453,7 +387,6 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 			if img == null:
 				sm.texture_load_failed[texture_id] = true
 			else:
-				_texture_opaque[texture_id] = (img.get_format() == Image.FORMAT_DXT1)
 				var _t0 := Time.get_ticks_usec()
 				sm.texture_cache[texture_id] = ImageTexture.create_from_image(img)
 				var _t1 := Time.get_ticks_usec()
@@ -482,15 +415,18 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 			_mesh_in_flight.erase(mesh_id)
 			if result.error or result.gltf_state == null:
 				sm.mesh_load_failed[mesh_id] = true
+				print("[VR_DIAG] Mesh FAILED (parse error): %s path=%s" % [mesh_id.left(8), info.get("path", "?")])
 			else:
 				# Extract mesh via ImporterMesh — no Node tree, no queue_free
 				var gltf_meshes: Array = result.gltf_state.get_meshes()
 				if gltf_meshes.is_empty():
 					sm.mesh_load_failed[mesh_id] = true
+					print("[VR_DIAG] Mesh FAILED (no meshes in GLB): %s path=%s" % [mesh_id.left(8), info.get("path", "?")])
 				else:
 					var importer_mesh: ImporterMesh = gltf_meshes[0].mesh
 					if importer_mesh == null:
 						sm.mesh_load_failed[mesh_id] = true
+						print("[VR_DIAG] Mesh FAILED (null ImporterMesh): %s" % mesh_id.left(8))
 					else:
 						var _t0 := Time.get_ticks_usec()
 						var m: Mesh = importer_mesh.get_mesh()
@@ -499,7 +435,7 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 							sm.mesh_load_failed[mesh_id] = true
 						else:
 							sm.mesh_cache[mesh_id] = m
-							_retry_pending_complete(mesh_id)
+							_flush_mesh_waiters(mesh_id)
 							var _t2 := Time.get_ticks_usec()
 							_fin_mesh_extract_ms += (_t1 - _t0) / 1000.0
 							_fin_mesh_apply_ms += (_t2 - _t1) / 1000.0
@@ -507,22 +443,6 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 							_mesh_finalized_count += 1
 		for task_id: int in done_ids:
 			_mesh_tasks.erase(task_id)
-
-	# Drain deferred apply queues (budget-controlled, one item at a time)
-	var apply_budget_ms: float = budget_ms - ((Time.get_ticks_usec() / 1000.0) - start_ms)
-	if apply_budget_ms > 0.0:
-		var apply_start := Time.get_ticks_usec() / 1000.0
-		while _deferred_tex_apply.size() > 0 or _deferred_mesh_apply.size() > 0:
-			if (Time.get_ticks_usec() / 1000.0) - apply_start >= apply_budget_ms:
-				break
-			if _deferred_tex_apply.size() > 0:
-				var obj_uuid: String = _deferred_tex_apply.pop_front()
-				var rsi = sm.objects.get(obj_uuid)
-				if rsi != null and sm.object_faces.has(obj_uuid):
-					apply_face_materials(rsi, obj_uuid, sm.object_faces[obj_uuid])
-			elif _deferred_mesh_apply.size() > 0:
-				var msg: Dictionary = _deferred_mesh_apply.pop_front()
-				sm.object_mgr.handle_object_complete(msg)
 
 	# Track budget stats
 	_budget_samples += 1
@@ -601,13 +521,14 @@ func apply_face_materials(rsi, obj_uuid: String, faces: Array) -> void:
 		# Check if albedo is cached (minimum requirement to apply any material)
 		var albedo_cached: bool = sm.texture_cache.has(texture_id)
 
-		# Hollow prim inner face (SL face 2): draw before outer faces so
-		# alpha blending is back-to-front when viewing through outer shell.
-		var render_pri: int = -1 if face_idx == 2 and color[3] < 1.0 else 0
+		# Electron-computed decisions
+		var render_pri: int = int(fi.get("renderPriority", 0))
+		var resolved_alpha: int = int(fi.get("resolvedAlphaMode", alpha_mode))
+		var mat_key: String = str(fi.get("materialKey", ""))
 		var mat: Material
 		if albedo_cached:
 			mat = _get_or_create_material(
-				texture_id, color, full_bright, double_sided, uv_info, alpha_mode, alpha_cutoff, pbr, mapping_type, render_pri)
+				mat_key, texture_id, color, full_bright, double_sided, uv_info, resolved_alpha, alpha_cutoff, pbr, mapping_type, render_pri)
 		else:
 			mat = _make_placeholder_material(color, full_bright, double_sided)
 		rsi.set_surface_material(face_idx, mat)
@@ -626,9 +547,6 @@ func apply_face_materials(rsi, obj_uuid: String, faces: Array) -> void:
 				# Avoid duplicate entries
 				if obj_uuid not in _tex_waiting[tid]:
 					_tex_waiting[tid].append(obj_uuid)
-				# Re-request if not already in-flight (may have been evicted)
-				if not _texture_in_flight.has(tid):
-					_request_texture(tid)
 
 
 func _get_double_sided_shader(shader: Shader) -> Shader:
@@ -640,38 +558,33 @@ func _get_double_sided_shader(shader: Shader) -> Shader:
 	return ds
 
 
-func _get_or_create_material(texture_id: String, color: Array, full_bright: bool, double_sided: bool, uv_info: Dictionary = {}, alpha_mode: int = 0, alpha_cutoff: float = 0.5, pbr: Dictionary = {}, mapping_type: int = 0, render_priority: int = 0) -> Material:
+func _get_or_create_material(key: String, texture_id: String, color: Array, full_bright: bool, double_sided: bool, uv_info: Dictionary = {}, alpha_mode: int = 0, alpha_cutoff: float = 0.5, pbr: Dictionary = {}, mapping_type: int = 0, render_priority: int = 0) -> Material:
 	_material_lookups += 1
 
-	# Alpha mode: 0=opaque, 1=blend, 2=mask (resolver always provides a resolved value).
-	# Promote blend→opaque when texture is known-opaque (DXT1/BC1, no alpha channel).
-	# This avoids expensive transparent render path for legacy faces without a material.
-	var resolved_mode := alpha_mode
-	if alpha_mode == 1 and color[3] >= 1.0 and _texture_opaque.get(texture_id, false):
-		resolved_mode = 0
+	# Key + resolvedAlphaMode computed by Electron (includes texture opacity promotion)
+	if sm.material_cache.has(key):
+		return sm.material_cache[key]
 
-	# PBR params — everything is PBR-shaped, resolver provides defaults
+	# alpha_mode is already the resolved mode (blend→opaque promotion done by Electron)
+	var resolved_mode := alpha_mode
+
+	# PBR params
 	var normal_id: String = pbr.get("normalTextureId", "")
 	var orm_id: String = pbr.get("ormTextureId", "")
 	var emissive_id: String = pbr.get("emissiveTextureId", "")
 	var metallic_factor: float = float(pbr.get("metallicFactor", 0.0))
 	var roughness_factor: float = float(pbr.get("roughnessFactor", 1.0))
 	var emissive_factor: Array = pbr.get("emissiveFactor", [0, 0, 0])
-	# Only include PBR tex IDs in key if they're actually cached (so key changes on arrival)
-	var norm_key: String = ""
-	if not normal_id.is_empty() and sm.texture_cache.has(normal_id):
-		norm_key = normal_id
-	var orm_key: String = ""
-	if not orm_id.is_empty() and sm.texture_cache.has(orm_id):
-		orm_key = orm_id
-	var emis_key: String = ""
-	if not emissive_id.is_empty() and sm.texture_cache.has(emissive_id):
-		emis_key = emissive_id
 
-	# Build cache key from texture + color + fullbright + doubleSided + UV + alpha + PBR params
-	var color_hex := Color(color[0], color[1], color[2], color[3]).to_html()
-	var fb_str := "1" if full_bright else "0"
-	var ds_str := "1" if double_sided else "0"
+	# PBR texture cache keys (only include IDs of textures that are GPU-ready)
+	var norm_key: String = normal_id if (not normal_id.is_empty() and sm.texture_cache.has(normal_id)) else ""
+	var orm_key: String = orm_id if (not orm_id.is_empty() and sm.texture_cache.has(orm_id)) else ""
+	var emis_key: String = emissive_id if (not emissive_id.is_empty() and sm.texture_cache.has(emissive_id)) else ""
+	# Don't cache materials when referenced PBR textures aren't GPU-ready yet.
+	# _tex_waiting will re-apply when they load, creating the final material.
+	var _cacheable: bool = (norm_key == normal_id or normal_id.is_empty()) and (orm_key == orm_id or orm_id.is_empty()) and (emis_key == emissive_id or emissive_id.is_empty())
+
+	# UV params
 	var ru_val = uv_info.get("repeatU", 1.0)
 	var ru: float = ru_val if ru_val != null else 1.0
 	var rv_val = uv_info.get("repeatV", 1.0)
@@ -682,21 +595,6 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 	var ov: float = ov_val if ov_val != null else 0.0
 	var tr_val = uv_info.get("texRotation", 0.0)
 	var tr: float = tr_val if tr_val != null else 0.0
-	# Round UV params to 2 decimal places — collapses near-duplicates from floating-point
-	# protocol noise (e.g. 1.0001 vs 1.0) into shared materials, cutting material count.
-	var uv_key := "%.2f_%.2f_%.2f_%.2f_%.2f" % [ru, rv, ou, ov, tr]
-	var alpha_key := "%d_%.2f" % [resolved_mode, alpha_cutoff]
-	# Always include PBR params in cache key — resolver always provides them
-	var pbr_key := "_%s_%s_%s_%.2f_%.2f_%.2f_%.2f_%.2f" % [
-		norm_key, orm_key, emis_key,
-		metallic_factor, roughness_factor,
-		emissive_factor[0], emissive_factor[1], emissive_factor[2]]
-	var map_key := "m%d" % mapping_type if mapping_type != 0 else ""
-	var pri_key := "p%d" % render_priority if render_priority != 0 else ""
-	var key := "%s_%s_%s_%s_%s_%s%s%s%s" % [texture_id, color_hex, fb_str, ds_str, uv_key, alpha_key, pbr_key, map_key, pri_key]
-
-	if sm.material_cache.has(key):
-		return sm.material_cache[key]
 
 	# Planar mapping uses a custom ShaderMaterial that implements SL's planarProjection()
 	if mapping_type == 2:
@@ -721,7 +619,8 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 			mat.set_shader_parameter("alpha_scissor_threshold", alpha_cutoff)
 		if render_priority != 0:
 			mat.render_priority = render_priority
-		sm.material_cache[key] = mat
+		if _cacheable:
+			sm.material_cache[key] = mat
 		return mat
 
 	# Texture rotation requires a custom shader (StandardMaterial3D has no rotation property)
@@ -746,7 +645,8 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 			smat.set_shader_parameter("alpha_scissor_threshold", alpha_cutoff)
 		if render_priority != 0:
 			smat.render_priority = render_priority
-		sm.material_cache[key] = smat
+		if _cacheable:
+			sm.material_cache[key] = smat
 		return smat
 
 	var mat := StandardMaterial3D.new()
@@ -814,7 +714,8 @@ func _get_or_create_material(texture_id: String, color: Array, full_bright: bool
 
 	if render_priority != 0:
 		mat.render_priority = render_priority
-	sm.material_cache[key] = mat
+	if _cacheable:
+		sm.material_cache[key] = mat
 	return mat
 
 
@@ -863,7 +764,6 @@ func evict_unused_assets() -> void:
 	for tid: String in sm.texture_cache.keys():
 		if not tex_in_use.has(tid) and not _texture_in_flight.has(tid):
 			sm.texture_cache.erase(tid)
-			_texture_opaque.erase(tid)
 			evicted_tex.append(tid)
 
 	# Evict materials whose albedo texture was evicted (key starts with textureId)
@@ -890,24 +790,6 @@ func evict_unused_assets() -> void:
 	if evicted_tex.size() > 0 or evicted_mesh_count > 0:
 		print("[AssetPipeline] Evicted %d textures (%d materials), %d meshes" % [
 			evicted_tex.size(), sm.material_cache.size(), evicted_mesh_count])
-
-
-## Send texture_request to TS so it re-sends texture_ready from disk cache.
-func _request_texture(texture_id: String) -> void:
-	if _tex_requested.has(texture_id):
-		return
-	_tex_requested[texture_id] = true
-	if sm.send_fn.is_valid():
-		sm.send_fn.call({"type": "texture_request", "textureId": texture_id})
-
-
-## Send mesh_request to TS so it re-sends mesh_ready from disk cache.
-func _request_mesh(mesh_id: String) -> void:
-	if _mesh_requested.has(mesh_id):
-		return
-	_mesh_requested[mesh_id] = true
-	if sm.send_fn.is_valid():
-		sm.send_fn.call({"type": "mesh_request", "meshId": mesh_id})
 
 
 # ─── Stats ───────────────────────────────────────────
@@ -983,7 +865,7 @@ func get_pipeline_stats() -> Dictionary:
 		"meshDone": _mesh_finalized_count,
 		"meshCached": sm.mesh_cache.size(),
 		"meshFailed": sm.mesh_load_failed.size(),
-		"meshPending": _pending_complete_by_mesh.size(),
+		"meshPending": _waiting_for_mesh.size(),
 		"meshFinalize": "%.2f/%.2fms extract/apply (n=%d)" % [avg_mesh_extract, avg_mesh_apply, fin_mesh_n],
 		"budgetElapsed": avg_elapsed,
 		"budgetAvail": avg_budget,

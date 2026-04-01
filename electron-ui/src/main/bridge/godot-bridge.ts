@@ -35,7 +35,7 @@ import { GodotEnvironmentManager } from './godot-environment-manager';
 import { GodotUpdateCoalescer } from './godot-update-coalescer';
 import { GodotInputHandler } from './godot-input-handler';
 import { GodotAnimationManager } from './godot-animation-manager';
-import { GodotFaceUpdateBatcher, resolvedToGodotFace } from './godot-material-pipeline';
+import { GodotFaceUpdateBatcher, resolvedToGodotFace, enrichFaceMaterialKey } from './godot-material-pipeline';
 import { MaterialResolver } from '../materials/material-resolver';
 import { GodotObjectSender } from './godot-object-sender';
 import { GodotAvatarManager } from './godot-avatar-manager';
@@ -151,8 +151,17 @@ export class GodotBridge extends EventEmitter {
     this.materialResolver = new MaterialResolver(bot, this.trackedObjects,
       (objectUuid, faceIndex, material) => {
         const godotFace = resolvedToGodotFace(faceIndex, material);
-        // If object_complete hasn't shipped yet, patch it directly — no race
+        // If object_render hasn't shipped yet, patch face and register PBR texture dependencies
         if (this.readinessTracker?.updatePendingFaces(objectUuid, godotFace)) {
+          // Add PBR textures as new dependencies so the tracker waits for them
+          const newTexIds = new Set<string>();
+          if (material.baseColorTexture) newTexIds.add(material.baseColorTexture);
+          if (material.normalTexture) newTexIds.add(material.normalTexture);
+          if (material.ormTexture) newTexIds.add(material.ormTexture);
+          if (material.emissiveTexture) newTexIds.add(material.emissiveTexture);
+          if (newTexIds.size > 0) {
+            this.readinessTracker.addTextures(objectUuid, newTexIds);
+          }
           return;
         }
         // Already sent — deliver via face update batcher
@@ -347,36 +356,38 @@ export class GodotBridge extends EventEmitter {
     // Preload skeleton/attachment data (async file reads, populates sync caches)
     await initSkeletonData();
 
-    // Init fetch queues
+    // Init fetch queues — onReady stores paths in lookup maps (no longer sends to Godot)
     const meshCacheDir = path.join(app.getPath('userData'), 'asset-cache', 'meshes');
+    /** meshId → { path, isRigged, jointNames, jointOverrides } */
+    const meshMeta = new Map<string, { path: string; isRigged?: boolean; jointNames?: string[]; jointOverrides?: string[] }>();
+    /** textureId → { path, opaque } */
+    const texturePaths = new Map<string, { path: string; opaque: boolean }>();
+    // Wire face update batcher to enrich faces with texture paths + materialKey
+    this.faceUpdateBatcher.textureLookup = (textureId) => texturePaths.get(textureId);
+
     this.meshFetchQueue = new MeshFetchQueue(this.bot, (meshUuid, cachePath, isRigged, jointNames, jointOverrides) => {
       const fwdPath = cachePath.replace(/\\/g, '/');
-      const msg: any = { type: 'mesh_ready', meshId: meshUuid, path: fwdPath };
-      if (isRigged) {
-        msg.isRigged = true;
-        msg.jointNames = jointNames;
-        if (jointOverrides && jointOverrides.length > 0) {
-          msg.jointOverrides = jointOverrides;
-        }
-      }
+      meshMeta.set(meshUuid, { path: fwdPath, isRigged, jointNames, jointOverrides });
       if (jointOverrides && jointOverrides.length > 0) {
         console.log(`[MeshReady] meshId=${meshUuid.slice(0, 8)} jointOverrides=${jointOverrides.length}`);
       }
-      this.send(msg);
     }, meshCacheDir);
 
-    this.textureFetchQueue = new TextureFetchQueue(this.bot, (textureUuid, cachePath) => {
+    this.textureFetchQueue = new TextureFetchQueue(this.bot, (textureUuid, cachePath, opaque) => {
       const fwdPath = cachePath.replace(/\\/g, '/');
-      this.send({ type: 'texture_ready', textureId: textureUuid, path: fwdPath });
+      texturePaths.set(textureUuid, { path: fwdPath, opaque });
     });
 
     this.sculptFetchQueue = new SculptFetchQueue(this.bot, (meshId, cachePath) => {
       const fwdPath = cachePath.replace(/\\/g, '/');
-      this.send({ type: 'mesh_ready', meshId, path: fwdPath });
+      meshMeta.set(meshId, { path: fwdPath });
     }, this.textureFetchQueue.decodePool);
 
     this.materialFetchQueue = new MaterialFetchQueue(this.bot, (materialUuid, data) => {
+      // Step 1: Resolve PBR faces — patches pending objects + adds PBR texture deps
       this.materialResolver.handleMaterialReady(materialUuid, data);
+      // Step 2: Mark material gate resolved — checkAndEmit runs here (after PBR textures are registered)
+      this.readinessTracker?.onMaterialReady(materialUuid);
     });
 
     this.animationFetchQueue = new AnimationFetchQueue(this.bot, (animUuid, data) => {
@@ -386,13 +397,46 @@ export class GodotBridge extends EventEmitter {
     // Create readiness tracker and wire to fetch queue callbacks
     this.readinessTracker = new ObjectReadinessTracker((msg) => this.send(msg));
     const readinessTracker = this.readinessTracker;
+    // Enrich object_render messages with disk paths before sending to Godot
+    readinessTracker.enrichFn = (msg: any) => {
+      if (msg.meshId) {
+        const meta = meshMeta.get(msg.meshId);
+        if (meta) {
+          msg.meshPath = meta.path;
+          if (meta.isRigged) msg.isRigged = true;
+          if (meta.jointNames) msg.jointNames = meta.jointNames;
+          if (meta.jointOverrides && meta.jointOverrides.length > 0) msg.jointOverrides = meta.jointOverrides;
+        }
+      }
+      if (msg.faces) {
+        for (const face of msg.faces) {
+          if (face.textureId) {
+            const tex = texturePaths.get(face.textureId);
+            face.texturePath = tex?.path ?? '';
+            if (tex?.opaque) face.textureOpaque = true;
+          }
+          if (face.normalTextureId) face.normalTexturePath = texturePaths.get(face.normalTextureId)?.path ?? '';
+          if (face.ormTextureId) face.ormTexturePath = texturePaths.get(face.ormTextureId)?.path ?? '';
+          if (face.emissiveTextureId) face.emissiveTexturePath = texturePaths.get(face.emissiveTextureId)?.path ?? '';
+          // Compute material cache key + resolvedAlphaMode now that all texture info is available
+          enrichFaceMaterialKey(face);
+        }
+      }
+    };
     this.meshFetchQueue.onResolved = (uuid) => readinessTracker.onMeshReady(uuid);
     this.meshFetchQueue.onFailed = (uuid) => readinessTracker.onMeshFailed(uuid);
     this.textureFetchQueue.onResolved = (uuid) => readinessTracker.onTextureReady(uuid);
     this.textureFetchQueue.onFailed = (uuid) => readinessTracker.onTextureFailed(uuid);
     this.sculptFetchQueue.onResolved = (uuid) => readinessTracker.onMeshReady(uuid);
     this.sculptFetchQueue.onFailed = (uuid) => readinessTracker.onMeshFailed(uuid);
+    this.materialFetchQueue.onFailed = (uuid) => {
+      this.materialResolver.handleMaterialFailed(uuid);
+      readinessTracker.onMaterialFailed(uuid);
+    };
     this.objectSender.setReadinessTracker(readinessTracker);
+
+    // Wire avatar creation to readiness tracker so attachments wait for their avatar
+    this.avatarManager.onAvatarEmitted = (uuid) => readinessTracker.markEmitted(uuid);
 
     // Wire fetch queues to sub-modules
     this.materialResolver.initQueues(this.materialFetchQueue, this.textureFetchQueue);
@@ -525,12 +569,6 @@ export class GodotBridge extends EventEmitter {
           x: msg.x, y: msg.y,
           width: msg.width, height: msg.height,
         });
-        break;
-      case 'texture_request':
-        this.textureFetchQueue?.renotify(msg.textureId);
-        break;
-      case 'mesh_request':
-        this.meshFetchQueue?.renotify(msg.meshId);
         break;
       case 'quit':
         console.log('[GodotBridge] Godot requested immediate quit');

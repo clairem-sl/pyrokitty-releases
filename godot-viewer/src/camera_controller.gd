@@ -70,6 +70,16 @@ var _last_xr_yaw: float = INF
 const XR_POS_THRESHOLD: float = 0.005   # 5 mm
 const XR_YAW_THRESHOLD: float = 0.001  # ~0.06 degrees
 
+## Return the camera to use for mouse ray projection.
+## In VR the desktop Camera3D isn't current — the XR camera renders to the
+## viewport, so screen-space mouse coordinates must project through it.
+func _pick_camera() -> Camera3D:
+	if vr_mode:
+		var xr_cam := get_viewport().get_camera_3d()
+		if xr_cam:
+			return xr_cam
+	return self
+
 @onready var main_node: Node3D = get_node("/root/Main")
 @onready var scene_manager: Node3D = get_node("../SceneManager")
 
@@ -110,6 +120,7 @@ func _ready() -> void:
 	# Action bar — init deferred so scene_manager is ready
 	if scene_manager:
 		_action_bar = ActionBarScript.new(scene_manager, self, func(msg: Dictionary): main_node.send_message(msg))
+		_action_bar._pick_camera_fn = _pick_camera
 		_action_bar._inspect_fn = func(uuid: String): _inspect_object(uuid)
 
 
@@ -436,8 +447,9 @@ func _input(event: InputEvent) -> void:
 
 
 func _start_alt_orbit(screen_pos: Vector2) -> void:
-	var ray_from := project_ray_origin(screen_pos)
-	var ray_dir := project_ray_normal(screen_pos)
+	var _pc := _pick_camera()
+	var ray_from := _pc.project_ray_origin(screen_pos)
+	var ray_dir := _pc.project_ray_normal(screen_pos)
 	# Try object pick first
 	var hit: Dictionary = scene_manager.pick_object(ray_from, ray_dir) if scene_manager else {}
 	if not hit.is_empty():
@@ -520,10 +532,11 @@ func _is_click_on_self_avatar(screen_pos: Vector2, grow_amount: float = 0.3) -> 
 	var data: Dictionary = scene_manager.get_self_avatar_click_data()
 	if data.is_empty():
 		return false
-	if is_position_behind(data["position"]):
+	var _pc := _pick_camera()
+	if _pc.is_position_behind(data["position"]):
 		return false
-	var ray_from := project_ray_origin(screen_pos)
-	var ray_dir := project_ray_normal(screen_pos)
+	var ray_from := _pc.project_ray_origin(screen_pos)
+	var ray_dir := _pc.project_ray_normal(screen_pos)
 	var inv: Transform3D = (data["transform"] as Transform3D).affine_inverse()
 	var local_from := inv * ray_from
 	var local_dir := (inv.basis * ray_dir).normalized()
@@ -720,7 +733,7 @@ func _inspect_object(obj_uuid: String) -> void:
 	var rsi = scene_manager.objects.get(obj_uuid)
 	var screen_pos := Vector2(200, 200)
 	if rsi != null:
-		screen_pos = unproject_position(rsi.pos)
+		screen_pos = _pick_camera().unproject_position(rsi.pos)
 	_show_debug_tooltip(screen_pos, 0.0, info, faces)
 	main_node.send_message({ "type": "request_object_properties", "uuid": obj_uuid })
 
@@ -728,8 +741,9 @@ func _inspect_object(obj_uuid: String) -> void:
 func _handle_debug_pick(screen_pos: Vector2) -> void:
 	if scene_manager == null:
 		return
-	var ray_from := project_ray_origin(screen_pos)
-	var ray_dir := project_ray_normal(screen_pos)
+	var _pc := _pick_camera()
+	var ray_from := _pc.project_ray_origin(screen_pos)
+	var ray_dir := _pc.project_ray_normal(screen_pos)
 	var hit: Dictionary = scene_manager.pick_object(ray_from, ray_dir)
 	if hit.is_empty():
 		_hide_debug_tooltip()
@@ -754,8 +768,9 @@ func _handle_debug_pick(screen_pos: Vector2) -> void:
 func _handle_touch_pick(screen_pos: Vector2) -> void:
 	if scene_manager == null:
 		return
-	var ray_from := project_ray_origin(screen_pos)
-	var ray_dir := project_ray_normal(screen_pos)
+	var _pc := _pick_camera()
+	var ray_from := _pc.project_ray_origin(screen_pos)
+	var ray_dir := _pc.project_ray_normal(screen_pos)
 	var hit: Dictionary = scene_manager.pick_object_detailed(ray_from, ray_dir)
 	if hit.is_empty():
 		return
@@ -766,8 +781,9 @@ func _handle_touch_pick(screen_pos: Vector2) -> void:
 func _handle_touch_move(screen_pos: Vector2) -> void:
 	if scene_manager == null or not scene_manager.touch_mgr.is_grabbing():
 		return
-	var ray_from := project_ray_origin(screen_pos)
-	var ray_dir := project_ray_normal(screen_pos)
+	var _pc := _pick_camera()
+	var ray_from := _pc.project_ray_origin(screen_pos)
+	var ray_dir := _pc.project_ray_normal(screen_pos)
 	var hit: Dictionary = scene_manager.pick_object_detailed(ray_from, ray_dir)
 	scene_manager.touch_mgr.touch_move(hit)
 
@@ -775,8 +791,9 @@ func _handle_touch_move(screen_pos: Vector2) -> void:
 func _handle_touch_release(screen_pos: Vector2) -> void:
 	if scene_manager == null or not scene_manager.touch_mgr.is_grabbing():
 		return
-	var ray_from := project_ray_origin(screen_pos)
-	var ray_dir := project_ray_normal(screen_pos)
+	var _pc := _pick_camera()
+	var ray_from := _pc.project_ray_origin(screen_pos)
+	var ray_dir := _pc.project_ray_normal(screen_pos)
 	var hit: Dictionary = scene_manager.pick_object_detailed(ray_from, ray_dir)
 	scene_manager.touch_mgr.touch_end(hit)
 

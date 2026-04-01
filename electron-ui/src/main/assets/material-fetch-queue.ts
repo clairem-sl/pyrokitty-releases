@@ -45,6 +45,8 @@ export class MaterialFetchQueue {
   private queue: string[] = [];
   private failed = new Set<string>();
   private destroyed = false;
+  /** Called when a material fetch permanently fails (unblocks readiness tracker). */
+  onFailed?: (materialUuid: string) => void;
 
   constructor(bot: Bot, onReady: MaterialReadyCallback) {
     this.bot = bot;
@@ -94,6 +96,7 @@ export class MaterialFetchQueue {
       if (!buf || buf.length < 20) {
         console.warn(`[MaterialFetchQueue] Skipping ${materialUuid}: too small (${buf?.length ?? 0} bytes)`);
         this.failed.add(materialUuid);
+        this.onFailed?.(materialUuid);
         return;
       }
 
@@ -102,6 +105,7 @@ export class MaterialFetchQueue {
       if (!gltfMat.data) {
         console.warn(`[MaterialFetchQueue] No data in material ${materialUuid}`);
         this.failed.add(materialUuid);
+        this.onFailed?.(materialUuid);
         return;
       }
 
@@ -159,6 +163,7 @@ export class MaterialFetchQueue {
       const msg = err?.message || err?.code || String(err);
       console.error(`[MaterialFetchQueue] Failed ${materialUuid}: ${msg}`);
       this.failed.add(materialUuid);
+      this.onFailed?.(materialUuid);
     }
   }
 

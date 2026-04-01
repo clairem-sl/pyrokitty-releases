@@ -86,11 +86,13 @@ export class GpuCompressQueue {
         dataSize: compressedData.length,
       };
       const bctexBuf = encodeBctex(header, compressedData);
-      await fs.promises.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.promises.writeFile(cachePath, bctexBuf);
+      // Replace .bctex extension with format-specific .bc1.bctex / .bc3.bctex
+      const finalPath = cachePath.replace(/\.bctex$/, hasAlpha ? '.bc3.bctex' : '.bc1.bctex');
+      await fs.promises.mkdir(path.dirname(finalPath), { recursive: true });
+      await fs.promises.writeFile(finalPath, bctexBuf);
 
       const timeMs = performance.now() - startMs;
-      item.resolve({ cachePath, format, mipCount, timeMs });
+      item.resolve({ cachePath: finalPath, format, mipCount, timeMs });
     } catch (err: any) {
       item.reject(err instanceof Error ? err : new Error(String(err)));
     }

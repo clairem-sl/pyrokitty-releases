@@ -49,14 +49,14 @@ visible = false
 [node name="Bg" type="ColorRect" parent="StatsBar"]
 anchors_preset = 10
 anchor_right = 1.0
-offset_bottom = 24
+offset_bottom = 48
 color = Color(0, 0, 0, 0.72)
 
 [node name="Label" type="RichTextLabel" parent="StatsBar"]
 anchors_preset = 10
 anchor_right = 1.0
 offset_left = 6.0
-offset_bottom = 24.0
+offset_bottom = 48.0
 bbcode_enabled = true
 fit_content = true
 scroll_active = false

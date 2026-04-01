@@ -166,10 +166,6 @@ var _vis_fade: float = 32.0
 var send_fn: Callable  # set by main.gd; routes messages back to TS over WebSocket
 var _evict_timer: float = 0.0
 const EVICT_INTERVAL: float = 60.0
-var _sweep_timer: float = 0.0
-var _sweep_last_pos: Vector3 = Vector3.ZERO
-const SWEEP_INTERVAL: float = 3.0
-const SWEEP_MOVE_DIST_SQ: float = 100.0  # 10m squared
 
 
 # Loading fade-in overlay (opaque black → transparent)
@@ -359,19 +355,6 @@ func _process(delta: float) -> void:
 		name_bubble_3d_mgr.process(delta, _bubble_cam)
 	_timing_bubbles_ms += (Time.get_ticks_usec() - _t0) / 1000.0
 
-	# Update camera position for distance-filtered asset apply
-	var _cam := get_viewport().get_camera_3d()
-	if _cam:
-		asset_pipeline._cam_pos = _cam.global_position
-		# Sweep far parking lot: when camera moves OR queues are non-empty (initial load)
-		_sweep_timer += delta
-		if _sweep_timer >= SWEEP_INTERVAL:
-			var _has_far: bool = asset_pipeline._deferred_tex_far.size() > 0 or asset_pipeline._deferred_mesh_far.size() > 0
-			if _has_far or asset_pipeline._cam_pos.distance_squared_to(_sweep_last_pos) > SWEEP_MOVE_DIST_SQ:
-				asset_pipeline.sweep_deferred_far()
-				_sweep_last_pos = asset_pipeline._cam_pos
-			_sweep_timer = 0.0
-
 	# Submit queued mesh work to WorkerThreadPool + finalize textures/meshes
 	_t0 = Time.get_ticks_usec()
 	asset_pipeline.finalize_frame(delta, _vr_mode, _target_frame_ms)
@@ -458,8 +441,8 @@ func handle_region_change() -> void:
 	# Notify animation thread to clear all state
 	animation_mgr.push_region_change()
 
-	# Clear asset pipeline retry queues
-	asset_pipeline._pending_complete_by_mesh.clear()
+	# Clear asset pipeline waiter queues
+	asset_pipeline._waiting_for_mesh.clear()
 	asset_pipeline._tex_waiting.clear()
 
 	# Evict unreferenced assets now that all objects are cleared
@@ -473,11 +456,8 @@ func handle_region_change() -> void:
 
 
 # Objects
-func handle_object_create(msg: Dictionary) -> void:
-	object_mgr.handle_object_create(msg)
-
-func handle_object_complete(msg: Dictionary) -> void:
-	object_mgr.handle_object_complete(msg)
+func handle_object_render(msg: Dictionary) -> void:
+	object_mgr.handle_object_render(msg)
 
 func handle_object_update_batch(msg: Dictionary) -> void:
 	object_mgr.handle_object_update_batch(msg)
@@ -567,13 +547,6 @@ func handle_animations_batch(msg: Dictionary) -> void:
 
 func handle_avatar_shape(msg: Dictionary) -> void:
 	avatar_mgr.handle_avatar_shape(msg)
-
-# Assets
-func handle_mesh_ready(msg: Dictionary) -> void:
-	asset_pipeline.handle_mesh_ready(msg)
-
-func handle_texture_ready(msg: Dictionary) -> void:
-	asset_pipeline.handle_texture_ready(msg)
 
 # Terrain / Environment
 func handle_terrain_ready(msg: Dictionary) -> void:

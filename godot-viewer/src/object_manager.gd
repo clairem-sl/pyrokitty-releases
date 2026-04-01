@@ -142,14 +142,14 @@ func handle_object_create(msg: Dictionary) -> void:
 	if flexi_data is Dictionary:
 		sm.flexi_params[obj_uuid] = flexi_data
 
-	# Phase 1 placeholder — mesh, shape, and faces arrive later via object_complete
-	# Sculpts skip the placeholder box — their real mesh may be a megaprim and the
-	# placeholder box at that scale wrecks the scene until the sculpt mesh loads.
+	# Placeholder box — only for legacy object_create (no mesh/shape data).
+	# object_render messages include mesh/shape, so skip placeholder for those.
 	var is_sculpt: bool = msg.get("sculpt", false)
+	var has_real_mesh: bool = not str(msg.get("meshId", "")).is_empty() or msg.has("shape")
 	var _vfar: float = sm.FrameBudget.VR_CAMERA_FAR if sm._vr_mode else sm._vis_far
 	var _vfade: float = sm.FrameBudget.VR_VISIBILITY_FADE_MARGIN if sm._vr_mode else sm._vis_fade
 	var rsi = sm.RSInstance.new(sm._scenario, _vfar, _vfade)
-	if not is_sculpt:
+	if not is_sculpt and not has_real_mesh:
 		rsi.set_mesh(sm.object_mesh)
 		rsi.set_material_override(sm.object_material)
 
@@ -691,85 +691,128 @@ func _find_node_of_type(node: Node, type_name: String) -> Node:
 	return null
 
 
-# ─── Object Complete (Phase 2) ────────────────────────
+# ─── Object Render (unified single-message path) ─────
 
-## Handle object_complete — applies mesh, shape, and face materials to an existing placeholder.
-## Sent by the readiness tracker once all assets (mesh + textures) are cached on disk.
-func handle_object_complete(msg: Dictionary) -> void:
+## Handle object_render — unified message containing spatial data + mesh + faces + textures.
+## Sent by the readiness tracker once ALL assets (mesh + textures) are cached on disk.
+## Parent ordering guaranteed by Electron: parents always emitted before children.
+func handle_object_render(msg: Dictionary) -> void:
+	# Create RSInstance with position/rotation/scale/linkset/animesh setup
+	handle_object_create(msg)
+
 	var obj_uuid: String = str(msg.get("uuid", ""))
-	var rsi = sm.objects.get(obj_uuid)
-	if rsi == null:
-		return  # killed before completion
+	if obj_uuid.is_empty() or not sm.objects.has(obj_uuid):
+		return
 
-	var mesh_id: String = msg.get("meshId", "")
+	var mesh_id: String = str(msg.get("meshId", ""))
+	var mesh_path: String = str(msg.get("meshPath", ""))
 	var faces: Array = msg.get("faces", [])
 	var shape: Dictionary = msg.get("shape", {})
 
-	# Apply mesh
-	if not mesh_id.is_empty():
-		if sm.mesh_cache.has(mesh_id):
-			var is_rigged: bool = sm.rigged_mesh_paths.has(mesh_id)
-			var will_be_animesh: bool = sm.animesh_root_for.has(obj_uuid)
+	# Queue disk→GPU loads (readiness tracker guarantees files exist on disk)
+	if not mesh_id.is_empty() and not mesh_path.is_empty():
+		sm.asset_pipeline.queue_mesh_load(mesh_id, mesh_path, msg)
+	if msg.has("faces"):
+		for fi: Dictionary in msg.get("faces", []):
+			var tex_id: String = str(fi.get("textureId", ""))
+			var tex_path: String = str(fi.get("texturePath", ""))
+			if not tex_id.is_empty() and not tex_path.is_empty():
+				sm.asset_pipeline.queue_texture_load(tex_id, tex_path)
+			for key: String in ["normalTextureId", "ormTextureId", "emissiveTextureId"]:
+				var pbr_id: String = str(fi.get(key, ""))
+				var pbr_path: String = str(fi.get(key.replace("Id", "Path"), ""))
+				if not pbr_id.is_empty() and not pbr_path.is_empty():
+					sm.asset_pipeline.queue_texture_load(pbr_id, pbr_path)
 
-			if is_rigged and will_be_animesh and not sm.animesh_roots.has(obj_uuid):
-				# Animesh child with rigged mesh: use placeholder — real mesh goes on Skeleton3D
-				pass  # keep existing placeholder mesh
-			elif is_rigged and not sm.animesh_roots.has(obj_uuid) and not will_be_animesh:
-				# Non-animesh rigged: use cached mesh with AABB correction
-				var cached_mesh: Mesh = sm.mesh_cache[mesh_id]
-				rsi.set_mesh(cached_mesh)
-				var aabb: AABB = cached_mesh.get_aabb()
-				if aabb.size.x > 0.001 and aabb.size.y > 0.001 and aabb.size.z > 0.001:
-					rsi.scl_divisor = aabb.size
-					rsi.scl_center = aabb.get_center()
-				rsi.push_transform()
-				sm.object_picker.create_pick_resources(obj_uuid, cached_mesh, mesh_id, rsi)
-			else:
-				rsi.set_mesh(sm.mesh_cache[mesh_id])
-				sm.object_picker.create_pick_resources(obj_uuid, sm.mesh_cache[mesh_id], mesh_id, rsi)
-
-			sm.object_mesh_id[obj_uuid] = mesh_id
-
-			# Animesh rigged mesh instantiation
-			if sm.animesh_root_for.has(obj_uuid) and sm.rigged_mesh_paths.has(mesh_id):
-				var ar_uuid: String = sm.animesh_root_for[obj_uuid]
-				if not sm.animesh_mesh_instances.has(obj_uuid):
-					_instantiate_animesh_mesh(obj_uuid, mesh_id, ar_uuid)
-		else:
-			# mesh_ready hasn't been processed yet — retry when mesh loads
-			if not sm.asset_pipeline._pending_complete_by_mesh.has(mesh_id):
-				sm.asset_pipeline._pending_complete_by_mesh[mesh_id] = []
-			sm.asset_pipeline._pending_complete_by_mesh[mesh_id].append(msg)
-			# Re-request from TS if not in-flight (may have been evicted)
-			if not sm.asset_pipeline._mesh_in_flight.has(mesh_id):
-				sm.asset_pipeline._request_mesh(mesh_id)
-	elif not shape.is_empty():
-		var is_flexi: bool = sm.flexi_params.has(obj_uuid)
-		# Flexi prims need higher tessellation for bone deformation (14 path points, matching Firestorm)
-		var prim_mesh: ArrayMesh = sm.prim_generator.generate_flexi(shape) if is_flexi else sm.prim_generator.get_or_generate(shape)
-		rsi.set_mesh(prim_mesh)
-		sm.object_picker.create_pick_resources(obj_uuid, prim_mesh, "", rsi)
-		if is_flexi:
-			var flexi_root: Node3D = sm.flexi_mgr.CreateFlexi(
-				obj_uuid, sm.flexi_params[obj_uuid], prim_mesh,
-				rsi.pos, rsi.rot, rsi.scl)
-			if flexi_root != null:
-				RenderingServer.instance_set_visible(rsi.rid, false)
-
-	# Apply face materials (textures should be cached) — defer if out of range
-	# For flexi prims, asset_pipeline auto-applies to the MeshInstance3D too.
+	# Store face data — _apply_faces and _tex_waiting callbacks read from here
 	if faces.size() > 0:
 		sm.object_faces[obj_uuid] = faces
-		var dist_sq: float = sm._vis_far * sm._vis_far
-		if sm.asset_pipeline._is_in_range(obj_uuid, dist_sq):
-			sm.asset_pipeline.apply_face_materials(rsi, obj_uuid, faces)
+
+	# Apply mesh (or register for callback when GPU-ready), then faces
+	if not mesh_id.is_empty():
+		sm.object_mesh_id[obj_uuid] = mesh_id
+		if sm.mesh_cache.has(mesh_id):
+			_apply_mesh(obj_uuid, mesh_id)
+			_apply_faces(obj_uuid)
 		else:
-			sm.asset_pipeline._deferred_tex_far.append(obj_uuid)
+			# Mesh is loading disk→GPU — _flush_mesh_waiters will call _apply_mesh + _apply_faces
+			sm.asset_pipeline.register_mesh_waiter(mesh_id, obj_uuid)
+	elif not shape.is_empty():
+		_apply_shape(obj_uuid, shape)
+		_apply_faces(obj_uuid)
+	else:
+		_apply_faces(obj_uuid)
+
+
+# ─── Mesh / Shape / Face Application ────────────────
+
+## Apply a cached GPU mesh to an RSInstance. Handles rigged, animesh, and AABB correction.
+func _apply_mesh(obj_uuid: String, mesh_id: String) -> void:
+	var rsi = sm.objects.get(obj_uuid)
+	if rsi == null:
+		return
+
+	var is_rigged: bool = sm.rigged_mesh_paths.has(mesh_id)
+	var will_be_animesh: bool = sm.animesh_root_for.has(obj_uuid)
+
+	if is_rigged and will_be_animesh and not sm.animesh_roots.has(obj_uuid):
+		# Animesh child with rigged mesh: placeholder stays — real mesh goes on Skeleton3D
+		pass
+	elif is_rigged and not sm.animesh_roots.has(obj_uuid) and not will_be_animesh:
+		# Non-animesh rigged: use cached mesh with AABB correction
+		var cached_mesh: Mesh = sm.mesh_cache[mesh_id]
+		rsi.set_mesh(cached_mesh)
+		var aabb: AABB = cached_mesh.get_aabb()
+		if aabb.size.x > 0.001 and aabb.size.y > 0.001 and aabb.size.z > 0.001:
+			rsi.scl_divisor = aabb.size
+			rsi.scl_center = aabb.get_center()
+		rsi.push_transform()
+		sm.object_picker.create_pick_resources(obj_uuid, cached_mesh, mesh_id, rsi)
+	else:
+		rsi.set_mesh(sm.mesh_cache[mesh_id])
+		sm.object_picker.create_pick_resources(obj_uuid, sm.mesh_cache[mesh_id], mesh_id, rsi)
+
+	sm.object_mesh_id[obj_uuid] = mesh_id
+
+	# Animesh rigged mesh instantiation
+	if sm.animesh_root_for.has(obj_uuid) and sm.rigged_mesh_paths.has(mesh_id):
+		var ar_uuid: String = sm.animesh_root_for[obj_uuid]
+		if not sm.animesh_mesh_instances.has(obj_uuid):
+			_instantiate_animesh_mesh(obj_uuid, mesh_id, ar_uuid)
+
+
+## Generate a procedural prim mesh and apply it.
+func _apply_shape(obj_uuid: String, shape: Dictionary) -> void:
+	var rsi = sm.objects.get(obj_uuid)
+	if rsi == null:
+		return
+	var is_flexi: bool = sm.flexi_params.has(obj_uuid)
+	var prim_mesh: ArrayMesh = sm.prim_generator.generate_flexi(shape) if is_flexi else sm.prim_generator.get_or_generate(shape)
+	rsi.set_mesh(prim_mesh)
+	sm.object_picker.create_pick_resources(obj_uuid, prim_mesh, "", rsi)
+	if is_flexi:
+		var flexi_root: Node3D = sm.flexi_mgr.CreateFlexi(
+			obj_uuid, sm.flexi_params[obj_uuid], prim_mesh,
+			rsi.pos, rsi.rot, rsi.scl)
+		if flexi_root != null:
+			RenderingServer.instance_set_visible(rsi.rid, false)
+
+
+## Apply face materials from sm.object_faces. Textures not yet GPU-ready get placeholders
+## and are registered in _tex_waiting for re-apply when they finish loading.
+func _apply_faces(obj_uuid: String) -> void:
+	var rsi = sm.objects.get(obj_uuid)
+	if rsi == null:
+		return
+	var faces: Array = sm.object_faces.get(obj_uuid, [])
+	if faces.size() > 0:
+		sm.asset_pipeline.apply_face_materials(rsi, obj_uuid, faces)
 
 
 # ─── Face/Material Updates ───────────────────────────
 
-## Handle face updates from material asset fetch (PBR materials resolved after initial object_create)
+## Handle face updates (live texture changes, late PBR material resolution).
+## Face data arrives enriched from Electron with texturePath, materialKey, resolvedAlphaMode.
 func handle_update_faces(msg: Dictionary) -> void:
 	var obj_uuid: String = str(msg.get("uuid", ""))
 	var rsi = sm.objects.get(obj_uuid)
@@ -779,11 +822,22 @@ func handle_update_faces(msg: Dictionary) -> void:
 	if faces.size() == 0:
 		return
 
-	# Merge into existing face data so apply_face_materials picks up PBR updates
+	# Queue texture loads for any new textures in the update
+	for fi: Dictionary in faces:
+		var tex_id: String = str(fi.get("textureId", ""))
+		var tex_path: String = str(fi.get("texturePath", ""))
+		if not tex_id.is_empty() and not tex_path.is_empty():
+			sm.asset_pipeline.queue_texture_load(tex_id, tex_path)
+		for key: String in ["normalTextureId", "ormTextureId", "emissiveTextureId"]:
+			var pbr_id: String = str(fi.get(key, ""))
+			var pbr_path: String = str(fi.get(key.replace("Id", "Path"), ""))
+			if not pbr_id.is_empty() and not pbr_path.is_empty():
+				sm.asset_pipeline.queue_texture_load(pbr_id, pbr_path)
+
+	# Merge into existing face data
 	if not sm.object_faces.has(obj_uuid):
 		sm.object_faces[obj_uuid] = faces
 	else:
-		# Update/add faces by index
 		var existing: Array = sm.object_faces[obj_uuid]
 		for new_face: Dictionary in faces:
 			var idx: int = int(new_face.get("index", -1))
@@ -795,11 +849,7 @@ func handle_update_faces(msg: Dictionary) -> void:
 					break
 			if not found:
 				existing.append(new_face)
-	var dist_sq: float = sm._vis_far * sm._vis_far
-	if sm.asset_pipeline._is_in_range(obj_uuid, dist_sq):
-		sm.asset_pipeline.apply_face_materials(rsi, obj_uuid, sm.object_faces[obj_uuid])
-	else:
-		sm.asset_pipeline._deferred_tex_far.append(obj_uuid)
+	sm.asset_pipeline.apply_face_materials(rsi, obj_uuid, sm.object_faces[obj_uuid])
 
 
 ## Handle batched face updates (multiple objects in one message)
@@ -868,15 +918,13 @@ func _cleanup_object(obj_uuid: String) -> void:
 			animesh_ref.queue_free()
 		sm.erase_animesh_state(obj_uuid)
 
-	# Clean up asset pipeline retry queues
+	# Clean up asset pipeline waiter queues
 	var mid: String = sm.object_mesh_id.get(obj_uuid, "")
-	if not mid.is_empty() and sm.asset_pipeline._pending_complete_by_mesh.has(mid):
-		var msgs: Array = sm.asset_pipeline._pending_complete_by_mesh[mid]
-		msgs = msgs.filter(func(m: Dictionary) -> bool: return str(m.get("uuid", "")) != obj_uuid)
-		if msgs.size() == 0:
-			sm.asset_pipeline._pending_complete_by_mesh.erase(mid)
-		else:
-			sm.asset_pipeline._pending_complete_by_mesh[mid] = msgs
+	if not mid.is_empty() and sm.asset_pipeline._waiting_for_mesh.has(mid):
+		var uuids: Array = sm.asset_pipeline._waiting_for_mesh[mid]
+		uuids.erase(obj_uuid)
+		if uuids.size() == 0:
+			sm.asset_pipeline._waiting_for_mesh.erase(mid)
 	# Remove from texture waiting lists
 	for tid: String in sm.asset_pipeline._tex_waiting.keys():
 		sm.asset_pipeline._tex_waiting[tid].erase(obj_uuid)

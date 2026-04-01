@@ -25,13 +25,22 @@ const BAKE_CHANNEL_URL_NAMES = [
   'leftarm', 'leftleg', 'aux1', 'aux2', 'aux3',
 ];
 
-export type TextureReadyCallback = (textureUuid: string, cachePath: string) => void;
+export type TextureReadyCallback = (textureUuid: string, cachePath: string, opaque: boolean) => void;
 
 function getCacheDir(): string {
   return path.join(app.getPath('userData'), 'asset-cache', 'textures');
 }
 
-const EXT_PRIORITY: readonly string[] = ['.bctex', '.webp', '.png'];
+/** Recognized cache extensions in priority order (first match wins). */
+const EXT_PRIORITY: readonly string[] = ['.bc1.bctex', '.bc3.bctex', '.webp', '.png'];
+
+/** Extract the full compound extension (.bc1.bctex, .bc3.bctex, .webp, .png) from a filename. */
+function getCacheExt(filename: string): string | null {
+  for (const ext of EXT_PRIORITY) {
+    if (filename.endsWith(ext)) return ext;
+  }
+  return null;
+}
 
 const cachedTextures = new Map<string, string>();
 
@@ -45,13 +54,12 @@ export async function initTextureCache(): Promise<void> {
     entries = [];
   }
   for (const entry of entries) {
-    const ext = path.extname(entry);
-    if (ext === '.bctex' || ext === '.webp' || ext === '.png') {
-      const uuid = path.basename(entry, ext);
-      const existing = cachedTextures.get(uuid);
-      if (!existing || EXT_PRIORITY.indexOf(ext) < EXT_PRIORITY.indexOf(existing)) {
-        cachedTextures.set(uuid, ext);
-      }
+    const ext = getCacheExt(entry);
+    if (!ext) continue;
+    const uuid = entry.slice(0, entry.length - ext.length);
+    const existing = cachedTextures.get(uuid);
+    if (!existing || EXT_PRIORITY.indexOf(ext) < EXT_PRIORITY.indexOf(existing)) {
+      cachedTextures.set(uuid, ext);
     }
   }
 }
@@ -63,7 +71,12 @@ function recordCached(uuid: string, ext: string): void {
   }
 }
 
-/** Primary cache path — .bctex if GPU available, else .webp */
+/** Whether a cached texture extension indicates an opaque (BC1) texture. */
+function isExtOpaque(ext: string): boolean {
+  return ext === '.bc1.bctex';
+}
+
+/** Base cache path — gpu-compress-queue replaces .bctex with .bc1.bctex/.bc3.bctex */
 export function textureCachePath(textureUuid: string): string {
   return path.join(getCacheDir(), `${textureUuid}.bctex`);
 }
@@ -136,7 +149,8 @@ export class TextureFetchQueue {
     // On disk but Godot doesn't know yet — notify once
     if (isTextureCached(textureUuid)) {
       this.notified.add(textureUuid);
-      this.onReady(textureUuid, resolvedCachePath(textureUuid));
+      const ext = cachedTextures.get(textureUuid) || '';
+      this.onReady(textureUuid, resolvedCachePath(textureUuid), isExtOpaque(ext));
       this.onResolved?.(textureUuid);
       return;
     }
@@ -160,7 +174,8 @@ export class TextureFetchQueue {
 
     if (isTextureCached(textureUuid)) {
       this.notified.add(textureUuid);
-      this.onReady(textureUuid, resolvedCachePath(textureUuid));
+      const ext = cachedTextures.get(textureUuid) || '';
+      this.onReady(textureUuid, resolvedCachePath(textureUuid), isExtOpaque(ext));
       this.onResolved?.(textureUuid);
       return;
     }
@@ -228,14 +243,15 @@ export class TextureFetchQueue {
       if (gpuCompressionAvailable()) {
         try {
           const raw = await this.decodePool.decodeRaw(j2cBuf);
-          const cachePath = textureCachePath(textureUuid); // .bctex
-          await this.gpuQueue.compress(raw.rgbaPixels, raw.width, raw.height, cachePath);
-          recordCached(textureUuid, '.bctex');
+          const basePath = textureCachePath(textureUuid); // .bctex — gpu-compress replaces ext
+          const result = await this.gpuQueue.compress(raw.rgbaPixels, raw.width, raw.height, basePath);
+          const ext = getCacheExt(path.basename(result.cachePath)) || '.bc3.bctex';
+          recordCached(textureUuid, ext);
           this._gpuCompressCount++;
 
           if (!this.destroyed) {
             this.notified.add(textureUuid);
-            this.onReady(textureUuid, cachePath);
+            this.onReady(textureUuid, result.cachePath, isExtOpaque(ext));
             this.onResolved?.(textureUuid);
           }
           return;
@@ -255,7 +271,7 @@ export class TextureFetchQueue {
 
       if (!this.destroyed) {
         this.notified.add(textureUuid);
-        this.onReady(textureUuid, cachePath);
+        this.onReady(textureUuid, cachePath, false); // WebP/PNG — assume has alpha
         this.onResolved?.(textureUuid);
       }
     } catch (err: any) {

@@ -21,6 +21,8 @@ export class GodotAvatarManager {
   private avatarAttachSubs = new Map<string, Subscription>();
   private objectSender!: GodotObjectSender;
   private connected = false;
+  /** Called after avatar_create is sent — used to mark avatar as emitted in readiness tracker. */
+  onAvatarEmitted?: (avatarUuid: string) => void;
 
   // BoM state: avatarUuid → array of 11 baked texture UUIDs (index = channel)
   private avatarBakedTextures = new Map<string, string[]>();
@@ -276,6 +278,7 @@ export class GodotAvatarManager {
       parentUuid,
     });
     this.trackedAvatars.add(id);
+    if (this.onAvatarEmitted) this.onAvatarEmitted(id);
     if (localId === 0) {
       // Avatar known from agent list but no ObjectUpdate yet (distant avatar).
       // Mark as tracked to prevent redundant re-creates, but add to deferred set
