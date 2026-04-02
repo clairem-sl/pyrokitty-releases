@@ -653,6 +653,7 @@ func _get_or_create_material(key: String, texture_id: String, color: Array, full
 			mat.render_priority = render_priority
 		if _cacheable:
 			sm.material_cache[full_key] = mat
+		sm.apply_debug_highlight_if_needed(mat)
 		return mat
 
 	# Texture rotation requires a custom shader (StandardMaterial3D has no rotation property)
@@ -679,6 +680,7 @@ func _get_or_create_material(key: String, texture_id: String, color: Array, full
 			smat.render_priority = render_priority
 		if _cacheable:
 			sm.material_cache[full_key] = smat
+		sm.apply_debug_highlight_if_needed(smat)
 		return smat
 
 	var mat := StandardMaterial3D.new()
@@ -755,6 +757,7 @@ func _get_or_create_material(key: String, texture_id: String, color: Array, full
 		mat.render_priority = render_priority
 	if _cacheable:
 		sm.material_cache[full_key] = mat
+	sm.apply_debug_highlight_if_needed(mat)
 	return mat
 
 

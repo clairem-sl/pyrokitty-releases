@@ -15,7 +15,6 @@ var ws_port: int = 9200
 @onready var _stats_label: RichTextLabel = $StatsBar/Label
 var _planar_debug_mode: int = 0
 var _stats_update_timer: float = 0.0
-var _stats_send_timer: float = 0.0  # send pipeline_stats to Electron every 5s
 var _electron_stats: Dictionary = {}  # latest electron_stats from bridge
 
 # Low-priority message backlog — object_create / mesh_ready / texture_ready etc.
@@ -176,6 +175,8 @@ func _ready() -> void:
 		# and thin-geometry sparkle (leaves, wires, fences) across frames.
 		get_viewport().use_taa = true
 		get_viewport().screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
+		# GPU frame time measurement is toggled with the stats bar (Ctrl+Shift+1)
+		RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), _stats_bar.visible)
 
 	tcp_server = TCPServer.new()
 	var err := tcp_server.listen(ws_port, "127.0.0.1")
@@ -194,15 +195,6 @@ func _process(_delta: float) -> void:
 	if _stats_update_timer >= 1.0:
 		_stats_update_timer = 0.0
 		_update_stats_bar()
-	# Send pipeline_stats to Electron every 5s
-	_stats_send_timer += _delta
-	if _stats_send_timer >= 5.0:
-		_stats_send_timer = 0.0
-		if ws_peer and ws_peer.get_ready_state() == WebSocketPeer.STATE_OPEN:
-			var stats: Dictionary = scene_manager.get_pipeline_stats()
-			stats["type"] = "pipeline_stats"
-			stats["fps"] = Engine.get_frames_per_second()
-			send_message(stats)
 
 	# Report window bounds changes (debounced, every 0.5s max)
 	_window_bounds_timer += _delta
@@ -340,6 +332,11 @@ func _update_stats_bar() -> void:
 	const C_WHITE := "color=#dddddd"   # labels
 	const C_CYAN := "color=#66dddd"    # counts
 
+	# GPU/render timing (read regardless of stats bar visibility for console log)
+	var vp_rid := get_viewport().get_viewport_rid()
+	var gpu_ms: float = RenderingServer.viewport_get_measured_render_time_gpu(vp_rid)
+	var render_cpu_ms: float = RenderingServer.viewport_get_measured_render_time_cpu(vp_rid)
+
 	# Update on-screen label (BBCode)
 	if _stats_bar.visible:
 		var bb := ""
@@ -405,6 +402,8 @@ func _update_stats_bar() -> void:
 			bb += "[%s]MsgQ:[/color] [%s]%d[/color]" % [C_WHITE, C_YELLOW, msg_q]
 		bb += "\n"
 		# Per-subsystem timing
+		bb += "[%s]GPU:[/color] [%s]%.1fms[/color]  " % [C_WHITE, C_CYAN, gpu_ms]
+		bb += "[%s]RenderCPU:[/color] [%s]%.1fms[/color]  " % [C_WHITE, C_CYAN, render_cpu_ms]
 		bb += "[%s]CPU:[/color] " % C_WHITE
 		bb += "[%s]%.1fms[/color]  " % [C_CYAN, t_total]
 		bb += "[%s]terrain=[/color][%s]%.2f[/color] " % [C_WHITE, C_CYAN, t_terrain]
@@ -421,8 +420,8 @@ func _update_stats_bar() -> void:
 	var mesh_fail_str := ("  %d FAILED" % mesh_failed) if mesh_failed > 0 else ""
 	var e_tex_fail_str := ("  %d FAIL" % e_tex_fail) if e_tex_fail > 0 else ""
 	var e_mesh_fail_str := ("  %d FAIL" % e_mesh_fail) if e_mesh_fail > 0 else ""
-	print("[Stats] FPS: %.0f | Obj: %d Av: %d Lights: %d/%d Mat: %d | VRAM: tex=%.1fMB buf=%.1fMB | Tex: %d cached %d decoding %d placeholder%s [eDL:%d q:%d dec:%d gpu:%d done:%d%s] | Mesh: %d cached %d decoding %d pending%s [eDL:%d q:%d sculpt:%d done:%d%s] | Def: %d MsgQ: %d | CPU: %.1fms [terrain=%.2f interp=%.2f(%da+%do) anim=%.2f(%d) flexi=%.2f bubbles=%.2f final=%.2f]" % [
-		fps, obj_count, avatar_count, lights_active, lights_total, mat_count,
+	print("[Stats] FPS: %.0f | GPU: %.1fms RenderCPU: %.1fms | Obj: %d Av: %d Lights: %d/%d Mat: %d | VRAM: tex=%.1fMB buf=%.1fMB | Tex: %d cached %d decoding %d placeholder%s [eDL:%d q:%d dec:%d gpu:%d done:%d%s] | Mesh: %d cached %d decoding %d pending%s [eDL:%d q:%d sculpt:%d done:%d%s] | Def: %d MsgQ: %d | CPU: %.1fms [terrain=%.2f interp=%.2f(%da+%do) anim=%.2f(%d) flexi=%.2f bubbles=%.2f final=%.2f]" % [
+		fps, gpu_ms, render_cpu_ms, obj_count, avatar_count, lights_active, lights_total, mat_count,
 		tex_mem / 1048576.0, buf_mem / 1048576.0,
 		tex_cached, tex_loading, tex_waiting, tex_fail_str,
 		e_tex_dl, e_tex_q, e_tex_dec, e_tex_gpu, e_tex_done, e_tex_fail_str,
@@ -523,6 +522,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			scene_manager.set_planar_debug_mode(_planar_debug_mode)
 		elif event.keycode == KEY_1 and event.ctrl_pressed and event.shift_pressed:
 			_stats_bar.visible = not _stats_bar.visible
+			RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), _stats_bar.visible)
 			scene_manager.toggle_debug_skeleton()
 		elif event.keycode == KEY_F10:
 			scene_manager.toggle_pick_debug()

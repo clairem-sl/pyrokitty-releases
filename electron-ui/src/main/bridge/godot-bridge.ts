@@ -131,7 +131,6 @@ export class GodotBridge extends EventEmitter {
   private sendTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Stats
-  private lastGodotStats: any = null;
   private killSweepTimer: ReturnType<typeof setInterval> | null = null;
   private electronStatsCounter = 0;
 
@@ -453,14 +452,14 @@ export class GodotBridge extends EventEmitter {
       send: (msg) => this.send(msg),
       trySendObject: (obj) => {
         const parentLocalId = obj.ParentID || 0;
-        let parentUuid = '';
         if (parentLocalId > 0) {
           try {
             const parentObj = obj.region?.objects?.getObjectByLocalID(parentLocalId);
-            parentUuid = parentObj?.FullID?.toString() || '';
+            const parentUuid = parentObj?.FullID?.toString() || '';
+            this.objectSender.sendObject(obj, parentUuid);
           } catch { /* parent may not be in store */ }
         }
-        this.objectSender.sendObject(obj, parentUuid);
+        
       },
       resendObject: (obj) => {
         const objUuid = obj.FullID?.toString() || '';
@@ -472,6 +471,7 @@ export class GodotBridge extends EventEmitter {
             const parentObj = obj.region?.objects?.getObjectByLocalID(parentLocalId);
             parentUuid = parentObj?.FullID?.toString() || '';
           } catch { /* parent may not be in store */ }
+          if (!parentUuid) return; // parent not in store — skip resend
         }
         // Untrack so sendObject doesn't skip it, then re-send
         this.trackedObjects.delete(objUuid);
@@ -529,7 +529,6 @@ export class GodotBridge extends EventEmitter {
         this.inputHandler.handleCameraUpdate(msg);
         break;
       case 'pipeline_stats':
-        this.lastGodotStats = msg;
         break;
       case 'request_object_properties':
         this.inputHandler.handleRequestObjectProperties(msg.uuid);
@@ -753,6 +752,13 @@ export class GodotBridge extends EventEmitter {
           const parentObj = obj.region?.objects?.getObjectByLocalID(parentLocalId);
           parentUuid = parentObj?.FullID?.toString() || '';
         } catch { /* parent may not be in store */ }
+        if (!parentUuid) {
+          // Parent not in object store yet — skip child. When the parent's ObjectUpdate
+          // arrives, getObjectsByParent() will find this child and send it with correct parentUuid.
+          const childUuid = obj.FullID?.toString() || '';
+          console.log(`[GodotBridge] Child ${childUuid.slice(0, 8)} skipped — parent localId=${parentLocalId} not yet in store`);
+          return;
+        }
       }
       this.objectSender.sendObject(obj, parentUuid);
 
@@ -898,11 +904,7 @@ export class GodotBridge extends EventEmitter {
     let objStoreSize: string | number = '?';
     try { objStoreSize = this.bot.currentRegion?.objects?.getNumberOfObjects?.() ?? '?'; } catch { /* bot disconnected */ }
     const tq = this.textureFetchQueue;
-    const gs = this.lastGodotStats;
-    const godotStr = gs
-      ? ` | godot(${gs.fps?.toFixed(0) ?? '?'}fps budget:${gs.budgetElapsed?.toFixed(1) ?? '?'}/${gs.budgetAvail?.toFixed(1) ?? '?'}/${gs.budgetUsed?.toFixed(1) ?? '?'}ms el/av/us): tex: w=${gs.texWorkers}(${gs.texReady ?? '?'}rdy) q=${gs.texQueue} done=${gs.texDone} cached=${gs.texCached} fail=${gs.texFailed} pending=${gs.texPending} [${gs.texTiming ?? '?'}] | mesh: w=${gs.meshWorkers}(${gs.meshReady ?? '?'}rdy) q=${gs.meshQueue} done=${gs.meshDone} cached=${gs.meshCached} fail=${gs.meshFailed} pending=${gs.meshPending} | mats=${gs.materials}(${gs.materialReuse ?? '?'}reuse) opaque=${gs.texOpaque ?? '?'}`
-      : '';
-    console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: w=${tq?.decodePool?.workerCount ?? '?'} q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | pbr: ${this.materialResolver.totalPbrFaceCount} faces | deferred: ${this.objectSender.deferredCount} pending: ${this.objectSender.readinessPendingCount}${godotStr}`);
+    console.log(`[GodotBridge] Memory: rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ext=${mb(mem.external)}MB | objects=${objStoreSize} tracked=${this.trackedObjects.size} | tex: q=${tq?.queueDepth ?? '?'} active=${tq?.activeCount ?? '?'} done=${tq?.notifiedCount ?? '?'} fail=${tq?.failedCount ?? '?'} gpu=${tq?.gpuCompressCount ?? '?'}/${tq?.webpFallbackCount ?? '?'}wp decode: w=${tq?.decodePool?.workerCount ?? '?'} q=${tq?.decodePool?.queueDepth ?? '?'} active=${tq?.decodePool?.activeCount ?? '?'} gpuq: q=${tq?.gpuQueueDepth ?? '?'} active=${tq?.gpuQueueActive ?? '?'} | pbr: ${this.materialResolver.totalPbrFaceCount} faces | deferred: ${this.objectSender.deferredCount} pending: ${this.objectSender.readinessPendingCount}`);
   }
 
   /** Send electron-side fetch queue stats to Godot for the stats bar */

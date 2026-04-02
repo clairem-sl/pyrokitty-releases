@@ -20,6 +20,7 @@ const NameBubbleManagerScript = preload("res://src/name_bubble_manager.gd")
 const NameBubble3DManagerScript = preload("res://src/name_bubble_3d_manager.gd")
 const FlexiPrimManagerScript = preload("res://src/FlexiPrimManager.cs")
 const TouchManagerScript = preload("res://src/touch_manager.gd")
+const DebugInvisibleShader = preload("res://src/debug_invisible_highlight.gdshader")
 
 signal self_avatar_moved(pos: Vector3)
 signal object_properties_received(uuid: String, name: String, description: String)
@@ -79,6 +80,7 @@ var objects: Dictionary = {}   # uuid (String) -> RSInstance
 var avatars: Dictionary = {}   # avatarId (String) -> RSInstance
 var self_avatar_id: String = ""
 var debug_mode: bool = false   # toggled by CTRL+SHIFT+1 — enables visual debug overlays
+var _debug_invisible_mat: ShaderMaterial  # lazily created red overlay for invisible faces
 var self_avatar_target_rot: Quaternion = Quaternion.IDENTITY  # target yaw, damped in interpolation
 
 # World origin — set at login, updated on teleport. All positions relative to this.
@@ -585,6 +587,47 @@ func set_planar_debug_mode(mode: int) -> void:
 func toggle_debug_skeleton() -> void:
 	debug_mode = not debug_mode
 	animation_mgr.toggle_debug_skeleton()
+	_toggle_debug_invisible()
+
+func _toggle_debug_invisible() -> void:
+	if debug_mode:
+		if _debug_invisible_mat == null:
+			_debug_invisible_mat = ShaderMaterial.new()
+			_debug_invisible_mat.shader = DebugInvisibleShader
+		for key: String in material_cache:
+			var mat: Material = material_cache[key]
+			if _is_invisible_material(mat):
+				mat.next_pass = _debug_invisible_mat
+	else:
+		for key: String in material_cache:
+			var mat: Material = material_cache[key]
+			if mat.next_pass == _debug_invisible_mat:
+				mat.next_pass = null
+
+func _is_invisible_material(mat: Material) -> bool:
+	if mat is StandardMaterial3D:
+		var smat := mat as StandardMaterial3D
+		if smat.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR and smat.alpha_scissor_threshold >= 0.99:
+			return true
+		if smat.albedo_color.a < 0.1:
+			return true
+	elif mat is ShaderMaterial:
+		var smat := mat as ShaderMaterial
+		var color = smat.get_shader_parameter("albedo_color")
+		if color is Color and color.a < 0.1:
+			return true
+		var threshold = smat.get_shader_parameter("alpha_scissor_threshold")
+		if threshold is float and threshold >= 0.99:
+			return true
+	return false
+
+## Called by asset_pipeline when a new material is created while debug mode is on.
+func apply_debug_highlight_if_needed(mat: Material) -> void:
+	if debug_mode and _is_invisible_material(mat):
+		if _debug_invisible_mat == null:
+			_debug_invisible_mat = ShaderMaterial.new()
+			_debug_invisible_mat.shader = DebugInvisibleShader
+		mat.next_pass = _debug_invisible_mat
 
 func toggle_pick_debug() -> void:
 	object_picker.toggle_pick_debug()
