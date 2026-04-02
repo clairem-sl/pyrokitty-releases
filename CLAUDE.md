@@ -11,10 +11,10 @@ cd godot-viewer && for s in tests/test_*.tscn; do ./Godot_v4.7-dev2_mono_win64/G
 Test run with window:
 ```bash
 # Using saved account (first account in accounts.json)
-cd /c/DeeDrive/dev/phoenix-firestorm/electron-ui && AUTO_LOGIN=1 npm start &>/dev/null
+cd electron-ui && AUTO_LOGIN=1 npm start &>/dev/null
 
 # Using CLI credentials (--grid defaults to first configured grid)
-cd /c/DeeDrive/dev/phoenix-firestorm/electron-ui && npm start -- --login FirstName LastName password [--grid agni]
+cd electron-ui && npm start -- --login FirstName LastName password [--grid agni]
 ```
 
 ## Building Firestorm (Windows)
@@ -36,7 +36,7 @@ cd firestorm/build-vc170-64 && SKIP_NSIS=1 SKIP_SYMBOLS=1 bash -c 'source ../scr
 Build errors are also written to: `firestorm/build-vc170-64/logs/FirestormBuild_win-64.err`
 
 PDB output: `firestorm/build-vc170-64/newview/Release/firestorm-bin.pdb`
-WER crash dumps: `C:\Users\callcolor\AppData\Local\CrashDumps\`
+WER crash dumps: `%LOCALAPPDATA%\CrashDumps\`
 
 
 ## Compile node-metaverse
@@ -73,9 +73,9 @@ See `docs/avatar-rendering.md` for skeleton architecture, animation system, shap
 
 ## Logs
 
-- **Firestorm Viewer**: `C:\Users\callcolor\AppData\Roaming\PyroKitty_x64\logs\PyroKitty.log`
-- **Godot Viewer**: `C:\Users\callcolor\AppData\Roaming\pyrokitty-ui\pyrokitty.log`
-- **Electron main process + voice sidecar**: `C:\Users\callcolor\AppData\Roaming\pyrokitty-ui\pyrokitty.log` (tee'd from console.log/warn/error; voice lines prefixed `[VoiceSidecar]`)
+- **Firestorm Viewer**: `%APPDATA%\PyroKitty_x64\logs\PyroKitty.log`
+- **Godot Viewer**: `%APPDATA%\pyrokitty-ui\pyrokitty.log`
+- **Electron main process + voice sidecar**: `%APPDATA%\pyrokitty-ui\pyrokitty.log` (tee'd from console.log/warn/error; voice lines prefixed `[VoiceSidecar]`)
 
 ## Voice Sidecar
 
@@ -94,7 +94,7 @@ Fork: `wasm-openjpeg` → `https://github.com/pyrokitty64/openjpeg`
 Rebuild WASM (requires podman, uses Emscripten container):
 
 ```bash
-cd C:/DeeDrive/dev/phoenix-firestorm/wasm-openjpeg
+cd wasm-openjpeg
 rm -rf build
 MSYS_NO_PATHCONV=1 podman run --rm -v "$(cygpath -w $(pwd)):/openjpegjs" -w /openjpegjs openjpegjsbuild bash -c "scripts/wasm-build.sh"
 ```
@@ -102,8 +102,8 @@ MSYS_NO_PATHCONV=1 podman run --rm -v "$(cygpath -w $(pwd)):/openjpegjs" -w /ope
 Then rebuild the npm package and reinstall:
 
 ```bash
-cd C:/DeeDrive/dev/phoenix-firestorm/wasm-openjpeg/packages/2.5.4-decoder && npm run build
-cd C:/DeeDrive/dev/phoenix-firestorm/electron-ui && npm install @abasb75/jpeg2000-decoder
+cd wasm-openjpeg/packages/2.5.4-decoder && npm run build
+cd electron-ui && npm install @abasb75/jpeg2000-decoder
 ```
 
 **Gotchas:**

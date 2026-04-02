@@ -57,9 +57,18 @@ function colorHex(c: number[]): string {
  *   face.materialKey — cache key for Godot's material_cache
  *   face.resolvedAlphaMode — alpha mode after blend→opaque promotion
  */
-export function enrichFaceMaterialKey(face: any): void {
-  const texId: string = face.textureId ?? '';
+export function enrichFaceMaterialKey(face: any, isAttachment: boolean = false): void {
   const color: number[] = face.color ?? [1, 1, 1, 1];
+
+  // Fully transparent faces have no visual contribution — share one invisible material.
+  if (color[3] <= 0) {
+    face.materialKey = '__invisible';
+    face.resolvedAlphaMode = 2;   // mask
+    face.alphaCutoff = 1.0;       // cutoff=1.0 → every fragment discarded
+    return;
+  }
+
+  const texId: string = face.textureId ?? '';
   const opaque: boolean = face.textureOpaque ?? false;
   const alphaMode: number = face.alphaMode ?? 0;
 
@@ -88,7 +97,8 @@ export function enrichFaceMaterialKey(face: any): void {
   const renderPri: number = face.renderPriority ?? 0;
   const pri = renderPri !== 0 ? `p${renderPri}` : '';
 
-  face.materialKey = `${texId}_${ch}_${fb}_${ds}_${uv}_${alpha}${pbr}${map}${pri}`;
+  const ah = isAttachment ? '_ah' : '';
+  face.materialKey = `${texId}_${ch}_${fb}_${ds}_${uv}_${alpha}${pbr}${map}${pri}${ah}`;
 }
 
 /** Texture path + opacity lookup, set by godot-bridge after construction. */
@@ -102,6 +112,8 @@ export class GodotFaceUpdateBatcher {
 
   /** Set by godot-bridge — looks up texture disk path + opacity from the texturePaths map. */
   textureLookup?: TexturePathLookup;
+  /** Set by godot-bridge — checks if an object UUID is an attachment (for material key suffix). */
+  isAttachment?: (uuid: string) => boolean;
 
   constructor(private send: SendFn) {}
 
@@ -128,7 +140,7 @@ export class GodotFaceUpdateBatcher {
 
   /** Enrich a face with texture paths, opacity, and materialKey.
    *  Returns true if all textures are available. */
-  private enrichFace(face: any): boolean {
+  private enrichFace(face: any, isAtt: boolean = false): boolean {
     const lookup = this.textureLookup;
     if (!lookup) return true; // no lookup = pass through (shouldn't happen)
 
@@ -154,7 +166,7 @@ export class GodotFaceUpdateBatcher {
       }
     }
     if (allReady) {
-      enrichFaceMaterialKey(face);
+      enrichFaceMaterialKey(face, isAtt);
     }
     return allReady;
   }
@@ -167,9 +179,10 @@ export class GodotFaceUpdateBatcher {
     const deferred = new Map<string, any[]>();
 
     for (const [uuid, faces] of this.faceUpdateBuffer) {
+      const isAtt = this.isAttachment?.(uuid) ?? false;
       let allReady = true;
       for (const face of faces) {
-        if (!this.enrichFace(face)) {
+        if (!this.enrichFace(face, isAtt)) {
           allReady = false;
         }
       }

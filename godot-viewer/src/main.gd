@@ -71,7 +71,7 @@ func _ready() -> void:
 	if _breadcrumb_file:
 		_breadcrumb_file.store_string("Godot started at %s\n" % Time.get_datetime_string_from_system())
 		_breadcrumb_file.flush()
-		print("[Main] Crash breadcrumb: %s" % _breadcrumb_path)
+		DebugLog.log("main", "Crash breadcrumb: %s" % _breadcrumb_path)
 
 	# Parse command-line args
 	var args := OS.get_cmdline_user_args()
@@ -112,13 +112,13 @@ func _ready() -> void:
 			# rapidly cycling valid/invalid — the symptom of the Godot 4.6
 			# OpenXR 1.1 / Meta runtime incompatibility (issue #114987).
 			if xr_interface.has_signal("session_begun"):
-				xr_interface.session_begun.connect(func(): print("[XR] session_begun"))
+				xr_interface.session_begun.connect(func(): DebugLog.log("xr", "session_begun"))
 			if xr_interface.has_signal("session_stopping"):
-				xr_interface.session_stopping.connect(func(): print("[XR] session_stopping"))
+				xr_interface.session_stopping.connect(func(): DebugLog.log("xr", "session_stopping"))
 			if xr_interface.has_signal("session_focused"):
-				xr_interface.session_focused.connect(func(): print("[XR] session_focused"))
+				xr_interface.session_focused.connect(func(): DebugLog.log("xr", "session_focused"))
 			if xr_interface.has_signal("session_visible"):
-				xr_interface.session_visible.connect(func(): print("[XR] session_visible"))
+				xr_interface.session_visible.connect(func(): DebugLog.log("xr", "session_visible"))
 			_vr_mode = true
 			# Disable vsync so OpenXR controls frame pacing via xrEndFrame().
 			# With vsync on, Godot blocks waiting for the monitor flip (60Hz)
@@ -166,23 +166,24 @@ func _ready() -> void:
 			# Hide self avatar in VR — you're inside it in first-person
 			if scene_manager and scene_manager.has_method("set_first_person_mode"):
 				scene_manager.set_first_person_mode(true)
-			print("[Main] OpenXR initialised — VR mode active")
+			DebugLog.log("main", "OpenXR initialised -- VR mode active")
 		else:
-			push_warning("[Main] OpenXR not available, falling back to desktop mode")
+			DebugLog.warn("main", "OpenXR not available, falling back to desktop mode")
 
 	if not _vr_mode and camera_ctrl:
 		_active_camera = camera_ctrl
 		# TAA: temporal anti-aliasing smooths jagged edges, specular shimmer,
 		# and thin-geometry sparkle (leaves, wires, fences) across frames.
 		get_viewport().use_taa = true
+		get_viewport().screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
 
 	tcp_server = TCPServer.new()
 	var err := tcp_server.listen(ws_port, "127.0.0.1")
 	if err != OK:
-		push_error("Failed to listen on port %d: %s" % [ws_port, error_string(err)])
+		DebugLog.error("main", "Failed to listen on port %d: %s" % [ws_port, error_string(err)])
 		return
 
-	print("[Main] Listening on ws://127.0.0.1:%d" % ws_port)
+	DebugLog.log("main", "Listening on ws://127.0.0.1:%d" % ws_port)
 
 
 func _process(_delta: float) -> void:
@@ -230,11 +231,11 @@ func _process(_delta: float) -> void:
 		ws_peer.max_queued_packets = 65536
 		var err := ws_peer.accept_stream(tcp_peer)
 		if err != OK:
-			push_error("[Main] WebSocket accept failed: %s" % error_string(err))
+			DebugLog.error("main", "WebSocket accept failed: %s" % error_string(err))
 			ws_peer = null
 			tcp_peer = null
 			return
-		print("[Main] WebSocket client connected")
+		DebugLog.log("main", "WebSocket client connected")
 
 	if ws_peer == null:
 		return
@@ -267,7 +268,7 @@ func _process(_delta: float) -> void:
 	elif state == WebSocketPeer.STATE_CLOSING:
 		pass  # Wait for close to complete
 	elif state == WebSocketPeer.STATE_CLOSED:
-		print("[Main] WebSocket closed (code=%d)" % ws_peer.get_close_code())
+		DebugLog.log("main", "WebSocket closed (code=%d)" % ws_peer.get_close_code())
 		ws_peer = null
 		tcp_peer = null
 
@@ -444,7 +445,7 @@ func _handle_message(text: String) -> void:
 	var json := JSON.new()
 	var err := json.parse(text)
 	if err != OK:
-		push_warning("[Main] Invalid JSON: %s" % text.left(200))
+		DebugLog.warn("main", "Invalid JSON: %s" % text.left(200))
 		return
 
 	var msg: Dictionary = json.data
@@ -512,7 +513,7 @@ func _handle_message(text: String) -> void:
 			if camera_ctrl and camera_ctrl.has_method("handle_pay_message"):
 				camera_ctrl.handle_pay_message(msg)
 		_:
-			push_warning("[Main] Unknown message type: %s" % msg_type)
+			DebugLog.warn("main", "Unknown message type: %s" % msg_type)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -532,4 +533,4 @@ func send_message(msg: Dictionary) -> void:
 		ws_peer.send_text(JSON.stringify(msg))
 	elif msg.get("type") == "input_move":
 		var state := "null" if not ws_peer else str(ws_peer.get_ready_state())
-		print("[Main] DROP input_move — ws not open (state=%s)" % state)
+		DebugLog.log("main", "DROP input_move -- ws not open (state=%s)" % state)

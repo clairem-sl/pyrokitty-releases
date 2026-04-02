@@ -294,32 +294,10 @@ export class GodotAvatarManager {
       this.objectSender.selfAvatarUuid = id;
     }
 
-    // Send existing attachments
+    // Attachments arrive via onNewObject → sendObject → readiness tracker.
+    // Parent ordering gate holds them until markEmitted(avatarUuid) fires above.
+    // No need to enumerate getAttachments() — normal object pipeline handles it.
     const avLocalId = localId || 0;
-    try {
-      const attachments = avatar.getAttachments();
-      console.log(`[Avatar] ${id.slice(0, 8)} localId=${localId}: ${attachments.size} attachments from getAttachments()`);
-      let sentCount = 0;
-      let skippedHud = 0;
-      let skippedTracked = 0;
-      for (const [, obj] of attachments) {
-        if (isHudAttachment(obj)) { skippedHud++; continue; }
-        const objUuid = obj.FullID?.toString() || '';
-        if (!objUuid || !this.trackedObjects.has(objUuid)) {
-          this.objectSender.sendObject(obj, id);
-          this.objectSender.sendChildren(obj);
-          sentCount++;
-        } else {
-          skippedTracked++;
-        }
-      }
-      console.log(`[Avatar] ${id.slice(0, 8)}: sent=${sentCount} skippedHud=${skippedHud} skippedTracked=${skippedTracked}`);
-      if (isSelf) {
-        console.log(`[SelfAvatar] Sent ${sentCount} attachments (${skippedHud} HUD skipped, ${skippedTracked} already tracked)`);
-      }
-    } catch (err) {
-      console.error(`[Avatar] ${id.slice(0, 8)}: getAttachments error:`, (err as Error).message);
-    }
 
     // Subscribe to late-arriving attachments
     if (avLocalId > 0) {

@@ -261,11 +261,11 @@ func _input(event: InputEvent) -> void:
 					if now - last_w_press_time < 0.3:
 						double_tap_running = true
 						move_dirty = true
-						print("[CameraCtrl] Double-tap W → running")
+						DebugLog.debug("camera", "Double-tap W -> running")
 					last_w_press_time = now
 				if not ke.pressed:
 					if double_tap_running:
-						print("[CameraCtrl] W released → stopped running")
+						DebugLog.debug("camera", "W released -> stopped running")
 					double_tap_running = false
 					move_dirty = true
 			KEY_S:
@@ -336,7 +336,7 @@ func _input(event: InputEvent) -> void:
 		if ke.keycode == KEY_R and ke.pressed and not ke.echo and Input.is_key_pressed(KEY_CTRL):
 			always_run = not always_run
 			move_dirty = true
-			print("[CameraCtrl] Ctrl+R → always_run=%s" % always_run)
+			DebugLog.debug("camera", "Ctrl+R -> always_run=%s" % always_run)
 		# Ctrl+Alt+S or Alt+Shift+S: toggle ground sit / stand up (matches Firestorm)
 		if ke.keycode == KEY_S and ke.pressed and not ke.echo:
 			var ctrl := Input.is_key_pressed(KEY_CTRL)
@@ -1013,11 +1013,11 @@ func _send_movement() -> void:
 	var is_moving := move_forward or move_backward or strafe_left or strafe_right \
 		or turn_left or turn_right or jump or crouch
 	if is_moving and not _dbg_was_moving:
-		print("[CameraCtrl] Movement started fwd=%s back=%s sl=%s sr=%s tl=%s tr=%s j=%s c=%s" \
+		DebugLog.debug("camera", "Movement started fwd=%s back=%s sl=%s sr=%s tl=%s tr=%s j=%s c=%s" \
 			% [move_forward, move_backward, strafe_left, strafe_right, turn_left, turn_right, jump, crouch])
 		_dbg_was_moving = true
 	elif not is_moving and _dbg_was_moving:
-		print("[CameraCtrl] Movement stopped")
+		DebugLog.debug("camera", "Movement stopped")
 		_dbg_was_moving = false
 
 	var msg := {

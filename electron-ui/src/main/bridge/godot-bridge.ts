@@ -364,6 +364,7 @@ export class GodotBridge extends EventEmitter {
     const texturePaths = new Map<string, { path: string; opaque: boolean }>();
     // Wire face update batcher to enrich faces with texture paths + materialKey
     this.faceUpdateBatcher.textureLookup = (textureId) => texturePaths.get(textureId);
+    this.faceUpdateBatcher.isAttachment = (uuid) => this.readinessTracker?.isAttachment(uuid) ?? false;
 
     this.meshFetchQueue = new MeshFetchQueue(this.bot, (meshUuid, cachePath, isRigged, jointNames, jointOverrides) => {
       const fwdPath = cachePath.replace(/\\/g, '/');
@@ -419,7 +420,7 @@ export class GodotBridge extends EventEmitter {
           if (face.ormTextureId) face.ormTexturePath = texturePaths.get(face.ormTextureId)?.path ?? '';
           if (face.emissiveTextureId) face.emissiveTexturePath = texturePaths.get(face.emissiveTextureId)?.path ?? '';
           // Compute material cache key + resolvedAlphaMode now that all texture info is available
-          enrichFaceMaterialKey(face);
+          enrichFaceMaterialKey(face, !!msg.isAttachment);
         }
       }
     };
@@ -450,6 +451,17 @@ export class GodotBridge extends EventEmitter {
       isAvatarTracked: (id) => this.trackedAvatars.has(id),
       getLightInfo: (obj) => this.objectSender.getLightInfo(obj),
       send: (msg) => this.send(msg),
+      trySendObject: (obj) => {
+        const parentLocalId = obj.ParentID || 0;
+        let parentUuid = '';
+        if (parentLocalId > 0) {
+          try {
+            const parentObj = obj.region?.objects?.getObjectByLocalID(parentLocalId);
+            parentUuid = parentObj?.FullID?.toString() || '';
+          } catch { /* parent may not be in store */ }
+        }
+        this.objectSender.sendObject(obj, parentUuid);
+      },
       resendObject: (obj) => {
         const objUuid = obj.FullID?.toString() || '';
         // Resolve parent local ID → UUID (ParentID is a number, sendObject expects a UUID string)

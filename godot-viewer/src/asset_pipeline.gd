@@ -172,7 +172,7 @@ func _start_texture_threads() -> void:
 		var t := Thread.new()
 		t.start(_texture_worker_loop)
 		_texture_threads.append(t)
-	print("[SceneManager] Ready: %d CPU threads, %d texture threads" % [OS.get_processor_count(), TEXTURE_THREAD_COUNT])
+	DebugLog.log("pipeline", "Ready: %d CPU threads, %d texture threads" % [OS.get_processor_count(), TEXTURE_THREAD_COUNT])
 
 
 ## Worker loop: runs on each dedicated texture thread
@@ -261,14 +261,14 @@ func _texture_worker_loop() -> void:
 func _load_bctex(bctex_path: String) -> Image:
 	var f := FileAccess.open(bctex_path, FileAccess.READ)
 	if f == null:
-		push_warning("[SceneManager] _load_bctex: can't open %s" % bctex_path)
+		DebugLog.warn("bctex", "_load_bctex: can't open %s" % bctex_path)
 		return null
 
 	# Read 32-byte header
 	var magic := f.get_32()
 	var version := f.get_32()
 	if magic != 0x42435458 or version != 1:
-		push_warning("[SceneManager] _load_bctex: invalid header in %s" % bctex_path)
+		DebugLog.warn("bctex", "_load_bctex: invalid header in %s" % bctex_path)
 		f.close()
 		return null
 
@@ -284,7 +284,7 @@ func _load_bctex(bctex_path: String) -> Image:
 	f.close()
 
 	if data.size() != data_size:
-		push_warning("[SceneManager] _load_bctex: short read %d/%d in %s" % [data.size(), data_size, bctex_path])
+		DebugLog.warn("bctex", "_load_bctex: short read %d/%d in %s" % [data.size(), data_size, bctex_path])
 		return null
 
 	# Map format: BC1 -> FORMAT_DXT1, BC3 -> FORMAT_DXT5
@@ -295,6 +295,9 @@ func _load_bctex(bctex_path: String) -> Image:
 		godot_format = Image.FORMAT_DXT5
 
 	var has_mipmaps := mip_count > 1
+	if DebugLog.enabled("bctex"):
+		var _fmt_name := "DXT1(BC1)" if fmt == 0 else "DXT5(BC3)"
+		DebugLog.debug("bctex", "%s: %dx%d fmt=%s mips=%d data=%d flags=%d" % [bctex_path.get_file(), width, height, _fmt_name, mip_count, data_size, _flags])
 	return Image.create_from_data(width, height, has_mipmaps, godot_format, data)
 
 
@@ -341,7 +344,7 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 		_initial_loading = false
 		if _initial_load_start_ms > 0.0:
 			var total_ms := (Time.get_ticks_usec() / 1000.0) - _initial_load_start_ms
-			print("[AssetPipeline] Initial load complete in %.0fms (tex: %d, mesh: %d)" % [
+			DebugLog.log("pipeline", "Initial load complete in %.0fms (tex: %d, mesh: %d)" % [
 				total_ms, _tex_finalized_count, _mesh_finalized_count])
 
 	if not has_textures and not has_meshes:
@@ -415,18 +418,18 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 			_mesh_in_flight.erase(mesh_id)
 			if result.error or result.gltf_state == null:
 				sm.mesh_load_failed[mesh_id] = true
-				print("[VR_DIAG] Mesh FAILED (parse error): %s path=%s" % [mesh_id.left(8), info.get("path", "?")])
+				DebugLog.warn("pipeline", "Mesh FAILED (parse error): %s path=%s" % [mesh_id.left(8), info.get("path", "?")])
 			else:
 				# Extract mesh via ImporterMesh — no Node tree, no queue_free
 				var gltf_meshes: Array = result.gltf_state.get_meshes()
 				if gltf_meshes.is_empty():
 					sm.mesh_load_failed[mesh_id] = true
-					print("[VR_DIAG] Mesh FAILED (no meshes in GLB): %s path=%s" % [mesh_id.left(8), info.get("path", "?")])
+					DebugLog.warn("pipeline", "Mesh FAILED (no meshes in GLB): %s path=%s" % [mesh_id.left(8), info.get("path", "?")])
 				else:
 					var importer_mesh: ImporterMesh = gltf_meshes[0].mesh
 					if importer_mesh == null:
 						sm.mesh_load_failed[mesh_id] = true
-						print("[VR_DIAG] Mesh FAILED (null ImporterMesh): %s" % mesh_id.left(8))
+						DebugLog.warn("pipeline", "Mesh FAILED (null ImporterMesh): %s" % mesh_id.left(8))
 					else:
 						var _t0 := Time.get_ticks_usec()
 						var m: Mesh = importer_mesh.get_mesh()
@@ -457,6 +460,7 @@ func finalize_frame(delta: float, vr_mode: bool, target_frame_ms: float) -> void
 ## Faces with cached textures get real materials; uncached ones get placeholders and register in _tex_waiting.
 func apply_face_materials(rsi, obj_uuid: String, faces: Array) -> void:
 	rsi.set_material_override(null)
+	var is_attachment: bool = sm.object_is_attachment.get(obj_uuid, false)
 	var surface_count: int = rsi.mesh.get_surface_count() if rsi.mesh else 0
 	# For animesh/flexi objects, the real mesh is on a MeshInstance3D, not the RSI (placeholder box).
 	# Use the real mesh's surface count so we don't skip faces beyond the placeholder's 1 surface.
@@ -528,10 +532,29 @@ func apply_face_materials(rsi, obj_uuid: String, faces: Array) -> void:
 		var mat: Material
 		if albedo_cached:
 			mat = _get_or_create_material(
-				mat_key, texture_id, color, full_bright, double_sided, uv_info, resolved_alpha, alpha_cutoff, pbr, mapping_type, render_pri)
+				mat_key, texture_id, color, full_bright, double_sided, uv_info, resolved_alpha, alpha_cutoff, pbr, mapping_type, render_pri, is_attachment)
 		else:
 			mat = _make_placeholder_material(color, full_bright, double_sided)
-		rsi.set_surface_material(face_idx, mat)
+
+		if DebugLog.enabled("alpha"):
+			var rsi_sc: int = rsi.mesh.get_surface_count() if rsi.mesh else -1
+			var ami_sc: int = ami.mesh.get_surface_count() if (ami and ami.mesh) else -1
+			var rsi_will_set: bool = rsi.mesh != null and face_idx < rsi.mesh.get_surface_count()
+			var ami_will_set: bool = ami != null and ami.mesh != null and face_idx < ami.mesh.get_surface_count()
+			var mat_type: String = ""
+			if mat is StandardMaterial3D:
+				mat_type = "StdMat transp=%d albedo_a=%.3f" % [(mat as StandardMaterial3D).transparency, (mat as StandardMaterial3D).albedo_color.a]
+			elif mat is ShaderMaterial:
+				mat_type = "ShaderMat"
+			else:
+				mat_type = str(mat.get_class())
+			DebugLog.debug("alpha", "obj=%s face=%d tex=%s color=[%.2f,%.2f,%.2f,%.2f] resolved_alpha=%d attach=%s cached=%s key=%s rsi_sc=%d ami_sc=%d rsi_set=%s ami_set=%s mat=%s" % [
+				obj_uuid.substr(0, 8), face_idx, texture_id.substr(0, 8), color[0], color[1], color[2], color[3],
+				resolved_alpha, str(is_attachment), str(albedo_cached), mat_key.substr(0, 24),
+				rsi_sc, ami_sc, str(rsi_will_set), str(ami_will_set), mat_type])
+
+		if rsi.mesh and face_idx < rsi.mesh.get_surface_count():
+			rsi.set_surface_material(face_idx, mat)
 		# Also apply to animesh MeshInstance3D if this object has one
 		if ami and ami.mesh and face_idx < ami.mesh.get_surface_count():
 			ami.set_surface_override_material(face_idx, mat)
@@ -558,12 +581,21 @@ func _get_double_sided_shader(shader: Shader) -> Shader:
 	return ds
 
 
-func _get_or_create_material(key: String, texture_id: String, color: Array, full_bright: bool, double_sided: bool, uv_info: Dictionary = {}, alpha_mode: int = 0, alpha_cutoff: float = 0.5, pbr: Dictionary = {}, mapping_type: int = 0, render_priority: int = 0) -> Material:
+func _get_or_create_material(key: String, texture_id: String, color: Array, full_bright: bool, double_sided: bool, uv_info: Dictionary = {}, alpha_mode: int = 0, alpha_cutoff: float = 0.5, pbr: Dictionary = {}, mapping_type: int = 0, render_priority: int = 0, is_attachment: bool = false) -> Material:
 	_material_lookups += 1
 
-	# Key + resolvedAlphaMode computed by Electron (includes texture opacity promotion)
-	if sm.material_cache.has(key):
-		return sm.material_cache[key]
+	# Key fully computed by Electron (includes _ah suffix for attachments)
+	var full_key: String = key
+
+	if sm.material_cache.has(full_key):
+		if DebugLog.enabled("alpha") and color[3] < 1.0:
+			var cached_mat: Material = sm.material_cache[full_key]
+			var cached_info: String = ""
+			if cached_mat is StandardMaterial3D:
+				var cm := cached_mat as StandardMaterial3D
+				cached_info = "transp=%d albedo_a=%.3f" % [cm.transparency, cm.albedo_color.a]
+			DebugLog.debug("alpha", "CACHE HIT full_key=%s color[3]=%.3f -> %s" % [full_key.substr(0, 30), color[3], cached_info])
+		return sm.material_cache[full_key]
 
 	# alpha_mode is already the resolved mode (blend→opaque promotion done by Electron)
 	var resolved_mode := alpha_mode
@@ -620,7 +652,7 @@ func _get_or_create_material(key: String, texture_id: String, color: Array, full
 		if render_priority != 0:
 			mat.render_priority = render_priority
 		if _cacheable:
-			sm.material_cache[key] = mat
+			sm.material_cache[full_key] = mat
 		return mat
 
 	# Texture rotation requires a custom shader (StandardMaterial3D has no rotation property)
@@ -646,7 +678,7 @@ func _get_or_create_material(key: String, texture_id: String, color: Array, full
 		if render_priority != 0:
 			smat.render_priority = render_priority
 		if _cacheable:
-			sm.material_cache[key] = smat
+			sm.material_cache[full_key] = smat
 		return smat
 
 	var mat := StandardMaterial3D.new()
@@ -664,17 +696,24 @@ func _get_or_create_material(key: String, texture_id: String, color: Array, full
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 	# Alpha handling: 0=opaque, 1=blend, 2=mask (resolver always provides resolved value).
-	# Color alpha (transparency slider) always wins.
-	if color[3] < 1.0:
-		# Transparency slider active — always use alpha blending
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	elif resolved_mode == 1:
-		# GLTF BLEND — smooth alpha blending
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	elif resolved_mode == 2:
-		# GLTF MASK — alpha scissor with cutoff
+	# Attachments use ALPHA_HASH for correct depth sorting (Godot lacks per-triangle sort).
+	# World objects use ALPHA for smooth glass/water blending.
+	# TAA + FXAA smooth the hash dithering. Known limitation: near-opaque textures
+	# (alpha ~0.95) show slight hash artifacts — dithered-texture preprocessing will fix this.
+	if resolved_mode == 2:
+		# GLTF MASK — alpha scissor with cutoff (also used for __invisible: cutoff=1.0)
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 		mat.alpha_scissor_threshold = alpha_cutoff
+		DebugLog.debug("alpha", "SCISSOR key=%s cutoff=%.3f color_a=%.3f tex=%s" % [key.substr(0, 20), alpha_cutoff, color[3], texture_id.substr(0, 8)])
+	elif color[3] < 1.0:
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	elif resolved_mode == 1:
+		# Attachments use ALPHA_HASH for correct depth sorting (Godot lacks per-triangle sort).
+		# World objects use ALPHA for smooth glass/water blending.
+		if is_attachment:
+			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_HASH
+		else:
+			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	# else: mode 0 (opaque) — no transparency pipeline overhead
 
 	# Fullbright = unshaded
@@ -715,7 +754,7 @@ func _get_or_create_material(key: String, texture_id: String, color: Array, full
 	if render_priority != 0:
 		mat.render_priority = render_priority
 	if _cacheable:
-		sm.material_cache[key] = mat
+		sm.material_cache[full_key] = mat
 	return mat
 
 
@@ -788,7 +827,7 @@ func evict_unused_assets() -> void:
 			evicted_mesh_count += 1
 
 	if evicted_tex.size() > 0 or evicted_mesh_count > 0:
-		print("[AssetPipeline] Evicted %d textures (%d materials), %d meshes" % [
+		DebugLog.log("pipeline", "Evicted %d textures (%d materials), %d meshes" % [
 			evicted_tex.size(), sm.material_cache.size(), evicted_mesh_count])
 
 

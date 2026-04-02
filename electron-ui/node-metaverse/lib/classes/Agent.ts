@@ -75,6 +75,11 @@ export class Agent {
     public estateManager = false;
     public appearanceComplete = false;
     public agentAppearanceService: string;
+    public uploadCosts?: {
+        animation: number;
+        sound: number;
+        texture: number;
+    };
     public onGroupChatExpired = new Subject<UUID>();
     public cameraLookAt: Vector3 = new Vector3([0.979546, 0.105575, -0.171303]);
     public cameraCenter: Vector3 = new Vector3([199.58, 203.95, 24.304]);

@@ -327,6 +327,11 @@ export class LoginResponse
                     {
                         this.accountLevelBenefits.large_texture_upload_cost = val.large_texture_upload_cost.map((v: any) => parseInt(v, 10));
                     }
+                    this.agent.uploadCosts = {
+                        animation: this.accountLevelBenefits.animation_upload_cost,
+                        sound: this.accountLevelBenefits.sound_upload_cost,
+                        texture: this.accountLevelBenefits.texture_upload_cost,
+                    };
                     break;
                 case 'premium_packages':
                     this.premiumPackages = val;

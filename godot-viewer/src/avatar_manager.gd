@@ -124,7 +124,7 @@ func handle_avatar_create(msg: Dictionary) -> void:
 			sm.pending_seated_avatars[seat_uuid].append({
 				"id": avatar_id, "pos": godot_pos, "rot": godot_rot
 			})
-			print("[AvatarSit] Deferred: avatar=%s waiting for seat uuid=%s" % [avatar_id.substr(0, 8), seat_uuid.substr(0, 8)])
+			DebugLog.debug("avatarsit", "Deferred: avatar=%s waiting for seat uuid=%s" % [avatar_id.substr(0, 8), seat_uuid.substr(0, 8)])
 
 	rsi.pos = godot_pos
 	rsi.rot = godot_rot
@@ -161,7 +161,7 @@ func handle_avatar_create(msg: Dictionary) -> void:
 		var body_offset: float = _compute_body_z_offset(shared_skel, _avatar_shapes[avatar_id])
 		var hover: float = _avatar_hover_heights.get(avatar_id, 0.0)
 		shared_skel.position.y = -body_offset + hover
-		print("[AvatarShape] Pending body_offset=%.4f hover=%.4f for %s" % [body_offset, hover, avatar_id.substr(0, 8)])
+		DebugLog.debug("avatarshape", "Pending body_offset=%.4f hover=%.4f for %s" % [body_offset, hover, avatar_id.substr(0, 8)])
 	# Apply pending volume morphs
 	if _avatar_volume_morphs.has(avatar_id):
 		sm.cv_volume_morphs[avatar_id] = _avatar_volume_morphs[avatar_id]
@@ -169,7 +169,7 @@ func handle_avatar_create(msg: Dictionary) -> void:
 	if _avatar_shapes.has(avatar_id):
 		sm.animation_mgr.push_shape_changed(avatar_id, shared_skel, sm.bone_shape_scales.get(avatar_id, {}), sm.cv_volume_morphs.get(avatar_id, {}))
 	if avatar_id == sm.self_avatar_id:
-		print("[SelfAvatar] === Skeleton root created: uuid=%s bones=%d ===" % [avatar_id.substr(0, 8), shared_skel.get_bone_count()])
+		DebugLog.log("selfavatar", "=== Skeleton root created: uuid=%s bones=%d ===" % [avatar_id.substr(0, 8), shared_skel.get_bone_count()])
 
 	_crumb("avatar_create id=%s step=pending_children" % avatar_id.substr(0, 8))
 	# Resolve pending children that arrived before this avatar —
@@ -340,7 +340,7 @@ func handle_avatar_shape(msg: Dictionary) -> void:
 	# Notify animation thread about shape change (new rest positions + scales)
 	sm.animation_mgr.push_shape_changed(avatar_id, shared_skel, sm.bone_shape_scales.get(avatar_id, {}), sm.cv_volume_morphs.get(avatar_id, {}))
 
-	print("[AvatarShape] Applied shape for avatar %s (%d bones, hover=%.4f, body_offset=%.4f)" % [avatar_id.substr(0, 8), bones.size(), hover_height, body_offset])
+	DebugLog.debug("avatarshape", "Applied shape for avatar %s (%d bones, hover=%.4f, body_offset=%.4f)" % [avatar_id.substr(0, 8), bones.size(), hover_height, body_offset])
 
 
 ## Recompute body size offset after joint overrides change bone rest positions.
@@ -352,7 +352,7 @@ func _recompute_body_offset(root_uuid: String, shared_skel: Skeleton3D) -> void:
 	# Preserve hover height if we have it (from AvatarAppearance message)
 	var hover_height: float = _avatar_hover_heights.get(root_uuid, 0.0)
 	shared_skel.position.y = -body_offset + hover_height
-	print("[AvatarShape] Recomputed body_offset=%.4f (hover=%.4f) for %s after joint overrides" % [body_offset, hover_height, root_uuid.substr(0, 8)])
+	DebugLog.debug("avatarshape", "Recomputed body_offset=%.4f (hover=%.4f) for %s after joint overrides" % [body_offset, hover_height, root_uuid.substr(0, 8)])
 
 
 ## Compute the vertical offset from bounding box center to pelvis.
@@ -450,7 +450,7 @@ func _reapply_joint_overrides(root_uuid: String, shared_skel: Skeleton3D, avatar
 		# Need the GLB skeleton to get the override rest transforms.
 		# The override rest was already copied to shared_skel during initial setup,
 		# and shape just reset all rests to XML baseline. Re-apply from the GLB.
-		print("[ReapplyOverrides] %s mesh_uuid=%s mesh_id=%s overrides=%s" % [avatar_id.substr(0, 8), mesh_uuid.substr(0, 8), mesh_id.substr(0, 16), str(override_joints)])
+		DebugLog.debug("jointoverride", "reapply avatar=%s mesh_uuid=%s mesh_id=%s overrides=%s" % [avatar_id.substr(0, 8), mesh_uuid.substr(0, 8), mesh_id.substr(0, 16), str(override_joints)])
 		var glb_path: String = sm.rigged_mesh_paths.get(mesh_id, "")
 		if glb_path.is_empty():
 			continue

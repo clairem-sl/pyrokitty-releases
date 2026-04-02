@@ -69,7 +69,7 @@ export class GpuCompressQueue {
     try {
       const { rgba, width, height, cachePath } = item;
 
-      // CPU alpha detection (~0.1ms, samples ~1000 pixels)
+      // CPU alpha detection — scans all pixels (sub-ms, early-exits on first transparent pixel)
       const hasAlpha = detectAlpha(rgba);
       const format: BctexFormat = hasAlpha ? BctexFormat.BC3 : BctexFormat.BC1;
       const formatFlag: 0 | 1 = hasAlpha ? 1 : 0;
@@ -106,9 +106,8 @@ export class GpuCompressQueue {
 
 /** Check if any pixel has alpha < 250 (sampled every ~1000 pixels for speed). */
 function detectAlpha(rgba: Buffer): boolean {
-  const pixelCount = rgba.length / 4;
-  const step = Math.max(1, Math.floor(pixelCount / 1000));
-  for (let i = 3; i < rgba.length; i += step * 4) {
+  // Check every pixel — sparse sampling misses hair/foliage alpha at edges
+  for (let i = 3; i < rgba.length; i += 4) {
     if (rgba[i] < 250) return true;
   }
   return false;

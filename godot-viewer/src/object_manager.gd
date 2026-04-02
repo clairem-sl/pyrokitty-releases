@@ -268,7 +268,7 @@ func handle_object_create(msg: Dictionary) -> void:
 				sm.animesh_shared_skeleton[obj_uuid] = shared_skel
 				sm.animation_mgr.push_avatar_created(obj_uuid, shared_skel)
 			_register_animesh_descendants(obj_uuid, obj_uuid)
-			print("[Animesh] Worn animesh %s → own skeleton under avatar root %s" % [_uuid_short(obj_uuid), _uuid_short(parent_uuid)])
+			DebugLog.debug("animesh", "Worn animesh %s -> own skeleton under avatar root %s" % [_uuid_short(obj_uuid), _uuid_short(parent_uuid)])
 		else:
 			# Standalone animesh object (rezzed on ground) — own root + skeleton
 			var animesh_node := Node3D.new()
@@ -289,7 +289,7 @@ func handle_object_create(msg: Dictionary) -> void:
 				sm.animesh_shared_skeleton[obj_uuid] = shared_skel
 				sm.animation_mgr.push_avatar_created(obj_uuid, shared_skel)
 			if _is_self_avatar(obj_uuid):
-				print("[SelfAvatar] Animesh root object %s created" % [_uuid_short(obj_uuid)])
+				DebugLog.debug("animesh", "Animesh root object %s created" % [_uuid_short(obj_uuid)])
 			# Retroactively register existing children + grandchildren (attachment linksets)
 			_register_animesh_descendants(obj_uuid, obj_uuid)
 
@@ -305,11 +305,11 @@ func handle_object_create(msg: Dictionary) -> void:
 		else:
 			# Only log for self-avatar attachments — regular linkset children are expected noise
 			if not sm.self_avatar_id.is_empty() and parent_uuid == sm.self_avatar_id:
-				print("[SelfAvatar] WARNING: obj %s has parentUuid=%s (self avatar) but NOT an animesh root (animesh_roots has %d entries)" % [_uuid_short(obj_uuid), _uuid_short(parent_uuid), sm.animesh_roots.size()])
+				DebugLog.warn("animesh", "obj %s has parentUuid=%s (self avatar) but NOT an animesh root (animesh_roots has %d entries)" % [_uuid_short(obj_uuid), _uuid_short(parent_uuid), sm.animesh_roots.size()])
 
 	# [SelfAvatar] log when an attachment is registered for the self avatar
 	if _is_self_avatar(obj_uuid):
-		print("[SelfAvatar] Attachment created: uuid=%s parentUuid=%s" % [_uuid_short(obj_uuid), _uuid_short(parent_uuid)])
+		DebugLog.debug("animesh", "Attachment created: uuid=%s parentUuid=%s" % [_uuid_short(obj_uuid), _uuid_short(parent_uuid)])
 
 	# Create light if this object is a light source
 	if msg.has("light") and msg["light"] is Dictionary:
@@ -341,7 +341,7 @@ func handle_object_create(msg: Dictionary) -> void:
 					var av_node: Node3D = sm.animesh_roots[av_id]
 					av_node.position = world_pos
 					av_node.quaternion = world_rot
-				print("[AvatarSit] Resolved: avatar=%s seat=%s pos=%s" % [av_id.substr(0, 8), _uuid_short(obj_uuid), world_pos])
+				DebugLog.debug("avatarsit", "Resolved: avatar=%s seat=%s pos=%s" % [av_id.substr(0, 8), _uuid_short(obj_uuid), world_pos])
 		sm.pending_seated_avatars.erase(obj_uuid)
 
 
@@ -540,15 +540,15 @@ func _instantiate_animesh_mesh(obj_uuid: String, mesh_id: String, animesh_root_u
 		return
 	var glb_path: String = sm.rigged_mesh_paths.get(mesh_id, "")
 	if glb_path.is_empty():
-		push_warning("[Animesh] No GLB path for rigged mesh %s (obj %s)" % [mesh_id, _uuid_short(obj_uuid)])
+		DebugLog.warn("animesh", "No GLB path for rigged mesh %s (obj %s)" % [mesh_id, _uuid_short(obj_uuid)])
 		return
 	var root_node: Node3D = sm.animesh_roots.get(animesh_root_uuid)
 	if root_node == null:
-		push_warning("[Animesh] No root node for animesh root %s (obj %s)" % [_uuid_short(animesh_root_uuid), _uuid_short(obj_uuid)])
+		DebugLog.warn("animesh", "No root node for animesh root %s (obj %s)" % [_uuid_short(animesh_root_uuid), _uuid_short(obj_uuid)])
 		return
 	var shared_skel: Skeleton3D = sm.animesh_shared_skeleton.get(animesh_root_uuid)
 	if shared_skel == null:
-		push_warning("[Animesh] No shared skeleton for animesh root %s (obj %s)" % [_uuid_short(animesh_root_uuid), _uuid_short(obj_uuid)])
+		DebugLog.warn("animesh", "No shared skeleton for animesh root %s (obj %s)" % [_uuid_short(animesh_root_uuid), _uuid_short(obj_uuid)])
 		return
 
 	# Parse GLB and generate full scene tree (includes Skeleton3D + MeshInstance3D)
@@ -556,18 +556,18 @@ func _instantiate_animesh_mesh(obj_uuid: String, mesh_id: String, animesh_root_u
 	var state := GLTFState.new()
 	var err := doc.append_from_file(glb_path, state)
 	if err != OK:
-		push_warning("[Animesh] Failed to parse GLB %s: %s (obj %s)" % [glb_path, error_string(err), _uuid_short(obj_uuid)])
+		DebugLog.warn("animesh", "Failed to parse GLB %s: %s (obj %s)" % [glb_path, error_string(err), _uuid_short(obj_uuid)])
 		return
 	var scene: Node = doc.generate_scene(state)
 	if scene == null:
-		push_warning("[Animesh] generate_scene returned null for %s (obj %s)" % [glb_path, _uuid_short(obj_uuid)])
+		DebugLog.warn("animesh", "generate_scene returned null for %s (obj %s)" % [glb_path, _uuid_short(obj_uuid)])
 		return
 
 	# Find Skeleton3D and MeshInstance3D in the generated scene tree
 	var glb_skeleton: Skeleton3D = _find_node_of_type(scene, "Skeleton3D")
 	var mesh_instance: MeshInstance3D = _find_node_of_type(scene, "MeshInstance3D")
 	if glb_skeleton == null or mesh_instance == null:
-		push_warning("[Animesh] No Skeleton3D/MeshInstance3D in GLB for object %s" % [_uuid_short(obj_uuid)])
+		DebugLog.warn("animesh", "No Skeleton3D/MeshInstance3D in GLB for object %s" % [_uuid_short(obj_uuid)])
 		scene.queue_free()
 		return
 
@@ -575,7 +575,7 @@ func _instantiate_animesh_mesh(obj_uuid: String, mesh_id: String, animesh_root_u
 	# Override list comes from mesh_ready message, stored on scene_manager.
 	var override_joints: Array = sm.mesh_joint_overrides.get(mesh_id, [])
 	if override_joints.size() > 0:
-		print("[JointOverride] Applying %d overrides for mesh %s (avatar root=%s)" % [override_joints.size(), mesh_id.substr(0, 16), _uuid_short(animesh_root_uuid)])
+		DebugLog.debug("jointoverride", "Applying %d overrides for mesh %s (avatar root=%s)" % [override_joints.size(), mesh_id.substr(0, 16), _uuid_short(animesh_root_uuid)])
 		sm.animation_mgr._apply_joint_overrides(glb_skeleton, shared_skel, override_joints, mesh_id)
 
 	# Duplicate skin and remap bone indices to shared skeleton order.
@@ -609,7 +609,7 @@ func _instantiate_animesh_mesh(obj_uuid: String, mesh_id: String, animesh_root_u
 						var shared_parent_bi: int = shared_skel.find_bone(parent_name)
 						if shared_parent_bi >= 0:
 							shared_skel.set_bone_parent(shared_bi, shared_parent_bi)
-					print("[Animesh] Added missing bone '%s' (idx %d) to shared skeleton" % [bone_name, shared_bi])
+					DebugLog.debug("animesh", "Added missing bone '%s' (idx %d) to shared skeleton" % [bone_name, shared_bi])
 				if shared_bi >= 0:
 					new_skin.set_bind_bone(i, shared_bi)
 		mesh_instance.skin = new_skin
@@ -664,7 +664,7 @@ func _instantiate_animesh_mesh(obj_uuid: String, mesh_id: String, animesh_root_u
 		sm.animation_mgr._apply_pending_animations(obj_uuid)
 
 	if _is_self_avatar(obj_uuid):
-		print("[SelfAvatar] Rigged mesh instantiated: uuid=%s meshId=%s shared_bones=%d" % [_uuid_short(obj_uuid), mesh_id.substr(0, 8), shared_skel.get_bone_count()])
+		DebugLog.debug("animesh", "Rigged mesh instantiated: uuid=%s meshId=%s shared_bones=%d" % [_uuid_short(obj_uuid), mesh_id.substr(0, 8), shared_skel.get_bone_count()])
 
 	# Debug: visualize skeleton once per root (check for existing markers)
 	if sm.animation_mgr._debug_skeleton_visible:
@@ -727,6 +727,8 @@ func handle_object_render(msg: Dictionary) -> void:
 	# Store face data — _apply_faces and _tex_waiting callbacks read from here
 	if faces.size() > 0:
 		sm.object_faces[obj_uuid] = faces
+	if msg.get("isAttachment", false):
+		sm.object_is_attachment[obj_uuid] = true
 
 	# Apply mesh (or register for callback when GPU-ready), then faces
 	if not mesh_id.is_empty():

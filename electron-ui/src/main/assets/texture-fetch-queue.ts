@@ -9,6 +9,7 @@ import type { Bot } from '../../../node-metaverse/dist/lib';
 import { DecodePool } from './decode-pool';
 import { GpuCompressQueue } from './gpu-compress-queue';
 import { gpuCompressionAvailable } from './gpu-compress-window';
+import { TRANSPARENT_TEXTURES, SOLID_COLOR_TEXTURES, WATER_EXCLUSION_TEXTURES, BAKE_MAGIC_UUIDS } from '../bridge/godot-bridge-types';
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
@@ -142,6 +143,9 @@ export class TextureFetchQueue {
   request(textureUuid: string, objectUuid: string): void {
     if (this.destroyed || this.failed.has(textureUuid)) return;
     if (!textureUuid || textureUuid === ZERO_UUID) return;
+    // Never download built-in textures — guards all callers (projection lights, normal maps, etc.)
+    if (TRANSPARENT_TEXTURES.has(textureUuid) || SOLID_COLOR_TEXTURES.has(textureUuid) ||
+        WATER_EXCLUSION_TEXTURES.has(textureUuid) || BAKE_MAGIC_UUIDS.has(textureUuid)) return;
 
     // Already cached and Godot notified — nothing to do
     if (this.notified.has(textureUuid)) return;

@@ -878,7 +878,7 @@ export class RegionCommands extends CommandsBase
 
     // noinspection JSUnusedGlobalSymbols
     public async dragGrabbedObject(localID: number | UUID,
-                                   grabPosition: Vector3,
+                                   grabPosition: Vector3 | null = null,
                                    grabOffset: Vector3 = Vector3.getZero(),
                                    uvCoordinate: Vector3 = Vector3.getZero(),
                                    stCoordinate: Vector3 = Vector3.getZero(),
@@ -888,10 +888,29 @@ export class RegionCommands extends CommandsBase
                                    binormal: Vector3 = Vector3.getZero()): Promise<void>
     {
         // For some reason this message takes a UUID when the others take a LocalID - wtf?
+        let obj: GameObject;
         if (!(localID instanceof UUID))
         {
-            const obj: GameObject = this.currentRegion.objects.getObjectByLocalID(localID);
+            obj = this.currentRegion.objects.getObjectByLocalID(localID);
             localID = obj.FullID;
+        }
+        else
+        {
+            obj = this.currentRegion.objects.getObjectByUUID(localID);
+        }
+
+        // If no grabPosition supplied (or zero), use the object's current position so the
+        // server fires touch LSL events without applying any pull force.
+        // Short-circuit if the object position is also unavailable or zero — better to
+        // skip the message than risk moving something to the world origin.
+        if (!grabPosition || (grabPosition.x === 0 && grabPosition.y === 0 && grabPosition.z === 0))
+        {
+            const pos = obj?.Position;
+            if (!pos || (pos.x === 0 && pos.y === 0 && pos.z === 0))
+            {
+                return;
+            }
+            grabPosition = pos;
         }
         const msg = new ObjectGrabUpdateMessage();
         msg.AgentData = {

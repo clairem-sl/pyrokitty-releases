@@ -98,7 +98,7 @@ func _get_projector_texture(texture_id: String) -> ImageTexture:
 
 	var padded_tex := ImageTexture.create_from_image(padded)
 	_projector_textures[texture_id] = padded_tex
-	print("[Light] Created padded projector texture %s: %dx%d -> %dx%d" % [texture_id, ow, oh, nw, nh])
+	DebugLog.debug("light", "Created padded projector texture %s: %dx%d -> %dx%d" % [texture_id, ow, oh, nw, nh])
 	return padded_tex
 
 
@@ -222,7 +222,7 @@ func destroy_light(obj_uuid: String) -> void:
 		var cam: Camera3D = sm.get_viewport().get_camera_3d()
 		if cam:
 			dist_info = " dist=%.1f" % rsi.pos.distance_to(cam.global_position)
-	print("[Light] DESTROY uuid=%s spot=%s proj=%s%s" % [obj_uuid.substr(0, 8), str(rsl.is_spot), rsl.proj_texture_id, dist_info])
+	DebugLog.debug("light", "DESTROY uuid=%s spot=%s proj=%s%s" % [obj_uuid.substr(0, 8), str(rsl.is_spot), rsl.proj_texture_id, dist_info])
 	# Remove from pending proj textures
 	if not rsl.proj_texture_id.is_empty() and _pending_proj_textures.has(rsl.proj_texture_id):
 		_pending_proj_textures[rsl.proj_texture_id].erase(obj_uuid)
@@ -257,7 +257,7 @@ func apply_pending_proj_texture(texture_id: String) -> void:
 	for obj_uuid: String in waiting_uuids:
 		var rsl: RSLight = object_lights.get(obj_uuid)
 		if rsl != null and rsl.is_spot and rsl.node:
-			print("[Light] Applying proj texture %s to uuid=%s" % [texture_id, obj_uuid.substr(0, 8)])
+			DebugLog.debug("light", "Applying proj texture %s to uuid=%s" % [texture_id, obj_uuid.substr(0, 8)])
 			rsl.node.light_projector = _get_projector_texture(texture_id)
 
 

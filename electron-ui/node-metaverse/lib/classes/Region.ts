@@ -746,6 +746,10 @@ export class Region {
     }
 
     public async getUploadCost(): Promise<number> {
+        if (this.agent.uploadCosts !== undefined) {
+            return this.agent.uploadCosts.texture;
+        }
+
         if (this.uploadCost !== undefined) {
             return this.uploadCost;
         }

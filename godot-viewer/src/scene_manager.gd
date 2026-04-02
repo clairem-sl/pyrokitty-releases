@@ -78,6 +78,7 @@ class RSInstance extends RefCounted:
 var objects: Dictionary = {}   # uuid (String) -> RSInstance
 var avatars: Dictionary = {}   # avatarId (String) -> RSInstance
 var self_avatar_id: String = ""
+var debug_mode: bool = false   # toggled by CTRL+SHIFT+1 — enables visual debug overlays
 var self_avatar_target_rot: Quaternion = Quaternion.IDENTITY  # target yaw, damped in interpolation
 
 # World origin — set at login, updated on teleport. All positions relative to this.
@@ -118,6 +119,7 @@ var texture_cache: Dictionary = {}        # textureId (String) -> ImageTexture
 var material_cache: Dictionary = {}       # "uuid_colorhex_fb_ds_uv" (String) -> StandardMaterial3D
 var object_meta: Dictionary = {}          # uuid (String) -> { name, description }
 var object_faces: Dictionary = {}         # uuid (String) -> Array[face_info dicts]
+var object_is_attachment: Dictionary = {} # uuid (String) -> bool (from Electron isAttachment)
 var texture_load_failed: Dictionary = {}  # textureId (String) -> bool
 
 # Animesh (rigged mesh with skeleton animation)
@@ -380,7 +382,7 @@ func _update_loading_fade(delta: float) -> void:
 
 # Region change — clear entire scene for cross-region teleport
 func handle_region_change() -> void:
-	print("[SceneManager] Region change — clearing all objects, avatars, and lights")
+	DebugLog.log("scene", "Region change -- clearing all objects, avatars, and lights")
 
 	# Destroy all pick resources (physics bodies + ID buffer instances) before clearing objects
 	object_picker.destroy_all_pick_resources()
@@ -452,7 +454,7 @@ func handle_region_change() -> void:
 	# Clear terrain (new region will send new heightmap + environment)
 	terrain_env.clear()
 
-	print("[SceneManager] Scene cleared, ready for new region data")
+	DebugLog.log("scene", "Scene cleared, ready for new region data")
 
 
 # Objects
@@ -504,7 +506,7 @@ func set_world_origin(origin_x: float, origin_y: float) -> void:
 	world_origin_x = origin_x
 	world_origin_y = origin_y
 	region_offsets.clear()
-	print("[SceneManager] World origin set to (%.0f, %.0f)" % [origin_x, origin_y])
+	DebugLog.log("scene", "World origin set to (%.0f, %.0f)" % [origin_x, origin_y])
 
 ## Store region offset from a terrain_ready or region_info message.
 func register_region_offset(cache_id: String, offset_x: float, offset_y: float) -> void:
@@ -532,7 +534,7 @@ func handle_settings(msg: Dictionary) -> void:
 			rsi.set_vis_range(_vis_far, _vis_fade)
 		for rsi in avatars.values():
 			rsi.set_vis_range(_vis_far, _vis_fade)
-		print("[SceneManager] Draw distance set to %.0f m (fade %.0f m)" % [_vis_far, _vis_fade])
+		DebugLog.log("scene", "Draw distance set to %.0f m (fade %.0f m)" % [_vis_far, _vis_fade])
 
 func set_vr_mode(enabled: bool) -> void:
 	avatar_mgr.set_vr_mode(enabled)
@@ -581,6 +583,7 @@ func set_planar_debug_mode(mode: int) -> void:
 	object_picker.set_planar_debug_mode(mode)
 
 func toggle_debug_skeleton() -> void:
+	debug_mode = not debug_mode
 	animation_mgr.toggle_debug_skeleton()
 
 func toggle_pick_debug() -> void:
@@ -595,7 +598,7 @@ func set_bubble_vr_mode(vr: bool) -> void:
 		name_bubble_mgr._canvas_layer.visible = _bubble_2d_active
 	if name_bubble_3d_mgr:
 		name_bubble_3d_mgr.set_all_visible(_bubble_3d_active)
-	print("[SceneManager] Name bubbles: %s" % ("3D world-space" if vr else "2D screen-space"))
+	DebugLog.log("scene", "Name bubbles: %s" % ("3D world-space" if vr else "2D screen-space"))
 
 # Stats
 func get_pipeline_stats() -> Dictionary:

@@ -10,14 +10,14 @@ var _bones: Array = []  # [{name, parent, pos, rot, scale, cv}, ...] in parent-f
 func load_from_json(path: String) -> void:
 	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:
-		push_error("[SkeletonBuilder] Cannot open %s" % path)
+		DebugLog.error("skeleton", "Cannot open %s" % path)
 		return
 	var text: String = file.get_as_text()
 	file.close()
 
 	var parsed = JSON.parse_string(text)
 	if parsed == null or not (parsed is Array):
-		push_error("[SkeletonBuilder] Failed to parse JSON from %s" % path)
+		DebugLog.error("skeleton", "Failed to parse JSON from %s" % path)
 		return
 
 	for entry: Dictionary in parsed:
@@ -33,7 +33,7 @@ func load_from_json(path: String) -> void:
 			"is_cv": bool(entry.get("cv", false)),
 		})
 
-	print("[SkeletonBuilder] Loaded %d bones from %s" % [_bones.size(), path])
+	DebugLog.log("skeleton", "Loaded %d bones from %s" % [_bones.size(), path])
 
 
 ## Create a new Skeleton3D with all bones from the parsed data.

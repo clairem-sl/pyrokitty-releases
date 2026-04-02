@@ -455,12 +455,8 @@ export class GodotInputHandler {
       if (!obj) return;
 
       const surface = this._parseSurfaceInfo(msg);
-      const { Vector3 } = await import('../../../node-metaverse/lib/classes/Vector3');
-      const grabPos = msg.grabPosition
-        ? new Vector3(msg.grabPosition.x || 0, msg.grabPosition.y || 0, msg.grabPosition.z || 0)
-        : surface.position;
       await this.bot.clientCommands.region.dragGrabbedObject(
-        new UUID(obj.FullID.toString()), grabPos, surface.grabOffset,
+        new UUID(obj.FullID.toString()), null, surface.grabOffset,
         surface.uvCoord, surface.stCoord, surface.faceIndex,
         surface.position, surface.normal, surface.binormal
       );

@@ -1,37 +1,37 @@
 #!/bin/bash
 DIR="$(dirname "$(readlink -f "$0")")"
 
-# Both Godot (.NET build) and the voice sidecar require the .NET 8 runtime.
-if ! command -v dotnet &>/dev/null || ! dotnet --list-runtimes 2>/dev/null | grep -q 'Microsoft\.NETCore\.App 8\.'; then
+# Both Godot (.NET build) and the voice sidecar require .NET 8+.
+if ! command -v dotnet &>/dev/null || ! dotnet --list-runtimes 2>/dev/null | grep -qP 'Microsoft\.NETCore\.App (8|9|[1-9][0-9]+)\.'; then
     echo ""
-    echo "PyroKitty requires the .NET 8 runtime, which was not found on your system."
+    echo "PyroKitty requires the .NET 8+ runtime, which was not found on your system."
     echo ""
     echo "Install it with one of the following:"
-    echo "  Ubuntu/Debian:  sudo apt install dotnet-runtime-8.0"
-    echo "  Fedora:         sudo dnf install dotnet-runtime-8.0"
-    echo "  Arch:           sudo pacman -S dotnet-runtime-8.0"
+    echo "  Ubuntu/Debian:  sudo apt install dotnet-runtime-10.0"
+    echo "  Fedora:         sudo dnf install dotnet-runtime-10.0"
+    echo "  Arch:           sudo pacman -S dotnet-runtime-10.0"
     echo "  Other:          https://dotnet.microsoft.com/download/dotnet/8.0"
     echo ""
     read -rp "Would you like to try installing now? [y/N] " answer
     if [[ "$answer" =~ ^[Yy] ]]; then
         if command -v apt &>/dev/null; then
-            sudo apt install -y dotnet-runtime-8.0
+            sudo apt install -y dotnet-runtime-10.0
         elif command -v dnf &>/dev/null; then
-            sudo dnf install -y dotnet-runtime-8.0
+            sudo dnf install -y dotnet-runtime-10.0
         elif command -v pacman &>/dev/null; then
-            sudo pacman -S --noconfirm dotnet-runtime-8.0
+            sudo pacman -S --noconfirm dotnet-runtime-10.0
         else
-            echo "Could not detect your package manager. Please install .NET 8 manually."
+            echo "Could not detect your package manager. Please install .NET 8+ manually."
             exit 1
         fi
         # Verify it installed successfully
-        if ! dotnet --list-runtimes 2>/dev/null | grep -q 'Microsoft\.NETCore\.App 8\.'; then
-            echo "Installation failed. Please install .NET 8 manually and try again."
+        if ! dotnet --list-runtimes 2>/dev/null | grep -qP 'Microsoft\.NETCore\.App (8|9|[1-9][0-9]+)\.'; then
+            echo "Installation failed. Please install .NET 8+ manually and try again."
             exit 1
         fi
         echo ".NET 8 runtime installed successfully."
     else
-        echo "Please install the .NET 8 runtime and try again."
+        echo "Please install the .NET 8+ runtime and try again."
         exit 1
     fi
 fi

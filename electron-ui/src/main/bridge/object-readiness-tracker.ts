@@ -45,6 +45,8 @@ export class ObjectReadinessTracker {
   private resolvedMaterials = new Set<string>();
   /** Parent ordering: children wait until parent has been emitted. */
   private emitted = new Set<string>();                        // UUIDs already sent to Godot
+  /** Objects that are attachments (worn on an avatar) — propagated to children for material keys. */
+  private attachments = new Set<string>();
   private childrenWaitingForParent = new Map<string, Set<string>>(); // parentUuid → child UUIDs
   private send: SendFn;
   /** Called before emit to enrich the message with asset paths (meshPath, texturePaths). */
@@ -321,7 +323,13 @@ export class ObjectReadinessTracker {
     this.resolvedTextures.clear();
     this.resolvedMaterials.clear();
     this.emitted.clear();
+    this.attachments.clear();
     this.childrenWaitingForParent.clear();
+  }
+
+  /** Check if an object UUID is an attachment (or child of one). */
+  isAttachment(uuid: string): boolean {
+    return this.attachments.has(uuid);
   }
 
   /** Log objects that have been pending a long time (assets not yet arrived). */
@@ -417,9 +425,16 @@ export class ObjectReadinessTracker {
     const entry = this.pending.get(uuid);
     if (!entry) return;
 
+    // Propagate attachment status from parent to child
+    const msg = entry.renderMsg;
+    if (msg.isAttachment || (msg.parentUuid && this.attachments.has(msg.parentUuid))) {
+      msg.isAttachment = true;
+      this.attachments.add(uuid);
+    }
+
     // Enrich message with asset paths before sending
-    if (this.enrichFn) this.enrichFn(entry.renderMsg);
-    this.send(entry.renderMsg);
+    if (this.enrichFn) this.enrichFn(msg);
+    this.send(msg);
     this.emitted.add(uuid);
     this.remove(uuid);
 

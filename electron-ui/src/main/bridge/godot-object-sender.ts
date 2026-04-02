@@ -22,7 +22,7 @@ import type { ObjectReadinessTracker } from './object-readiness-tracker';
 export class GodotObjectSender {
   private deferredTextures = new Map<string, any>();
   /** Children waiting for their parent to be tracked before sending */
-  private pendingChildren = new Map<string, { obj: any; parentUuid: string }[]>();
+  // pendingChildren removed — readiness tracker parent ordering handles child gating
   private textureUpdateSubs = new Map<string, Subscription>();
   private get TEXTURE_FETCH_RANGE(): number { return this.bot.agent?.cameraFar ?? 128; }
 
@@ -114,15 +114,14 @@ export class GodotObjectSender {
       rotation: rot ? slQuat(rot) : [0, 0, 0, 1],
       scale: scl ? slScale(scl) : [0.5, 0.5, 0.5],
       ...(effectiveMeshId ? { meshId: effectiveMeshId } : {}),
-      // meshPath, isRigged, jointOverrides filled by enrichFn at emit time
       ...(shapeParams ? { shape: shapeParams } : {}),
       ...(texInfo ? { faces: texInfo.faces } : {}),
-      // texturePath per face filled by enrichFn at emit time
       ...(lightInfo ? { light: lightInfo } : {}),
       ...(isAnimesh ? { animesh: true } : {}),
       ...(sculptInfo ? { sculpt: true } : {}),
       ...(flexiInfo ? { flexible: flexiInfo } : {}),
       ...(obj.attachmentPoint > 0 ? { attachmentPoint: obj.attachmentPoint } : {}),
+      ...(obj.IsAttachment ? { isAttachment: true } : {}),
       ...(clickAction !== 0 ? { clickAction } : {}),
       ...(ownerID !== '' ? { ownerID } : {}),
       ...(primFlags !== 0 ? { primFlags } : {}),
@@ -222,19 +221,9 @@ export class GodotObjectSender {
     const pos = obj.Position;
     if (!pos) return;
 
-    // Buffer children whose parent hasn't been sent yet
-    if (parentUuid !== '' && !this.trackedObjects.has(parentUuid)) {
-      // Avatar UUIDs are always valid parents (tracked separately)
-      if (!this.trackedAvatars.has(parentUuid)) {
-        let buf = this.pendingChildren.get(parentUuid);
-        if (!buf) {
-          buf = [];
-          this.pendingChildren.set(parentUuid, buf);
-        }
-        buf.push({ obj, parentUuid });
-        return;
-      }
-    }
+    // Children proceed even if parent isn't tracked yet — the readiness tracker's
+    // parent ordering gate holds the object_render message until the parent is emitted.
+    // This lets textures/meshes download while waiting for the parent.
 
     // Distance gate: skip entirely for far root prims (no placeholder, no assets).
     // They stay in deferredTextures and get created when the bot moves closer.
@@ -342,15 +331,6 @@ export class GodotObjectSender {
       }
     }
     this.trackedObjects.add(objUuid);
-
-    // Flush any children that were waiting for this parent
-    const waiting = this.pendingChildren.get(objUuid);
-    if (waiting) {
-      this.pendingChildren.delete(objUuid);
-      for (const { obj: childObj, parentUuid: childParent } of waiting) {
-        this.sendObject(childObj, childParent);
-      }
-    }
 
     // Subscribe to live texture changes
     if (obj.onTextureUpdate) {
@@ -567,7 +547,6 @@ export class GodotObjectSender {
     }
     this.textureUpdateSubs.clear();
     this.deferredTextures.clear();
-    this.pendingChildren.clear();
     this.meshFetchQueue?.clearPending();
     this.sculptFetchQueue?.clearPending();
     this.readinessTracker?.clearAll();
@@ -579,7 +558,6 @@ export class GodotObjectSender {
     }
     this.textureUpdateSubs.clear();
     this.deferredTextures.clear();
-    this.pendingChildren.clear();
     if (this.meshFetchQueue) {
       this.meshFetchQueue.destroy();
       this.meshFetchQueue = null;

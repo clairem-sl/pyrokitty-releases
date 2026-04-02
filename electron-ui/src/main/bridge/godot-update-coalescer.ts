@@ -19,6 +19,8 @@ export interface UpdateCoalescerDeps {
   send(msg: object): void;
   /** Re-send an object to Godot (destroy + re-create) when its fundamental type changes */
   resendObject(obj: any): void;
+  /** Try to send an untracked object to Godot (late ObjectUpdate recovery) */
+  trySendObject(obj: any): void;
 }
 
 export class GodotUpdateCoalescer {
@@ -148,7 +150,13 @@ export class GodotUpdateCoalescer {
     const fullUpdateSub = events.onObjectUpdatedEvent.subscribe((event: any) => {
       const obj = event.object;
       const uid = obj.FullID?.toString() ?? '';
-      if (!uid || !this.deps.isTracked(uid)) return;
+      if (!uid) return;
+      if (!this.deps.isTracked(uid)) {
+        // Object exists in sim but wasn't sent to Godot yet — try now
+        // (handles attachments that lacked Position on first attempt)
+        if (obj.PCode !== 47) this.deps.trySendObject(obj);
+        return;
+      }
 
       const seq = event.sequenceNumber;
       const prevSeq = this.updateSeq.get(uid) ?? -1;

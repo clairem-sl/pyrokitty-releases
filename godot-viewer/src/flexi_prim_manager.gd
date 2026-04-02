@@ -87,7 +87,7 @@ func create_flexi(obj_uuid: String, params: Dictionary, prim_mesh: Mesh, world_p
 	_flexi_skeletons[obj_uuid] = skeleton
 	_flexi_meshes[obj_uuid] = mesh_inst
 
-	print("[Flexi] Created %s: pos=%s rot=%s scale=%s bones=%d sec_len=%.3f surfaces=%d" % [
+	DebugLog.debug("flexi", "Created %s: pos=%s rot=%s scale=%s bones=%d sec_len=%.3f surfaces=%d" % [
 		obj_uuid.substr(0, 8), world_pos, world_rot, prim_scale,
 		skeleton.get_bone_count(), section_length,
 		rigged_mesh.get_surface_count()])

@@ -94,7 +94,7 @@ func handle_animations_batch(msg: Dictionary) -> void:
 	var obj_uuid: String = str(msg.get("uuid", ""))
 	var animations: Dictionary = msg.get("animations", {})
 	if sm.object_mgr._is_self_avatar(obj_uuid):
-		print("[SelfAvatar] animations_batch: uuid=%s, %d animations, is_animesh_root=%s, has_shared_skel=%s" % [
+		DebugLog.debug("selfavatar", "animations_batch: uuid=%s, %d animations, is_animesh_root=%s, has_shared_skel=%s" % [
 			obj_uuid.substr(0, 8), animations.size(),
 			str(sm.animesh_roots.has(obj_uuid)),
 			str(sm.animesh_shared_skeleton.has(obj_uuid))])
@@ -119,7 +119,7 @@ func handle_animations_batch(msg: Dictionary) -> void:
 				shared_skel.set_bone_pose_rotation(bi, Quaternion.IDENTITY)
 				shared_skel.set_bone_pose_position(bi, Vector3.ZERO)
 		if sm.object_mgr._is_self_avatar(obj_uuid):
-			print("[SelfAvatar] Animations cleared for uuid=%s" % obj_uuid.substr(0, 8))
+			DebugLog.debug("selfavatar", "Animations cleared for uuid=%s" % obj_uuid.substr(0, 8))
 		return
 
 	# Cache all animation data and build pending anim list
@@ -143,13 +143,13 @@ func handle_animations_batch(msg: Dictionary) -> void:
 		sm.animesh_pending_anims[obj_uuid] = anim_ids
 
 	if sm.object_mgr._is_self_avatar(obj_uuid) or sm.object_mgr._is_self_avatar(anim_root):
-		print("[SelfAvatar] Animations batch received: uuid=%s root=%s, %d animations [%s]" % [obj_uuid.substr(0, 8), anim_root.substr(0, 8), anim_ids.size(), ", ".join(anim_ids.map(func(a: String) -> String: return a.substr(0, 8)))])
+		DebugLog.debug("selfavatar", "Animations batch received: uuid=%s root=%s, %d animations [%s]" % [obj_uuid.substr(0, 8), anim_root.substr(0, 8), anim_ids.size(), ", ".join(anim_ids.map(func(a: String) -> String: return a.substr(0, 8)))])
 
 	# Trigger rebuild if shared skeleton exists for the root
 	if sm.animesh_shared_skeleton.has(anim_root):
 		_apply_pending_animations(anim_root)
 	elif sm.object_mgr._is_self_avatar(anim_root):
-		print("[SelfAvatar] Batch for root=%s: %d anims cached, but NO shared skeleton yet" % [anim_root.substr(0, 8), anim_ids.size()])
+		DebugLog.debug("selfavatar", "Batch for root=%s: %d anims cached, but NO shared skeleton yet" % [anim_root.substr(0, 8), anim_ids.size()])
 
 
 ## Apply any pending animations to a specific animesh root.
@@ -195,10 +195,10 @@ func _apply_pending_animations(obj_uuid: String) -> void:
 
 	if available.is_empty():
 		if sm.object_mgr._is_self_avatar(root_id):
-			print("[SelfAvatar] _apply_pending root=%s: %d pending, 0 available, %d missing" % [root_id.substr(0, 8), pending_anims.size(), missing])
+			DebugLog.debug("selfavatar", "_apply_pending root=%s: %d pending, 0 available, %d missing" % [root_id.substr(0, 8), pending_anims.size(), missing])
 		return
 	if sm.object_mgr._is_self_avatar(root_id):
-		print("[SelfAvatar] _apply_pending root=%s: %d available, %d missing, %d total joints" % [root_id.substr(0, 8), available.size(), missing, available.reduce(func(acc: int, d: Dictionary): return acc + (d.get("joints", []) as Array).size(), 0)])
+		DebugLog.debug("selfavatar", "_apply_pending root=%s: %d available, %d missing, %d total joints" % [root_id.substr(0, 8), available.size(), missing, available.reduce(func(acc: int, d: Dictionary): return acc + (d.get("joints", []) as Array).size(), 0)])
 
 	# Build per-joint per-CHANNEL priority maps.
 	var joint_best_rot: Dictionary = {}
@@ -305,7 +305,7 @@ func _apply_pending_animations(obj_uuid: String) -> void:
 	_push_cmd({"type": CMD_ANIM_CHANGED, "root_id": root_id, "joints": merged_joints})
 
 	if sm.object_mgr._is_self_avatar(root_id):
-		print("[SelfAvatar] Animations applied: %d joints merged from %d animations" % [merged_joints.size(), available.size()])
+		DebugLog.debug("selfavatar", "Animations applied: %d joints merged from %d animations" % [merged_joints.size(), available.size()])
 
 
 # ─── Command Queue ────────────────────────────────────
@@ -1250,7 +1250,7 @@ func _apply_joint_overrides(glb_skel: Skeleton3D, shared_skel: Skeleton3D, overr
 		override_count += 1
 
 	if override_count > 0 or skipped_default > 0 or skipped_priority > 0:
-		print("[JointOverride] mesh=%s applied=%d/%d (skipped: %d default, %d priority)" % [mesh_id.substr(0, 8), override_count, override_joints.size(), skipped_default, skipped_priority])
+		DebugLog.debug("jointoverride", "mesh=%s applied=%d/%d (skipped: %d default, %d priority)" % [mesh_id.substr(0, 8), override_count, override_joints.size(), skipped_default, skipped_priority])
 
 	if override_count > 0 and not avatar_root_id.is_empty():
 		if sm.avatars.has(avatar_root_id):
@@ -1373,12 +1373,12 @@ func _debug_visualize_skeleton(skel: Skeleton3D) -> void:
 		skel.add_child(mi)
 		count += 1
 
-	print("[DebugSkel] Placed %d bone markers on skeleton (%d bones)" % [count, skel.get_bone_count()])
+	DebugLog.log("debugskel", "Placed %d bone markers on skeleton (%d bones)" % [count, skel.get_bone_count()])
 
 
 func toggle_debug_skeleton() -> void:
 	_debug_skeleton_visible = not _debug_skeleton_visible
-	print("[DebugSkel] Skeleton markers %s" % ("ON" if _debug_skeleton_visible else "OFF"))
+	DebugLog.log("debugskel", "Skeleton markers %s" % ("ON" if _debug_skeleton_visible else "OFF"))
 	if _debug_skeleton_visible:
 		for root_id in sm.animesh_shared_skeleton:
 			var skel: Skeleton3D = sm.animesh_shared_skeleton[root_id]

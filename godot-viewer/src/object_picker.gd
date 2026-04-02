@@ -794,7 +794,7 @@ func _barycentric(p: Vector3, a: Vector3, b: Vector3, c: Vector3) -> Vector3:
 func toggle_pick_debug() -> void:
 	if _debug_layer:
 		_debug_layer.visible = not _debug_layer.visible
-		print("[ObjectPicker] Debug overlay %s — %d static + %d skinned pick instances, %d IDs allocated" % [
+		DebugLog.log("picker", "Debug overlay %s -- %d static + %d skinned pick instances, %d IDs allocated" % [
 			"ON" if _debug_layer.visible else "OFF",
 			_uuid_to_pick_rid.size(), _uuid_to_pick_mi.size(), _next_id - 1])
 

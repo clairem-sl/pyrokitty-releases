@@ -81,13 +81,13 @@ func clear() -> void:
 func handle_terrain_ready(msg: Dictionary) -> void:
 	var bin_path: String = msg.get("path", "")
 	if bin_path.is_empty():
-		push_warning("[SceneManager] terrain_ready: no path")
+		DebugLog.warn("terrain", "terrain_ready: no path")
 		return
 
 	# Read raw Float32LE binary (256*256*4 = 262144 bytes)
 	var f := FileAccess.open(bin_path, FileAccess.READ)
 	if f == null:
-		push_warning("[SceneManager] terrain_ready: can't open %s" % bin_path)
+		DebugLog.warn("terrain", "terrain_ready: can't open %s" % bin_path)
 		return
 
 	var heights := PackedFloat32Array()
@@ -122,7 +122,7 @@ func handle_terrain_ready(msg: Dictionary) -> void:
 		var south_id: String = terrain_grid[south_key]
 		_build_terrain_tile(south_id, grid_x, grid_y - 1, offset_x, offset_y - 256.0)
 
-	print("[Terrain] Tile loaded: cacheID=%s grid=(%d,%d) offset=(%.0f, %.0f)" % [cache_id.substr(0, 8), grid_x, grid_y, offset_x, offset_y])
+	DebugLog.debug("terrain", "Tile loaded: cacheID=%s grid=(%d,%d) offset=(%.0f, %.0f)" % [cache_id.substr(0, 8), grid_x, grid_y, offset_x, offset_y])
 
 	# Build water plane
 	var water_height: float = float(msg.get("waterHeight", 20.0))
@@ -257,7 +257,7 @@ func _build_terrain_mesh(heights: PackedFloat32Array, east_edge: PackedFloat32Ar
 
 
 func _build_water_plane(water_height: float) -> void:
-	print("[Water] _build_water_plane called, water_height=", water_height)
+	DebugLog.debug("water", "_build_water_plane called, water_height=%s" % water_height)
 
 	# Tear down any existing water
 	if _ocean_quad_tree:
@@ -317,7 +317,7 @@ func _build_water_plane(water_height: float) -> void:
 	# GPU underwater fog — fullscreen quad with depth-based shader
 	_create_underwater_fog_quad(water_height)
 
-	print("[Water] OceanFFT water added at height ", water_height)
+	DebugLog.log("water", "OceanFFT water added at height %s" % water_height)
 
 
 ## Recursively set all MeshInstance3D children to a specific render layer (removing layer 1).
@@ -464,7 +464,7 @@ func handle_environment_data(msg: Dictionary) -> void:
 				_ocean.wind_direction_degrees = rad_to_deg(dir_rad)
 				# Scale wind speed by wave direction magnitude (typical range ~0.5-2.0)
 				_ocean.wind_speed = clampf(mag * 10.0, 3.0, 30.0)
-				print("[Water] EEP wave direction: %.1f° speed: %.1f" % [rad_to_deg(dir_rad), _ocean.wind_speed])
+				DebugLog.debug("water", "EEP wave direction: %.1f deg speed: %.1f" % [rad_to_deg(dir_rad), _ocean.wind_speed])
 
 		# Fresnel parameters
 		var mat: ShaderMaterial = _ocean.material
