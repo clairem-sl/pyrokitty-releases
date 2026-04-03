@@ -179,6 +179,9 @@ func _on_right_button_pressed(button_name: String) -> void:
 	# Either button activates the laser
 	if not _laser_active and (_trigger_held or _grip_held):
 		_laser_active = true
+		var sm_act = _camera_ctrl.scene_manager if _camera_ctrl else null
+		if sm_act:
+			sm_act.object_picker.set_pick_continuous(true)
 	# Both buttons together = touch
 	if _trigger_held and _grip_held:
 		_fire_touch_start()
@@ -196,6 +199,9 @@ func _on_right_button_released(button_name: String) -> void:
 	# Laser off when both buttons released
 	if not _trigger_held and not _grip_held:
 		_laser_active = false
+		var sm_deact = _camera_ctrl.scene_manager if _camera_ctrl else null
+		if sm_deact:
+			sm_deact.object_picker.set_pick_continuous(false)
 
 
 func _fire_touch_start() -> void:

@@ -13,7 +13,6 @@ var ws_port: int = 9200
 @onready var scene_manager: Node3D = $SceneManager
 @onready var _stats_bar: CanvasLayer = $StatsBar
 @onready var _stats_label: RichTextLabel = $StatsBar/Label
-var _planar_debug_mode: int = 0
 var _stats_update_timer: float = 0.0
 var _electron_stats: Dictionary = {}  # latest electron_stats from bridge
 
@@ -346,6 +345,8 @@ func _update_stats_bar() -> void:
 		bb += "[%s]Av:[/color] [%s]%d[/color]  " % [C_WHITE, C_CYAN, avatar_count]
 		bb += "[%s]Lights:[/color] [%s]%d/%d[/color]  " % [C_WHITE, C_CYAN, lights_active, lights_total]
 		bb += "[%s]VRAM:[/color] [%s]%.0fMB[/color]" % [C_WHITE, C_CYAN, (tex_mem + buf_mem) / 1048576.0]
+		if scene_manager._occ_enabled:
+			bb += "  [%s]Occ:[/color] [%s]%d vis %d hid[/color]" % [C_WHITE, C_CYAN, scene_manager._occ_visible_ids.size(), scene_manager._occ_hidden_uuids.size()]
 		bb += "  |  "
 		# Textures — Godot side
 		bb += "[%s]Tex:[/color] " % C_WHITE
@@ -420,9 +421,12 @@ func _update_stats_bar() -> void:
 	var mesh_fail_str := ("  %d FAILED" % mesh_failed) if mesh_failed > 0 else ""
 	var e_tex_fail_str := ("  %d FAIL" % e_tex_fail) if e_tex_fail > 0 else ""
 	var e_mesh_fail_str := ("  %d FAIL" % e_mesh_fail) if e_mesh_fail > 0 else ""
-	print("[Stats] FPS: %.0f | GPU: %.1fms RenderCPU: %.1fms | Obj: %d Av: %d Lights: %d/%d Mat: %d | VRAM: tex=%.1fMB buf=%.1fMB | Tex: %d cached %d decoding %d placeholder%s [eDL:%d q:%d dec:%d gpu:%d done:%d%s] | Mesh: %d cached %d decoding %d pending%s [eDL:%d q:%d sculpt:%d done:%d%s] | Def: %d MsgQ: %d | CPU: %.1fms [terrain=%.2f interp=%.2f(%da+%do) anim=%.2f(%d) flexi=%.2f bubbles=%.2f final=%.2f]" % [
+	var occ_str := ""
+	if scene_manager._occ_enabled:
+		occ_str = " | Occ: %d vis %d hid" % [scene_manager._occ_visible_ids.size(), scene_manager._occ_hidden_uuids.size()]
+	print("[Stats] FPS: %.0f | GPU: %.1fms RenderCPU: %.1fms | Obj: %d Av: %d Lights: %d/%d Mat: %d | VRAM: tex=%.1fMB buf=%.1fMB%s | Tex: %d cached %d decoding %d placeholder%s [eDL:%d q:%d dec:%d gpu:%d done:%d%s] | Mesh: %d cached %d decoding %d pending%s [eDL:%d q:%d sculpt:%d done:%d%s] | Def: %d MsgQ: %d | CPU: %.1fms [terrain=%.2f interp=%.2f(%da+%do) anim=%.2f(%d) flexi=%.2f bubbles=%.2f final=%.2f]" % [
 		fps, gpu_ms, render_cpu_ms, obj_count, avatar_count, lights_active, lights_total, mat_count,
-		tex_mem / 1048576.0, buf_mem / 1048576.0,
+		tex_mem / 1048576.0, buf_mem / 1048576.0, occ_str,
 		tex_cached, tex_loading, tex_waiting, tex_fail_str,
 		e_tex_dl, e_tex_q, e_tex_dec, e_tex_gpu, e_tex_done, e_tex_fail_str,
 		mesh_cached, mesh_loading, mesh_pending, mesh_fail_str,
@@ -430,7 +434,6 @@ func _update_stats_bar() -> void:
 		e_deferred, msg_q,
 		t_total, t_terrain, t_interp_av + t_interp_obj, avatar_count, interp_targets,
 		t_anim, anim_roots, t_flexi, t_bubbles, t_finalize])
-
 
 ## Classify a raw JSON string as high-priority without full parsing.
 ## Peeks at the first 40 bytes — enough to see any "type":"avatar_*" or "self_id".
@@ -517,16 +520,14 @@ func _handle_message(text: String) -> void:
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_F9:
-			_planar_debug_mode = (_planar_debug_mode + 1) % 4
-			scene_manager.set_planar_debug_mode(_planar_debug_mode)
-		elif event.keycode == KEY_1 and event.ctrl_pressed and event.shift_pressed:
+		if event.keycode == KEY_1 and event.ctrl_pressed and event.shift_pressed:
 			_stats_bar.visible = not _stats_bar.visible
 			RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), _stats_bar.visible)
 			scene_manager.toggle_debug_skeleton()
 		elif event.keycode == KEY_F10:
 			scene_manager.toggle_pick_debug()
-
+		elif event.keycode == KEY_F11:
+			scene_manager.toggle_occlusion_culling()
 
 func send_message(msg: Dictionary) -> void:
 	if ws_peer and ws_peer.get_ready_state() == WebSocketPeer.STATE_OPEN:

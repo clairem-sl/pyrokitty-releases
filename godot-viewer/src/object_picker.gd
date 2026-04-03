@@ -28,6 +28,13 @@ var _uuid_to_pick_mi: Dictionary = {}  # UUID (String) -> MeshInstance3D (skinne
 var _pick_materials: Dictionary = {}   # UUID (String) -> ShaderMaterial (prevent GC)
 var _debug_layer: CanvasLayer
 var _debug_rect: TextureRect
+var _pick_continuous: bool = false     # true when VR laser is active (render every frame)
+var _transparent_uuids: Dictionary = {} # uuid -> true (objects with any alpha — hidden during occlusion scan)
+
+# ─── Occlusion scan (GPU compute) ─────────────────────
+var _local_rd: RenderingDevice
+var _occ_shader: RID
+var _occ_pipeline: RID
 
 # ─── Hover highlight ───────────────────────────────────
 var _highlight_mat: StandardMaterial3D
@@ -47,14 +54,14 @@ func _setup_id_buffer() -> void:
 
 	# SubViewport: shared world, 1/4 resolution, renders every frame.
 	# No AA — edge blending would corrupt ID colors.
-	# UPDATE_ALWAYS instead of on-demand force_draw — force_draw inside _process
-	# breaks OpenXR frame ordering (XR_ERROR_CALL_ORDER_INVALID → device lost).
+	# UPDATE_DISABLED by default — rendered on-demand via request_pick_frame().
+	# VR laser sets UPDATE_ALWAYS via set_pick_continuous().
 	_pick_viewport = SubViewport.new()
 	_pick_viewport.name = "PickViewport"
 	_pick_viewport.world_3d = sm.get_world_3d()
 	var main_size: Vector2i = sm.get_viewport().size
 	_pick_viewport.size = Vector2i(maxi(main_size.x / 4, 64), maxi(main_size.y / 4, 64))
-	_pick_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_pick_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	_pick_viewport.msaa_3d = Viewport.MSAA_DISABLED
 	_pick_viewport.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
 	_pick_viewport.use_taa = false
@@ -92,11 +99,37 @@ func _setup_id_buffer() -> void:
 	_highlight_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_highlight_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
+	# GPU compute shader for occlusion scan (local RD so we can submit+sync)
+	_local_rd = RenderingServer.create_local_rendering_device()
+	if _local_rd != null:
+		var shader_file = load("res://src/occlusion_scan.glsl")
+		if shader_file != null:
+			var spirv: RDShaderSPIRV = shader_file.get_spirv()
+			_occ_shader = _local_rd.shader_create_from_spirv(spirv)
+			if _occ_shader.is_valid():
+				_occ_pipeline = _local_rd.compute_pipeline_create(_occ_shader)
+				DebugLog.log("picker", "Occlusion compute shader ready")
+			else:
+				DebugLog.warn("picker", "Occlusion compute shader creation failed")
+		else:
+			DebugLog.warn("picker", "occlusion_scan.glsl not found (run --headless --import)")
+
 
 ## Mirror main camera to pick camera. Call from scene_manager._process() each frame.
 ## Desktop default — ray originates from camera so projection is parallax-free.
 ## VR overrides this with update_pick_camera_ray() from xr_rig before pick.
 var _pick_ray_aligned: bool = false
+
+## Enable continuous pick viewport rendering (VR laser active).
+func set_pick_continuous(enabled: bool) -> void:
+	_pick_continuous = enabled
+	if _pick_viewport:
+		_pick_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if enabled else SubViewport.UPDATE_DISABLED
+
+## Request a single pick viewport render (desktop click/hover).
+func request_pick_frame() -> void:
+	if _pick_viewport and not _pick_continuous:
+		_pick_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 func update_pick_camera() -> void:
 	if _pick_camera == null or _pick_viewport == null:
@@ -113,7 +146,6 @@ func update_pick_camera() -> void:
 	var pick_size := Vector2i(maxi(main_size.x / 4, 64), maxi(main_size.y / 4, 64))
 	if _pick_viewport.size != pick_size:
 		_pick_viewport.size = pick_size
-
 
 ## Aim pick camera along a ray. Call from xr_rig._update_laser() each frame AFTER
 ## update_pick_camera() so it overrides the mirror. On pick, center pixel = hit.
@@ -316,6 +348,7 @@ func destroy_all_pick_instances() -> void:
 	_id_to_uuid.clear()
 	_uuid_to_id.clear()
 	_pick_materials.clear()
+	_transparent_uuids.clear()
 	_next_id = 1
 
 
@@ -336,6 +369,7 @@ func destroy_pick_resources(obj_uuid: String) -> void:
 		rsi.on_transform_pushed = Callable()
 	_destroy_pick_body(obj_uuid)
 	_destroy_pick_instance(obj_uuid)
+	_transparent_uuids.erase(obj_uuid)
 
 
 ## Destroy all pick resources (region change).
@@ -855,3 +889,137 @@ func handle_object_properties(msg: Dictionary) -> void:
 		sm.object_meta[obj_uuid]["name"] = obj_name
 		sm.object_meta[obj_uuid]["description"] = obj_desc
 	sm.object_properties_received.emit(obj_uuid, obj_name, obj_desc)
+
+
+# ─── Occlusion scan ────────────────────────────────────
+
+## Async scan: renders pick viewport once with transparent instances hidden,
+## then reads visible IDs via GPU compute shader (or CPU fallback).
+## Returns { numeric_id: true } for all visible object IDs.
+func scan_visible_ids() -> Dictionary:
+	if _pick_viewport == null:
+		return {}
+
+	if _pick_continuous:
+		# VR mode — viewport already renders every frame, just read current texture
+		return _read_visible_ids()
+
+	# Hide transparent pick instances (they'd appear visible but don't actually occlude)
+	var scan_hidden_rids: Array[RID] = []
+	var scan_hidden_mis: Array = []
+	for uuid: String in _transparent_uuids:
+		_hide_pick_for_scan(uuid, scan_hidden_rids, scan_hidden_mis)
+
+	# Render one frame
+	_pick_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	await sm.get_tree().process_frame
+
+	# Re-show transparent pick instances (so clicks still work)
+	for rid: RID in scan_hidden_rids:
+		RenderingServer.instance_set_visible(rid, true)
+	for mi in scan_hidden_mis:
+		if is_instance_valid(mi):
+			mi.visible = true
+
+	return _read_visible_ids()
+
+
+## Hide a pick instance (RS duplicate or skinned MeshInstance3D) for the scan render.
+func _hide_pick_for_scan(uuid: String, rids: Array[RID], mis: Array) -> void:
+	var dup: RID = _uuid_to_pick_rid.get(uuid, RID())
+	if dup.is_valid():
+		RenderingServer.instance_set_visible(dup, false)
+		rids.append(dup)
+	var mi = _uuid_to_pick_mi.get(uuid)
+	if mi != null and is_instance_valid(mi):
+		mi.visible = false
+		mis.append(mi)
+
+
+## Read visible IDs from the pick viewport texture. Uses GPU compute if available,
+## falls back to CPU iteration otherwise.
+func _read_visible_ids() -> Dictionary:
+	var img: Image = _pick_viewport.get_texture().get_image()
+	if img == null:
+		return {}
+	if _local_rd != null and _occ_pipeline.is_valid():
+		return _read_visible_ids_gpu(img)
+	return _read_visible_ids_cpu(img)
+
+
+## GPU compute path: upload image to local RD, dispatch shader, read back flags.
+func _read_visible_ids_gpu(img: Image) -> Dictionary:
+	if img.get_format() != Image.FORMAT_RGBA8:
+		img.convert(Image.FORMAT_RGBA8)
+	var w: int = img.get_width()
+	var h: int = img.get_height()
+	var data: PackedByteArray = img.get_data()
+
+	# Create texture on local RD
+	var fmt := RDTextureFormat.new()
+	fmt.width = w
+	fmt.height = h
+	fmt.format = RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM
+	fmt.usage_bits = RenderingDevice.TEXTURE_USAGE_STORAGE_BIT | RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
+	var tex: RID = _local_rd.texture_create(fmt, RDTextureView.new(), [data])
+
+	# Visibility buffer — one u32 per possible ID, zeroed
+	var id_count: int = maxi(_next_id, 1)
+	var clear_bytes := PackedByteArray()
+	clear_bytes.resize(id_count * 4)
+	clear_bytes.fill(0)
+	var vis_buf: RID = _local_rd.storage_buffer_create(id_count * 4, clear_bytes)
+
+	# Uniform set
+	var u_tex := RDUniform.new()
+	u_tex.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+	u_tex.binding = 0
+	u_tex.add_id(tex)
+	var u_buf := RDUniform.new()
+	u_buf.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
+	u_buf.binding = 1
+	u_buf.add_id(vis_buf)
+	var uset: RID = _local_rd.uniform_set_create([u_tex, u_buf], _occ_shader, 0)
+
+	# Dispatch
+	var gx: int = ceili(float(w) / 16.0)
+	var gy: int = ceili(float(h) / 16.0)
+	var cl: int = _local_rd.compute_list_begin()
+	_local_rd.compute_list_bind_compute_pipeline(cl, _occ_pipeline)
+	_local_rd.compute_list_bind_uniform_set(cl, uset, 0)
+	_local_rd.compute_list_dispatch(cl, gx, gy, 1)
+	_local_rd.compute_list_end()
+	_local_rd.submit()
+	_local_rd.sync()
+
+	# Read back
+	var result_data: PackedByteArray = _local_rd.buffer_get_data(vis_buf)
+
+	# Free GPU resources (created fresh each scan — once per second is fine)
+	_local_rd.free_rid(uset)
+	_local_rd.free_rid(vis_buf)
+	_local_rd.free_rid(tex)
+
+	# Build result — iterate IDs (few thousand), not pixels (130k+)
+	var result: Dictionary = {}
+	for i: int in range(id_count):
+		if result_data.decode_u32(i * 4) != 0:
+			result[i] = true
+	return result
+
+
+## CPU fallback: iterate raw pixel bytes (slower, used when compute shader unavailable).
+func _read_visible_ids_cpu(img: Image) -> Dictionary:
+	if img.get_format() != Image.FORMAT_RGBA8:
+		img.convert(Image.FORMAT_RGBA8)
+	var data: PackedByteArray = img.get_data()
+	var pixel_count: int = img.get_width() * img.get_height()
+	var result: Dictionary = {}
+	for i: int in range(0, pixel_count, 2):
+		var idx: int = i * 4
+		var r: int = data[idx]
+		var g: int = data[idx + 1]
+		var b: int = data[idx + 2]
+		if r != 0 or g != 0 or b != 0:
+			result[(r << 16) | (g << 8) | b] = true
+	return result

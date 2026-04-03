@@ -52,6 +52,11 @@ var _cursor_timer: float = 0.0
 var _camera_timer: float = 0.0  # throttle for standalone camera updates
 var _last_cam_pos: Vector3 = Vector3.ZERO
 
+# Deferred pick — delay ID-buffer read by 2 frames so the SubViewport has rendered
+var _deferred_pick: StringName = &""
+var _deferred_pick_pos: Vector2 = Vector2.ZERO
+var _deferred_pick_countdown: int = 0
+
 # ALT-orbit camera (SL-style focus orbit)
 var is_alt_orbiting: bool = false  # True while ALT + left-drag
 var alt_focus_hold: bool = false   # True after alt-orbit release, until movement/ESC
@@ -223,6 +228,12 @@ func _process(delta: float) -> void:
 	if _action_bar:
 		_action_bar.process(delta)
 
+	# Deferred pick — wait for pick viewport to render after request_pick_frame()
+	if _deferred_pick_countdown > 0:
+		_deferred_pick_countdown -= 1
+		if _deferred_pick_countdown == 0:
+			_execute_deferred_pick()
+
 	# Fade click marker
 	if _click_marker_timer > 0.0:
 		_click_marker_timer -= delta
@@ -352,6 +363,9 @@ func _input(event: InputEvent) -> void:
 		if mb.pressed and mb.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
 			if Input.mouse_mode == Input.MOUSE_MODE_VISIBLE:
 				Input.mouse_mode = Input.MOUSE_MODE_CONFINED
+			# Trigger a pick viewport render so the next pick reads fresh data
+			if scene_manager:
+				scene_manager.object_picker.request_pick_frame()
 		elif not mb.pressed and mb.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
 			if not is_butt_grabbing and not is_alt_orbiting:
 				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -362,14 +376,19 @@ func _input(event: InputEvent) -> void:
 					_drag_offset = mb.position - _tooltip_panel.global_position
 				elif _tooltip_visible and not _is_click_on_panel(mb.position):
 					_hide_debug_tooltip()
+				elif alt_focus_hold and _is_click_on_self_avatar(mb.position):
+					alt_focus_hold = false
+					orbit_hold = false
+					is_butt_grabbing = true
+					Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 				elif not _tooltip_visible and Input.is_key_pressed(KEY_ALT):
-					_start_alt_orbit(mb.position)
+					_defer_pick(&"alt_orbit", mb.position)
 				elif not _tooltip_visible and _is_click_on_self_avatar(mb.position):
 					orbit_hold = false
 					is_butt_grabbing = true
 					Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 				elif not _tooltip_visible:
-					_handle_touch_pick(mb.position)
+					_defer_pick(&"touch_pick", mb.position)
 			else:
 				_dragging_panel = false
 				if scene_manager and scene_manager.touch_mgr.is_grabbing():
@@ -386,9 +405,9 @@ func _input(event: InputEvent) -> void:
 		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			if not _is_click_on_panel(mb.position):
 				if _action_bar:
-					_action_bar.handle_click(mb.position)
+					_defer_pick(&"action_click", mb.position)
 				else:
-					_handle_debug_pick(mb.position)
+					_defer_pick(&"debug_pick", mb.position)
 
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
 			if _tooltip_visible:
@@ -446,10 +465,33 @@ func _input(event: InputEvent) -> void:
 			_pending_cursor_pos = mm.position
 
 
+func _defer_pick(action: StringName, pos: Vector2) -> void:
+	_deferred_pick = action
+	_deferred_pick_pos = pos
+	_deferred_pick_countdown = 2  # request_pick_frame() already called; wait 2 _process ticks for render
+
+
+func _execute_deferred_pick() -> void:
+	var action := _deferred_pick
+	var pos := _deferred_pick_pos
+	_deferred_pick = &""
+	match action:
+		&"alt_orbit":
+			if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+				_start_alt_orbit(pos)
+		&"touch_pick":
+			_handle_touch_pick(pos)
+		&"debug_pick":
+			_handle_debug_pick(pos)
+		&"action_click":
+			if _action_bar:
+				_action_bar.handle_click(pos)
+
+
 func _start_alt_orbit(screen_pos: Vector2) -> void:
 	var _pc := _pick_camera()
 	var ray_from := _pc.project_ray_origin(screen_pos)
-	var ray_dir := _pc.project_ray_normal(screen_pos)
+	var ray_dir := _pc.project_ray_normal(screen_pos)	
 	# Try object pick first
 	var hit: Dictionary = scene_manager.pick_object(ray_from, ray_dir) if scene_manager else {}
 	if not hit.is_empty():

@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cxfrsrgqhyfg4"
+path="res://.godot/imported/occlusion_scan.glsl-4e75658082c8e9621239be08bcd1f8ae.res"
+
+[deps]
+
+source_file="res://src/occlusion_scan.glsl"
+dest_files=["res://.godot/imported/occlusion_scan.glsl-4e75658082c8e9621239be08bcd1f8ae.res"]
+
+[params]
+

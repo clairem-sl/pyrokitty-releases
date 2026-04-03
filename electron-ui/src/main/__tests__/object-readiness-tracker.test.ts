@@ -222,6 +222,152 @@ describe('ObjectReadinessTracker', () => {
     });
   });
 
+  describe('sync cache hit (resolve before track)', () => {
+    it('emits immediately if mesh resolved before track()', () => {
+      tracker.onMeshReady('mesh-abc');
+      tracker.track('obj-1', 'mesh-abc', new Set(), new Set(), { uuid: 'obj-1' });
+      expect(send).toHaveBeenCalledOnce();
+    });
+
+    it('emits immediately if texture resolved before track()', () => {
+      tracker.onTextureReady('tex-1');
+      tracker.track('obj-1', null, new Set(['tex-1']), new Set(), { uuid: 'obj-1' });
+      expect(send).toHaveBeenCalledOnce();
+    });
+
+    it('emits immediately if material resolved before track()', () => {
+      tracker.onMaterialReady('mat-1');
+      tracker.track('obj-1', null, new Set(), new Set(['mat-1']), { uuid: 'obj-1' });
+      expect(send).toHaveBeenCalledOnce();
+    });
+
+    it('emits immediately with mesh + texture both pre-resolved', () => {
+      tracker.onMeshReady('mesh-abc');
+      tracker.onTextureReady('tex-1');
+      tracker.track('obj-1', 'mesh-abc', new Set(['tex-1']), new Set(), { uuid: 'obj-1' });
+      expect(send).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('unfetchable texture filtering', () => {
+    it('does not block on IMG_TRANSPARENT', () => {
+      tracker.track('obj-1', null, new Set(['8dcd4a48-2d37-4909-9f78-f7a9eb4ef903']), new Set(), { uuid: 'obj-1' });
+      expect(send).toHaveBeenCalledOnce();
+    });
+
+    it('does not block on IMG_INVISIBLE', () => {
+      tracker.track('obj-1', null, new Set(['38b86f85-2575-52a9-a531-23108d8da837']), new Set(), { uuid: 'obj-1' });
+      expect(send).toHaveBeenCalledOnce();
+    });
+
+    it('does not block on zero UUID', () => {
+      tracker.track('obj-1', null, new Set(['00000000-0000-0000-0000-000000000000']), new Set(), { uuid: 'obj-1' });
+      expect(send).toHaveBeenCalledOnce();
+    });
+
+    it('does not block on empty string texture id', () => {
+      tracker.track('obj-1', null, new Set(['']), new Set(), { uuid: 'obj-1' });
+      expect(send).toHaveBeenCalledOnce();
+    });
+
+    it('still blocks on a real texture mixed with unfetchable UUIDs', () => {
+      tracker.track('obj-1', null, new Set(['8dcd4a48-2d37-4909-9f78-f7a9eb4ef903', 'tex-real']), new Set(), { uuid: 'obj-1' });
+      expect(send).not.toHaveBeenCalled();
+      tracker.onTextureReady('tex-real');
+      expect(send).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('parent ordering', () => {
+    it('holds child until parent is emitted', () => {
+      tracker.track('child-1', null, new Set(), new Set(), { uuid: 'child-1' }, 'parent-1');
+      expect(send).not.toHaveBeenCalled();
+
+      tracker.track('parent-1', null, new Set(), new Set(), { uuid: 'parent-1' });
+      expect(send).toHaveBeenCalledTimes(2);
+    });
+
+    it('parent emits before child', () => {
+      tracker.track('child-1', null, new Set(), new Set(), { uuid: 'child-1' }, 'parent-1');
+      tracker.track('parent-1', null, new Set(), new Set(), { uuid: 'parent-1' });
+      expect(send.mock.calls[0][0].uuid).toBe('parent-1');
+      expect(send.mock.calls[1][0].uuid).toBe('child-1');
+    });
+
+    it('markEmitted flushes waiting children (avatar parent path)', () => {
+      tracker.track('child-1', null, new Set(), new Set(), { uuid: 'child-1' }, 'avatar-uuid');
+      expect(send).not.toHaveBeenCalled();
+
+      tracker.markEmitted('avatar-uuid');
+      expect(send).toHaveBeenCalledOnce();
+    });
+
+    it('child emits immediately if parent was already emitted', () => {
+      tracker.track('parent-1', null, new Set(), new Set(), { uuid: 'parent-1' });
+      send.mockClear();
+
+      tracker.track('child-1', null, new Set(), new Set(), { uuid: 'child-1' }, 'parent-1');
+      expect(send).toHaveBeenCalledOnce();
+    });
+
+    it('child still waits for its own mesh even after parent emits', () => {
+      tracker.track('parent-1', null, new Set(), new Set(), { uuid: 'parent-1' });
+      send.mockClear();
+
+      tracker.track('child-1', 'mesh-c', new Set(), new Set(), { uuid: 'child-1' }, 'parent-1');
+      expect(send).not.toHaveBeenCalled();
+
+      tracker.onMeshReady('mesh-c');
+      expect(send).toHaveBeenCalledOnce();
+    });
+
+    it('removing a child does not emit it when parent later emits', () => {
+      tracker.track('child-1', null, new Set(), new Set(), { uuid: 'child-1' }, 'parent-1');
+      tracker.remove('child-1');
+
+      tracker.track('parent-1', null, new Set(), new Set(), { uuid: 'parent-1' });
+      expect(send).toHaveBeenCalledOnce(); // only parent
+      expect(send.mock.calls[0][0].uuid).toBe('parent-1');
+    });
+  });
+
+  describe('attachment propagation', () => {
+    it('root with isAttachment=true is tracked as attachment', () => {
+      tracker.track('root-1', null, new Set(), new Set(), { uuid: 'root-1', isAttachment: true });
+      expect(tracker.isAttachment('root-1')).toBe(true);
+    });
+
+    it('non-attachment root is not marked', () => {
+      tracker.track('root-1', null, new Set(), new Set(), { uuid: 'root-1' });
+      expect(tracker.isAttachment('root-1')).toBe(false);
+    });
+
+    it('child inherits isAttachment from parent', () => {
+      tracker.track('root-1', null, new Set(), new Set(), { uuid: 'root-1', isAttachment: true });
+      tracker.track('child-1', null, new Set(), new Set(), { uuid: 'child-1', parentUuid: 'root-1' }, 'root-1');
+      expect(tracker.isAttachment('child-1')).toBe(true);
+    });
+
+    it('child message gets isAttachment=true set on emit', () => {
+      tracker.track('root-1', null, new Set(), new Set(), { uuid: 'root-1', isAttachment: true });
+      const childMsg: any = { uuid: 'child-1', parentUuid: 'root-1' };
+      tracker.track('child-1', null, new Set(), new Set(), childMsg, 'root-1');
+      expect(childMsg.isAttachment).toBe(true);
+    });
+
+    it('non-attachment child of non-attachment parent is not marked', () => {
+      tracker.track('root-1', null, new Set(), new Set(), { uuid: 'root-1' });
+      tracker.track('child-1', null, new Set(), new Set(), { uuid: 'child-1' }, 'root-1');
+      expect(tracker.isAttachment('child-1')).toBe(false);
+    });
+
+    it('attachment status cleared on clearAll', () => {
+      tracker.track('root-1', null, new Set(), new Set(), { uuid: 'root-1', isAttachment: true });
+      tracker.clearAll();
+      expect(tracker.isAttachment('root-1')).toBe(false);
+    });
+  });
+
   describe('sweepTimeouts', () => {
     it('does not crash with no pending objects', () => {
       tracker.sweepTimeouts();

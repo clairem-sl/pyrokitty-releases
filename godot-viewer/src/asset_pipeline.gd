@@ -571,6 +571,18 @@ func apply_face_materials(rsi, obj_uuid: String, faces: Array) -> void:
 				if obj_uuid not in _tex_waiting[tid]:
 					_tex_waiting[tid].append(obj_uuid)
 
+	# Track transparency for occlusion culling — transparent objects are hidden
+	# during occlusion scans so they don't falsely occlude objects behind them.
+	var has_transparency: bool = false
+	for fi: Dictionary in faces:
+		if int(fi.get("resolvedAlphaMode", int(fi.get("alphaMode", 0)))) > 0:
+			has_transparency = true
+			break
+	if has_transparency:
+		sm.object_picker._transparent_uuids[obj_uuid] = true
+	else:
+		sm.object_picker._transparent_uuids.erase(obj_uuid)
+
 
 func _get_double_sided_shader(shader: Shader) -> Shader:
 	if _double_sided_shader_cache.has(shader):

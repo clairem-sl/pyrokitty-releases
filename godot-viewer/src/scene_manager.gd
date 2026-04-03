@@ -171,6 +171,13 @@ var send_fn: Callable  # set by main.gd; routes messages back to TS over WebSock
 var _evict_timer: float = 0.0
 const EVICT_INTERVAL: float = 60.0
 
+# ─── Occlusion Culling ─────────────────────────────────
+var _occ_enabled: bool = false
+const OCC_HIDE_AFTER_SCANS: int = 5   # consecutive scan misses before hiding (= seconds at 1 scan/s)
+var _occ_missing_scans: Dictionary = {}  # uuid -> int (consecutive miss count)
+var _occ_hidden_uuids: Dictionary = {}   # uuid -> true (hidden by occlusion culling)
+var _occ_visible_ids: Dictionary = {}    # numeric_id -> true (from last scan)
+
 
 # Loading fade-in overlay (opaque black → transparent)
 var _fade_overlay: ColorRect = null
@@ -262,6 +269,9 @@ func _ready() -> void:
 
 	asset_pipeline.start_threads()
 
+	# Start occlusion scan coroutine (runs every 1s when enabled)
+	_occlusion_scan_loop()
+
 	# Start with opaque black overlay — fade out as assets load
 	var fade_layer := CanvasLayer.new()
 	fade_layer.layer = 100  # on top of everything
@@ -270,7 +280,6 @@ func _ready() -> void:
 	_fade_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	fade_layer.add_child(_fade_overlay)
 	add_child(fade_layer)
-
 
 ## Per-subsystem timing accumulators (milliseconds, averaged over 1s windows).
 ## Reset each time stats are collected via get_process_timing().
@@ -312,6 +321,24 @@ func _process(delta: float) -> void:
 
 	# Mirror main camera to pick viewport (renders continuously for ID buffer picking)
 	object_picker.update_pick_camera()
+
+	# Per-frame: instantly un-hide occluded objects that left the frustum (camera turned)
+	if _occ_enabled and not _occ_hidden_uuids.is_empty():
+		var _occ_cam: Camera3D = object_picker._pick_camera
+		if _occ_cam != null:
+			var to_unhide: Array = []
+			for uuid: String in _occ_hidden_uuids:
+				var rsi = objects.get(uuid)
+				if rsi == null:
+					to_unhide.append(uuid)  # stale entry
+				elif not _occ_cam.is_position_in_frustum(rsi.pos):
+					to_unhide.append(uuid)
+			for uuid: String in to_unhide:
+				var rsi = objects.get(uuid)
+				if rsi != null:
+					RenderingServer.instance_set_visible(rsi.rid, true)
+				_occ_hidden_uuids.erase(uuid)
+				_occ_missing_scans.erase(uuid)
 
 	# Terrain/water/sky processing
 	_t0 = Time.get_ticks_usec()
@@ -368,7 +395,6 @@ func _process(delta: float) -> void:
 	if _fade_overlay != null:
 		_update_loading_fade(delta)
 
-
 func _update_loading_fade(delta: float) -> void:
 	# Smooth linear fade from black over the full 30s loading period and beyond.
 	# Rate: 1/30 ≈ 0.033 alpha/sec during loading, then same rate after.
@@ -385,6 +411,11 @@ func _update_loading_fade(delta: float) -> void:
 # Region change — clear entire scene for cross-region teleport
 func handle_region_change() -> void:
 	DebugLog.log("scene", "Region change -- clearing all objects, avatars, and lights")
+
+	# Clear occlusion state before destroying objects
+	_occ_hidden_uuids.clear()
+	_occ_missing_scans.clear()
+	_occ_visible_ids.clear()
 
 	# Destroy all pick resources (physics bodies + ID buffer instances) before clearing objects
 	object_picker.destroy_all_pick_resources()
@@ -631,7 +662,7 @@ func apply_debug_highlight_if_needed(mat: Material) -> void:
 
 func toggle_pick_debug() -> void:
 	object_picker.toggle_pick_debug()
-
+	
 ## Switch name bubbles to VR mode (3D world-space) or desktop mode (2D overlay).
 ## Called by set_vr_mode() during init.
 func set_bubble_vr_mode(vr: bool) -> void:
@@ -646,3 +677,60 @@ func set_bubble_vr_mode(vr: bool) -> void:
 # Stats
 func get_pipeline_stats() -> Dictionary:
 	return asset_pipeline.get_pipeline_stats()
+
+
+# ─── Occlusion Culling ─────────────────────────────────
+
+func toggle_occlusion_culling() -> void:
+	_occ_enabled = not _occ_enabled
+	if not _occ_enabled:
+		for uuid: String in _occ_hidden_uuids:
+			var rsi = objects.get(uuid)
+			if rsi != null:
+				RenderingServer.instance_set_visible(rsi.rid, true)
+		_occ_hidden_uuids.clear()
+		_occ_missing_scans.clear()
+		_occ_visible_ids.clear()
+	DebugLog.log("scene", "Occlusion culling %s" % ("ON" if _occ_enabled else "OFF"))
+
+
+func _occlusion_scan_loop() -> void:
+	while true:
+		await get_tree().create_timer(1.0).timeout
+		if not _occ_enabled:
+			continue
+		_occ_visible_ids = await object_picker.scan_visible_ids()
+		_apply_occlusion_culling()
+
+
+func _apply_occlusion_culling() -> void:
+	var pick_cam: Camera3D = object_picker._pick_camera
+	if pick_cam == null:
+		return
+	for uuid: String in objects:
+		if object_picker._transparent_uuids.has(uuid):
+			continue  # transparent objects are never occluded
+		var numeric_id: int = object_picker._uuid_to_id.get(uuid, 0)
+		if numeric_id == 0:
+			continue  # no pick instance allocated
+		var rsi = objects[uuid]
+		# Objects outside the frustum — leave visible (Godot culls them natively)
+		if not pick_cam.is_position_in_frustum(rsi.pos):
+			if _occ_hidden_uuids.has(uuid):
+				RenderingServer.instance_set_visible(rsi.rid, true)
+				_occ_hidden_uuids.erase(uuid)
+			_occ_missing_scans.erase(uuid)
+			continue
+		if _occ_visible_ids.has(numeric_id):
+			# Visible in scan — reset miss count, un-hide if needed
+			_occ_missing_scans.erase(uuid)
+			if _occ_hidden_uuids.has(uuid):
+				RenderingServer.instance_set_visible(rsi.rid, true)
+				_occ_hidden_uuids.erase(uuid)
+		else:
+			# Not visible — count consecutive misses
+			var misses: int = _occ_missing_scans.get(uuid, 0) + 1
+			_occ_missing_scans[uuid] = misses
+			if misses >= OCC_HIDE_AFTER_SCANS and not _occ_hidden_uuids.has(uuid):
+				RenderingServer.instance_set_visible(rsi.rid, false)
+				_occ_hidden_uuids[uuid] = true
