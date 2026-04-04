@@ -19,7 +19,8 @@
         "strictNullChecks": true,
         "noFallthroughCasesInSwitch": false,
         "types": [
-            "node"
+            "node",
+            "mocha"
         ]
     },
     "include": [
