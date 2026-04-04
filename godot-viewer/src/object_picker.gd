@@ -19,7 +19,8 @@ var _uuid_to_cache_key: Dictionary = {} # UUID (String) -> cache_key (String)
 # ─── Phase 2: GPU ID-buffer ─────────────────────────────
 var _pick_viewport: SubViewport
 var _pick_camera: Camera3D
-var _id_shader: Shader
+var _id_shader: Shader         # opaque: depth_draw_opaque (builds depth buffer)
+var _id_shader_transparent: Shader  # transparent: depth_draw_never + ALPHA=1.0 (tests depth, doesn't write)
 var _next_id: int = 1                  # 0 = background (no hit), reserved
 var _id_to_uuid: Dictionary = {}       # numeric_id (int) -> UUID (String)
 var _uuid_to_id: Dictionary = {}       # UUID (String) -> numeric_id (int)
@@ -48,9 +49,17 @@ func _init(scene_manager) -> void:
 
 ## Deferred setup — scene_manager must be in the tree before we add children.
 func _setup_id_buffer() -> void:
-	# ID shader: 24-bit object ID as RGB. No depth — physics provides distance.
+	# ID shaders: 24-bit object ID as RGB.
+	# Opaque variant writes depth — builds the depth buffer for occlusion.
 	_id_shader = Shader.new()
 	_id_shader.code = "shader_type spatial;\nrender_mode unshaded, cull_back, depth_draw_opaque, fog_disabled;\nuniform vec3 id_color;\nvoid fragment() { ALBEDO = id_color; }\n"
+	# Transparent variant: ALPHA=1.0 forces Godot to draw these AFTER all opaque objects,
+	# so the opaque depth buffer is fully built before transparent objects test against it.
+	# depth_draw_never — tests against opaque depth but can't occlude others.
+	# Stochastic discard — randomly drops ~50% of pixels so underlying opaque IDs and other
+	# transparent layers show through. Over multiple scans, all visible objects get flagged.
+	_id_shader_transparent = Shader.new()
+	_id_shader_transparent.code = "shader_type spatial;\nrender_mode unshaded, cull_back, depth_draw_never, fog_disabled;\nuniform vec3 id_color;\nvoid fragment() {\n\tfloat h = fract(sin(dot(FRAGCOORD.xy, vec2(12.9898, 78.233)) + TIME) * 43758.5453);\n\tif (h < 0.5) discard;\n\tALBEDO = id_color;\n\tALPHA = 1.0;\n}\n"
 
 	# SubViewport: shared world, 1/4 resolution, renders every frame.
 	# No AA — edge blending would corrupt ID colors.
@@ -244,15 +253,25 @@ func _alloc_id(obj_uuid: String) -> int:
 
 
 ## Create an ID-color ShaderMaterial for a given numeric ID.
-func _create_id_material(numeric_id: int) -> ShaderMaterial:
+## transparent=true uses the depth_draw_never variant (rendered after opaque, can't occlude).
+func _create_id_material(numeric_id: int, transparent: bool = false) -> ShaderMaterial:
 	var mat := ShaderMaterial.new()
-	mat.shader = _id_shader
+	mat.shader = _id_shader_transparent if transparent else _id_shader
 	mat.set_shader_parameter("id_color", Color(
 		float((numeric_id >> 16) & 0xFF) / 255.0,
 		float((numeric_id >> 8) & 0xFF) / 255.0,
 		float(numeric_id & 0xFF) / 255.0,
 	))
 	return mat
+
+
+## Swap an existing pick instance's material between opaque and transparent shaders.
+## Called by asset_pipeline when an object's transparency state changes.
+func update_pick_material_transparency(obj_uuid: String, transparent: bool) -> void:
+	var mat: ShaderMaterial = _pick_materials.get(obj_uuid)
+	if mat == null:
+		return
+	mat.shader = _id_shader_transparent if transparent else _id_shader
 
 
 ## Create an RS instance duplicate for a static (non-skinned) object.
@@ -275,8 +294,9 @@ func _create_pick_instance(obj_uuid: String, mesh: Mesh, rsi) -> void:
 	var xform := Transform3D(Basis(rsi.rot) * Basis.from_scale(effective_scl), adjusted_pos)
 	RenderingServer.instance_set_transform(dup, xform)
 
-	# ID material
-	var mat := _create_id_material(numeric_id)
+	# ID material — transparent objects use depth_draw_never variant
+	var is_transparent: bool = _transparent_uuids.has(obj_uuid)
+	var mat := _create_id_material(numeric_id, is_transparent)
 	RenderingServer.instance_geometry_set_material_override(dup, mat.get_rid())
 
 	# Track
@@ -309,7 +329,8 @@ func create_pick_instance_skinned(obj_uuid: String, mesh: Mesh, skin: Skin, skel
 	mi.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	mi.transform = Transform3D.IDENTITY
 
-	var mat := _create_id_material(numeric_id)
+	var is_transparent: bool = _transparent_uuids.has(obj_uuid)
+	var mat := _create_id_material(numeric_id, is_transparent)
 	mi.material_override = mat
 
 	skeleton.add_child(mi)
@@ -893,8 +914,9 @@ func handle_object_properties(msg: Dictionary) -> void:
 
 # ─── Occlusion scan ────────────────────────────────────
 
-## Async scan: renders pick viewport once with transparent instances hidden,
-## then reads visible IDs via GPU compute shader (or CPU fallback).
+## Async scan: renders pick viewport once, reads visible IDs via GPU compute shader.
+## Transparent pick instances use depth_draw_never — they're occluded by opaque geometry
+## but can't occlude others. No need to hide/show them during scan.
 ## Returns { numeric_id: true } for all visible object IDs.
 func scan_visible_ids() -> Dictionary:
 	if _pick_viewport == null:
@@ -904,36 +926,11 @@ func scan_visible_ids() -> Dictionary:
 		# VR mode — viewport already renders every frame, just read current texture
 		return _read_visible_ids()
 
-	# Hide transparent pick instances (they'd appear visible but don't actually occlude)
-	var scan_hidden_rids: Array[RID] = []
-	var scan_hidden_mis: Array = []
-	for uuid: String in _transparent_uuids:
-		_hide_pick_for_scan(uuid, scan_hidden_rids, scan_hidden_mis)
-
 	# Render one frame
 	_pick_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	await sm.get_tree().process_frame
 
-	# Re-show transparent pick instances (so clicks still work)
-	for rid: RID in scan_hidden_rids:
-		RenderingServer.instance_set_visible(rid, true)
-	for mi in scan_hidden_mis:
-		if is_instance_valid(mi):
-			mi.visible = true
-
 	return _read_visible_ids()
-
-
-## Hide a pick instance (RS duplicate or skinned MeshInstance3D) for the scan render.
-func _hide_pick_for_scan(uuid: String, rids: Array[RID], mis: Array) -> void:
-	var dup: RID = _uuid_to_pick_rid.get(uuid, RID())
-	if dup.is_valid():
-		RenderingServer.instance_set_visible(dup, false)
-		rids.append(dup)
-	var mi = _uuid_to_pick_mi.get(uuid)
-	if mi != null and is_instance_valid(mi):
-		mi.visible = false
-		mis.append(mi)
 
 
 ## Read visible IDs from the pick viewport texture. Uses GPU compute if available,

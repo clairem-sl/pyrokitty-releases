@@ -571,17 +571,25 @@ func apply_face_materials(rsi, obj_uuid: String, faces: Array) -> void:
 				if obj_uuid not in _tex_waiting[tid]:
 					_tex_waiting[tid].append(obj_uuid)
 
-	# Track transparency for occlusion culling — transparent objects are hidden
-	# during occlusion scans so they don't falsely occlude objects behind them.
+	# Track transparency for occlusion culling. Transparent pick instances use a
+	# depth_draw_never shader so they're occluded by solid geometry but can't occlude others.
 	var has_transparency: bool = false
 	for fi: Dictionary in faces:
 		if int(fi.get("resolvedAlphaMode", int(fi.get("alphaMode", 0)))) > 0:
 			has_transparency = true
 			break
+		var fc: Array = fi.get("color", [1, 1, 1, 1])
+		if fc.size() >= 4 and float(fc[3]) < 0.99:
+			has_transparency = true
+			break
+	var was_transparent: bool = sm.object_picker._transparent_uuids.has(obj_uuid)
 	if has_transparency:
 		sm.object_picker._transparent_uuids[obj_uuid] = true
 	else:
 		sm.object_picker._transparent_uuids.erase(obj_uuid)
+	# Swap pick material shader if transparency state changed
+	if has_transparency != was_transparent:
+		sm.object_picker.update_pick_material_transparency(obj_uuid, has_transparency)
 
 
 func _get_double_sided_shader(shader: Shader) -> Shader:

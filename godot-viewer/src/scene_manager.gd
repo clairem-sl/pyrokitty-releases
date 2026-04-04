@@ -35,6 +35,8 @@ class RSInstance extends RefCounted:
 	var scl_divisor: Vector3 = Vector3.ONE  # Rigged mesh AABB size correction
 	var scl_center: Vector3 = Vector3.ZERO  # Rigged mesh AABB center offset
 	var mesh: Mesh = null
+	var _surface_mats: Array = []   # Strong refs so GC doesn't free materials while RS uses them
+	var _mat_override: Material = null
 	var on_transform_pushed: Callable
 
 	func _init(scenario: RID, vis_far: float = 128.0, vis_fade: float = 32.0) -> void:
@@ -61,13 +63,20 @@ class RSInstance extends RefCounted:
 			on_transform_pushed.call(xform)
 
 	func set_material_override(mat: Material) -> void:
+		_mat_override = mat
 		if mat == null:
 			RenderingServer.instance_geometry_set_material_override(rid, RID())
 		else:
 			RenderingServer.instance_geometry_set_material_override(rid, mat.get_rid())
 
 	func set_surface_material(idx: int, mat: Material) -> void:
-		RenderingServer.instance_set_surface_override_material(rid, idx, mat.get_rid())
+		if idx >= _surface_mats.size():
+			_surface_mats.resize(idx + 1)
+		_surface_mats[idx] = mat
+		if mat == null:
+			RenderingServer.instance_set_surface_override_material(rid, idx, RID())
+		else:
+			RenderingServer.instance_set_surface_override_material(rid, idx, mat.get_rid())
 
 	func destroy() -> void:
 		RenderingServer.free_rid(rid)
@@ -171,12 +180,19 @@ var send_fn: Callable  # set by main.gd; routes messages back to TS over WebSock
 var _evict_timer: float = 0.0
 const EVICT_INTERVAL: float = 60.0
 
+# ─── Distance Culling (always active) ──────────────────
+var _dist_hidden_avatars: Dictionary = {}  # root_uuid -> true (beyond draw distance)
+
 # ─── Occlusion Culling ─────────────────────────────────
 var _occ_enabled: bool = false
 const OCC_HIDE_AFTER_SCANS: int = 5   # consecutive scan misses before hiding (= seconds at 1 scan/s)
 var _occ_missing_scans: Dictionary = {}  # uuid -> int (consecutive miss count)
 var _occ_hidden_uuids: Dictionary = {}   # uuid -> true (hidden by occlusion culling)
 var _occ_visible_ids: Dictionary = {}    # numeric_id -> true (from last scan)
+# Avatar-level occlusion — hides skeleton, meshes, and pauses animation
+var _occ_av_missing_scans: Dictionary = {} # root_uuid -> int (consecutive miss count)
+var _occ_hidden_avatars: Dictionary = {}   # root_uuid -> true
+var _occ_avatar_hidden_objs: Dictionary = {} # root_uuid -> Array[String] (object uuids we hid)
 
 
 # Loading fade-in overlay (opaque black → transparent)
@@ -322,23 +338,8 @@ func _process(delta: float) -> void:
 	# Mirror main camera to pick viewport (renders continuously for ID buffer picking)
 	object_picker.update_pick_camera()
 
-	# Per-frame: instantly un-hide occluded objects that left the frustum (camera turned)
-	if _occ_enabled and not _occ_hidden_uuids.is_empty():
-		var _occ_cam: Camera3D = object_picker._pick_camera
-		if _occ_cam != null:
-			var to_unhide: Array = []
-			for uuid: String in _occ_hidden_uuids:
-				var rsi = objects.get(uuid)
-				if rsi == null:
-					to_unhide.append(uuid)  # stale entry
-				elif not _occ_cam.is_position_in_frustum(rsi.pos):
-					to_unhide.append(uuid)
-			for uuid: String in to_unhide:
-				var rsi = objects.get(uuid)
-				if rsi != null:
-					RenderingServer.instance_set_visible(rsi.rid, true)
-				_occ_hidden_uuids.erase(uuid)
-				_occ_missing_scans.erase(uuid)
+	_distance_cull_avatars()
+	_occlusion_frustum_check()
 
 	# Terrain/water/sky processing
 	_t0 = Time.get_ticks_usec()
@@ -412,10 +413,16 @@ func _update_loading_fade(delta: float) -> void:
 func handle_region_change() -> void:
 	DebugLog.log("scene", "Region change -- clearing all objects, avatars, and lights")
 
-	# Clear occlusion state before destroying objects
+	# Clear distance + occlusion state before destroying objects
+	_dist_hidden_avatars.clear()
 	_occ_hidden_uuids.clear()
 	_occ_missing_scans.clear()
 	_occ_visible_ids.clear()
+	for root_uuid: String in _occ_hidden_avatars.keys():
+		animation_mgr.set_avatar_paused(root_uuid, false)
+	_occ_hidden_avatars.clear()
+	_occ_av_missing_scans.clear()
+	_occ_avatar_hidden_objs.clear()
 
 	# Destroy all pick resources (physics bodies + ID buffer instances) before clearing objects
 	object_picker.destroy_all_pick_resources()
@@ -691,6 +698,9 @@ func toggle_occlusion_culling() -> void:
 		_occ_hidden_uuids.clear()
 		_occ_missing_scans.clear()
 		_occ_visible_ids.clear()
+		for root_uuid: String in _occ_hidden_avatars.keys():
+			_unhide_avatar(root_uuid)
+		_occ_av_missing_scans.clear()
 	DebugLog.log("scene", "Occlusion culling %s" % ("ON" if _occ_enabled else "OFF"))
 
 
@@ -703,13 +713,83 @@ func _occlusion_scan_loop() -> void:
 		_apply_occlusion_culling()
 
 
+## Hide animesh roots beyond draw distance. Skeleton + MeshInstance3D children have no
+## visibility_range (only the RSInstance placeholder does). Always active, every frame.
+func _distance_cull_avatars() -> void:
+	var cam: Camera3D = get_viewport().get_camera_3d()
+	if cam == null:
+		return
+	var cam_pos: Vector3 = cam.global_position
+	var far_sq: float = _vis_far * _vis_far
+	for root: String in animesh_roots:
+		if root == self_avatar_id:
+			continue
+		var rn: Node3D = animesh_roots[root]
+		if rn == null or not is_instance_valid(rn):
+			continue
+		if cam_pos.distance_squared_to(rn.global_position) > far_sq:
+			if not _dist_hidden_avatars.has(root):
+				rn.visible = false
+				animation_mgr.set_avatar_paused(root, true)
+				_dist_hidden_avatars[root] = true
+		else:
+			if _dist_hidden_avatars.has(root):
+				_dist_hidden_avatars.erase(root)
+				if not _occ_hidden_avatars.has(root):
+					rn.visible = true
+					animation_mgr.set_avatar_paused(root, false)
+
+
+## Un-hide occluded objects/avatars that left the frustum (camera turned).
+## Prevents pop-in when looking back — Godot frustum-culls them natively anyway.
+func _occlusion_frustum_check() -> void:
+	if not _occ_enabled:
+		return
+	if _occ_hidden_uuids.is_empty() and _occ_hidden_avatars.is_empty():
+		return
+	var cam: Camera3D = object_picker._pick_camera
+	if cam == null:
+		return
+	# Objects
+	var to_unhide: Array = []
+	for uuid: String in _occ_hidden_uuids:
+		var rsi = objects.get(uuid)
+		if rsi == null:
+			to_unhide.append(uuid)
+		elif not cam.is_position_in_frustum(rsi.pos):
+			to_unhide.append(uuid)
+	for uuid: String in to_unhide:
+		var rsi = objects.get(uuid)
+		if rsi != null:
+			RenderingServer.instance_set_visible(rsi.rid, true)
+		_occ_hidden_uuids.erase(uuid)
+		_occ_missing_scans.erase(uuid)
+	# Avatars
+	var to_unhide_av: Array = []
+	for root_uuid: String in _occ_hidden_avatars:
+		var av_rsi = avatars.get(root_uuid)
+		if av_rsi != null:
+			if not cam.is_position_in_frustum(av_rsi.pos):
+				to_unhide_av.append(root_uuid)
+		else:
+			var rn: Node3D = animesh_roots.get(root_uuid)
+			if rn != null and is_instance_valid(rn):
+				if not cam.is_position_in_frustum(rn.global_position):
+					to_unhide_av.append(root_uuid)
+			else:
+				to_unhide_av.append(root_uuid)
+	for root_uuid: String in to_unhide_av:
+		_unhide_avatar(root_uuid)
+		_occ_av_missing_scans.erase(root_uuid)
+
+
 func _apply_occlusion_culling() -> void:
 	var pick_cam: Camera3D = object_picker._pick_camera
 	if pick_cam == null:
 		return
+
+	# ── Objects ──
 	for uuid: String in objects:
-		if object_picker._transparent_uuids.has(uuid):
-			continue  # transparent objects are never occluded
 		var numeric_id: int = object_picker._uuid_to_id.get(uuid, 0)
 		if numeric_id == 0:
 			continue  # no pick instance allocated
@@ -734,3 +814,86 @@ func _apply_occlusion_culling() -> void:
 			if misses >= OCC_HIDE_AFTER_SCANS and not _occ_hidden_uuids.has(uuid):
 				RenderingServer.instance_set_visible(rsi.rid, false)
 				_occ_hidden_uuids[uuid] = true
+
+	# ── Avatars ── aggregate visibility: if ANY mesh part is visible, avatar is visible
+	var av_visible: Dictionary = {}
+	for uuid: String in animesh_root_for:
+		var root: String = animesh_root_for[uuid]
+		if av_visible.has(root):
+			continue  # already known visible
+		var nid: int = object_picker._uuid_to_id.get(uuid, 0)
+		if nid != 0 and _occ_visible_ids.has(nid):
+			av_visible[root] = true
+
+	for root: String in animesh_roots:
+		if root == self_avatar_id:
+			continue  # never hide self
+		if _dist_hidden_avatars.has(root):
+			continue  # already distance-culled
+		# Frustum check — use avatar RSInstance position, or animesh root node for non-player animesh
+		var av_pos: Vector3
+		var av_rsi = avatars.get(root)
+		if av_rsi != null:
+			av_pos = av_rsi.pos
+		else:
+			var rn: Node3D = animesh_roots[root]
+			if rn != null and is_instance_valid(rn):
+				av_pos = rn.global_position
+			else:
+				continue
+		if not pick_cam.is_position_in_frustum(av_pos):
+			if _occ_hidden_avatars.has(root):
+				_unhide_avatar(root)
+			_occ_av_missing_scans.erase(root)
+			continue
+		if av_visible.has(root):
+			_occ_av_missing_scans.erase(root)
+			if _occ_hidden_avatars.has(root):
+				_unhide_avatar(root)
+		else:
+			var misses: int = _occ_av_missing_scans.get(root, 0) + 1
+			_occ_av_missing_scans[root] = misses
+			if misses >= OCC_HIDE_AFTER_SCANS and not _occ_hidden_avatars.has(root):
+				_hide_avatar(root)
+
+
+func _hide_avatar(root_uuid: String) -> void:
+	# Hide the animesh root Node3D (skeleton + all MeshInstance3D children + worn animesh subnodes)
+	var root_node: Node3D = animesh_roots.get(root_uuid)
+	if root_node != null and is_instance_valid(root_node):
+		root_node.visible = false
+	# Hide non-rigged attachment RSInstances belonging to this avatar.
+	# Skip objects whose RSInstance was already hidden by the mesh pipeline (rigged meshes
+	# have a MeshInstance3D in animesh_mesh_instances — their RSI is already invisible).
+	var hidden_objs: Array = []
+	for uuid: String in animesh_root_for:
+		if animesh_root_for[uuid] == root_uuid:
+			if animesh_mesh_instances.has(uuid):
+				continue  # rigged mesh — RSI already hidden by mesh pipeline
+			var rsi = objects.get(uuid)
+			if rsi != null:
+				RenderingServer.instance_set_visible(rsi.rid, false)
+				hidden_objs.append(uuid)
+	_occ_avatar_hidden_objs[root_uuid] = hidden_objs
+	animation_mgr.set_avatar_paused(root_uuid, true)
+	_occ_hidden_avatars[root_uuid] = true
+	DebugLog.log("occ", "Hide avatar %s (%d attachment RSIs)" % [root_uuid.substr(0, 8), hidden_objs.size()])
+
+
+func _unhide_avatar(root_uuid: String) -> void:
+	# Only actually show if not also distance-culled
+	if not _dist_hidden_avatars.has(root_uuid):
+		var root_node: Node3D = animesh_roots.get(root_uuid)
+		if root_node != null and is_instance_valid(root_node):
+			root_node.visible = true
+		animation_mgr.set_avatar_paused(root_uuid, false)
+	# Re-show the attachment RSInstances we hid (not ones hidden by object-level occlusion)
+	var hidden_objs: Array = _occ_avatar_hidden_objs.get(root_uuid, [])
+	for uuid: String in hidden_objs:
+		if not _occ_hidden_uuids.has(uuid):
+			var rsi = objects.get(uuid)
+			if rsi != null:
+				RenderingServer.instance_set_visible(rsi.rid, true)
+	_occ_avatar_hidden_objs.erase(root_uuid)
+	_occ_hidden_avatars.erase(root_uuid)
+	DebugLog.log("occ", "Unhide avatar %s (%d attachments restored)" % [root_uuid.substr(0, 8), hidden_objs.size()])

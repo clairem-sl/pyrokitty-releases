@@ -346,7 +346,7 @@ func _update_stats_bar() -> void:
 		bb += "[%s]Lights:[/color] [%s]%d/%d[/color]  " % [C_WHITE, C_CYAN, lights_active, lights_total]
 		bb += "[%s]VRAM:[/color] [%s]%.0fMB[/color]" % [C_WHITE, C_CYAN, (tex_mem + buf_mem) / 1048576.0]
 		if scene_manager._occ_enabled:
-			bb += "  [%s]Occ:[/color] [%s]%d vis %d hid[/color]" % [C_WHITE, C_CYAN, scene_manager._occ_visible_ids.size(), scene_manager._occ_hidden_uuids.size()]
+			bb += "  [%s]Occ:[/color] [%s]%d vis %d hid %d avHid[/color]" % [C_WHITE, C_CYAN, scene_manager._occ_visible_ids.size(), scene_manager._occ_hidden_uuids.size(), scene_manager._occ_hidden_avatars.size()]
 		bb += "  |  "
 		# Textures — Godot side
 		bb += "[%s]Tex:[/color] " % C_WHITE
@@ -423,7 +423,7 @@ func _update_stats_bar() -> void:
 	var e_mesh_fail_str := ("  %d FAIL" % e_mesh_fail) if e_mesh_fail > 0 else ""
 	var occ_str := ""
 	if scene_manager._occ_enabled:
-		occ_str = " | Occ: %d vis %d hid" % [scene_manager._occ_visible_ids.size(), scene_manager._occ_hidden_uuids.size()]
+		occ_str = " | Occ: %d vis %d hid %d avHid" % [scene_manager._occ_visible_ids.size(), scene_manager._occ_hidden_uuids.size(), scene_manager._occ_hidden_avatars.size()]
 	print("[Stats] FPS: %.0f | GPU: %.1fms RenderCPU: %.1fms | Obj: %d Av: %d Lights: %d/%d Mat: %d | VRAM: tex=%.1fMB buf=%.1fMB%s | Tex: %d cached %d decoding %d placeholder%s [eDL:%d q:%d dec:%d gpu:%d done:%d%s] | Mesh: %d cached %d decoding %d pending%s [eDL:%d q:%d sculpt:%d done:%d%s] | Def: %d MsgQ: %d | CPU: %.1fms [terrain=%.2f interp=%.2f(%da+%do) anim=%.2f(%d) flexi=%.2f bubbles=%.2f final=%.2f]" % [
 		fps, gpu_ms, render_cpu_ms, obj_count, avatar_count, lights_active, lights_total, mat_count,
 		tex_mem / 1048576.0, buf_mem / 1048576.0, occ_str,
@@ -524,7 +524,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_stats_bar.visible = not _stats_bar.visible
 			RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), _stats_bar.visible)
 			scene_manager.toggle_debug_skeleton()
-		elif event.keycode == KEY_F10:
 			scene_manager.toggle_pick_debug()
 		elif event.keycode == KEY_F11:
 			scene_manager.toggle_occlusion_culling()

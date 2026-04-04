@@ -31,6 +31,15 @@ const CMD_REGION_CHANGE: String = "REGION_CHANGE"
 const CMD_CV_DATA: String = "CV_DATA"
 const CMD_SHUTDOWN: String = "SHUTDOWN"
 
+# ─── Occlusion Pause ─────────────────────────────────
+var _paused_roots: Dictionary = {}  # root_id -> true (skip consumption while hidden)
+
+func set_avatar_paused(root_id: String, paused: bool) -> void:
+	if paused:
+		_paused_roots[root_id] = true
+	else:
+		_paused_roots.erase(root_id)
+
 # ─── Debug ────────────────────────────────────────────
 
 var _debug_skeleton_visible: bool = false
@@ -934,6 +943,9 @@ func consume_anim_slots(delta: float) -> void:
 	_slots_lock.unlock()
 
 	for root_id: String in slots_snapshot:
+		# Skip avatars hidden by occlusion culling (thread stops naturally when slot stays ready)
+		if _paused_roots.has(root_id):
+			continue
 		# LOD gating
 		if not _should_consume_lod(root_id, camera_pos):
 			continue
