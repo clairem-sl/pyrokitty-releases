@@ -280,6 +280,14 @@ export class ViewerManager extends EventEmitter {
     });
     this.godotBridges.set(instanceId, bridge);
 
+    bridge.on('crash', (message: string) => {
+      const inst = this.instances.get(instanceId);
+      if (inst) {
+        inst.statusMessage = message;
+        this.emit('status-update', inst);
+      }
+    });
+
     bridge.on('exit', () => {
       console.log(`[ViewerManager] Godot bridge exited for ${instanceId}`);
       this.godotBridges.delete(instanceId);

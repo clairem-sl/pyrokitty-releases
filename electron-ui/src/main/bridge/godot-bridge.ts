@@ -262,8 +262,15 @@ export class GodotBridge extends EventEmitter {
       }
     });
 
+    let sawCrashSignal = false;
+    const spawnTime = Date.now();
+
     this.process.stderr?.on('data', (data) => {
-      console.error(`[Godot] ${data.toString().trim()}`);
+      const text = data.toString().trim();
+      console.error(`[Godot] ${text}`);
+      if (text.includes('signal 11') || text.includes('CrashHandlerException')) {
+        sawCrashSignal = true;
+      }
     });
 
     this.process.on('exit', (code, signal) => {
@@ -277,6 +284,14 @@ export class GodotBridge extends EventEmitter {
           console.error(`[GodotBridge] Crash breadcrumb: ${breadcrumb.trim()}`);
         } catch { /* breadcrumb file may not exist */ }
       }
+
+      // Detect startup crash (crashed within 10s, saw signal 11 in stderr)
+      const uptimeMs = Date.now() - spawnTime;
+      if (sawCrashSignal && uptimeMs < 10_000) {
+        console.error(`[GodotBridge] Startup crash detected (uptime ${uptimeMs}ms) — likely a GPU driver issue`);
+        this.emit('crash', '3D viewer crashed on startup. This usually means your video drivers need updating — check for updates from your GPU manufacturer (AMD, NVIDIA, or Intel).');
+      }
+
       this.cleanup();
       this.emit('exit');
     });
