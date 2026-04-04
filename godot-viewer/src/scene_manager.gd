@@ -280,8 +280,9 @@ func _ready() -> void:
 	touch_mgr = TouchManagerScript.new(func(msg: Dictionary): if send_fn.is_valid(): send_fn.call(msg))
 	name_bubble_mgr = NameBubbleManagerScript.new(self)
 	name_bubble_3d_mgr = NameBubble3DManagerScript.new(self)
-	if FlexiPrimManagerScript.can_instantiate():
-		flexi_mgr = FlexiPrimManagerScript.new()
+	var _flexi_script: Script = FlexiPrimManagerScript
+	if _flexi_script.can_instantiate():
+		flexi_mgr = _flexi_script.new()
 		flexi_mgr.Init(self)
 	else:
 		push_warning("FlexiPrimManager C# not compiled — flexi prims disabled")
