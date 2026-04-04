@@ -181,6 +181,48 @@ export class GameObject implements IGameObjectData
     public isMarkedRoot = false;
     public onTextureUpdate: Subject<void> = new Subject<void>();
 
+    /**
+     * Compute the absolute (region-space) position by walking up the parent
+     * chain. Child prims store Position relative to their parent; root prims
+     * (ParentID 0) already have region-space position. Returns null if any
+     * link in the chain is missing from the object store.
+     */
+    public get absolutePosition(): Vector3 | null
+    {
+        if (!this.Position)
+        {
+            return null;
+        }
+        if (!this.ParentID)
+        {
+            return this.Position;
+        }
+        try
+        {
+            const parent = this.region.objects.getObjectByLocalID(this.ParentID);
+            const parentPos = parent.absolutePosition;
+            if (!parentPos)
+            {
+                return null;
+            }
+            const q = parent.Rotation ?? Quaternion.getIdentity();
+            const vx = this.Position.x, vy = this.Position.y, vz = this.Position.z;
+            // Rotate vector by quaternion: v' = v + 2w(q×v) + 2(q×(q×v))
+            const tx = 2 * (q.y * vz - q.z * vy);
+            const ty = 2 * (q.z * vx - q.x * vz);
+            const tz = 2 * (q.x * vy - q.y * vx);
+            return new Vector3([
+                parentPos.x + vx + q.w * tx + (q.y * tz - q.z * ty),
+                parentPos.y + vy + q.w * ty + (q.z * tx - q.x * tz),
+                parentPos.z + vz + q.w * tz + (q.x * ty - q.y * tx)
+            ]);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public get OwnerID(): UUID
     {
         return this._ownerID;

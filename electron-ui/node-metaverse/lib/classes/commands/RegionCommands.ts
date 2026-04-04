@@ -1,5 +1,8 @@
 import * as LLSD from '@caspertech/llsd';
 
+/** Epsilon for "is this position basically zero?" — covers float drift from quaternion rotation */
+const NEAR_ZERO = 0.001;
+
 import type * as Long from 'long';
 import * as micromatch from 'micromatch';
 import type { Subscription } from 'rxjs';
@@ -899,18 +902,20 @@ export class RegionCommands extends CommandsBase
             obj = this.currentRegion.objects.getObjectByUUID(localID);
         }
 
-        // If no grabPosition supplied (or zero), use the object's current position so the
-        // server fires touch LSL events without applying any pull force.
-        // Short-circuit if the object position is also unavailable or zero — better to
-        // skip the message than risk moving something to the world origin.
-        if (!grabPosition || (grabPosition.x === 0 && grabPosition.y === 0 && grabPosition.z === 0))
+        // If no grabPosition supplied (or zero), use the object's current absolute
+        // position so the server fires touch LSL events without applying any pull force.
+        // Child prims store Position relative to their parent, so we walk up the
+        // parent chain to compute the world-space position.
+        // Short-circuit if the position is unavailable — better to skip the message
+        // than risk moving something to the world origin.
+        if (!grabPosition || (grabPosition.x < NEAR_ZERO && grabPosition.y < NEAR_ZERO && grabPosition.z < NEAR_ZERO))
         {
-            const pos = obj?.Position;
-            if (!pos || (pos.x === 0 && pos.y === 0 && pos.z === 0))
+            const absPos = obj?.absolutePosition;
+            if (!absPos || absPos.x < NEAR_ZERO || absPos.y < NEAR_ZERO || absPos.z < NEAR_ZERO)
             {
                 return;
             }
-            grabPosition = pos;
+            grabPosition = absPos;
         }
         const msg = new ObjectGrabUpdateMessage();
         msg.AgentData = {
