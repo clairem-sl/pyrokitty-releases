@@ -249,7 +249,7 @@ if [ -d "$GODOT_SRC" ]; then
         fi
 
         # Copy loose project files (icon, shaders, OpenXR action map)
-        for f in icon.png icon.png.import openxr_action_map.tres override.vr.cfg; do
+        for f in splash.png splash.png.import icon.png icon.png.import openxr_action_map.tres override.vr.cfg; do
             if [ -f "$GODOT_SRC/$f" ]; then
                 cp "$GODOT_SRC/$f" "$GODOT_STAGING/"
             fi

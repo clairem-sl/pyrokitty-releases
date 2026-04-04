@@ -253,25 +253,16 @@ func _alloc_id(obj_uuid: String) -> int:
 
 
 ## Create an ID-color ShaderMaterial for a given numeric ID.
-## transparent=true uses the depth_draw_never variant (rendered after opaque, can't occlude).
-func _create_id_material(numeric_id: int, transparent: bool = false) -> ShaderMaterial:
+## Always uses the solid opaque shader — scan_visible_ids swaps to stochastic for scans.
+func _create_id_material(numeric_id: int) -> ShaderMaterial:
 	var mat := ShaderMaterial.new()
-	mat.shader = _id_shader_transparent if transparent else _id_shader
+	mat.shader = _id_shader
 	mat.set_shader_parameter("id_color", Color(
 		float((numeric_id >> 16) & 0xFF) / 255.0,
 		float((numeric_id >> 8) & 0xFF) / 255.0,
 		float(numeric_id & 0xFF) / 255.0,
 	))
 	return mat
-
-
-## Swap an existing pick instance's material between opaque and transparent shaders.
-## Called by asset_pipeline when an object's transparency state changes.
-func update_pick_material_transparency(obj_uuid: String, transparent: bool) -> void:
-	var mat: ShaderMaterial = _pick_materials.get(obj_uuid)
-	if mat == null:
-		return
-	mat.shader = _id_shader_transparent if transparent else _id_shader
 
 
 ## Create an RS instance duplicate for a static (non-skinned) object.
@@ -294,9 +285,8 @@ func _create_pick_instance(obj_uuid: String, mesh: Mesh, rsi) -> void:
 	var xform := Transform3D(Basis(rsi.rot) * Basis.from_scale(effective_scl), adjusted_pos)
 	RenderingServer.instance_set_transform(dup, xform)
 
-	# ID material — transparent objects use depth_draw_never variant
-	var is_transparent: bool = _transparent_uuids.has(obj_uuid)
-	var mat := _create_id_material(numeric_id, is_transparent)
+	# ID material — always solid for clicks; scan_visible_ids swaps to stochastic for scans
+	var mat := _create_id_material(numeric_id)
 	RenderingServer.instance_geometry_set_material_override(dup, mat.get_rid())
 
 	# Track
@@ -329,8 +319,7 @@ func create_pick_instance_skinned(obj_uuid: String, mesh: Mesh, skin: Skin, skel
 	mi.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	mi.transform = Transform3D.IDENTITY
 
-	var is_transparent: bool = _transparent_uuids.has(obj_uuid)
-	var mat := _create_id_material(numeric_id, is_transparent)
+	var mat := _create_id_material(numeric_id)
 	mi.material_override = mat
 
 	skeleton.add_child(mi)
@@ -915,8 +904,9 @@ func handle_object_properties(msg: Dictionary) -> void:
 # ─── Occlusion scan ────────────────────────────────────
 
 ## Async scan: renders pick viewport once, reads visible IDs via GPU compute shader.
-## Transparent pick instances use depth_draw_never — they're occluded by opaque geometry
-## but can't occlude others. No need to hide/show them during scan.
+## Async occlusion scan. Swaps transparent pick materials to stochastic discard shader
+## for the scan render (so they don't overwrite opaque IDs), then swaps back to the
+## solid shader for click picking (so transparent objects are always clickable).
 ## Returns { numeric_id: true } for all visible object IDs.
 func scan_visible_ids() -> Dictionary:
 	if _pick_viewport == null:
@@ -926,9 +916,21 @@ func scan_visible_ids() -> Dictionary:
 		# VR mode — viewport already renders every frame, just read current texture
 		return _read_visible_ids()
 
+	# Swap transparent pick materials to stochastic discard for scan
+	for uuid: String in _transparent_uuids:
+		var mat: ShaderMaterial = _pick_materials.get(uuid)
+		if mat != null:
+			mat.shader = _id_shader_transparent
+
 	# Render one frame
 	_pick_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	await sm.get_tree().process_frame
+
+	# Swap back to solid shader for clicks
+	for uuid: String in _transparent_uuids:
+		var mat: ShaderMaterial = _pick_materials.get(uuid)
+		if mat != null:
+			mat.shader = _id_shader
 
 	return _read_visible_ids()
 

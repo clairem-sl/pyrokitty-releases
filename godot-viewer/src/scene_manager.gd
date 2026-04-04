@@ -215,7 +215,7 @@ var name_bubble_mgr: RefCounted    # NameBubbleManager (2D screen-space)
 var name_bubble_3d_mgr: RefCounted # NameBubble3DManager (3D world-space)
 var _bubble_2d_active: bool = true   # desktop default; VR flips these
 var _bubble_3d_active: bool = false
-var flexi_mgr: RefCounted          # FlexiPrimManager
+var flexi_mgr                      # FlexiPrimManager (C# — no static type)
 
 
 ## Erase all animesh-related dictionary entries for a given root uuid.

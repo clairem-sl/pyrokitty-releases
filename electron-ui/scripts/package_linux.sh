@@ -169,7 +169,7 @@ if [ -d "$GODOT_SRC" ]; then
     [ -d "$GODOT_SRC/data" ]    && cp -r "$GODOT_SRC/data"    "$GODOT_STAGING/"
     [ -d "$GODOT_SRC/addons" ]  && cp -r "$GODOT_SRC/addons"  "$GODOT_STAGING/"
     [ -d "$GODOT_SRC/shaders" ] && cp -r "$GODOT_SRC/shaders" "$GODOT_STAGING/"
-    for f in icon.png icon.png.import openxr_action_map.tres override.vr.cfg; do
+    for f in splash.png splash.png.import icon.png icon.png.import openxr_action_map.tres override.vr.cfg; do
         [ -f "$GODOT_SRC/$f" ] && cp "$GODOT_SRC/$f" "$GODOT_STAGING/"
     done
 
