@@ -261,7 +261,7 @@ if [ -d "$GODOT_SRC" ]; then
         # Build C# assembly (must happen before Godot import)
         echo "  Building C# assembly..."
         cd "$GODOT_STAGING"
-        dotnet build "PyroKitty 3D.csproj" -c Release
+        dotnet build "PyroKitty 3D.csproj" -c Debug
         cd "$ELECTRON_DIR"
 
         # Run headless import so .godot/imported/ gets populated

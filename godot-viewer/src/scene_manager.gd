@@ -237,7 +237,7 @@ func erase_animesh_state(root_uuid: String) -> void:
 
 func _exit_tree() -> void:
 	animation_mgr.shutdown()
-	flexi_mgr.Shutdown()
+	if flexi_mgr: flexi_mgr.Shutdown()
 	asset_pipeline.shutdown()
 	# Skip all cleanup — process is about to die anyway.
 	# RenderingServer RIDs, threads, and memory are freed by the OS on exit.
@@ -280,8 +280,11 @@ func _ready() -> void:
 	touch_mgr = TouchManagerScript.new(func(msg: Dictionary): if send_fn.is_valid(): send_fn.call(msg))
 	name_bubble_mgr = NameBubbleManagerScript.new(self)
 	name_bubble_3d_mgr = NameBubble3DManagerScript.new(self)
-	flexi_mgr = FlexiPrimManagerScript.new()
-	flexi_mgr.Init(self)
+	if FlexiPrimManagerScript.can_instantiate():
+		flexi_mgr = FlexiPrimManagerScript.new()
+		flexi_mgr.Init(self)
+	else:
+		push_warning("FlexiPrimManager C# not compiled — flexi prims disabled")
 
 	asset_pipeline.start_threads()
 
@@ -358,7 +361,7 @@ func _process(delta: float) -> void:
 
 	# Flexi prim Verlet simulation (world-space physics → bone rotations)
 	_t0 = Time.get_ticks_usec()
-	flexi_mgr.ConsumeSlots()
+	if flexi_mgr: flexi_mgr.ConsumeSlots()
 	_timing_flexi_ms += (Time.get_ticks_usec() - _t0) / 1000.0
 
 	# Consume animation thread output slots and apply to Skeleton3D
