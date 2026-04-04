@@ -164,3 +164,4 @@ electron-ui/scripts/decode-sculpt-test.ts
 electron-ui/scripts/test-object-loading.sh
 Hippolyzer
 TODO*.md
+*.local
