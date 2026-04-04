@@ -728,8 +728,8 @@ func _distance_cull_avatars() -> void:
 	for root: String in animesh_roots:
 		if root == self_avatar_id:
 			continue
-		var rn: Node3D = animesh_roots[root]
-		if rn == null or not is_instance_valid(rn):
+		var rn = animesh_roots[root]
+		if not is_instance_valid(rn):
 			continue
 		if cam_pos.distance_squared_to(rn.global_position) > far_sq:
 			if not _dist_hidden_avatars.has(root):
