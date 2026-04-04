@@ -6,6 +6,13 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ELECTRON_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Switch to pinned Node version
+_PREV_NODE=""
+if [ -f "$ELECTRON_DIR/.nvmrc" ] && command -v nvm &>/dev/null; then
+    _PREV_NODE="$(nvm current)"
+    nvm install --silent
+fi
 ROOT_DIR="$(dirname "$ELECTRON_DIR")"
 
 # Viewer build output location
@@ -313,3 +320,8 @@ npm run dist
 
 echo ""
 echo "=== Packaging Complete ==="
+
+# Restore previous Node version
+if [ -n "$_PREV_NODE" ] && command -v nvm &>/dev/null; then
+    nvm use "$_PREV_NODE" --silent
+fi
