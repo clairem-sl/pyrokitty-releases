@@ -135,6 +135,7 @@ export interface ViewerInstance {
   connectionState: ConnectionState;
   regionName?: string; // Set when fully arrived in a region
   godotBridgeActive?: boolean; // True when Godot sidecar is running
+  statusMessage?: string; // User-facing message (e.g. crash reason)
 }
 
 export type ViewerStatus = 'starting' | 'running' | 'connected' | 'disconnected' | 'crashed';

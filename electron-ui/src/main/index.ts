@@ -13,6 +13,7 @@ import { voiceRegistry } from './voice/voice-registry';
 import { InventoryFolder } from '../../node-metaverse/dist/lib/classes/InventoryFolder';
 import { initGpuCompressWindow, destroyGpuCompressWindow } from './assets/gpu-compress-window';
 import { getSavedBounds, trackWindow } from './ui/window-state-manager';
+import { ensureDotnet } from './dotnet-check';
 
 // Linux-specific Chromium tweaks (must run before app.whenReady())
 if (process.platform === 'linux') {
@@ -422,8 +423,9 @@ async function createWindow(): Promise<void> {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   console.log(`[PyroKitty] v${app.getVersion()} (${app.isPackaged ? 'packaged' : 'dev'})`);
+  await ensureDotnet();
   createWindow();
 });
 

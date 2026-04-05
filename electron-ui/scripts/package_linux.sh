@@ -10,6 +10,13 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ELECTRON_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Switch to pinned Node version
+_PREV_NODE=""
+if [ -f "$ELECTRON_DIR/.nvmrc" ] && command -v nvm &>/dev/null; then
+    _PREV_NODE="$(nvm current)"
+    nvm install --silent
+fi
 ROOT_DIR="$(dirname "$ELECTRON_DIR")"
 
 VIEWER_STAGING="$ELECTRON_DIR/viewer"
@@ -169,14 +176,14 @@ if [ -d "$GODOT_SRC" ]; then
     [ -d "$GODOT_SRC/data" ]    && cp -r "$GODOT_SRC/data"    "$GODOT_STAGING/"
     [ -d "$GODOT_SRC/addons" ]  && cp -r "$GODOT_SRC/addons"  "$GODOT_STAGING/"
     [ -d "$GODOT_SRC/shaders" ] && cp -r "$GODOT_SRC/shaders" "$GODOT_STAGING/"
-    for f in icon.png icon.png.import openxr_action_map.tres override.vr.cfg; do
+    for f in splash.png splash.png.import icon.png icon.png.import openxr_action_map.tres override.vr.cfg; do
         [ -f "$GODOT_SRC/$f" ] && cp "$GODOT_SRC/$f" "$GODOT_STAGING/"
     done
 
     # Build C# assembly (must happen before Godot import)
     echo "  Building C# assembly..."
     cd "$GODOT_STAGING"
-    dotnet build "PyroKitty 3D.csproj" -c Release
+    dotnet build "PyroKitty 3D.csproj" -c Debug
     cd "$ELECTRON_DIR"
 
     # Run headless import so .godot/imported/ gets populated
@@ -254,3 +261,8 @@ echo "  Done: $(du -sh "$ARCHIVE" | cut -f1)  →  $ARCHIVE"
 
 echo ""
 echo "=== Linux Packaging Complete ==="
+
+# Restore previous Node version
+if [ -n "$_PREV_NODE" ] && command -v nvm &>/dev/null; then
+    nvm use "$_PREV_NODE" --silent
+fi

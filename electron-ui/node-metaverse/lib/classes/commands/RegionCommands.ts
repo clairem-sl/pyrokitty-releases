@@ -1,5 +1,8 @@
 import * as LLSD from '@caspertech/llsd';
 
+/** Epsilon for "is this position basically zero?" — covers float drift from quaternion rotation */
+const NEAR_ZERO = 0.001;
+
 import type * as Long from 'long';
 import * as micromatch from 'micromatch';
 import type { Subscription } from 'rxjs';
@@ -803,14 +806,148 @@ export class RegionCommands extends CommandsBase
         this.currentRegion.objects.setPersist(persist);
     }
 
+    // ─── Touch methods (can NEVER move an object) ───────────────────────
+    // These hardcode zero vectors for GrabOffset and SurfaceInfo.Position
+    // so that no caller can accidentally supply position data that the
+    // server would interpret as a movement instruction.
+
     public async grabObject(localID: number | UUID,
-                            grabOffset: Vector3 = Vector3.getZero(),
-                            uvCoordinate: Vector3 = Vector3.getZero(),
-                            stCoordinate: Vector3 = Vector3.getZero(),
                             faceIndex = 0,
-                            position: Vector3 = Vector3.getZero(),
-                            normal: Vector3 = Vector3.getZero(),
-                            binormal: Vector3 = Vector3.getZero()): Promise<void>
+                            stCoordinate: Vector3 = Vector3.getZero(),
+                            uvCoordinate: Vector3 = Vector3.getZero()): Promise<void>
+    {
+        if (localID instanceof UUID)
+        {
+            const obj: GameObject = this.currentRegion.objects.getObjectByUUID(localID);
+            localID = obj.ID;
+        }
+        const msg = new ObjectGrabMessage();
+        msg.AgentData = {
+            AgentID: this.agent.agentID,
+            SessionID: this.circuit.sessionID
+        };
+        msg.ObjectData = {
+            LocalID: localID,
+            GrabOffset: Vector3.getZero()
+        };
+        msg.SurfaceInfo = [
+            {
+                UVCoord: uvCoordinate,
+                STCoord: stCoordinate,
+                FaceIndex: faceIndex,
+                Position: Vector3.getZero(),
+                Normal: Vector3.getZero(),
+                Binormal: Vector3.getZero()
+            }
+        ];
+        const seqID = this.circuit.sendMessage(msg, PacketFlags.Reliable);
+        return this.circuit.waitForAck(seqID, 10000);
+    }
+
+    public async deGrabObject(localID: number | UUID,
+                              faceIndex = 0,
+                              stCoordinate: Vector3 = Vector3.getZero(),
+                              uvCoordinate: Vector3 = Vector3.getZero()): Promise<void>
+    {
+        if (localID instanceof UUID)
+        {
+            const obj: GameObject = this.currentRegion.objects.getObjectByUUID(localID);
+            localID = obj.ID;
+        }
+        const msg = new ObjectDeGrabMessage();
+        msg.AgentData = {
+            AgentID: this.agent.agentID,
+            SessionID: this.circuit.sessionID
+        };
+        msg.ObjectData = {
+            LocalID: localID
+        };
+        msg.SurfaceInfo = [
+            {
+                UVCoord: uvCoordinate,
+                STCoord: stCoordinate,
+                FaceIndex: faceIndex,
+                Position: Vector3.getZero(),
+                Normal: Vector3.getZero(),
+                Binormal: Vector3.getZero()
+            }
+        ];
+        const seqID = this.circuit.sendMessage(msg, PacketFlags.Reliable);
+        return this.circuit.waitForAck(seqID, 10000);
+    }
+
+    public async dragGrabbedObject(localID: number | UUID,
+                                   faceIndex = 0,
+                                   stCoordinate: Vector3 = Vector3.getZero(),
+                                   uvCoordinate: Vector3 = Vector3.getZero()): Promise<void>
+    {
+        let obj: GameObject;
+        if (!(localID instanceof UUID))
+        {
+            obj = this.currentRegion.objects.getObjectByLocalID(localID);
+            localID = obj.FullID;
+        }
+        else
+        {
+            obj = this.currentRegion.objects.getObjectByUUID(localID);
+        }
+
+        // Use the object's current position so the server fires touch LSL
+        // events without applying any pull force.
+        const absPos = obj?.absolutePosition;
+        if (!absPos || absPos.x < NEAR_ZERO || absPos.y < NEAR_ZERO || absPos.z < NEAR_ZERO)
+        {
+            return;
+        }
+        const msg = new ObjectGrabUpdateMessage();
+        msg.AgentData = {
+            AgentID: this.agent.agentID,
+            SessionID: this.circuit.sessionID
+        };
+        msg.ObjectData = {
+            ObjectID: localID,
+            GrabOffsetInitial: Vector3.getZero(),
+            GrabPosition: absPos,
+            TimeSinceLast: 0
+        };
+        msg.SurfaceInfo = [
+            {
+                UVCoord: uvCoordinate,
+                STCoord: stCoordinate,
+                FaceIndex: faceIndex,
+                Position: Vector3.getZero(),
+                Normal: Vector3.getZero(),
+                Binormal: Vector3.getZero()
+            }
+        ];
+        const seqID = this.circuit.sendMessage(msg, PacketFlags.Reliable);
+        return this.circuit.waitForAck(seqID, 10000);
+    }
+
+    public async touchObject(localID: number | UUID,
+                             faceIndex = 0,
+                             stCoordinate: Vector3 = Vector3.getZero(),
+                             uvCoordinate: Vector3 = Vector3.getZero()): Promise<void>
+    {
+        if (localID instanceof UUID)
+        {
+            const obj: GameObject = this.currentRegion.objects.getObjectByUUID(localID);
+            localID = obj.ID;
+        }
+        await this.grabObject(localID, faceIndex, stCoordinate, uvCoordinate);
+        return this.deGrabObject(localID, faceIndex, stCoordinate, uvCoordinate);
+    }
+
+    // ─── Move methods (explicitly for dragging objects to new positions) ──
+
+    public async moveGrabStart(localID: number | UUID,
+                               grabOffset: Vector3,
+                               faceIndex = 0,
+                               stCoordinate: Vector3 = Vector3.getZero(),
+                               uvCoordinate: Vector3 = Vector3.getZero(),
+                               position: Vector3 = Vector3.getZero(),
+                               normal: Vector3 = Vector3.getZero(),
+                               binormal: Vector3 = Vector3.getZero()): Promise<void>
     {
         if (localID instanceof UUID)
         {
@@ -840,54 +977,16 @@ export class RegionCommands extends CommandsBase
         return this.circuit.waitForAck(seqID, 10000);
     }
 
-    public async deGrabObject(localID: number | UUID,
-                              _grabOffset: Vector3 = Vector3.getZero(),
-                              uvCoordinate: Vector3 = Vector3.getZero(),
-                              stCoordinate: Vector3 = Vector3.getZero(),
-                              faceIndex = 0,
-                              position: Vector3 = Vector3.getZero(),
-                              normal: Vector3 = Vector3.getZero(),
-                              binormal: Vector3 = Vector3.getZero()): Promise<void>
+    public async moveGrabUpdate(localID: number | UUID,
+                                grabPosition: Vector3,
+                                grabOffset: Vector3 = Vector3.getZero(),
+                                faceIndex = 0,
+                                stCoordinate: Vector3 = Vector3.getZero(),
+                                uvCoordinate: Vector3 = Vector3.getZero(),
+                                position: Vector3 = Vector3.getZero(),
+                                normal: Vector3 = Vector3.getZero(),
+                                binormal: Vector3 = Vector3.getZero()): Promise<void>
     {
-        if (localID instanceof UUID)
-        {
-            const obj: GameObject = this.currentRegion.objects.getObjectByUUID(localID);
-            localID = obj.ID;
-        }
-        const msg = new ObjectDeGrabMessage();
-        msg.AgentData = {
-            AgentID: this.agent.agentID,
-            SessionID: this.circuit.sessionID
-        };
-        msg.ObjectData = {
-            LocalID: localID
-        };
-        msg.SurfaceInfo = [
-            {
-                UVCoord: uvCoordinate,
-                STCoord: stCoordinate,
-                FaceIndex: faceIndex,
-                Position: position,
-                Normal: normal,
-                Binormal: binormal
-            }
-        ];
-        const seqID = this.circuit.sendMessage(msg, PacketFlags.Reliable);
-        return this.circuit.waitForAck(seqID, 10000);
-    }
-
-    // noinspection JSUnusedGlobalSymbols
-    public async dragGrabbedObject(localID: number | UUID,
-                                   grabPosition: Vector3 | null = null,
-                                   grabOffset: Vector3 = Vector3.getZero(),
-                                   uvCoordinate: Vector3 = Vector3.getZero(),
-                                   stCoordinate: Vector3 = Vector3.getZero(),
-                                   faceIndex = 0,
-                                   position: Vector3 = Vector3.getZero(),
-                                   normal: Vector3 = Vector3.getZero(),
-                                   binormal: Vector3 = Vector3.getZero()): Promise<void>
-    {
-        // For some reason this message takes a UUID when the others take a LocalID - wtf?
         let obj: GameObject;
         if (!(localID instanceof UUID))
         {
@@ -897,20 +996,6 @@ export class RegionCommands extends CommandsBase
         else
         {
             obj = this.currentRegion.objects.getObjectByUUID(localID);
-        }
-
-        // If no grabPosition supplied (or zero), use the object's current position so the
-        // server fires touch LSL events without applying any pull force.
-        // Short-circuit if the object position is also unavailable or zero — better to
-        // skip the message than risk moving something to the world origin.
-        if (!grabPosition || (grabPosition.x === 0 && grabPosition.y === 0 && grabPosition.z === 0))
-        {
-            const pos = obj?.Position;
-            if (!pos || (pos.x === 0 && pos.y === 0 && pos.z === 0))
-            {
-                return;
-            }
-            grabPosition = pos;
         }
         const msg = new ObjectGrabUpdateMessage();
         msg.AgentData = {
@@ -937,23 +1022,12 @@ export class RegionCommands extends CommandsBase
         return this.circuit.waitForAck(seqID, 10000);
     }
 
-    // noinspection JSUnusedGlobalSymbols
-    public async touchObject(localID: number | UUID,
-                             grabOffset: Vector3 = Vector3.getZero(),
-                             uvCoordinate: Vector3 = Vector3.getZero(),
-                             stCoordinate: Vector3 = Vector3.getZero(),
+    public async moveGrabEnd(localID: number | UUID,
                              faceIndex = 0,
-                             position: Vector3 = Vector3.getZero(),
-                             normal: Vector3 = Vector3.getZero(),
-                             binormal: Vector3 = Vector3.getZero()): Promise<void>
+                             stCoordinate: Vector3 = Vector3.getZero(),
+                             uvCoordinate: Vector3 = Vector3.getZero()): Promise<void>
     {
-        if (localID instanceof UUID)
-        {
-            const obj: GameObject = this.currentRegion.objects.getObjectByUUID(localID);
-            localID = obj.ID;
-        }
-        await this.grabObject(localID, grabOffset, uvCoordinate, stCoordinate, faceIndex, position, normal, binormal);
-        return this.deGrabObject(localID, grabOffset, uvCoordinate, stCoordinate, faceIndex, position, normal, binormal);
+        return this.deGrabObject(localID, faceIndex, stCoordinate, uvCoordinate);
     }
 
     // noinspection JSUnusedGlobalSymbols

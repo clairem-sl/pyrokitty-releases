@@ -6,6 +6,13 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ELECTRON_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Switch to pinned Node version
+_PREV_NODE=""
+if [ -f "$ELECTRON_DIR/.nvmrc" ] && command -v nvm &>/dev/null; then
+    _PREV_NODE="$(nvm current)"
+    nvm install --silent
+fi
 ROOT_DIR="$(dirname "$ELECTRON_DIR")"
 
 # Viewer build output location
@@ -249,7 +256,7 @@ if [ -d "$GODOT_SRC" ]; then
         fi
 
         # Copy loose project files (icon, shaders, OpenXR action map)
-        for f in icon.png icon.png.import openxr_action_map.tres override.vr.cfg; do
+        for f in splash.png splash.png.import icon.png icon.png.import openxr_action_map.tres override.vr.cfg; do
             if [ -f "$GODOT_SRC/$f" ]; then
                 cp "$GODOT_SRC/$f" "$GODOT_STAGING/"
             fi
@@ -261,7 +268,7 @@ if [ -d "$GODOT_SRC" ]; then
         # Build C# assembly (must happen before Godot import)
         echo "  Building C# assembly..."
         cd "$GODOT_STAGING"
-        dotnet build "PyroKitty 3D.csproj" -c Release
+        dotnet build "PyroKitty 3D.csproj" -c Debug
         cd "$ELECTRON_DIR"
 
         # Run headless import so .godot/imported/ gets populated
@@ -311,5 +318,26 @@ echo "Step 6: Packaging with electron-builder..."
 cd "$ELECTRON_DIR"
 npm run dist
 
+# Step 7: Trigger Linux build
+echo ""
+echo "Step 7: Triggering Linux build on 192.168.1.102..."
+LINUX_BUILD_HOST="${LINUX_BUILD_HOST:-}"
+if [ -z "$LINUX_BUILD_HOST" ] && [ -f "$ELECTRON_DIR/.build-host" ]; then
+    LINUX_BUILD_HOST="$(cat "$ELECTRON_DIR/.build-host" | tr -d '[:space:]')"
+fi
+if [ -z "$LINUX_BUILD_HOST" ]; then
+    echo "  Skipping — set LINUX_BUILD_HOST or create electron-ui/.build-host"
+elif ssh -o ConnectTimeout=5 "$LINUX_BUILD_HOST" \
+    'bash /home/owner/dev/pyrokitty-releases/check-and-build-linux.sh' 2>&1; then
+    echo "  Linux build complete."
+else
+    echo "  WARNING: Linux build failed or host unreachable — Windows package is still valid."
+fi
+
 echo ""
 echo "=== Packaging Complete ==="
+
+# Restore previous Node version
+if [ -n "$_PREV_NODE" ] && command -v nvm &>/dev/null; then
+    nvm use "$_PREV_NODE" --silent
+fi

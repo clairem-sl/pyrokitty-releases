@@ -75,6 +75,7 @@ var _last_global_overrides: Dictionary = {} # root_id -> Dictionary[int, Transfo
 
 # Main-thread cached CV data (for _get_cv_default_scale and initialization)
 var _cv_default_scales: Dictionary = {}
+var _ap_logged: Dictionary = {}  # child_id -> true — one-shot AP debug log per attachment
 # Cache key for last applied animation set per root — skip rebuild if unchanged
 var _last_anim_set_key: Dictionary = {}  # root_id -> String (sorted anim IDs)
 var _sl_cv_rest_rotations: Dictionary = {}
@@ -1120,7 +1121,6 @@ func _update_bone_attachments(root_id: String, shared_skel: Skeleton3D, global_o
 		var bone_world_pos: Vector3 = _rn_pos + _rn_rot * (skel_offset + bone_pos)
 		var bone_world_rot: Quaternion = _rn_rot * bone_rot
 		var ap_id: int = sm.attach_point_id.get(child_id, 0)
-		# Pass bone's shape scale so AP offset is scaled by parent bone (xform.cpp:76)
 		var bone_scale: Vector3 = shape_scales.get(bone_name, Vector3.ONE)
 		var ap_xf: Array = _get_ap_world_transform(ap_id, bone_world_pos, bone_world_rot, bone_scale)
 		var offset_pos: Vector3 = sm.child_offset_pos.get(child_id, Vector3.ZERO)
@@ -1128,6 +1128,13 @@ func _update_bone_attachments(root_id: String, shared_skel: Skeleton3D, global_o
 		child_rsi.pos = ap_xf[0] + ap_xf[2] * offset_pos
 		child_rsi.rot = ap_xf[2] * offset_rot
 		child_rsi.push_transform()
+		if not _ap_logged.has(child_id):
+			_ap_logged[child_id] = true
+			DebugLog.debug("attach", "obj=%s ap=%d bone=%s bone_wpos=%s bone_wrot=%s ap_wpos=%s ap_wrot=%s offset_pos=%s offset_rot=%s final_pos=%s" % [
+				child_id.substr(0, 8), ap_id, bone_name,
+				str(bone_world_pos), str(bone_world_rot),
+				str(ap_xf[0]), str(ap_xf[2]),
+				str(offset_pos), str(offset_rot), str(child_rsi.pos)])
 		sm.object_mgr._sync_animesh_transform(child_id, child_rsi)
 		if sm.light_mgr.object_lights.has(child_id):
 			sm.light_mgr.update_light_transform(child_id, child_rsi)
@@ -1136,6 +1143,8 @@ func _update_bone_attachments(root_id: String, shared_skel: Skeleton3D, global_o
 
 
 ## Compute the world transform of an attachment point given the bone's world transform.
+## SL's operator*(a,b) == Godot's b*a (reversed Hamilton product), so
+## SL's "localRot * parentWorldRot" == Godot's "parentWorldRot * localRot".
 ## Returns [ap_world_pos, bone_world_rot, ap_world_rot].
 func _get_ap_world_transform(ap_id: int, bone_world_pos: Vector3, bone_world_rot: Quaternion, bone_shape_scale: Vector3 = Vector3.ONE) -> Array:
 	if ap_id <= 0 or not sm.object_mgr.ATTACH_POINT_OFFSETS.has(ap_id):
@@ -1178,8 +1187,9 @@ func _get_cv_default_scale(cv_name: String) -> Vector3:
 	return _cv_default_scales.get(cv_name, Vector3.ONE)
 
 
-## Convert SL Euler angles (roll, pitch, yaw in degrees, ZYX order) to a Godot quaternion.
-func _sl_euler_to_godot_quat(roll_deg: float, pitch_deg: float, yaw_deg: float) -> Quaternion:
+## Convert SL Euler angles (roll, pitch, yaw in degrees) to a Godot quaternion.
+## Formula matches SL's LLQuaternion::setQuat(roll, pitch, yaw) from llquaternion.cpp.
+static func _sl_euler_to_godot_quat(roll_deg: float, pitch_deg: float, yaw_deg: float) -> Quaternion:
 	if roll_deg == 0.0 and pitch_deg == 0.0 and yaw_deg == 0.0:
 		return Quaternion.IDENTITY
 	var r: float = deg_to_rad(roll_deg) * 0.5
@@ -1188,10 +1198,10 @@ func _sl_euler_to_godot_quat(roll_deg: float, pitch_deg: float, yaw_deg: float) 
 	var sr := sin(r); var cr := cos(r)
 	var sp := sin(p); var cp := cos(p)
 	var sy := sin(y); var cy := cos(y)
-	var sl_x: float = sr * cp * cy - cr * sp * sy
-	var sl_y: float = cr * sp * cy + sr * cp * sy
-	var sl_z: float = cr * cp * sy - sr * sp * cy
-	var sl_w: float = cr * cp * cy + sr * sp * sy
+	var sl_x: float = sr * cp * cy + cr * sp * sy
+	var sl_y: float = cr * sp * cy - sr * cp * sy
+	var sl_z: float = cr * cp * sy + sr * sp * cy
+	var sl_w: float = cr * cp * cy - sr * sp * sy
 	return Quaternion(sl_x, sl_z, -sl_y, sl_w).normalized()
 
 

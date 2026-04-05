@@ -401,17 +401,10 @@ export class GodotInputHandler {
         return;
       }
 
-      const surface = this._parseSurfaceInfo(msg);
-      // Legacy single-shot touch: grab + degrab
-      await this.bot.clientCommands.region.grabObject(
-        localId, surface.grabOffset, surface.uvCoord, surface.stCoord,
-        surface.faceIndex, surface.position, surface.normal, surface.binormal
-      );
-      await this.bot.clientCommands.region.deGrabObject(
-        localId, surface.grabOffset, surface.uvCoord, surface.stCoord,
-        surface.faceIndex, surface.position, surface.normal, surface.binormal
-      );
-      console.log(`[GodotBridge] Touched object ${objectUuid.slice(0, 8)} face=${surface.faceIndex} st=(${msg.st?.x?.toFixed(2)},${msg.st?.y?.toFixed(2)})`);
+      const faceIndex = msg.faceIndex || 0;
+      const { stCoord, uvCoord } = this._parseSTCoord(msg);
+      await this.bot.clientCommands.region.touchObject(localId, faceIndex, stCoord, uvCoord);
+      console.log(`[GodotBridge] Touched object ${objectUuid.slice(0, 8)} face=${faceIndex} st=(${msg.st?.x?.toFixed(2)},${msg.st?.y?.toFixed(2)})`);
     } catch (e) {
       console.error(`[GodotBridge] object_touch failed for ${msg.uuid}:`, e);
     }
@@ -435,12 +428,10 @@ export class GodotInputHandler {
         return;
       }
 
-      const surface = this._parseSurfaceInfo(msg);
-      await this.bot.clientCommands.region.grabObject(
-        obj.ID, surface.grabOffset, surface.uvCoord, surface.stCoord,
-        surface.faceIndex, surface.position, surface.normal, surface.binormal
-      );
-      console.log(`[GodotBridge] touch_start ${objectUuid.slice(0, 8)} face=${surface.faceIndex} st=(${msg.st?.x?.toFixed(2)},${msg.st?.y?.toFixed(2)})`);
+      const faceIndex = msg.faceIndex || 0;
+      const { stCoord, uvCoord } = this._parseSTCoord(msg);
+      await this.bot.clientCommands.region.grabObject(obj.ID, faceIndex, stCoord, uvCoord);
+      console.log(`[GodotBridge] touch_start ${objectUuid.slice(0, 8)} face=${faceIndex} st=(${msg.st?.x?.toFixed(2)},${msg.st?.y?.toFixed(2)})`);
     } catch (e) {
       console.error(`[GodotBridge] object_touch_start failed for ${msg.uuid}:`, e);
     }
@@ -454,11 +445,10 @@ export class GodotInputHandler {
       const obj = region.objects?.getObjectByUUID(new UUID(msg.uuid));
       if (!obj) return;
 
-      const surface = this._parseSurfaceInfo(msg);
+      const faceIndex = msg.faceIndex || 0;
+      const { stCoord, uvCoord } = this._parseSTCoord(msg);
       await this.bot.clientCommands.region.dragGrabbedObject(
-        new UUID(obj.FullID.toString()), null, surface.grabOffset,
-        surface.uvCoord, surface.stCoord, surface.faceIndex,
-        surface.position, surface.normal, surface.binormal
+        new UUID(obj.FullID.toString()), faceIndex, stCoord, uvCoord
       );
     } catch (e) {
       console.error(`[GodotBridge] object_touch_move failed for ${msg.uuid}:`, e);
@@ -473,31 +463,21 @@ export class GodotInputHandler {
       const obj = region.objects?.getObjectByUUID(new UUID(msg.uuid));
       if (!obj) return;
 
-      const surface = this._parseSurfaceInfo(msg);
-      await this.bot.clientCommands.region.deGrabObject(
-        obj.ID, surface.grabOffset, surface.uvCoord, surface.stCoord,
-        surface.faceIndex, surface.position, surface.normal, surface.binormal
-      );
-      console.log(`[GodotBridge] touch_end ${msg.uuid.slice(0, 8)} face=${surface.faceIndex}`);
+      const faceIndex = msg.faceIndex || 0;
+      const { stCoord, uvCoord } = this._parseSTCoord(msg);
+      await this.bot.clientCommands.region.deGrabObject(obj.ID, faceIndex, stCoord, uvCoord);
+      console.log(`[GodotBridge] touch_end ${msg.uuid.slice(0, 8)} face=${faceIndex}`);
     } catch (e) {
       console.error(`[GodotBridge] object_touch_end failed for ${msg.uuid}:`, e);
     }
   }
 
-  private _parseSurfaceInfo(msg: any) {
-    // Lazy import — cached after first call by Node.js module system
+  private _parseSTCoord(msg: any) {
     const Vector3 = require('../../../node-metaverse/lib/classes/Vector3').Vector3;
-    const pos = msg.position || {};
-    const norm = msg.normal || {};
     const st = msg.st || {};
     return {
-      faceIndex: msg.faceIndex || 0,
-      position: new Vector3(pos.x || 0, pos.y || 0, pos.z || 0),
-      normal: new Vector3(norm.x || 0, norm.y || 0, norm.z || 0),
       stCoord: new Vector3(st.x || 0, st.y || 0, 0),
       uvCoord: new Vector3(st.x || 0, st.y || 0, 0),
-      grabOffset: new Vector3(pos.x || 0, pos.y || 0, pos.z || 0),
-      binormal: Vector3.getZero(),
     };
   }
 }

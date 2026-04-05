@@ -582,14 +582,10 @@ func apply_face_materials(rsi, obj_uuid: String, faces: Array) -> void:
 		if fc.size() >= 4 and float(fc[3]) < 0.99:
 			has_transparency = true
 			break
-	var was_transparent: bool = sm.object_picker._transparent_uuids.has(obj_uuid)
 	if has_transparency:
 		sm.object_picker._transparent_uuids[obj_uuid] = true
 	else:
 		sm.object_picker._transparent_uuids.erase(obj_uuid)
-	# Swap pick material shader if transparency state changed
-	if has_transparency != was_transparent:
-		sm.object_picker.update_pick_material_transparency(obj_uuid, has_transparency)
 
 
 func _get_double_sided_shader(shader: Shader) -> Shader:

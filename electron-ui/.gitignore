@@ -9,3 +9,4 @@ voice/bin/
 godot-viewer-staging/
 voice-staging/
 node-metaverse/lib/classes/cache/
+.build-host

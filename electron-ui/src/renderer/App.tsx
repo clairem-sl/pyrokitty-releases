@@ -168,6 +168,7 @@ export const App: React.FC = () => {
 
           <main className="content">
             {error && <Alert color="red" mb="md">{error}</Alert>}
+            {selectedInstance?.statusMessage && <Alert color="orange" mb="md">{selectedInstance.statusMessage}</Alert>}
 
             {currentView === 'add-account' ? (
               <LoginForm
