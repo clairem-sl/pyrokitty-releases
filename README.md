@@ -4,7 +4,41 @@ An experimental Second Life / OpenSim viewer that replaces the traditional monol
 
 ## I just want to run it
 
-Grab a release, unzip with something like [7-Zip](https://www.7-zip.org/download.html), and run.  Currently only have a Windows build available.  Linux build coming soon!
+### Windows
+
+Grab a release, unzip with something like [7-Zip](https://www.7-zip.org/download.html), and run.
+
+### Linux
+
+Grab a release, extract into a directory, run the `PyroKitty.sh` script.
+
+An example process:
+
+```bash
+# Adjust as needed
+pyrodir="/opt/pyrokitty"
+
+sudo mkdir -p "$pyrodir"
+sudo chown -R $USER "$pyrodir"
+
+# Optional; use only when upgrading
+cd "$pyrodir"
+rm -rf *
+cd -
+
+# Replace/set $pyrotar to the actual tarball name
+tar xvf ~/Downloads/"$pyrotar" -C "$pyrodir" --strip-components=1
+
+# IF AND ONLY IF (1) you have multiple users, and (2) all your users are members of the same $USER_GROUP
+sudo chown -R :$USER_GROUP "$pyrodir"
+sudo chmod -R g+wX "$pyrodir"
+sudo find "$pyrodir" -type d -exec chmod g+s '{}' ';'
+
+# Run -- this will also check for requirements
+cd "$pyrodir"
+./PyroKitty.sh
+```
+
 
 ## I want to build it
 
