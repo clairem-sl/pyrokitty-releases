@@ -10,7 +10,7 @@ Grab a release, unzip with something like [7-Zip](https://www.7-zip.org/download
 
 ### Linux
 
-Grab a release, extract into a directory, run the `PyroKitty.sh` script.
+Grab a release, extract into a directory, run the `PyroKitty.sh` script. The script will identify missing dependencies and offer to install (currently only for Ubuntu/Debian/derivatives, Fedora/derivatives, and Arch/derivatives).
 
 An example process:
 
