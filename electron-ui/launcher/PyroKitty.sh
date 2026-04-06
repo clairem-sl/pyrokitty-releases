@@ -5,7 +5,7 @@ DIR="$(dirname "$(readlink -f "$0")")"
 function dotnet_vermaj() {
     local vermaj
     if command -v dotnet &> /dev/null; then
-        vermaj="$(dotnet --list-runtimes 2>/dev/null | awk '$1 == "Microsoft.NETCore.App" {print $2}' | awk -F"." '{print $1}')"
+        vermaj="$(dotnet --list-runtimes | awk '$1 == "Microsoft.NETCore.App" {sub(/\..*/, "", $2) ; print $2}')"
     fi
     echo "${vermaj:-0}"
 }
@@ -15,6 +15,7 @@ function check_dotnet() {
         return 0
     fi
 
+    local answer
     echo ""
     echo "PyroKitty requires the .NET 8+ runtime, which was not found on your system."
     echo ""
