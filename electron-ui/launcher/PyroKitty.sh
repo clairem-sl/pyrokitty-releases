@@ -5,7 +5,7 @@ DIR="$(dirname "$(readlink -f "$0")")"
 function dotnet_vermaj() {
     local vermaj
     if command -v dotnet &> /dev/null; then
-        vermaj="$(dotnet --list-runtimes | awk '$1 == "Microsoft.NETCore.App" {sub(/\..*/, "", $2) ; print $2}')"
+        vermaj="$(dotnet --list-runtimes 2> /dev/null | awk '$1 == "Microsoft.NETCore.App" {sub(/\..*/, "", $2) ; print $2}')"
     fi
     echo "${vermaj:-0}"
 }
