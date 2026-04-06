@@ -3,11 +3,15 @@ DIR="$(dirname "$(readlink -f "$0")")"
 
 # Both Godot (.NET build) and the voice sidecar require .NET 8+.
 function dotnet_vermaj() {
-    local vermaj
+    local -a vermaj
     if command -v dotnet &> /dev/null; then
-        vermaj="$(dotnet --list-runtimes 2> /dev/null | awk '$1 == "Microsoft.NETCore.App" {sub(/\..*/, "", $2) ; print $2}')"
+        vermaj=($(
+            dotnet --list-runtimes 2> /dev/null |
+            awk '$1 == "Microsoft.NETCore.App" {sub(/\..*/, "", $2) ; print $2}' |
+            sort -nur
+        ))
     fi
-    echo "${vermaj:-0}"
+    echo "${vermaj[0]:-0}"
 }
 
 function check_dotnet() {
